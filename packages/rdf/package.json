@@ -21,7 +21,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -32,9 +34,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@types/n3": "1.26.1",
     "n3": "2.0.3"
-  },
-  "devDependencies": {
-    "@types/n3": "1.26.1"
   }
 }
