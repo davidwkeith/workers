@@ -37,7 +37,7 @@ export interface StoredQuad {
   readonly graph: StoredTerm;
 }
 
-const RDF_LANGSTRING = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
 
 /** Convert an RDF term into its flat store representation. */
 export function termToStored(term: Term): StoredTerm {
@@ -76,7 +76,7 @@ export function storedToTerm(stored: StoredTerm): Term {
       }
       return DataFactory.literal(
         stored.value,
-        DataFactory.namedNode(stored.datatype ?? RDF_LANGSTRING),
+        DataFactory.namedNode(stored.datatype ?? XSD_STRING),
       );
     default:
       throw new Error(

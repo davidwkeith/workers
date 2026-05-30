@@ -57,6 +57,14 @@ describe("@dwk/rdf store helpers", () => {
     expect(restored.equals(original)).toBe(true);
   });
 
+  it("defaults a datatype-less, language-less literal to xsd:string", () => {
+    const restored = storedToTerm({ termType: "Literal", value: "x" });
+    expect(restored.termType).toBe("Literal");
+    expect((restored as ReturnType<typeof literal>).datatype.value).toBe(
+      "http://www.w3.org/2001/XMLSchema#string",
+    );
+  });
+
   it("round-trips a default-graph quad", () => {
     const original = quad(
       blankNode("x"),

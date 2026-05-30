@@ -65,6 +65,8 @@ describe("@dwk/rdf content negotiation", () => {
     );
     expect(formatForMediaType("Application/N-Quads")).toBe("N-Quads");
     expect(formatForMediaType("text/html")).toBeUndefined();
+    // A missing Content-Type header passed straight through must not throw.
+    expect(formatForMediaType(undefined as unknown as string)).toBeUndefined();
   });
 
   it("parses and serializes via media type", async () => {

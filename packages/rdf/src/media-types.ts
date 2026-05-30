@@ -22,6 +22,8 @@ export const MEDIA_TYPE_FORMATS: Readonly<Record<string, RdfFormat>> = {
  * RDF format, or `undefined` when the media type is not an RDF serialization.
  */
 export function formatForMediaType(mediaType: string): RdfFormat | undefined {
+  // Guard against a missing Content-Type header passed straight through.
+  if (typeof mediaType !== "string") return undefined;
   const essence = mediaType.split(";")[0]?.trim().toLowerCase();
   return essence ? MEDIA_TYPE_FORMATS[essence] : undefined;
 }

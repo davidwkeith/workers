@@ -131,6 +131,57 @@ describe("@dwk/rdf JSON-LD parse", () => {
     expect(quads.every((q) => q.graph.termType === "DefaultGraph")).toBe(true);
   });
 
+  it("drops reverse properties whose object would be a literal subject", async () => {
+    const quads = await parseJsonLd({
+      "@context": {
+        "@vocab": "https://ex/",
+        parent: { "@reverse": "https://ex/child" },
+      },
+      "@id": "https://ex/p",
+      parent: ["not-a-node", { "@id": "https://ex/c" }],
+    });
+    // Only the node reference yields a (valid) reversed quad.
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.subject.value).toBe("https://ex/c");
+    expect(quads[0]?.object.value).toBe("https://ex/p");
+  });
+
+  it("drops literals inside an @reverse block", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/p",
+      "@reverse": { child: ["nope", { "@id": "https://ex/c" }] },
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.subject.value).toBe("https://ex/c");
+  });
+
+  it("disables a term mapped to null (dropped, not vocab-expanded)", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", name: null },
+      "@id": "https://ex/s",
+      name: "dropped",
+      age: { "@value": "5", "@type": "https://ex/n" },
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/age");
+  });
+
+  it("emits canonical xsd:double lexical forms for non-finite numbers", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      nan: Number.NaN,
+      pos: Number.POSITIVE_INFINITY,
+      neg: Number.NEGATIVE_INFINITY,
+    });
+    const lex = (p: string) =>
+      quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object.value;
+    expect(lex("nan")).toBe("NaN");
+    expect(lex("pos")).toBe("INF");
+    expect(lex("neg")).toBe("-INF");
+  });
+
   it("rejects remote contexts and invalid JSON", async () => {
     await expect(
       parseJsonLd({ "@context": "https://schema.org", "@id": "https://ex/a" }),

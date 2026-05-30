@@ -112,7 +112,9 @@ function expandIri(
   if (isKeyword(value)) return value;
 
   const term = active.terms.get(value);
-  if (opts.vocab && term) return term.id ?? value;
+  // A term whose definition is `null` is explicitly disabled: it expands to
+  // nothing (callers drop empty results) rather than to a bogus IRI.
+  if (opts.vocab && term) return term.id ?? "";
 
   const colon = value.indexOf(":");
   if (colon > 0) {
@@ -340,7 +342,10 @@ class RdfEmitter {
         const object = this.valueToObject(item, def, active, graph);
         if (!object) continue;
         if (def?.reverse) {
-          this.emit(object as Quad_Subject, predicate, subject, graph);
+          // A literal cannot be the subject of a triple — drop reverse literals.
+          if (object.termType !== "Literal") {
+            this.emit(object as Quad_Subject, predicate, subject, graph);
+          }
         } else {
           this.emit(subject, predicate, object, graph);
         }
@@ -362,8 +367,10 @@ class RdfEmitter {
       const def = active.terms.get(key);
       for (const item of arrayify(value)) {
         const object = this.valueToObject(item, def, active, graph);
-        if (object)
+        // A literal cannot be the subject of a triple — drop reverse literals.
+        if (object && object.termType !== "Literal") {
           this.emit(object as Quad_Subject, predicate, subject, graph);
+        }
       }
     }
   }
@@ -507,6 +514,11 @@ class RdfEmitter {
 
 function numberToLexical(value: number, datatype: string): string {
   if (datatype === XSD_INTEGER) return String(Math.trunc(value));
+  // xsd:double/float canonical forms for the non-finite values; reachable only
+  // via pre-parsed object input since JSON itself has no NaN/Infinity.
+  if (Number.isNaN(value)) return "NaN";
+  if (value === Infinity) return "INF";
+  if (value === -Infinity) return "-INF";
   return String(value);
 }
 
