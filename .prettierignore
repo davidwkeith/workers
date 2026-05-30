@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.wrangler/
+pnpm-lock.yaml
+
+# Hand-authored specification & docs (preserve manual Markdown table alignment).
+spec/
+README.md
+LICENSE
