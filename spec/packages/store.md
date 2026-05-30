@@ -18,8 +18,12 @@ unit-testable.
 - **Copy-on-write blob bodies in R2:**
   - write a new **content-addressed** key, then **atomically flip** the DO
     pointer to it;
-  - on delete, **drop the pointer first**; the underlying object is **GC'd
-    later** (cron Worker) with a safety window **≥ max write duration**.
+  - on delete, **drop the pointer first** and enqueue the now-orphaned key to a
+    shared tracking store (a D1 table or a queue) in the same transaction; a
+    cron Worker drains that list and deletes the R2 objects after a safety
+    window **≥ max write duration**. The GC Worker MUST NOT scan/wake every
+    per-pod DO — orphaned keys are reported by the DO at delete time, not
+    discovered by a full sweep.
 - Treat any body over the ~2 MB DO-cell ceiling as an **opaque blob** routed to
   R2 rather than the quad store.
 - Support transactional writes so `solid-pod` can apply N3 Patch

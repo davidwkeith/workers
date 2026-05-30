@@ -12,9 +12,13 @@ Receives and sends Webmentions for the user's domain.
 
 ### Receiver
 
-- Accept `source` and `target` parameters.
-- **Verify asynchronously** via a queue (do not block the request on fetching
-  and parsing the source).
+- Accept `source` and `target` parameters, **synchronously validating** before
+  returning `202 Accepted` that `source` and `target` are valid URLs and that
+  `target` is a resource under this receiver's control. Reject invalid/foreign
+  targets up front — this is a spec requirement and prevents queue
+  exhaustion / spam.
+- **Verify the link asynchronously** via a queue (do not block the request on
+  fetching and parsing the source for the `target` link).
 - Store verified mentions to an **inbox** (D1, or the pod DO when composed with
   `@dwk/solid-pod`).
 

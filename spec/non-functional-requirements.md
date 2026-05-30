@@ -3,7 +3,9 @@
 ## Consistency rules (load-bearing)
 
 - Authoritative state MUST live only in **strongly-consistent** stores:
-  **Durable Object SQLite** and **R2**.
+  **Durable Object SQLite**, **R2**, or **D1 accessed with session
+  consistency** (read-your-writes). D1's default cross-replica reads are
+  *eventually* consistent and MUST NOT be relied on for authoritative state.
 - **KV MUST NEVER be used for authz, or for anything where staleness is a
   correctness or security bug** (KV propagation is ≈60 s eventually
   consistent). KV is acceptable only for data that tolerates staleness (e.g.

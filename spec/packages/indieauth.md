@@ -26,8 +26,8 @@ tokens that `@dwk/micropub` (and other clients) consume.
 ## Bindings (declared `Env` fragment)
 
 - Storage for authorization codes / issued tokens. Codes are short-lived;
-  authoritative token state MUST live in a strongly-consistent store (D1 or a
-  DO), never KV (see
+  authoritative token state MUST live in a strongly-consistent store (a DO, or
+  D1 accessed with session consistency), never KV (see
   [non-functional-requirements.md](../non-functional-requirements.md#consistency-rules-load-bearing)).
 - Signing key material as a secret binding.
 

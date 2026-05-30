@@ -25,9 +25,9 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
 ## Bindings (declared `Env` fragment)
 
 - **R2 bucket** for the media endpoint.
-- Storage for published content / post records (D1 or R2 per the consuming
-  app's model). Authoritative state in strongly-consistent stores only — not
-  KV.
+- Storage for published content / post records (D1 accessed with session
+  consistency, or R2, per the consuming app's model). Authoritative state in
+  strongly-consistent stores only — not KV.
 
 ## Config
 

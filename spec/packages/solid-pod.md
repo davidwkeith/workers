@@ -45,7 +45,10 @@ Durable Object.
 - **DPoP-bound bearer tokens**, validated at the Worker edge: issuer JWKS,
   `aud` / `exp` / `webid`, and proof `htu` / `htm` / `cnf.jkt` (see
   [`@dwk/dpop`](dpop.md)).
-- **Strict `jti` replay** enforced in the DO for writes.
+- **Strict `jti` replay** enforced in the DO for writes. Each seen `jti` is
+  stored with an expiry (the proof/token `exp`, or a bounded max validity
+  window) and **pruned** — periodically and/or opportunistically during write
+  transactions — so the replay table cannot grow unbounded.
 - Reads MAY use a short edge-cached replay window — a **documented tradeoff**.
 
 ### Concurrency

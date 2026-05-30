@@ -15,7 +15,9 @@ future `@dwk` packages can adopt it unchanged.
 - Verify a DPoP proof JWT and its binding to an access token:
   - proof `htu` (HTTP target URI) and `htm` (method) match the request,
   - `cnf.jkt` (the token's confirmation thumbprint) matches the proof key,
-  - standard proof validity (signature, `iat` window, `jti` presence).
+  - standard proof validity: the JOSE `typ` header is exactly `dpop+jwt`
+    (RFC 9449 §4.2 — guards against JWT mix-up / reuse), valid signature, `iat`
+    within an acceptable window, and `jti` present.
 - Surface the verified `jti` so callers can enforce replay policy
   (`@dwk/solid-pod` enforces strict `jti` replay in the DO for writes; reads MAY
   use a short edge-cached window).

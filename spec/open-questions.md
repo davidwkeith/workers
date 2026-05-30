@@ -24,6 +24,15 @@ Confirm that `wrangler`-config generation + deploy orchestration live in
 (bindings + config schema). This is the current assumption throughout the
 specs.
 
+## 4. JSON-LD on the edge
+
+N3.js does not parse/serialize JSON-LD, yet JSON-LD is a required Solid
+content-negotiation format and `jsonld.js` is too heavy for the Worker
+script-size budget. Open: which lightweight, edge-compatible JSON-LD
+library/approach does [`@dwk/rdf`](packages/rdf.md) adopt (a small library vs.
+expansion/flattening to N-Quads for the common cases), and what is the
+supported subset?
+
 ---
 
 ## Reference links
