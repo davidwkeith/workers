@@ -1,12 +1,74 @@
 # `@dwk/dpop`
 
-> DPoP (RFC 9449) proof verification. Cross-standard reusable; no Workers runtime dependency.
+> DPoP (RFC 9449) proof verification. Cross-standard reusable.
 
 Part of the [`@dwk` IndieWeb + Solid cohort](../../README.md). See the
 [package specification](../../spec/packages/dpop.md) for the full requirements.
 
-**Status:** pre-implementation scaffold — the public surface is stubbed and the
-behaviour is not yet implemented.
+This package is **cross-standard reusable**: it takes plain-data inputs only,
+has no Workers-runtime dependency (only Web Crypto), and unit-tests in isolation
+(Node, no `workerd`). It is **protocol-agnostic** — it knows nothing about
+IndieAuth or Solid. The caller supplies the request facts and any access-token
+binding it expects, and owns replay detection via the returned `jti`.
+
+## API
+
+```ts
+import { verifyDpopProof } from "@dwk/dpop";
+
+const result = await verifyDpopProof({
+  proof: request.headers.get("DPoP")!, // the DPoP proof JWT
+  htm: request.method, // HTTP method, e.g. "POST"
+  htu: "https://pod.example/resource", // request URI (query/fragment ignored)
+  // now,            // epoch seconds; defaults to Date.now()
+  // maxAgeSeconds,  // iat clock-skew window; defaults to 300
+});
+
+if (!result.valid) {
+  // result.reason is a stable code, e.g. "htu_mismatch", "signature_invalid"
+  return new Response("invalid DPoP proof", { status: 401 });
+}
+
+// Enforce your own replay policy with the verified jti.
+if (await seenBefore(result.jti)) return new Response("DPoP replay", { status: 401 });
+```
+
+### Resource Server: token binding
+
+When a request carries a DPoP-bound access token, pass the token and the token's
+`cnf.jkt` to verify the binding:
+
+```ts
+const result = await verifyDpopProof({
+  proof,
+  htm,
+  htu,
+  accessToken, // proof MUST carry ath = base64url(SHA-256(accessToken))
+  expectedJkt, // proof key thumbprint MUST equal this
+});
+```
+
+## What is verified
+
+- **Header** — `typ` is exactly `dpop+jwt`; `alg` is an asymmetric algorithm
+  from the allow-list (`ES256`, `ES384`, `RS256`, `PS256` — never `none` or
+  HMAC); `jwk` is present and carries no private key material.
+- **Signature** — over `header.payload` using the embedded `jwk`.
+- **Claims** — `htm` matches the request method (case-insensitive); `htu`
+  matches the request URI after normalization (scheme/host lowercased, default
+  port and any query/fragment removed); `iat` is within the clock-skew window;
+  `jti` is a present, non-empty string.
+- **Bindings** (optional) — `ath` matches `base64url(SHA-256(accessToken))`; the
+  computed `jkt` (RFC 7638 thumbprint) equals `expectedJkt`.
+
+`verifyDpopProof` never throws — failures return `{ valid: false, reason }` with
+a stable `DpopFailureReason` code. On success it returns `{ valid: true, jti, jkt }`.
+
+## Out of scope
+
+- Replay detection storage (the caller owns the `jti` cache).
+- `DPoP-Nonce` issuance and the `use_dpop_nonce` error flow.
+- Access-token validation beyond the DPoP binding checks.
 
 ## License
 

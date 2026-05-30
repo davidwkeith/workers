@@ -1,47 +1,390 @@
 /**
  * `@dwk/dpop` — DPoP (RFC 9449) proof verification.
  *
- * Cross-standard reusable: plain-data inputs only, no Workers runtime
- * dependency. See `spec/packages/dpop.md`.
+ * A pure, runtime-agnostic library: HTTP request facts and token claims go in,
+ * a verification result comes out. It performs no I/O beyond Web Crypto, holds
+ * no state, and needs no Cloudflare bindings, so it unit-tests without a
+ * Workers runtime.
+ *
+ * The library stays protocol-agnostic — it knows nothing about IndieAuth or
+ * Solid. The caller supplies the request facts and any access-token binding it
+ * expects, and owns replay detection via the returned `jti`.
+ *
+ * @see https://datatracker.ietf.org/doc/html/rfc9449
+ * @packageDocumentation
  */
 
-/** Facts about the HTTP request a DPoP proof is bound to. */
-export interface DpopRequestFacts {
-  /** HTTP method, matched against the proof `htm` claim. */
-  readonly method: string;
-  /** Full request target URI, matched against the proof `htu` claim. */
-  readonly url: string;
-}
+/** Default clock-skew window (seconds) applied to `iat` when none is given. */
+export const DEFAULT_MAX_AGE_SECONDS = 300;
 
-/** Inputs required to verify a DPoP proof. */
-export interface DpopVerificationInput {
-  /** The compact-serialized DPoP proof JWT. */
-  readonly proof: string;
-  /** The request the proof must be bound to. */
-  readonly request: DpopRequestFacts;
+/**
+ * Asymmetric signature algorithms accepted in the DPoP proof JOSE header.
+ *
+ * Symmetric (`HS*`) and `none` are deliberately excluded: a DPoP proof must be
+ * signed by the client-held private key whose public half is embedded as `jwk`.
+ */
+export type DpopAlgorithm = "ES256" | "ES384" | "RS256" | "PS256";
+
+/** Stable, locale-independent failure codes returned in {@link DpopVerifyResult.reason}. */
+export type DpopFailureReason =
+  | "proof_malformed"
+  | "header_invalid"
+  | "payload_invalid"
+  | "typ_invalid"
+  | "alg_unsupported"
+  | "jwk_missing"
+  | "jwk_private"
+  | "jwk_invalid"
+  | "signature_invalid"
+  | "htm_mismatch"
+  | "htu_invalid"
+  | "htu_mismatch"
+  | "iat_invalid"
+  | "proof_expired"
+  | "proof_future"
+  | "jti_missing"
+  | "ath_mismatch"
+  | "jkt_mismatch";
+
+/** Plain-data inputs required to verify a DPoP proof. */
+export interface DpopVerifyInput {
+  /** The DPoP proof JWT (compact JWS) from the `DPoP` header. */
+  proof: string;
+  /** HTTP method of the request the proof is bound to, e.g. `"POST"`. */
+  htm: string;
+  /** HTTP target URI of the request (query/fragment are ignored per §4.3). */
+  htu: string;
   /**
-   * The access token's confirmation thumbprint (`cnf.jkt`), when the proof is
-   * presented alongside a bound access token.
+   * Expected access-token hash binding (Resource Server case). When provided,
+   * the proof MUST carry an `ath` claim equal to `base64url(SHA-256(accessToken))`.
    */
-  readonly confirmationThumbprint?: string;
+  accessToken?: string;
+  /** Token confirmation thumbprint (`cnf.jkt`) to match against the proof key. */
+  expectedJkt?: string;
+  /** Current time in seconds since the epoch. Defaults to `Date.now()`. */
+  now?: number;
+  /** Allowed clock skew in seconds for the `iat` window. Defaults to {@link DEFAULT_MAX_AGE_SECONDS}. */
+  maxAgeSeconds?: number;
 }
 
-/** Result of a successful DPoP proof verification. */
-export interface DpopVerificationResult {
-  /** The verified, unique proof identifier (`jti`) for replay enforcement. */
-  readonly jti: string;
-  /** The JWK thumbprint of the proof key. */
-  readonly thumbprint: string;
+/** Result of verifying a DPoP proof. */
+export interface DpopVerifyResult {
+  /** Whether the proof is valid. */
+  valid: boolean;
+  /** The verified JWT ID (`jti`) for replay detection by the caller. */
+  jti?: string;
+  /** The RFC 7638 thumbprint of the proof key (`jkt`). */
+  jkt?: string;
+  /** Stable failure code (see {@link DpopFailureReason}) when `valid` is false. */
+  reason?: DpopFailureReason;
+}
+
+interface AlgSpec {
+  kty: "EC" | "RSA";
+  importParams: EcKeyImportParams | RsaHashedImportParams;
+  verifyParams: EcdsaParams | AlgorithmIdentifier | RsaPssParams;
+}
+
+const ALGS: Record<DpopAlgorithm, AlgSpec> = {
+  ES256: {
+    kty: "EC",
+    importParams: { name: "ECDSA", namedCurve: "P-256" },
+    verifyParams: { name: "ECDSA", hash: "SHA-256" },
+  },
+  ES384: {
+    kty: "EC",
+    importParams: { name: "ECDSA", namedCurve: "P-384" },
+    verifyParams: { name: "ECDSA", hash: "SHA-384" },
+  },
+  RS256: {
+    kty: "RSA",
+    importParams: { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    verifyParams: { name: "RSASSA-PKCS1-v1_5" },
+  },
+  PS256: {
+    kty: "RSA",
+    importParams: { name: "RSA-PSS", hash: "SHA-256" },
+    verifyParams: { name: "RSA-PSS", saltLength: 32 },
+  },
+};
+
+/** RSA/EC private-key JWK members; their presence means a private key was sent. */
+const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"] as const;
+
+const BASE64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+function fail(reason: DpopFailureReason): DpopVerifyResult {
+  return { valid: false, reason };
+}
+
+function base64urlToBytes(segment: string): Uint8Array {
+  const b64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+  const padded =
+    b64.length % 4 === 0 ? b64 : b64 + "=".repeat(4 - (b64.length % 4));
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function bytesToBase64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function decodeJsonSegment(segment: string): unknown {
+  const text = new TextDecoder().decode(base64urlToBytes(segment));
+  return JSON.parse(text) as unknown;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
- * Verify a DPoP proof and its binding to the request (and access token, when
- * supplied). Returns the verified `jti` so callers can enforce replay policy.
- *
- * @throws if the proof is malformed, expired, or not bound to the request/token.
+ * Normalize an HTTP URI for `htu` comparison: lowercase the scheme and host
+ * (the URL parser does this), drop default ports, and strip query and fragment.
+ * Returns `null` when the URI cannot be parsed.
  */
-export function verifyDpopProof(
-  _input: DpopVerificationInput,
-): Promise<DpopVerificationResult> {
-  throw new Error("@dwk/dpop: verifyDpopProof is not implemented yet");
+function normalizeHtu(uri: string): string | null {
+  try {
+    const url = new URL(uri);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+async function sha256Base64url(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input),
+  );
+  return bytesToBase64url(new Uint8Array(digest));
+}
+
+/**
+ * Compute the RFC 7638 JWK thumbprint (base64url SHA-256 over the canonical,
+ * lexicographically-ordered required members). Returns `null` if the required
+ * members for the key type are missing.
+ */
+async function jwkThumbprint(
+  jwk: Record<string, unknown>,
+): Promise<string | null> {
+  let canonical: string;
+  if (jwk.kty === "EC") {
+    const { crv, x, y } = jwk;
+    if (
+      typeof crv !== "string" ||
+      typeof x !== "string" ||
+      typeof y !== "string"
+    ) {
+      return null;
+    }
+    canonical = JSON.stringify({ crv, kty: "EC", x, y });
+  } else if (jwk.kty === "RSA") {
+    const { e, n } = jwk;
+    if (typeof e !== "string" || typeof n !== "string") {
+      return null;
+    }
+    canonical = JSON.stringify({ e, kty: "RSA", n });
+  } else {
+    return null;
+  }
+  return sha256Base64url(canonical);
+}
+
+/** Build a clean public-only JWK for `importKey`, dropping `alg`/`use`/`key_ops`. */
+function publicJwk(
+  jwk: Record<string, unknown>,
+  kty: "EC" | "RSA",
+): JsonWebKey | null {
+  if (kty === "EC") {
+    const { crv, x, y } = jwk;
+    if (
+      typeof crv !== "string" ||
+      typeof x !== "string" ||
+      typeof y !== "string"
+    ) {
+      return null;
+    }
+    return { kty: "EC", crv, x, y };
+  }
+  const { n, e } = jwk;
+  if (typeof n !== "string" || typeof e !== "string") {
+    return null;
+  }
+  return { kty: "RSA", n, e };
+}
+
+/**
+ * Verify a DPoP proof JWT and, optionally, its binding to an access token.
+ *
+ * Pure async function; performs no I/O beyond Web Crypto. Never throws — every
+ * failure is returned as `{ valid: false, reason }` with a stable
+ * {@link DpopFailureReason} code.
+ *
+ * @param input - Request facts, the proof, and any expected token binding.
+ * @returns On success `{ valid: true, jti, jkt }`; otherwise `{ valid: false, reason }`.
+ */
+export async function verifyDpopProof(
+  input: DpopVerifyInput,
+): Promise<DpopVerifyResult> {
+  const { proof, htm, htu } = input;
+  const now = input.now ?? Math.floor(Date.now() / 1000);
+  const maxAgeSeconds = input.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS;
+
+  // 1. Parse the compact JWS: exactly three non-empty base64url segments.
+  if (typeof proof !== "string") {
+    return fail("proof_malformed");
+  }
+  const segments = proof.split(".");
+  if (segments.length !== 3) {
+    return fail("proof_malformed");
+  }
+  const [headerSeg, payloadSeg, signatureSeg] = segments as [
+    string,
+    string,
+    string,
+  ];
+  if (
+    !BASE64URL_SEGMENT.test(headerSeg) ||
+    !BASE64URL_SEGMENT.test(payloadSeg) ||
+    !BASE64URL_SEGMENT.test(signatureSeg)
+  ) {
+    return fail("proof_malformed");
+  }
+
+  let header: unknown;
+  try {
+    header = decodeJsonSegment(headerSeg);
+  } catch {
+    return fail("header_invalid");
+  }
+  if (!isObject(header)) {
+    return fail("header_invalid");
+  }
+
+  // 2. Header checks: typ, alg allow-list, public-only jwk.
+  if (header.typ !== "dpop+jwt") {
+    return fail("typ_invalid");
+  }
+  const alg = header.alg;
+  const algSpec =
+    typeof alg === "string" ? ALGS[alg as DpopAlgorithm] : undefined;
+  if (!algSpec) {
+    return fail("alg_unsupported");
+  }
+
+  const jwk = header.jwk;
+  if (!isObject(jwk)) {
+    return fail("jwk_missing");
+  }
+  if (PRIVATE_JWK_MEMBERS.some((member) => member in jwk)) {
+    return fail("jwk_private");
+  }
+  if (jwk.kty !== algSpec.kty) {
+    return fail("jwk_invalid");
+  }
+  const importable = publicJwk(jwk, algSpec.kty);
+  if (importable === null) {
+    return fail("jwk_invalid");
+  }
+
+  // 3. Verify the signature over `header.payload` using the embedded jwk.
+  let signatureValid: boolean;
+  try {
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      importable,
+      algSpec.importParams,
+      false,
+      ["verify"],
+    );
+    signatureValid = await crypto.subtle.verify(
+      algSpec.verifyParams,
+      key,
+      base64urlToBytes(signatureSeg),
+      new TextEncoder().encode(`${headerSeg}.${payloadSeg}`),
+    );
+  } catch {
+    return fail("jwk_invalid");
+  }
+  if (!signatureValid) {
+    return fail("signature_invalid");
+  }
+
+  let payload: unknown;
+  try {
+    payload = decodeJsonSegment(payloadSeg);
+  } catch {
+    return fail("payload_invalid");
+  }
+  if (!isObject(payload)) {
+    return fail("payload_invalid");
+  }
+
+  // 4. Claim checks: htm, htu, iat window, jti.
+  if (
+    typeof payload.htm !== "string" ||
+    payload.htm.toUpperCase() !== htm.toUpperCase()
+  ) {
+    return fail("htm_mismatch");
+  }
+
+  const expectedHtu = normalizeHtu(htu);
+  if (expectedHtu === null) {
+    return fail("htu_invalid");
+  }
+  const proofHtu =
+    typeof payload.htu === "string" ? normalizeHtu(payload.htu) : null;
+  if (proofHtu === null || proofHtu !== expectedHtu) {
+    return fail("htu_mismatch");
+  }
+
+  const iat = payload.iat;
+  if (typeof iat !== "number" || !Number.isFinite(iat)) {
+    return fail("iat_invalid");
+  }
+  if (iat < now - maxAgeSeconds) {
+    return fail("proof_expired");
+  }
+  if (iat > now + maxAgeSeconds) {
+    return fail("proof_future");
+  }
+
+  if (typeof payload.jti !== "string" || payload.jti.length === 0) {
+    return fail("jti_missing");
+  }
+  const jti = payload.jti;
+
+  // Compute the thumbprint once, for both the cnf.jkt check and the result.
+  const jkt = await jwkThumbprint(jwk);
+  if (jkt === null) {
+    return fail("jwk_invalid");
+  }
+
+  // 5. Resource Server: access-token hash binding.
+  if (input.accessToken !== undefined) {
+    const expectedAth = await sha256Base64url(input.accessToken);
+    if (typeof payload.ath !== "string" || payload.ath !== expectedAth) {
+      return fail("ath_mismatch");
+    }
+  }
+
+  // 6. Resource Server: token confirmation thumbprint binding.
+  if (input.expectedJkt !== undefined && input.expectedJkt !== jkt) {
+    return fail("jkt_mismatch");
+  }
+
+  // 7. Success.
+  return { valid: true, jti, jkt };
 }
