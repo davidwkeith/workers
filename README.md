@@ -79,8 +79,9 @@ for the full rules.
 
 **Draft / pre-implementation.** The authoritative requirements live in
 [issue #1](https://github.com/davidwkeith/workers/issues/1) and are decomposed
-into technical specifications under [`spec/`](spec/). No package code has been
-written yet.
+into technical specifications under [`spec/`](spec/). The monorepo is scaffolded
+(pnpm workspaces, TypeScript, vitest, changesets, CI) and each package ships a
+typed, stubbed public surface; the standards behaviour is not yet implemented.
 
 ## Documentation
 

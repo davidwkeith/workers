@@ -1,0 +1,39 @@
+{
+  "name": "@dwk/indieauth",
+  "version": "0.0.0",
+  "description": "IndieAuth authorization, token, and metadata endpoints with PKCE and DPoP-bound tokens.",
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/indieauth#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/indieauth"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/dpop": "workspace:*"
+  }
+}
