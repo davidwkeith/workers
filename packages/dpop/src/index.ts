@@ -79,10 +79,25 @@ export interface DpopVerifyResult {
   reason?: DpopFailureReason;
 }
 
+// Structural shapes for the Web Crypto algorithm parameters. We avoid the
+// standard DOM lib names (EcKeyImportParams, EcdsaParams, …) because
+// @cloudflare/workers-types does not declare them; these objects are accepted
+// structurally by crypto.subtle.importKey / verify.
+interface ImportAlg {
+  name: string;
+  namedCurve?: string;
+  hash?: string;
+}
+interface VerifyAlg {
+  name: string;
+  hash?: string;
+  saltLength?: number;
+}
+
 interface AlgSpec {
   kty: "EC" | "RSA";
-  importParams: EcKeyImportParams | RsaHashedImportParams;
-  verifyParams: EcdsaParams | AlgorithmIdentifier | RsaPssParams;
+  importParams: ImportAlg;
+  verifyParams: VerifyAlg;
 }
 
 const ALGS: Record<DpopAlgorithm, AlgSpec> = {

@@ -24,9 +24,25 @@ function textToBase64url(text: string): string {
   return bytesToBase64url(new TextEncoder().encode(text));
 }
 
+// Structural shapes for the Web Crypto algorithm parameters (the standard DOM
+// lib names are not declared by @cloudflare/workers-types; these are accepted
+// structurally by crypto.subtle.generateKey / sign).
+interface GenerateAlg {
+  name: string;
+  namedCurve?: string;
+  modulusLength?: number;
+  publicExponent?: Uint8Array;
+  hash?: string;
+}
+interface SignAlg {
+  name: string;
+  hash?: string;
+  saltLength?: number;
+}
+
 interface SignerSpec {
-  generate: EcKeyGenParams | RsaHashedKeyGenParams;
-  sign: EcdsaParams | AlgorithmIdentifier | RsaPssParams;
+  generate: GenerateAlg;
+  sign: SignAlg;
   alg: string;
 }
 
@@ -60,7 +76,10 @@ async function makeKey(name: string): Promise<KeyMaterial> {
     "sign",
     "verify",
   ])) as CryptoKeyPair;
-  const publicJwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  const publicJwk = (await crypto.subtle.exportKey(
+    "jwk",
+    pair.publicKey,
+  )) as JsonWebKey;
   return { privateKey: pair.privateKey, publicJwk, spec };
 }
 
