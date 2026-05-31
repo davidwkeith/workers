@@ -45,17 +45,26 @@ export function parseLinkHeader(value: string | null): LinkHeaderEntry[] {
   return entries;
 }
 
+/**
+ * Split a `Link` header on top-level commas, respecting both the angle-bracket
+ * URI reference and double-quoted parameter values — so a comma inside
+ * `title="A, B"` or inside `<…>` does not split the entry.
+ */
 function splitLinks(value: string): string[] {
   const result: string[] = [];
   let depth = 0;
+  let inQuotes = false;
   let current = "";
-  for (const char of value) {
-    if (char === "<") {
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i] as string;
+    if (char === '"' && value[i - 1] !== "\\") {
+      inQuotes = !inQuotes;
+    } else if (!inQuotes && char === "<") {
       depth++;
-    } else if (char === ">") {
+    } else if (!inQuotes && char === ">") {
       depth--;
     }
-    if (char === "," && depth === 0) {
+    if (char === "," && depth === 0 && !inQuotes) {
       result.push(current);
       current = "";
     } else {
@@ -68,12 +77,48 @@ function splitLinks(value: string): string[] {
   return result;
 }
 
-function extractRel(paramString: string): string | null {
-  const relMatch = /rel\s*=\s*("([^"]*)"|'([^']*)'|[^;\s]+)/i.exec(paramString);
-  if (relMatch === null) {
-    return null;
+/**
+ * Split a `Link` entry's parameter string on top-level semicolons, respecting
+ * double-quoted values so a `;` inside a quoted value does not split a param.
+ */
+function splitParams(paramString: string): string[] {
+  const result: string[] = [];
+  let inQuotes = false;
+  let current = "";
+  for (let i = 0; i < paramString.length; i++) {
+    const char = paramString[i] as string;
+    if (char === '"' && paramString[i - 1] !== "\\") {
+      inQuotes = !inQuotes;
+    }
+    if (char === ";" && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
   }
-  return relMatch[2] ?? relMatch[3] ?? relMatch[1] ?? null;
+  if (current.trim() !== "") {
+    result.push(current);
+  }
+  return result;
+}
+
+/**
+ * Extract the `rel` parameter from a `Link` entry's parameter string. Matches
+ * the `rel` parameter exactly (per-parameter), so a `rel=` substring inside
+ * another parameter's quoted value (e.g. `title="my rel=x"`) is not mistaken
+ * for it.
+ */
+function extractRel(paramString: string): string | null {
+  for (const param of splitParams(paramString)) {
+    const match = /^\s*rel\s*=\s*("([^"]*)"|'([^']*)'|[^;\s]+)\s*$/i.exec(
+      param,
+    );
+    if (match !== null) {
+      return match[2] ?? match[3] ?? match[1] ?? null;
+    }
+  }
+  return null;
 }
 
 /** Split a whitespace-separated token list (e.g. a `rel` value) into tokens. */
@@ -96,10 +141,15 @@ export function matchTags(html: string, tagNames: readonly string[]): string[] {
   return html.match(pattern) ?? [];
 }
 
-/** Read a single attribute value off an opening tag, or `null` when absent. */
+/**
+ * Read a single attribute value off an opening tag, or `null` when absent.
+ *
+ * The attribute name must be standalone — preceded by whitespace, `<`, or the
+ * start of the string — so a query for `href` does not match `data-href`.
+ */
 export function getAttr(tag: string, name: string): string | null {
   const pattern = new RegExp(
-    `${name}\\s*=\\s*("([^"]*)"|'([^']*)'|[^\\s>]+)`,
+    `(?:^|[\\s<])${name}\\s*=\\s*("([^"]*)"|'([^']*)'|[^\\s>]+)`,
     "i",
   );
   const match = pattern.exec(tag);
@@ -116,4 +166,23 @@ export function resolveUrl(uri: string, base: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the effective base URL for a document: the `href` of the first
+ * `<base>` tag (resolved against `documentUrl`), or `documentUrl` itself when
+ * there is no usable `<base>`. Standard HTML resolution requires relative links
+ * to be resolved against this base.
+ */
+export function resolveDocumentBase(html: string, documentUrl: string): string {
+  const baseTags = matchTags(html, ["base"]);
+  const first = baseTags[0];
+  if (first === undefined) {
+    return documentUrl;
+  }
+  const href = getAttr(first, "href");
+  if (href === null || href === "") {
+    return documentUrl;
+  }
+  return resolveUrl(href, documentUrl) ?? documentUrl;
 }

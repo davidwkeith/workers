@@ -49,6 +49,30 @@ describe("sendWebmention", () => {
     });
   });
 
+  it("refuses to POST a non-http(s) discovered endpoint", async () => {
+    const posted: string[] = [];
+    const fetchImpl: FetchLike = vi.fn(async (url, init) => {
+      if (init?.method === "POST") {
+        posted.push(url);
+        return new Response(null, { status: 202 });
+      }
+      return new Response(
+        '<a rel="webmention" href="mailto:wm@target.example">x</a>',
+        {
+          headers: { "content-type": "text/html" },
+        },
+      );
+    });
+    const result = await sendWebmention(source, target, { fetch: fetchImpl });
+    expect(result).toEqual({
+      target,
+      endpoint: null,
+      delivered: false,
+      status: 0,
+    });
+    expect(posted).toEqual([]);
+  });
+
   it("reports a non-2xx endpoint as not delivered", async () => {
     const fetchImpl: FetchLike = vi.fn(async (_url, init) =>
       init?.method === "POST"

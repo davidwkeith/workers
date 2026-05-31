@@ -15,10 +15,11 @@ import {
   getAttr,
   matchTags,
   parseLinkHeader,
+  resolveDocumentBase,
   resolveUrl,
   splitTokens,
 } from "./html";
-import type { FetchLike } from "./fetch";
+import { readBodyCapped, type FetchLike } from "./fetch";
 
 const LEGACY_REL_PREFIX = "http://webmention.org";
 
@@ -45,12 +46,14 @@ export function findWebmentionEndpoint(
       return resolveUrl(entry.uri, documentUrl);
     }
   }
-  // 2. Fall back to the first <link>/<a rel="webmention"> in document order.
+  // 2. Fall back to the first <link>/<a rel="webmention"> in document order,
+  //    resolving relative hrefs against the document's <base href> if present.
+  const documentBase = resolveDocumentBase(html, documentUrl);
   for (const tag of matchTags(html, ["link", "a"])) {
     const rels = splitTokens(getAttr(tag, "rel"));
     if (rels.some(isWebmentionRel)) {
       // An empty href advertises the document itself as the endpoint.
-      return resolveUrl(getAttr(tag, "href") ?? "", documentUrl);
+      return resolveUrl(getAttr(tag, "href") ?? "", documentBase);
     }
   }
   return null;
@@ -103,10 +106,8 @@ export async function discoverEndpoint(
     return null;
   }
 
-  let html: string;
-  try {
-    html = await response.text();
-  } catch {
+  const html = await readBodyCapped(response);
+  if (html === null) {
     return null;
   }
   return findWebmentionEndpoint(null, html, base);

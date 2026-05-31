@@ -11,8 +11,8 @@
  * @packageDocumentation
  */
 
-import { getAttr, matchTags, resolveUrl } from "./html";
-import type { FetchLike } from "./fetch";
+import { getAttr, matchTags, resolveDocumentBase, resolveUrl } from "./html";
+import { readBodyCapped, type FetchLike } from "./fetch";
 
 /** Elements whose `href` may constitute a link to the target. */
 const HREF_TAGS = ["a", "link", "area"] as const;
@@ -25,13 +25,15 @@ const SRC_TAGS = ["img", "video", "audio", "source", "track"] as const;
  */
 export function extractLinks(html: string, baseUrl: string): string[] {
   const links: string[] = [];
+  // Respect a <base href> if present, per standard HTML link resolution.
+  const documentBase = resolveDocumentBase(html, baseUrl);
   const collect = (tags: readonly string[], attr: "href" | "src") => {
     for (const tag of matchTags(html, tags)) {
       const value = getAttr(tag, attr);
       if (value === null || value === "") {
         continue;
       }
-      const resolved = resolveUrl(value, baseUrl);
+      const resolved = resolveUrl(value, documentBase);
       if (resolved !== null) {
         links.push(resolved);
       }
@@ -116,10 +118,9 @@ export async function verifySource(
 
   const base = response.url !== "" ? response.url : source;
   const contentType = response.headers.get("content-type") ?? "";
-  let body: string;
-  try {
-    body = await response.text();
-  } catch {
+  const body = await readBodyCapped(response);
+  if (body === null) {
+    // Unreadable or oversized body: treat as no longer endorsing the mention.
     return { links: false, status: response.status };
   }
 

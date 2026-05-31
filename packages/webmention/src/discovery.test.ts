@@ -56,6 +56,15 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe(doc);
   });
 
+  it("resolves a relative HTML endpoint against a <base href>", () => {
+    const endpoint = findWebmentionEndpoint(
+      null,
+      '<base href="https://cdn.example/p/"><link rel="webmention" href="wm">',
+      doc,
+    );
+    expect(endpoint).toBe("https://cdn.example/p/wm");
+  });
+
   it("returns null when no endpoint is advertised", () => {
     expect(findWebmentionEndpoint(null, "<p>nothing</p>", doc)).toBeNull();
   });

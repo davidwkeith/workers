@@ -16,6 +16,11 @@ describe("extractLinks", () => {
       "https://blog.example/img.png",
     ]);
   });
+
+  it("resolves relative links against a <base href>", () => {
+    const html = '<base href="https://cdn.example/x/"><a href="rel">a</a>';
+    expect(extractLinks(html, source)).toEqual(["https://cdn.example/x/rel"]);
+  });
 });
 
 describe("sourceLinksTo", () => {

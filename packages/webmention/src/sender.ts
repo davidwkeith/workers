@@ -42,7 +42,9 @@ export async function sendWebmention(
     options?.fetch ?? ((input, init) => fetch(input, init));
 
   const endpoint = await discoverEndpoint(target, { fetch: doFetch });
-  if (endpoint === null) {
+  // Only notify http(s) endpoints: a page could advertise a `javascript:`,
+  // `file:`, or `mailto:` endpoint, which we must never fetch.
+  if (endpoint === null || !/^https?:$/i.test(new URL(endpoint).protocol)) {
     return { target, endpoint: null, delivered: false, status: 0 };
   }
 
