@@ -153,6 +153,11 @@ async function parseMultipartCreate(
     properties[key] = [...values];
   }
   for (const [field, file] of fileFields) {
+    if (file.size > config.maxMediaBytes) {
+      throw new Mf2ParseError(
+        `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
+      );
+    }
     const url = await storeMedia(file, env, config);
     const prop = field.endsWith("[]") ? field.slice(0, -2) : field;
     (properties[prop] ??= []).push(url);
@@ -442,7 +447,15 @@ async function doUpdate(
     throw err;
   }
   const next = applyUpdate(record.properties, ops);
-  await store.updateProperties(url, next, Math.floor(Date.now() / 1000));
+  const updated = await store.updateProperties(
+    url,
+    next,
+    Math.floor(Date.now() / 1000),
+  );
+  // The post may have been deleted between the read above and this write.
+  if (!updated) {
+    return error("not_found", "no post exists at that URL", 404);
+  }
   return noContent();
 }
 

@@ -248,9 +248,22 @@ function asPropertyMap(
 /** Thrown when a request body cannot be parsed into a valid mf2 structure. */
 export class Mf2ParseError extends Error {}
 
-/** Deep value equality by canonical JSON, for `delete`-by-value matching. */
+/**
+ * Order-independent deep equality, for `delete`-by-value matching. Compares
+ * objects by key membership rather than serialized form, so a nested value like
+ * `{ html, value }` matches regardless of the property order the client sends.
+ */
 function sameValue(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a === b) return true;
+  if (typeof a !== "object" || a === null) return false;
+  if (typeof b !== "object" || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const keysA = Object.keys(aObj);
+  const keysB = Object.keys(bObj);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((key) => key in bObj && sameValue(aObj[key], bObj[key]));
 }
 
 /**

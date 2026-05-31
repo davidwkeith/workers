@@ -91,17 +91,19 @@ function randomSlug(): string {
 
 /**
  * Default post-URL policy: prefer an explicit `mp-slug`, then a slug derived
- * from the `name` property, then a timestamp-based slug. The result is a path
- * under the origin, e.g. `https://example.com/<slug>`.
+ * from the `name` property, then a timestamp-based slug. The slug is appended to
+ * `baseUrl` so subdirectory installs (e.g. `https://example.com/blog`) place
+ * posts under the base path, e.g. `https://example.com/blog/<slug>`.
  */
-function defaultGeneratePostUrl(origin: string): GeneratePostUrl {
+function defaultGeneratePostUrl(baseUrl: string): GeneratePostUrl {
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return (post, commands) => {
     const name = post.properties.name?.[0];
     const slug =
       commands.slug ||
       (typeof name === "string" && name ? slugify(name) : "") ||
       randomSlug();
-    return `${origin}/${slug}`;
+    return `${base}${slug}`;
   };
 }
 
@@ -145,6 +147,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     syndicateTo: config.syndicateTo ?? [],
     maxMediaBytes: config.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
     checkRevocation: config.checkRevocation ?? true,
-    generatePostUrl: config.generatePostUrl ?? defaultGeneratePostUrl(origin),
+    generatePostUrl:
+      config.generatePostUrl ?? defaultGeneratePostUrl(config.baseUrl),
   };
 }

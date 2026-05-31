@@ -586,6 +586,104 @@ describe("@dwk/micropub media endpoint", () => {
     expect(typeof photo).toBe("string");
     expect((photo as string).startsWith(`${MEDIA}/`)).toBe(true);
   });
+
+  it("rejects a multipart upload over the media size limit", async () => {
+    const tiny = createMicropub({ baseUrl: BASE, maxMediaBytes: 2 });
+    const minted = await mintToken("create");
+    const form = new FormData();
+    form.set("h", "entry");
+    form.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3, 4])], "big.png", {
+        type: "image/png",
+      }),
+    );
+    const res = await tiny(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("@dwk/micropub post-URL policy", () => {
+  it("places posts under a subdirectory baseUrl", async () => {
+    const blog = createMicropub({ baseUrl: `${BASE}/blog`, tokenIssuer: BASE });
+    const minted = await mintToken("create");
+    const res = await blog(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "in a subdir"],
+          ["mp-slug", "hello"],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(res.headers.get("location")).toBe(`${BASE}/blog/hello`);
+  });
+});
+
+describe("@dwk/micropub delete-by-value", () => {
+  it("matches nested values regardless of key order", async () => {
+    const minted = await mintToken("create update");
+    const create = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: {
+            content: [{ html: "<b>hi</b>", value: "hi" }],
+          },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    const url = create.headers.get("location")!;
+    // Same value, keys in the opposite order.
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url,
+          delete: { content: [{ value: "hi", html: "<b>hi</b>" }] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(204);
+    const source = await handler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(url)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.properties.content).toBeUndefined();
+  });
 });
 
 describe("@dwk/micropub authorization", () => {
