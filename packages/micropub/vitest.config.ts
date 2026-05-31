@@ -6,6 +6,11 @@ export default defineConfig({
     cloudflareTest({
       miniflare: {
         compatibilityDate: "2025-01-01",
+        d1Databases: ["MICROPUB_DB", "AUTH_DB"],
+        r2Buckets: ["MEDIA"],
+        bindings: {
+          TOKEN_SIGNING_KEY: "test-signing-key-not-for-production",
+        },
       },
     }),
   ],

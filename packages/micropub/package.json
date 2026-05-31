@@ -34,6 +34,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@dwk/dpop": "workspace:*"
+    "@dwk/dpop": "workspace:*",
+    "@dwk/indieauth": "workspace:*"
   }
 }

@@ -3,34 +3,58 @@
  * media endpoint.
  *
  * Endpoint package: exports a factory returning a `fetch`-compatible handler,
- * mountable under a path prefix. Authorizes via DPoP-bound IndieAuth access
- * tokens (see `@dwk/indieauth`). See `spec/packages/micropub.md`.
+ * mountable under a path prefix so it composes with other `@dwk` packages in one
+ * Worker. It consumes the DPoP-bound IndieAuth access tokens issued by
+ * `@dwk/indieauth` — verifying the token signature, completing the DPoP
+ * proof-of-possession binding via `@dwk/dpop`, honouring revocation, and gating
+ * each action on the token's scope.
+ *
+ * Published posts are stored as microformats2 source in D1 (a strongly-
+ * consistent store — never KV); media blob bodies are streamed to R2. The
+ * handler fails loudly at startup if any required binding is missing.
+ *
+ * @see spec/packages/micropub.md
+ * @packageDocumentation
  */
 
-/** Cloudflare bindings required by the Micropub handler. */
-export interface MicropubEnv {
-  /** R2 bucket backing the media endpoint. */
-  readonly MEDIA: R2Bucket;
-}
+export { createMicropub } from "./handler";
+export type { MicropubEnv, MicropubHandler } from "./handler";
 
-/** Configuration passed to {@link createMicropub}. */
-export interface MicropubConfig {
-  /** The identity root / base URL (e.g. `https://example.com`). */
-  readonly baseUrl: string;
-}
+export { resolveConfig } from "./config";
+export type {
+  MicropubConfig,
+  ResolvedConfig,
+  SyndicationTarget,
+  GeneratePostUrl,
+} from "./config";
 
-/** A `fetch`-compatible Worker handler. */
-export type MicropubHandler = (
-  request: Request,
-  env: MicropubEnv,
-  ctx: ExecutionContext,
-) => Promise<Response>;
+export {
+  createMicropubStore,
+  recordToMf2,
+  type MicropubStore,
+  type MicropubStoreEnv,
+  type PostRecord,
+} from "./store";
 
-/**
- * Create the Micropub handler. The returned handler is mountable under a path
- * prefix.
- */
-export function createMicropub(_config: MicropubConfig): MicropubHandler {
-  return async (_request, _env, _ctx) =>
-    new Response("Not Implemented", { status: 501 });
-}
+export {
+  parseFormBody,
+  parseJsonBody,
+  parseUpdateOperations,
+  applyUpdate,
+  sourceView,
+  Mf2ParseError,
+  type Mf2Object,
+  type MicropubCommands,
+  type UpdateOperations,
+  type ParsedBody,
+} from "./mf2";
+
+export {
+  authorize,
+  tokenFromHeader,
+  hasScope,
+  type AuthEnv,
+  type AuthResult,
+  type AuthSuccess,
+  type AuthFailure,
+} from "./auth";
