@@ -1,8 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@dwk/rdf": ["../rdf/src/index.ts"]
+    }
   },
   "include": ["src"]
 }
