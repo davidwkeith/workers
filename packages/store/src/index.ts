@@ -4,27 +4,35 @@
  *
  * Confines Cloudflare storage specifics here so the pure libs (`@dwk/wac`,
  * `@dwk/rdf`, `@dwk/dpop`) stay runtime-free. Authoritative state lives only in
- * DO SQLite and R2 — never KV. See `spec/packages/store.md`.
+ * DO SQLite and R2 — never KV. Blob bodies are content-addressed and
+ * copy-on-write; orphaned keys are reported transactionally at delete time and
+ * reclaimed by an out-of-band GC Worker that never sweeps Durable Objects. See
+ * `spec/packages/store.md`.
  */
 
-/** Cloudflare bindings required to construct a {@link Store}. */
-export interface StoreEnv {
-  /** R2 bucket holding blob bodies. */
-  readonly BLOBS: R2Bucket;
-}
+export {
+  createStore,
+  PreconditionFailedError,
+  DEFAULT_MAX_INLINE_BYTES,
+  type Store,
+  type StoreEnv,
+  type StoreConfig,
+  type StorageTier,
+  type ResourceMeta,
+  type BlobBody,
+  type QuadPatch,
+  type WriteOptions,
+  type OrphanRecord,
+} from "./store";
 
-/** Storage interface over the DO-SQLite quad store and R2 blob bodies. */
-export interface Store {
-  /** Read the blob body at `key`, streamed from R2 (never fully buffered). */
-  readBlob(key: string): Promise<ReadableStream | null>;
-}
+export {
+  collectGarbage,
+  forwardOrphans,
+  d1OrphanSink,
+  ensureGcSchema,
+  GC_SCHEMA,
+  type OrphanSink,
+  type GcEnv,
+} from "./gc";
 
-/**
- * Create a {@link Store} backed by a Durable Object's SQLite storage and an R2
- * bucket.
- *
- * @throws not implemented yet.
- */
-export function createStore(_state: DurableObjectState, _env: StoreEnv): Store {
-  throw new Error("@dwk/store: createStore is not implemented yet");
-}
+export type { ResourceKind } from "./sql";
