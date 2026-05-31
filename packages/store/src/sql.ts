@@ -38,7 +38,8 @@ export const SCHEMA: readonly string[] = [
      g_value    TEXT NOT NULL,
      PRIMARY KEY (resource, s_value, p_value, o_value, o_datatype, o_language, g_value)
    )`,
-  `CREATE INDEX IF NOT EXISTS quads_by_resource ON quads (resource)`,
+  // No standalone index on `quads.resource`: it is the leftmost column of the
+  // primary key, so `WHERE resource = ?` already uses the PK index.
   // Index used by the unreferenced-blob check in copy-on-write / delete.
   `CREATE INDEX IF NOT EXISTS resources_by_blob ON resources (blob_key)`,
   `CREATE TABLE IF NOT EXISTS orphan_outbox (

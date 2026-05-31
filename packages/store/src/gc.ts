@@ -75,6 +75,12 @@ export async function forwardOrphans(
  * Reclaim orphaned R2 objects whose tracking rows are older than the safety
  * window. Deletes the object then its tracking row, one at a time, and returns
  * the keys reclaimed. Touches only D1 and R2 — never a Durable Object.
+ *
+ * Resurrection guard: because keys are content-addressed, re-uploading the same
+ * content after a delete writes the same R2 key. Before reclaiming, we `head`
+ * the object and skip it if its `uploaded` time is newer than when it was
+ * orphaned — i.e. it was resurrected by a live resource and must be kept. The
+ * tracking row is dropped either way.
  */
 export async function collectGarbage(
   env: GcEnv,
@@ -85,19 +91,24 @@ export async function collectGarbage(
   const limit = options.limit ?? 100;
 
   const { results } = await env.GC_DB.prepare(
-    `SELECT id, blob_key FROM orphan_blobs
+    `SELECT id, blob_key, enqueued_at FROM orphan_blobs
      WHERE enqueued_at <= ? ORDER BY enqueued_at LIMIT ?`,
   )
     .bind(cutoff, limit)
-    .all<{ id: number; blob_key: string }>();
+    .all<{ id: number; blob_key: string; enqueued_at: number }>();
 
   const reclaimed: string[] = [];
   for (const row of results) {
-    await env.BLOBS.delete(row.blob_key);
+    const head = await env.BLOBS.head(row.blob_key);
+    const resurrected =
+      head !== null && head.uploaded.getTime() > row.enqueued_at;
+    if (!resurrected) {
+      await env.BLOBS.delete(row.blob_key);
+      reclaimed.push(row.blob_key);
+    }
     await env.GC_DB.prepare("DELETE FROM orphan_blobs WHERE id = ?")
       .bind(row.id)
       .run();
-    reclaimed.push(row.blob_key);
   }
   return reclaimed;
 }

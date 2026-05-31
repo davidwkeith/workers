@@ -387,8 +387,11 @@ export function createStore(
       const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
       const contentType = options.contentType ?? "application/octet-stream";
 
-      // 1. Write the new content-addressed object first.
-      await env.BLOBS.put(blobKey, bytes);
+      // 1. Write the new content-addressed object first, recording the content
+      //    type on the R2 object for direct/public bucket access.
+      await env.BLOBS.put(blobKey, bytes, {
+        httpMetadata: { contentType },
+      });
 
       // 2. Atomically flip the pointer and outbox the displaced key.
       state.storage.transactionSync(() => {
