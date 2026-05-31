@@ -5,8 +5,55 @@
 Part of the [`@dwk` IndieWeb + Solid cohort](../../README.md). See the
 [package specification](../../spec/packages/micropub.md) for the full requirements.
 
-**Status:** pre-implementation scaffold — the public surface is stubbed and the
-behaviour is not yet implemented.
+A [Micropub](https://micropub.spec.indieweb.org/) server that runs as a
+Cloudflare Worker. It accepts both JSON and form-encoded requests, authorizes
+every request with a DPoP-bound IndieAuth access token (issued by
+[`@dwk/indieauth`](../indieauth)), stores published posts as microformats2 source
+in D1, and backs its media endpoint with R2.
+
+## Usage
+
+```ts
+import { createMicropub } from "@dwk/micropub";
+
+const micropub = createMicropub({
+  baseUrl: "https://example.com",
+  // optional: defaults are `${origin}/micropub` and `${origin}/media`
+  micropubEndpoint: "https://example.com/micropub",
+  mediaEndpoint: "https://example.com/media",
+  syndicateTo: [{ uid: "https://news.example/@me", name: "Example News" }],
+});
+
+export default {
+  fetch(request, env, ctx) {
+    return micropub(request, env, ctx);
+  },
+};
+```
+
+### Bindings (declared `Env` fragment)
+
+The handler fails loudly at startup if any of these are missing:
+
+- `MEDIA` — R2 bucket backing the media endpoint.
+- `MICROPUB_DB` — D1 database holding published post records.
+- `AUTH_DB` — the `@dwk/indieauth` issued-token store, consulted for revocation.
+- `TOKEN_SIGNING_KEY` — the secret the IndieAuth token endpoint signs tokens with.
+
+### What it implements
+
+- **Create** (`h-entry` etc.) from JSON, form-encoded, and `multipart/form-data`
+  bodies — the latter folds uploaded files (e.g. `photo`) into the post.
+- **Update** (JSON `replace`/`add`/`delete`), **delete**, and **undelete**
+  (soft, reversible).
+- **Media endpoint**: streams uploads to R2 and serves them back.
+- **Queries**: `q=config`, `q=source` (with a `properties[]` filter), and
+  `q=syndicate-to`.
+
+Every request is authorized by an IndieAuth access token whose scope gates the
+action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession
+binding completed via [`@dwk/dpop`](../dpop) and revocation checked against the
+strongly-consistent token store.
 
 ## License
 

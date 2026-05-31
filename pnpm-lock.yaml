@@ -52,6 +52,9 @@ importers:
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop
+      '@dwk/indieauth':
+        specifier: workspace:*
+        version: link:../indieauth
 
   packages/rdf:
     dependencies:
