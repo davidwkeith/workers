@@ -6,6 +6,7 @@ export default defineConfig({
     cloudflareTest({
       miniflare: {
         compatibilityDate: "2025-01-01",
+        d1Databases: ["WEBMENTION_INBOX"],
       },
     }),
   ],
