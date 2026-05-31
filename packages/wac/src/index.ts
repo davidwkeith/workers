@@ -145,7 +145,7 @@ function iri(object: AclQuad["object"]): string | undefined {
   if (typeof object === "string") {
     return object;
   }
-  return object.termType === "NamedNode" ? object.value : undefined;
+  return object?.termType === "NamedNode" ? object.value : undefined;
 }
 
 /** Collects the named-node object IRIs for all `(subject, predicate, *)` quads. */
@@ -170,6 +170,9 @@ function collect(
  * Finds the authorizations in an ACL document that apply to its scoped target.
  */
 function findApplicableAuthorizations(acl: AclResource): Authorization[] {
+  if (!acl || !acl.quads) {
+    return [];
+  }
   const { quads, scope, target } = acl;
 
   const subjects = new Set<string>();
@@ -279,6 +282,9 @@ export function evaluateAccess(
   request: AccessRequest,
   chain: AclResource[],
 ): AccessDecision {
+  if (!request || !chain || !Array.isArray(chain)) {
+    return { granted: false, modes: [] };
+  }
   for (const acl of chain) {
     const authorizations = findApplicableAuthorizations(acl);
     if (authorizations.length === 0) {
