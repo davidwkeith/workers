@@ -6,6 +6,10 @@ export default defineConfig({
     cloudflareTest({
       miniflare: {
         compatibilityDate: "2025-01-01",
+        d1Databases: ["AUTH_DB"],
+        bindings: {
+          TOKEN_SIGNING_KEY: "test-signing-key-not-for-production",
+        },
       },
     }),
   ],
