@@ -3,35 +3,62 @@
  *
  * Endpoint package: exports a factory returning a `fetch`-compatible handler,
  * mountable under a path prefix so it composes with other `@dwk` packages in
- * one Worker. See `spec/packages/indieauth.md`.
+ * one Worker. It is the identity layer rooted at the user's domain — it runs
+ * the authorization-code + PKCE flow, issues DPoP-bound access tokens (bound via
+ * `@dwk/dpop`'s `cnf.jkt`), and publishes an OAuth 2.0 / IndieAuth server
+ * metadata document so clients can discover the endpoints and PKCE methods.
+ *
+ * Authoritative authorization state (codes, issued tokens) lives in D1, a
+ * strongly-consistent store — never KV. Authentication and consent are
+ * delegated to the deployer via {@link IndieAuthConfig.approveAuthorization},
+ * since identity and UI are not a library concern.
+ *
+ * @see spec/packages/indieauth.md
+ * @packageDocumentation
  */
 
-/** Cloudflare bindings required by the IndieAuth handler. */
-export interface IndieAuthEnv {
-  /** Signing key material for issued tokens (secret binding). */
-  readonly TOKEN_SIGNING_KEY: string;
-}
+export { createIndieAuth } from "./handler";
+export type { IndieAuthEnv, IndieAuthHandler } from "./handler";
 
-/** Configuration passed to {@link createIndieAuth}. */
-export interface IndieAuthConfig {
-  /** The identity root / base URL (e.g. `https://example.com`). */
-  readonly baseUrl: string;
-  /** The token issuer identifier. */
-  readonly issuer: string;
-}
+export type {
+  IndieAuthConfig,
+  AuthorizationRequest,
+  AuthorizationApproval,
+  ApproveAuthorization,
+  RedirectUriPolicy,
+  ProfileInfo,
+} from "./config";
 
-/** A `fetch`-compatible Worker handler. */
-export type IndieAuthHandler = (
-  request: Request,
-  env: IndieAuthEnv,
-  ctx: ExecutionContext,
-) => Promise<Response>;
+export {
+  verifyAccessToken,
+  signAccessToken,
+  accessTokenHash,
+  type AccessTokenClaims,
+  type Confirmation,
+  type VerifyAccessTokenResult,
+  type VerifyAccessTokenOptions,
+  type AccessTokenFailureReason,
+} from "./token";
 
-/**
- * Create the IndieAuth handler. The returned handler is mountable under a path
- * prefix.
- */
-export function createIndieAuth(_config: IndieAuthConfig): IndieAuthHandler {
-  return async (_request, _env, _ctx) =>
-    new Response("Not Implemented", { status: 501 });
-}
+export {
+  createIndieAuthStore,
+  type IndieAuthStore,
+  type IndieAuthStoreEnv,
+  type AuthorizationCodeRecord,
+  type IssuedTokenRecord,
+} from "./store";
+
+export {
+  verifyPkce,
+  isSupportedChallengeMethod,
+  SUPPORTED_CODE_CHALLENGE_METHODS,
+  type CodeChallengeMethod,
+} from "./pkce";
+
+export {
+  canonicalizeProfileUrl,
+  parseRelMeLinks,
+  relMeLinksBack,
+} from "./profile";
+
+export { buildServerMetadata, type ServerMetadata } from "./metadata";
