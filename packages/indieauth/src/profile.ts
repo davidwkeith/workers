@@ -52,10 +52,13 @@ export function canonicalizeProfileUrl(input: string): string | null {
  * token list contains `me`. Returns a de-duplicated list in document order.
  */
 export function parseRelMeLinks(html: string, baseUrl: string): string[] {
+  // Strip HTML comments first so a commented-out `<a rel="me">` is not treated
+  // as a live back-link (comment injection).
+  const cleanHtml = html.replace(/<!--[\s\S]*?-->/g, "");
   const found = new Set<string>();
   // Match <a ...> and <link ...> start tags; inspect their attributes.
   const tagPattern = /<(a|link)\b([^>]*)>/gi;
-  for (const match of html.matchAll(tagPattern)) {
+  for (const match of cleanHtml.matchAll(tagPattern)) {
     const attrs = match[2] ?? "";
     const rel = attrValue(attrs, "rel");
     if (rel === null) continue;
@@ -74,12 +77,20 @@ export function parseRelMeLinks(html: string, baseUrl: string): string[] {
   return [...found];
 }
 
-/** Read a double/single-quoted attribute value from a raw attribute string. */
+/**
+ * Read an attribute value (double-quoted, single-quoted, or unquoted) from a
+ * raw attribute string. Anchors the name on a preceding start-or-whitespace
+ * boundary rather than `\b`, so `data-rel`/`data-href` are not mistaken for
+ * `rel`/`href` (a hyphen is a `\b` boundary).
+ */
 function attrValue(attrs: string, name: string): string | null {
-  const pattern = new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i");
+  const pattern = new RegExp(
+    `(?:^|\\s)${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    "i",
+  );
   const m = pattern.exec(attrs);
   if (!m) return null;
-  return m[2] ?? m[3] ?? null;
+  return m[2] ?? m[3] ?? m[4] ?? null;
 }
 
 /**

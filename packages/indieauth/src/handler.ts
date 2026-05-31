@@ -117,12 +117,19 @@ async function handleAuthorizationGet(
   const redirectUri = params.get("redirect_uri") ?? "";
   const state = params.get("state") ?? "";
 
-  // client_id and redirect_uri must be valid URLs before we can redirect.
+  // client_id and redirect_uri must be valid, fragment-free URLs before we can
+  // redirect anywhere.
   if (!isHttpUrl(clientId)) {
-    return oauthError("invalid_request", "`client_id` must be a valid URL");
+    return oauthError(
+      "invalid_request",
+      "`client_id` must be a valid URL without a fragment",
+    );
   }
   if (!isHttpUrl(redirectUri)) {
-    return oauthError("invalid_request", "`redirect_uri` must be a valid URL");
+    return oauthError(
+      "invalid_request",
+      "`redirect_uri` must be a valid URL without a fragment",
+    );
   }
   if (!(await config.redirectUriPolicy(clientId, redirectUri))) {
     return oauthError(
@@ -360,18 +367,29 @@ async function handleRevocation(
 
 /** Read an `application/x-www-form-urlencoded` body into `URLSearchParams`. */
 async function readForm(request: Request): Promise<URLSearchParams> {
-  const form = await request.formData();
   const params = new URLSearchParams();
-  for (const [key, value] of form) {
-    if (typeof value === "string") params.set(key, value);
+  try {
+    const form = await request.formData();
+    for (const [key, value] of form) {
+      if (typeof value === "string") params.set(key, value);
+    }
+  } catch {
+    // A malformed/empty body or wrong content-type yields empty params, so the
+    // caller's validation fails gracefully with a 400 rather than throwing.
   }
   return params;
 }
 
+/**
+ * Whether `value` is an `https`/`http` URL with no fragment. IndieAuth requires
+ * both `client_id` and `redirect_uri` to be URLs and to carry no fragment
+ * component, which guards against fragment-injection on the redirect.
+ */
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    return url.hash === "";
   } catch {
     return false;
   }

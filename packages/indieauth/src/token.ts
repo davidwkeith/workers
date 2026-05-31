@@ -15,6 +15,7 @@
 
 import {
   base64urlToText,
+  bytesToBase64url,
   sha256Base64url,
   textToBase64url,
   timingSafeEqual,
@@ -106,13 +107,7 @@ async function hmacSign(signingInput: string, secret: string): Promise<string> {
     key,
     new TextEncoder().encode(signingInput),
   );
-  const bytes = new Uint8Array(sig);
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return bytesToBase64url(new Uint8Array(sig));
 }
 
 /**

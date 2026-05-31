@@ -73,6 +73,24 @@ describe("rel=me discovery", () => {
     expect(links).not.toContain("https://other.example/");
   });
 
+  it("ignores commented-out links and hyphenated attribute names", () => {
+    const tricky = `
+      <!-- <a rel="me" href="https://evil.example/">hidden</a> -->
+      <a data-rel="me" data-href="https://decoy.example/">decoy</a>
+      <a rel="me" href="https://real.example/">real</a>
+    `;
+    const links = parseRelMeLinks(tricky, "https://alice.example.com/");
+    expect(links).toEqual(["https://real.example/"]);
+  });
+
+  it("supports unquoted href values", () => {
+    const links = parseRelMeLinks(
+      `<a rel=me href=https://unquoted.example/>x</a>`,
+      "https://alice.example.com/",
+    );
+    expect(links).toContain("https://unquoted.example/");
+  });
+
   it("confirms a back-link", () => {
     const back = `<a rel="me" href="https://alice.example.com">me</a>`;
     expect(

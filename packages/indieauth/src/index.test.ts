@@ -317,6 +317,36 @@ describe("@dwk/indieauth authorization endpoint validation", () => {
     expect(loc.searchParams.get("error")).toBe("invalid_request");
   });
 
+  it("rejects a redirect_uri carrying a fragment", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", `${REDIRECT_URI}#frag`);
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 (not 500) on a malformed token request body", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=x" },
+        body: "not actually multipart",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a cross-origin redirect_uri", async () => {
     const handler = autoApproveHandler();
     const url = new URL(`${BASE}/authorize`);
