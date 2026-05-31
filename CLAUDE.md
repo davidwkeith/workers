@@ -127,7 +127,7 @@ packages/<name>/
   `dist/`, and publishes `dist` + `src` (minus tests). Dependencies are
   **minimized and pinned** to exact versions.
 - **Internal workspace deps** use `"workspace:*"` (e.g. `@dwk/solid-pod` depends
-  on `dpop`/`rdf`/`store`/`wac`).
+  on `@dwk/dpop`, `@dwk/rdf`, `@dwk/store`, and `@dwk/wac`).
 - **TypeScript is strict** via `tsconfig.base.json`: `strict`,
   `noUncheckedIndexedAccess`, `noUnusedLocals`/`Parameters`,
   `verbatimModuleSyntax`, `isolatedModules`. Use `import type` for type-only
@@ -141,11 +141,12 @@ packages/<name>/
 Each package's `vitest.config.ts` picks one of two environments — get this right
 when adding a package:
 
-- **Pure libs run under Node** (`environment: "node"`): `dpop`, `rdf`, `wac`.
-  They take plain-data inputs and need no Workers runtime.
+- **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
+  `@dwk/wac`. They take plain-data inputs and need no Workers runtime.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
-  `store`, `indieauth`, `micropub`, `webmention`, `solid-pod`.
+  `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`,
+  `@dwk/solid-pod`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.
