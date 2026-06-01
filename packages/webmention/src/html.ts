@@ -133,6 +133,15 @@ export function splitTokens(value: string | null): string[] {
 }
 
 /**
+ * Strip HTML comments (`<!-- … -->`) from markup before tag scanning, so a
+ * `rel="webmention"` element hidden inside a comment is not mistaken for a real
+ * endpoint (webmention.rocks discovery test 13).
+ */
+export function stripComments(html: string): string {
+  return html.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+/**
  * Return every opening tag in `html` whose name is one of `tagNames`
  * (case-insensitive), e.g. `["a", "link"]`.
  */

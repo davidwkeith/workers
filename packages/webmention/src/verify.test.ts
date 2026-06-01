@@ -21,6 +21,13 @@ describe("extractLinks", () => {
     const html = '<base href="https://cdn.example/x/"><a href="rel">a</a>';
     expect(extractLinks(html, source)).toEqual(["https://cdn.example/x/rel"]);
   });
+
+  it("ignores links inside HTML comments", () => {
+    const html =
+      `<!-- <a href="${target}">commented</a> -->` +
+      '<a href="https://kept.example/">real</a>';
+    expect(extractLinks(html, source)).toEqual(["https://kept.example/"]);
+  });
 });
 
 describe("sourceLinksTo", () => {
@@ -38,6 +45,11 @@ describe("sourceLinksTo", () => {
 
   it("is false when the source does not link to the target", () => {
     const html = '<a href="https://elsewhere.example/">x</a>';
+    expect(sourceLinksTo(html, target, source, "text/html")).toBe(false);
+  });
+
+  it("is false when the only link to the target is inside a comment", () => {
+    const html = `<!-- <a href="${target}">x</a> -->`;
     expect(sourceLinksTo(html, target, source, "text/html")).toBe(false);
   });
 

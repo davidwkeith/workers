@@ -18,6 +18,7 @@ import {
   resolveDocumentBase,
   resolveUrl,
   splitTokens,
+  stripComments,
 } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
 
@@ -48,13 +49,22 @@ export function findWebmentionEndpoint(
   }
   // 2. Fall back to the first <link>/<a rel="webmention"> in document order,
   //    resolving relative hrefs against the document's <base href> if present.
-  const documentBase = resolveDocumentBase(html, documentUrl);
-  for (const tag of matchTags(html, ["link", "a"])) {
+  //    Comments are stripped first so a commented-out endpoint is ignored.
+  const markup = stripComments(html);
+  const documentBase = resolveDocumentBase(markup, documentUrl);
+  for (const tag of matchTags(markup, ["link", "a"])) {
     const rels = splitTokens(getAttr(tag, "rel"));
-    if (rels.some(isWebmentionRel)) {
-      // An empty href advertises the document itself as the endpoint.
-      return resolveUrl(getAttr(tag, "href") ?? "", documentBase);
+    if (!rels.some(isWebmentionRel)) {
+      continue;
     }
+    const href = getAttr(tag, "href");
+    // A tag with no `href` attribute at all is malformed — skip it and keep
+    // looking (test 20). An empty `href=""` is valid and advertises the
+    // document itself as the endpoint (test 15).
+    if (href === null) {
+      continue;
+    }
+    return resolveUrl(href, documentBase);
   }
   return null;
 }

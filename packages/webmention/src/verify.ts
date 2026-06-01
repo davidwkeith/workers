@@ -11,7 +11,13 @@
  * @packageDocumentation
  */
 
-import { getAttr, matchTags, resolveDocumentBase, resolveUrl } from "./html";
+import {
+  getAttr,
+  matchTags,
+  resolveDocumentBase,
+  resolveUrl,
+  stripComments,
+} from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
 
 /** Elements whose `href` may constitute a link to the target. */
@@ -25,10 +31,12 @@ const SRC_TAGS = ["img", "video", "audio", "source", "track"] as const;
  */
 export function extractLinks(html: string, baseUrl: string): string[] {
   const links: string[] = [];
-  // Respect a <base href> if present, per standard HTML link resolution.
-  const documentBase = resolveDocumentBase(html, baseUrl);
+  // Strip comments so a commented-out link doesn't count as a real one, then
+  // respect a <base href> if present, per standard HTML link resolution.
+  const markup = stripComments(html);
+  const documentBase = resolveDocumentBase(markup, baseUrl);
   const collect = (tags: readonly string[], attr: "href" | "src") => {
-    for (const tag of matchTags(html, tags)) {
+    for (const tag of matchTags(markup, tags)) {
       const value = getAttr(tag, attr);
       if (value === null || value === "") {
         continue;

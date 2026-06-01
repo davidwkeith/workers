@@ -68,6 +68,55 @@ describe("findWebmentionEndpoint", () => {
   it("returns null when no endpoint is advertised", () => {
     expect(findWebmentionEndpoint(null, "<p>nothing</p>", doc)).toBeNull();
   });
+
+  // webmention.rocks discovery conformance cases.
+  it("ignores a false endpoint inside an HTML comment (rocks #13)", () => {
+    const endpoint = findWebmentionEndpoint(
+      null,
+      "<!-- <link rel=\"webmention\" href='/false'> -->" +
+        '<link rel="webmention" href="/real">',
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/real");
+  });
+
+  it("ignores a non-webmention rel that contains the substring (rocks #12)", () => {
+    const endpoint = findWebmentionEndpoint(
+      null,
+      '<link rel="not-webmention" href="/false">' +
+        '<link rel="webmention" href="/real">',
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/real");
+  });
+
+  it("skips a rel=webmention tag with no href attribute (rocks #20)", () => {
+    const endpoint = findWebmentionEndpoint(
+      null,
+      '<link rel="webmention">' + '<a rel="webmention" href="/real">x</a>',
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/real");
+  });
+
+  it("takes the first endpoint across <a> then <link> in document order (rocks #16)", () => {
+    const endpoint = findWebmentionEndpoint(
+      null,
+      '<a rel="webmention" href="/first">x</a>' +
+        '<link rel="webmention" href="/second">',
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/first");
+  });
+
+  it("keeps an endpoint with query-string parameters intact (rocks #21)", () => {
+    const endpoint = findWebmentionEndpoint(
+      '<https://target.example/wm?query=1>; rel="webmention"',
+      "",
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/wm?query=1");
+  });
 });
 
 describe("discoverEndpoint", () => {

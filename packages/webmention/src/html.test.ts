@@ -4,7 +4,19 @@ import {
   parseLinkHeader,
   resolveDocumentBase,
   splitTokens,
+  stripComments,
 } from "./html";
+
+describe("stripComments", () => {
+  it("removes single and multi-line HTML comments", () => {
+    expect(stripComments("a<!-- x -->b")).toBe("ab");
+    expect(stripComments("a<!--\nmulti\nline\n-->b")).toBe("ab");
+  });
+
+  it("leaves markup without comments untouched", () => {
+    expect(stripComments("<a href='x'>y</a>")).toBe("<a href='x'>y</a>");
+  });
+});
 
 describe("getAttr", () => {
   it("reads a quoted attribute value", () => {
