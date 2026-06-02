@@ -104,6 +104,22 @@ test("a stable package missing a status entry is blocked", () => {
   assert.match(violations[0], /no conformance\/status\.json entry/);
 });
 
+test("a malformed (null) suite entry is flagged, not crashed on", () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/micropub", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/micropub": {
+          suites: { "micropub.rocks": null },
+          integration: { status: "passing" },
+        },
+      },
+    },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /micropub\.rocks/);
+});
+
 test('"not-applicable" suites and integration do not block', () => {
   const violations = evaluateReleaseGate({
     packages: [{ name: "@dwk/dpop", version: "1.0.0" }],

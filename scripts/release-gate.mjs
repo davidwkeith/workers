@@ -71,7 +71,16 @@ export function loadPackages(root = ROOT) {
     } catch {
       continue;
     }
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+      continue;
+    }
     if (manifest.private) continue;
+    if (
+      typeof manifest.name !== "string" ||
+      typeof manifest.version !== "string"
+    ) {
+      continue;
+    }
     out.push({
       name: manifest.name,
       version: manifest.version,
@@ -112,9 +121,10 @@ export function evaluateReleaseGate({ packages, status }) {
     }
 
     for (const [suite, result] of Object.entries(entry.suites ?? {})) {
-      if (result.status !== "passing" && result.status !== "not-applicable") {
+      const status = result?.status;
+      if (status !== "passing" && status !== "not-applicable") {
         violations.push(
-          `${pkg.name}@${pkg.version}: conformance suite "${suite}" is "${result.status}" (must be "passing").`,
+          `${pkg.name}@${pkg.version}: conformance suite "${suite}" is "${status}" (must be "passing").`,
         );
       }
     }
@@ -140,7 +150,7 @@ export function renderReport({ packages, status }) {
     const gated = isStable(pkg.version) ? "GATED" : "exempt";
     const suites = entry
       ? Object.entries(entry.suites ?? {})
-          .map(([name, r]) => `${name}=${r.status}`)
+          .map(([name, r]) => `${name}=${r?.status ?? "unknown"}`)
           .join(", ") || "—"
       : "(no entry)";
     const integration = entry?.integration?.status ?? "(none)";
