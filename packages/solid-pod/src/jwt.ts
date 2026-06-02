@@ -125,15 +125,19 @@ export async function verifyJwtSignature(
   if (!spec) return false;
 
   const kid = decoded.header.kid;
-  const candidates = jwks.filter((jwk) => {
-    if (!keyMatchesAlg(jwk, spec)) return false;
+  const compatible = jwks.filter((jwk) => keyMatchesAlg(jwk, spec));
+
+  // When the token names a `kid`, prefer the key(s) carrying it. Fall back to
+  // all alg-compatible keys only if none match — some issuers publish a single
+  // key with no `kid` while still setting one on the token.
+  let candidates = compatible;
+  if (typeof kid === "string") {
     // `kid` is not in the standard JsonWebKey type but is carried by JWKS keys.
-    const jwkKid = (jwk as { kid?: unknown }).kid;
-    if (typeof kid === "string" && typeof jwkKid === "string") {
-      return jwkKid === kid;
-    }
-    return true;
-  });
+    const byKid = compatible.filter(
+      (jwk) => (jwk as { kid?: unknown }).kid === kid,
+    );
+    if (byKid.length > 0) candidates = byKid;
+  }
 
   for (const jwk of candidates) {
     try {

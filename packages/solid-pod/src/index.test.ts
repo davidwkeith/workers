@@ -487,6 +487,33 @@ describe("@dwk/solid-pod LDP", () => {
     expect(await root.text()).toContain("contains");
   });
 
+  it("preserves ldp:contains when a container is PUT-updated", async () => {
+    const pod = freshPod();
+    // Create a child so the container gains an ldp:contains link.
+    const child = await pod.send("POST", "/c/", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE, slug: "kid" },
+    });
+    expect(child.status).toBe(201);
+
+    // Replace the container's own description (no ldp:contains in the body).
+    const put = await pod.send("PUT", "/c/", {
+      webid: OWNER,
+      body: `@prefix dc: <http://purl.org/dc/terms/> .
+<> dc:title "My container" .`,
+      headers: { "content-type": TURTLE },
+    });
+    expect(put.status).toBe(204);
+
+    // The containment link survives the metadata update.
+    const listing = await pod.send("GET", "/c/", { webid: OWNER });
+    const body = await listing.text();
+    expect(body).toContain("contains");
+    expect(body).toContain("/c/kid");
+    expect(body).toContain("My container");
+  });
+
   it("DELETE removes a resource (404 thereafter)", async () => {
     const pod = freshPod();
     await pod.send("PUT", "/gone", {

@@ -152,7 +152,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const store = this.#getStore(config);
     const url = new URL(request.url);
     const origin = url.origin;
-    const path = decodeURIComponent(url.pathname);
+    // Keep the path percent-encoded: decoding `%2F` would conflate it with a
+    // real path separator and corrupt store keys / resource IRIs.
+    const path = url.pathname;
     const webidHeader = request.headers.get(INTERNAL_HEADERS.webid);
     const agent =
       webidHeader && webidHeader.length > 0 ? webidHeader : undefined;
@@ -618,8 +620,16 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         baseIRI: toIri(origin, path),
       });
       const stored = quads.map(quadToStored);
+      // A container's `ldp:contains` listing is server-managed; clients never
+      // send it, so a PUT that replaced all quads would orphan every child.
+      // Preserve existing containment (and re-assert the container types).
+      const containerIri = toIri(origin, path);
+      const preserved =
+        isContainer(path) && store.head(path) !== null
+          ? store.readQuads(path).filter((q) => isContainsQuad(q, containerIri))
+          : [];
       const withType = isContainer(path)
-        ? [...stored, ...containerTypeQuads(toIri(origin, path))]
+        ? [...stored, ...containerTypeQuads(containerIri), ...preserved]
         : stored;
       await store.putResource(path, bytes, {
         quads: withType,
@@ -725,10 +735,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (typeof message === "string" && message === "ping") ws.send("pong");
   }
 
-  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
-    // 1006 (abnormal) must not be echoed back as a close code.
-    ws.close(code === 1006 ? 1000 : code);
-  }
+  // No `webSocketClose` override: the runtime closes the hibernatable socket
+  // itself, and calling `ws.close()` here throws on reserved codes (1006).
 
   /** Fan a change notification out to every connected subscriber. */
   #broadcast(objectIri: string, type: ChangeType): void {

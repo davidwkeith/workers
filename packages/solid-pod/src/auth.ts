@@ -57,9 +57,11 @@ async function resolveJwks(
     const response = await config.fetch(config.jwksUri);
     if (!response.ok) return cached?.keys ?? null;
     const body = (await response.json()) as { keys?: JsonWebKey[] };
-    const keys = Array.isArray(body.keys) ? body.keys : [];
-    jwksCache.set(config.jwksUri, { keys, fetchedAt: now });
-    return keys;
+    // Only cache a well-formed JWKS; caching an empty/garbled body would poison
+    // verification for the whole TTL and discard the last good keys.
+    if (!Array.isArray(body.keys)) return cached?.keys ?? null;
+    jwksCache.set(config.jwksUri, { keys: body.keys, fetchedAt: now });
+    return body.keys;
   } catch {
     // A transient fetch failure falls back to the last good keys if we have
     // them, rather than failing closed on every request mid-outage.
