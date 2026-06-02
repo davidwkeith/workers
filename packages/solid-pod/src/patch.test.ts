@@ -1,0 +1,142 @@
+import type { StoredQuad, StoredTerm } from "@dwk/rdf";
+import { describe, expect, it } from "vitest";
+
+import { parsePatch, PatchProblem, resolvePatch } from "./patch";
+
+const EX = "http://example.org/";
+const BASE = "https://pod.example/card";
+const DEFAULT_GRAPH: StoredTerm = { termType: "DefaultGraph", value: "" };
+
+function quad(s: string, p: string, o: StoredTerm): StoredQuad {
+  return {
+    subject: { termType: "NamedNode", value: s },
+    predicate: { termType: "NamedNode", value: p },
+    object: o,
+    graph: DEFAULT_GRAPH,
+  };
+}
+
+const literal = (value: string): StoredTerm => ({
+  termType: "Literal",
+  value,
+  datatype: "http://www.w3.org/2001/XMLSchema#string",
+});
+
+describe("@dwk/solid-pod N3 Patch parsing", () => {
+  it("parses where/deletes/inserts formulae", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p a solid:InsertDeletePatch ;
+  solid:where   { <${EX}me> ex:name "Old" . } ;
+  solid:deletes { <${EX}me> ex:name "Old" . } ;
+  solid:inserts { <${EX}me> ex:name "New" . } .`,
+      "text/n3",
+      BASE,
+    );
+    expect(patch.where).toHaveLength(1);
+    expect(patch.deletes).toHaveLength(1);
+    expect(patch.inserts).toHaveLength(1);
+  });
+
+  it("resolves a single binding and instantiates variables", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where   { ?s ex:name "Old" . } ;
+   solid:deletes { ?s ex:name "Old" . } ;
+   solid:inserts { ?s ex:name "New" . } .`,
+      "text/n3",
+      BASE,
+    );
+    const current = [quad(`${EX}me`, `${EX}name`, literal("Old"))];
+    const resolved = resolvePatch(patch, current);
+    expect(resolved.insertOnly).toBe(false);
+    expect(resolved.inserts[0]?.object).toMatchObject({ value: "New" });
+    expect(resolved.deletes[0]?.subject.value).toBe(`${EX}me`);
+  });
+
+  it("throws no_match when where does not bind", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where { ?s ex:name "Missing" . } ;
+   solid:inserts { ?s ex:name "New" . } .`,
+      "text/n3",
+      BASE,
+    );
+    expect(() => resolvePatch(patch, [])).toThrow(PatchProblem);
+    try {
+      resolvePatch(patch, []);
+    } catch (e) {
+      expect((e as PatchProblem).code).toBe("no_match");
+    }
+  });
+
+  it("throws ambiguous_match when where binds more than once", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where { ?s ex:kind "person" . } ;
+   solid:inserts { ?s ex:seen "yes" . } .`,
+      "text/n3",
+      BASE,
+    );
+    const current = [
+      quad(`${EX}a`, `${EX}kind`, literal("person")),
+      quad(`${EX}b`, `${EX}kind`, literal("person")),
+    ];
+    expect(() => resolvePatch(patch, current)).toThrow(/ambiguous/);
+  });
+
+  it("throws delete_not_found when a delete triple is absent", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:deletes { <${EX}me> ex:name "Old" . } .`,
+      "text/n3",
+      BASE,
+    );
+    expect(() => resolvePatch(patch, [])).toThrow(/delete_not_found/);
+  });
+
+  it("marks an insert-only patch", () => {
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:inserts { <${EX}me> ex:note "hi" . } .`,
+      "text/n3",
+      BASE,
+    );
+    expect(resolvePatch(patch, []).insertOnly).toBe(true);
+  });
+});
+
+describe("@dwk/solid-pod SPARQL Update parsing", () => {
+  it("parses INSERT DATA", () => {
+    const patch = parsePatch(
+      `PREFIX ex: <${EX}>
+INSERT DATA { <${EX}me> ex:name "New" . }`,
+      "application/sparql-update",
+      BASE,
+    );
+    expect(patch.inserts).toHaveLength(1);
+    expect(resolvePatch(patch, []).insertOnly).toBe(true);
+  });
+
+  it("parses DELETE DATA", () => {
+    const patch = parsePatch(
+      `PREFIX ex: <${EX}>
+DELETE DATA { <${EX}me> ex:name "Old" . }`,
+      "application/sparql-update",
+      BASE,
+    );
+    expect(patch.deletes).toHaveLength(1);
+  });
+
+  it("rejects an unsupported media type", () => {
+    expect(() => parsePatch("whatever", "application/json", BASE)).toThrow(
+      /unsupported_media_type/,
+    );
+  });
+});
