@@ -108,6 +108,11 @@ export interface ConsoleLoggerOptions {
  * can be passed unconditionally). Records below `minLevel` are dropped. The
  * matching `console` method is used per level so a platform's level routing
  * still applies.
+ *
+ * Honors the {@link Logger} non-throwing contract: if a field is not
+ * JSON-serializable (a circular reference, a `BigInt`, …) the record is replaced
+ * by a minimal `log.serialization_failed` record rather than throwing into the
+ * operation being logged.
  */
 export function consoleLogger(options: ConsoleLoggerOptions = {}): Logger {
   const sink = options.console ?? console;
@@ -128,7 +133,23 @@ export function consoleLogger(options: ConsoleLoggerOptions = {}): Logger {
         ...base,
         ...fields,
       };
-      sink[level](JSON.stringify(record));
+      try {
+        sink[level](JSON.stringify(record));
+      } catch (err) {
+        // Honor the Logger "MUST NOT throw" contract: a non-serializable field
+        // (circular reference, BigInt, …) must never break the operation being
+        // logged. Fall back to a minimal, guaranteed-serializable record. The
+        // serializer's own error message is safe to log — it is not caller data.
+        sink.error(
+          JSON.stringify({
+            level: "error",
+            event: "log.serialization_failed",
+            time: record.time,
+            failedEvent: event,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
     };
 
   return {

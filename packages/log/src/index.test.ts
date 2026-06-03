@@ -96,6 +96,21 @@ describe("consoleLogger", () => {
     });
   });
 
+  it("never throws on a non-serializable field; emits a fallback record", () => {
+    const sink = spySink();
+    const logger = consoleLogger({ console: sink, now: () => "t" });
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    expect(() => logger.info("evt", { circular })).not.toThrow();
+    expect(() => logger.warn("evt", { big: 1n })).not.toThrow();
+    // Both fall back to an error-level serialization_failed record.
+    expect(sink.records.map((r) => r.level)).toEqual(["error", "error"]);
+    const parsed = JSON.parse(sink.records[0]?.line ?? "");
+    expect(parsed.event).toBe("log.serialization_failed");
+    expect(parsed.failedEvent).toBe("evt");
+    expect(typeof parsed.error).toBe("string");
+  });
+
   it("omits undefined-valued fields via JSON serialization", () => {
     const sink = spySink();
     const logger = consoleLogger({ console: sink, now: () => "t" });
