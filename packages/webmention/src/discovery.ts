@@ -21,6 +21,7 @@ import {
   stripComments,
 } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
+import { safeFetch } from "./safe-fetch";
 
 const LEGACY_REL_PREFIX = "http://webmention.org";
 
@@ -78,9 +79,11 @@ export interface DiscoverOptions {
 /**
  * Fetch `target` and discover its Webmention endpoint.
  *
- * Follows redirects and resolves the endpoint against the final URL. Returns
- * the absolute endpoint URL, or `null` when discovery finds none or the fetch
- * fails.
+ * Fetches through the SSRF-safe wrapper ({@link safeFetch}): the target host —
+ * and every redirect hop — is validated against private/loopback/link-local
+ * ranges, redirects are capped, and the request is bounded by a timeout. The
+ * endpoint resolves against the final URL. Returns the absolute endpoint URL,
+ * or `null` when discovery finds none or the fetch fails or is blocked.
  */
 export async function discoverEndpoint(
   target: string,
@@ -90,17 +93,17 @@ export async function discoverEndpoint(
     options?.fetch ?? ((input, init) => fetch(input, init));
 
   let response: Response;
+  let base: string;
   try {
-    response = await doFetch(target, {
+    const result = await safeFetch(doFetch, target, {
       method: "GET",
       headers: { accept: "text/html, */*" },
-      redirect: "follow",
     });
+    response = result.response;
+    base = result.url;
   } catch {
     return null;
   }
-
-  const base = response.url !== "" ? response.url : target;
 
   const fromHeader = findWebmentionEndpoint(
     response.headers.get("link"),

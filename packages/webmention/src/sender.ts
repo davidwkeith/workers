@@ -10,6 +10,7 @@
 
 import { discoverEndpoint } from "./discovery";
 import type { FetchLike } from "./fetch";
+import { safeFetch } from "./safe-fetch";
 
 /** Options for {@link sendWebmention} / {@link sendWebmentions}. */
 export interface SendOptions {
@@ -51,11 +52,15 @@ export async function sendWebmention(
   const body = new URLSearchParams({ source, target }).toString();
   let response: Response;
   try {
-    response = await doFetch(endpoint, {
+    // Notify through the SSRF-safe wrapper: the discovered endpoint host (and
+    // any redirect hop) is validated against private/loopback ranges and the
+    // POST is bounded by a timeout.
+    const result = await safeFetch(doFetch, endpoint, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
+    response = result.response;
   } catch {
     return { target, endpoint, delivered: false, status: 0 };
   }

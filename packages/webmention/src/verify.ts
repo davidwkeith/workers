@@ -19,6 +19,7 @@ import {
   stripComments,
 } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
+import { safeFetch } from "./safe-fetch";
 
 /** Elements whose `href` may constitute a link to the target. */
 const HREF_TAGS = ["a", "link", "area"] as const;
@@ -97,9 +98,12 @@ export interface VerifyResult {
 /**
  * Fetch `source` and verify that it links to `target`.
  *
- * Follows redirects and resolves relative links against the final URL. A failed
- * or non-2xx fetch yields `{ links: false }` — a removed/unreachable source no
- * longer endorses the mention.
+ * Fetches through the SSRF-safe wrapper ({@link safeFetch}): the source host —
+ * and every redirect hop — is validated against private/loopback/link-local
+ * ranges, redirects are capped, and the request is bounded by a timeout.
+ * Relative links resolve against the final URL. A failed, blocked, or non-2xx
+ * fetch yields `{ links: false }` — a removed/unreachable source no longer
+ * endorses the mention.
  */
 export async function verifySource(
   source: string,
@@ -110,12 +114,14 @@ export async function verifySource(
     options?.fetch ?? ((input, init) => fetch(input, init));
 
   let response: Response;
+  let base: string;
   try {
-    response = await doFetch(source, {
+    const result = await safeFetch(doFetch, source, {
       method: "GET",
       headers: { accept: "text/html, */*" },
-      redirect: "follow",
     });
+    response = result.response;
+    base = result.url;
   } catch {
     return { links: false, status: 0 };
   }
@@ -124,7 +130,6 @@ export async function verifySource(
     return { links: false, status: response.status };
   }
 
-  const base = response.url !== "" ? response.url : source;
   const contentType = response.headers.get("content-type") ?? "";
   const body = await readBodyCapped(response);
   if (body === null) {

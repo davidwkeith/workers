@@ -54,6 +54,16 @@ export {
   type D1InboxOptions,
 } from "./inbox";
 export type { FetchLike } from "./fetch";
+export {
+  safeFetch,
+  assertPublicUrl,
+  isPrivateOrReservedHost,
+  SsrfError,
+  DEFAULT_MAX_REDIRECTS,
+  DEFAULT_TIMEOUT_MS,
+  type SafeFetchOptions,
+  type SafeFetchResult,
+} from "./safe-fetch";
 
 /** A queued verification job: confirm that `source` links to `target`. */
 export interface WebmentionJob {
