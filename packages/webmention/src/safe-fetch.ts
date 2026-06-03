@@ -75,16 +75,19 @@ function parseIPv4(host: string): [number, number, number, number] | null {
  * assignments, and the multicast/reserved/broadcast space.
  */
 function isPrivateIPv4(octets: [number, number, number, number]): boolean {
-  const [a, b] = octets;
+  const [a, b, c] = octets;
   if (a === 0) return true; // 0.0.0.0/8 ("this network", incl. 0.0.0.0)
   if (a === 10) return true; // 10.0.0.0/8 private
   if (a === 127) return true; // 127.0.0.0/8 loopback
   if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
   if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (metadata)
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
-  if (a === 192 && b === 0 && octets[2] === 0) return true; // 192.0.0.0/24 IETF
+  if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 IETF protocol
+  if (a === 192 && b === 0 && c === 2) return true; // 192.0.2.0/24 TEST-NET-1
   if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
+  if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 TEST-NET-2
   if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmark
+  if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 TEST-NET-3
   if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + broadcast
   return false;
 }
@@ -156,8 +159,10 @@ function parseIPv6(host: string): number[] | null {
 
 /**
  * True when `groups` (eight 16-bit values) is an IPv6 address that must never
- * be fetched: unspecified, loopback, link-local, unique-local, multicast, or
- * an IPv4-mapped address whose embedded IPv4 is itself private.
+ * be fetched: unspecified, loopback, link-local, site-local, unique-local,
+ * multicast, the documentation prefix, or an address that embeds an IPv4
+ * (IPv4-mapped `::ffff:0:0/96`, deprecated IPv4-compatible `::/96`, or NAT64
+ * `64:ff9b::/96`) whose embedded IPv4 is itself private.
  */
 function isPrivateIPv6(groups: number[]): boolean {
   const first = groups[0] ?? 0;
@@ -166,20 +171,32 @@ function isPrivateIPv6(groups: number[]): boolean {
   if (groups.every((group) => group === 0)) return true; // :: unspecified
   if (groups.slice(0, 7).every((group) => group === 0) && g7 === 1) return true; // ::1 loopback
   if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((first & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local (deprecated)
   if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
   if ((first & 0xff00) === 0xff00) return true; // ff00::/8 multicast
-  // ::ffff:0:0/96 IPv4-mapped — validate the embedded IPv4.
+  if (first === 0x2001 && groups[1] === 0x0db8) return true; // 2001:db8::/32 documentation
+
+  // Extract the IPv4 embedded in the low 32 bits.
+  const embeddedV4: [number, number, number, number] = [
+    g6 >> 8,
+    g6 & 0xff,
+    g7 >> 8,
+    g7 & 0xff,
+  ];
+  // ::ffff:0:0/96 IPv4-mapped and ::/96 deprecated IPv4-compatible.
   if (
     groups.slice(0, 5).every((group) => group === 0) &&
-    groups[5] === 0xffff
+    (groups[5] === 0xffff || groups[5] === 0x0000)
   ) {
-    const octets: [number, number, number, number] = [
-      g6 >> 8,
-      g6 & 0xff,
-      g7 >> 8,
-      g7 & 0xff,
-    ];
-    return isPrivateIPv4(octets);
+    return isPrivateIPv4(embeddedV4);
+  }
+  // 64:ff9b::/96 NAT64 well-known prefix.
+  if (
+    first === 0x0064 &&
+    groups[1] === 0xff9b &&
+    groups.slice(2, 6).every((group) => group === 0)
+  ) {
+    return isPrivateIPv4(embeddedV4);
   }
   return false;
 }
@@ -204,10 +221,14 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
   if (hostname === "") {
     return true;
   }
-  const host =
+  // Strip IPv6 brackets and a trailing dot. A trailing dot makes a name an
+  // FQDN that still resolves (e.g. `localhost.` → 127.0.0.1) but would slip
+  // past the string checks below if left in place.
+  const host = (
     hostname.startsWith("[") && hostname.endsWith("]")
       ? hostname.slice(1, -1)
-      : hostname;
+      : hostname
+  ).replace(/\.$/, "");
 
   const v4 = parseIPv4(host);
   if (v4 !== null) {
@@ -283,9 +304,10 @@ export async function safeFetch(
   const signal = AbortSignal.timeout(timeoutMs);
 
   let currentUrl = assertPublicUrl(rawUrl).toString();
+  let currentInit: RequestInit = { ...init };
   for (let hop = 0; ; hop++) {
     const response = await doFetch(currentUrl, {
-      ...init,
+      ...currentInit,
       redirect: "manual",
       signal,
     });
@@ -308,6 +330,22 @@ export async function safeFetch(
     const next = assertPublicUrl(new URL(location, currentUrl).toString());
     // Drain the redirect body so the connection can be reused/closed.
     await response.body?.cancel().catch(() => undefined);
+
+    // Strip credential-bearing headers on a cross-origin hop, matching what a
+    // browser's `fetch` does, so a redirect cannot leak them to a new origin.
+    if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
+      const headers = new Headers(currentInit.headers as HeadersInit);
+      for (const name of [
+        "authorization",
+        "cookie",
+        "cookie2",
+        "proxy-authorization",
+        "set-cookie",
+      ]) {
+        headers.delete(name);
+      }
+      currentInit = { ...currentInit, headers };
+    }
     currentUrl = next.toString();
   }
 }

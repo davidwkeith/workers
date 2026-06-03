@@ -38,10 +38,29 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("255.255.255.255")).toBe(true);
   });
 
-  it("blocks IPv4-mapped IPv6 addresses pointing at private space", () => {
+  it("blocks the IPv4 documentation (TEST-NET) ranges", () => {
+    expect(isPrivateOrReservedHost("192.0.2.1")).toBe(true);
+    expect(isPrivateOrReservedHost("198.51.100.1")).toBe(true);
+    expect(isPrivateOrReservedHost("203.0.113.1")).toBe(true);
+  });
+
+  it("blocks IPv6 addresses that embed a private IPv4", () => {
+    // IPv4-mapped ::ffff:0:0/96
     expect(isPrivateOrReservedHost("[::ffff:127.0.0.1]")).toBe(true);
     expect(isPrivateOrReservedHost("[::ffff:169.254.169.254]")).toBe(true);
     expect(isPrivateOrReservedHost("[::ffff:8.8.8.8]")).toBe(false);
+    // Deprecated IPv4-compatible ::/96
+    expect(isPrivateOrReservedHost("[::127.0.0.1]")).toBe(true);
+    expect(isPrivateOrReservedHost("[::169.254.169.254]")).toBe(true);
+    // NAT64 well-known prefix 64:ff9b::/96
+    expect(isPrivateOrReservedHost("[64:ff9b::127.0.0.1]")).toBe(true);
+    expect(isPrivateOrReservedHost("[64:ff9b::169.254.169.254]")).toBe(true);
+  });
+
+  it("blocks site-local, multicast, and documentation IPv6", () => {
+    expect(isPrivateOrReservedHost("[fec0::1]")).toBe(true);
+    expect(isPrivateOrReservedHost("[ff02::1]")).toBe(true);
+    expect(isPrivateOrReservedHost("[2001:db8::1]")).toBe(true);
   });
 
   it("blocks non-public hostnames", () => {
@@ -52,8 +71,14 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("")).toBe(true);
   });
 
+  it("blocks names with a trailing dot (FQDN form)", () => {
+    expect(isPrivateOrReservedHost("localhost.")).toBe(true);
+    expect(isPrivateOrReservedHost("db.internal.")).toBe(true);
+  });
+
   it("allows ordinary public hosts", () => {
     expect(isPrivateOrReservedHost("example.com")).toBe(false);
+    expect(isPrivateOrReservedHost("example.com.")).toBe(false);
     expect(isPrivateOrReservedHost("8.8.8.8")).toBe(false);
     expect(isPrivateOrReservedHost("172.32.0.1")).toBe(false); // just above 172.16/12
     expect(isPrivateOrReservedHost("[2606:4700:4700::1111]")).toBe(false);
@@ -188,6 +213,37 @@ describe("safeFetch", () => {
       method: "GET",
     });
     expect(response.status).toBe(302);
+  });
+
+  it("strips credential headers on a cross-origin redirect but keeps them same-origin", async () => {
+    const seen: Headers[] = [];
+    const doFetch: FetchLike = vi.fn(async (url, init) => {
+      seen.push(new Headers(init?.headers as HeadersInit));
+      if (url === "https://a.example/") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://a.example/same" }, // same origin
+        });
+      }
+      if (url === "https://a.example/same") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://b.example/cross" }, // cross origin
+        });
+      }
+      return new Response("ok");
+    });
+    await safeFetch(doFetch, "https://a.example/", {
+      method: "GET",
+      headers: { authorization: "Bearer secret", accept: "text/html" },
+    });
+    // hop 0 and hop 1 are same-origin: header retained.
+    expect(seen[0]?.get("authorization")).toBe("Bearer secret");
+    expect(seen[1]?.get("authorization")).toBe("Bearer secret");
+    // hop 2 followed a cross-origin redirect: credential header dropped, but a
+    // non-sensitive header is kept.
+    expect(seen[2]?.get("authorization")).toBeNull();
+    expect(seen[2]?.get("accept")).toBe("text/html");
   });
 
   it("preserves method and body across a redirect (no GET downgrade)", async () => {
