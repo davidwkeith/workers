@@ -18,8 +18,10 @@ import type {
   MessageBatch,
   Queue,
 } from "@cloudflare/workers-types";
+import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
 import { createD1Inbox, type InboxStore } from "./inbox";
 import type { FetchLike } from "./fetch";
+import { WebmentionLogEvent } from "./log";
 import { validateWebmentionParams } from "./validate";
 import { verifySource } from "./verify";
 
@@ -63,7 +65,10 @@ export {
   DEFAULT_TIMEOUT_MS,
   type SafeFetchOptions,
   type SafeFetchResult,
+  type SsrfReason,
 } from "./safe-fetch";
+export { WebmentionLogEvent } from "./log";
+export type { Logger } from "@dwk/log";
 
 /** A queued verification job: confirm that `source` links to `target`. */
 export interface WebmentionJob {
@@ -97,6 +102,12 @@ export interface WebmentionConfig {
   readonly inbox?: InboxStore;
   /** `fetch` implementation for verification; defaults to the global `fetch`. */
   readonly fetch?: FetchLike;
+  /**
+   * Logger for receiver/queue events; defaults to a no-op. Wire a real logger
+   * (see `@dwk/log`) to surface SSRF blocks, validation rejections, and
+   * poison-message retries instead of swallowing them.
+   */
+  readonly logger?: Logger;
 }
 
 /** A `fetch`-compatible Worker handler. */
@@ -150,6 +161,7 @@ function formValue(value: string | File | null): string | null {
  * binding is missing.
  */
 export function createWebmention(config: WebmentionConfig): WebmentionHandler {
+  const logger = config.logger ?? noopLogger;
   return async (request, env, _ctx) => {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", {
@@ -181,6 +193,7 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       allowedHosts: config.allowedHosts,
     });
     if (!result.ok) {
+      logger.warn(WebmentionLogEvent.ReceiveRejected, { reason: result.error });
       return textResponse(400, result.error);
     }
 
@@ -189,6 +202,10 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       target: result.target,
     });
 
+    logger.info(WebmentionLogEvent.ReceiveAccepted, {
+      sourceHost: hostFromUrl(result.source),
+      targetHost: hostFromUrl(result.target),
+    });
     return new Response(null, { status: 202 });
   };
 }
@@ -204,13 +221,15 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
 export function createWebmentionQueueConsumer(
   config: WebmentionConfig,
 ): WebmentionQueueConsumer {
+  const logger = config.logger ?? noopLogger;
   return async (batch, env, _ctx) => {
     const inbox = resolveInbox(config, env);
     for (const message of batch.messages) {
+      const { source, target } = message.body;
       try {
-        const { source, target } = message.body;
         const result = await verifySource(source, target, {
           fetch: config.fetch,
+          logger,
         });
         if (result.links) {
           await inbox.store({ source, target, verifiedAt: Date.now() });
@@ -218,7 +237,14 @@ export function createWebmentionQueueConsumer(
           await inbox.remove(source, target);
         }
         message.ack();
-      } catch {
+      } catch (err) {
+        // A poison message must not retry silently — record why so an operator
+        // can tell a transient failure from a wedged one.
+        logger.warn(WebmentionLogEvent.QueueRetry, {
+          sourceHost: hostFromUrl(source),
+          targetHost: hostFromUrl(target),
+          error: err instanceof Error ? err.name : "unknown",
+        });
         message.retry();
       }
     }

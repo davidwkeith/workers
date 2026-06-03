@@ -1,15 +1,15 @@
 {
-  "name": "@dwk/webmention",
+  "name": "@dwk/log",
   "version": "0.0.0",
-  "description": "Webmention receiver (async verification queue) and sender.",
+  "description": "Minimal injectable structured-logging seam. Cross-standard reusable; protocol-agnostic, no Workers runtime dependency.",
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
-  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/webmention#readme",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/log#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/davidwkeith/workers.git",
-    "directory": "packages/webmention"
+    "directory": "packages/log"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -32,8 +32,5 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "dependencies": {
-    "@dwk/log": "workspace:*"
   }
 }
