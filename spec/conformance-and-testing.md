@@ -35,3 +35,25 @@ nice-to-have.
 A package SHOULD NOT be published at a stable (`>=1.0.0`) version until it
 passes the conformance suite(s) relevant to its standard and its integration
 lifecycle tests are green.
+
+### How the gate is wired (issue #12)
+
+- **Source of truth:** [`conformance/status.json`](../conformance/status.json)
+  records, per package, the status of each conformance suite and of the
+  integration lifecycle tests (`pending` | `failing` | `passing` |
+  `not-applicable`). See [`conformance/README.md`](../conformance/README.md).
+- **Guard:** [`scripts/release-gate.mjs`](../scripts/release-gate.mjs)
+  (`pnpm release:gate`) cross-checks every package's declared version against
+  that file. Any package at a stable version (`major >= 1`, no prerelease tag)
+  whose suites or integration status are not `passing`/`not-applicable` is a
+  violation, and the gate exits non-zero. It runs inside `pnpm release` **before**
+  `changeset publish`, so a stable publish is impossible until conformance is
+  recorded green. 0.x packages are exempt. The guard is unit-tested via
+  `pnpm test:gate`.
+- **CI:** [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml)
+  runs the gate and the integration lifecycle tests (`pnpm test:integration`) on
+  every PR/push. The hosted suites (micropub.rocks, webmention.rocks, Solid
+  conformance) require a deployed, publicly reachable Worker, so they run on
+  `workflow_dispatch`/schedule via
+  [`scripts/conformance/run-suite.mjs`](../scripts/conformance/run-suite.mjs)
+  against a target URL; their results are recorded back into `status.json`.

@@ -14,12 +14,15 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --project @dwk/solid-pod",
+    "test:gate": "node --test scripts/release-gate.test.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release:gate": "node scripts/release-gate.mjs",
+    "release": "pnpm release:gate && pnpm build && changeset publish"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

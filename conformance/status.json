@@ -1,0 +1,98 @@
+{
+  "$schema": "./status.schema.json",
+  "description": "Single source of truth for per-package conformance and integration status. The release gate (scripts/release-gate.mjs) refuses to publish any package at a stable (>=1.0.0) version until every suite listed here is \"passing\" and its integration lifecycle tests are \"passing\". See conformance/README.md.",
+  "packages": {
+    "@dwk/micropub": {
+      "standard": "Micropub",
+      "suites": {
+        "micropub.rocks": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/webmention": {
+      "standard": "Webmention",
+      "suites": {
+        "webmention.rocks/receiver": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        },
+        "webmention.rocks/sender": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/indieauth": {
+      "standard": "IndieAuth",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/solid-pod": {
+      "standard": "Solid",
+      "suites": {
+        "solid-conformance": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "authenticated GET routed through WAC",
+          "PATCH with a solid:where match",
+          "PATCH whose where does not bind (409)",
+          "If-Match / ETag preconditioned write"
+        ]
+      }
+    },
+    "@dwk/wac": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/rdf": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/dpop": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/store": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    }
+  }
+}
