@@ -89,6 +89,80 @@ _:p solid:where { ?s ex:kind "person" . } ;
     expect(() => resolvePatch(patch, current)).toThrow(/ambiguous/);
   });
 
+  it("throws where_too_complex when the pattern has too many triples", () => {
+    const lines = Array.from(
+      { length: 30 },
+      (_, i) => `   ?s ex:p${i} ?o${i} .`,
+    ).join("\n");
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where {
+${lines}
+} ;
+   solid:inserts { ?s ex:seen "yes" . } .`,
+      "text/n3",
+      BASE,
+    );
+    try {
+      resolvePatch(patch, []);
+      expect.unreachable("expected where_too_complex");
+    } catch (e) {
+      expect((e as PatchProblem).code).toBe("where_too_complex");
+    }
+  });
+
+  it("throws where_too_complex when the cartesian product blows the work budget", () => {
+    // Several all-variable triples against a moderately sized resource build an
+    // N^k intermediate product that exceeds the solver's work budget.
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where {
+   ?a ?b ?c .
+   ?d ?e ?f .
+   ?g ?h ?i .
+   ?j ?k ?l .
+} ;
+   solid:inserts { <${EX}me> ex:seen "yes" . } .`,
+      "text/n3",
+      BASE,
+    );
+    const current = Array.from({ length: 200 }, (_, i) =>
+      quad(`${EX}s${i}`, `${EX}p`, literal(`v${i}`)),
+    );
+    try {
+      resolvePatch(patch, current);
+      expect.unreachable("expected where_too_complex");
+    } catch (e) {
+      expect((e as PatchProblem).code).toBe("where_too_complex");
+    }
+  });
+
+  it("still resolves a single binding that stays within the work budget", () => {
+    // A selective two-triple pattern against many triples binds exactly once
+    // and must not be rejected by the DoS guard.
+    const patch = parsePatch(
+      `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:where {
+   ?s ex:kind "person" .
+   ?s ex:name "Ada" .
+} ;
+   solid:inserts { ?s ex:seen "yes" . } .`,
+      "text/n3",
+      BASE,
+    );
+    const current = [
+      ...Array.from({ length: 100 }, (_, i) =>
+        quad(`${EX}p${i}`, `${EX}kind`, literal("person")),
+      ),
+      quad(`${EX}p0`, `${EX}name`, literal("Ada")),
+    ];
+    const resolved = resolvePatch(patch, current);
+    expect(resolved.inserts[0]?.subject.value).toBe(`${EX}p0`);
+  });
+
   it("throws delete_not_found when a delete triple is absent", () => {
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
