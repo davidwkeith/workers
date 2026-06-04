@@ -182,6 +182,95 @@ describe("@dwk/rdf JSON-LD parse", () => {
     expect(lex("neg")).toBe("-INF");
   });
 
+  it("drops a node whose @id is a relative IRI with no base", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "relative-subject",
+      name: "ignored",
+    });
+    expect(quads).toHaveLength(0);
+  });
+
+  it("drops a relative @id object reference but keeps valid triples", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", ref: { "@type": "@id" } },
+      "@id": "https://ex/s",
+      ref: "relative", // unresolvable -> dropped
+      name: "kept",
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/name");
+  });
+
+  it("resolves relative IRIs against an explicit base", async () => {
+    const quads = await parseJsonLd(
+      {
+        "@context": { "@vocab": "https://ex/", ref: { "@type": "@id" } },
+        "@id": "s",
+        ref: "o",
+      },
+      { base: "https://base.example/dir/" },
+    );
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.subject.value).toBe("https://base.example/dir/s");
+    expect(quads[0]?.object.value).toBe("https://base.example/dir/o");
+  });
+
+  it("emits canonical xsd:double lexical forms for finite numbers", async () => {
+    const XSD_DOUBLE = "http://www.w3.org/2001/XMLSchema#double";
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      a: 1.5,
+      b: { "@value": 100, "@type": XSD_DOUBLE },
+      c: { "@value": 1e-7, "@type": XSD_DOUBLE },
+      d: 1e21,
+      e: 42,
+    });
+    const obj = (p: string) =>
+      quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object;
+    expect(obj("a")?.value).toBe("1.5E0");
+    expect(obj("b")?.value).toBe("1.0E2");
+    expect(obj("c")?.value).toBe("1.0E-7");
+    // A magnitude >= 1e21 is an xsd:double, in canonical form (not "1e+21").
+    expect(obj("d")?.value).toBe("1.0E21");
+    expect((obj("d") as { datatype: { value: string } }).datatype.value).toBe(
+      XSD_DOUBLE,
+    );
+    // Ordinary integers stay xsd:integer in canonical decimal form.
+    expect(obj("e")?.value).toBe("42");
+    expect((obj("e") as { datatype: { value: string } }).datatype.value).toBe(
+      "http://www.w3.org/2001/XMLSchema#integer",
+    );
+  });
+
+  it("keeps an explicit xsd:integer in integer lexical space (BigInt past 1e21)", async () => {
+    const XSD_INTEGER = "http://www.w3.org/2001/XMLSchema#integer";
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      // A magnitude >= 1e21 explicitly typed xsd:integer must not be emitted in
+      // exponential notation (which is outside xsd:integer's lexical space).
+      big: { "@value": 1e21, "@type": XSD_INTEGER },
+    });
+    const object = quads[0]?.object;
+    expect(object?.value).toBe("1000000000000000000000");
+    expect((object as { datatype: { value: string } }).datatype.value).toBe(
+      XSD_INTEGER,
+    );
+  });
+
+  it("drops a value object whose @value is null", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      gone: { "@value": null },
+      kept: { "@value": "x" },
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/kept");
+  });
+
   it("rejects remote contexts and invalid JSON", async () => {
     await expect(
       parseJsonLd({ "@context": "https://schema.org", "@id": "https://ex/a" }),
@@ -214,6 +303,44 @@ describe("@dwk/rdf JSON-LD round-trips", () => {
       "@context": { "@vocab": "https://ex/", items: { "@container": "@list" } },
       "@id": "https://ex/g",
       "@graph": [{ "@id": "https://ex/s", items: ["x", "y", "z"] }],
+    });
+  });
+
+  it("reconstructs @list on serialize, collapsing the cell chain", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", items: { "@container": "@list" } },
+      "@id": "https://ex/s",
+      items: ["a", "b", "c"],
+    });
+    const out = JSON.parse(await writeJsonLd(quads)) as Array<
+      Record<string, unknown>
+    >;
+    // Only the subject node survives; the rdf:first/rest cells are collapsed.
+    expect(out).toHaveLength(1);
+    expect(out[0]!["https://ex/items"]).toEqual([
+      { "@list": [{ "@value": "a" }, { "@value": "b" }, { "@value": "c" }] },
+    ]);
+  });
+
+  it("serializes an empty @list as an rdf:nil reference", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", items: { "@container": "@list" } },
+      "@id": "https://ex/s",
+      items: [],
+    });
+    const out = JSON.parse(await writeJsonLd(quads)) as Array<
+      Record<string, unknown>
+    >;
+    expect(out[0]!["https://ex/items"]).toEqual([
+      { "@id": "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil" },
+    ]);
+  });
+
+  it("round-trips a list of node references", async () => {
+    await expectRoundTrip({
+      "@context": { "@vocab": "https://ex/", items: { "@container": "@list" } },
+      "@id": "https://ex/s",
+      items: [{ "@id": "https://ex/a" }, { "@id": "https://ex/b" }],
     });
   });
 

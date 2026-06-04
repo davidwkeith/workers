@@ -65,14 +65,18 @@ export function negotiateMediaType(accept: string | null): Negotiated | null {
     if (entry.q === 0) continue;
     if (entry.type === "*/*") return DEFAULT;
 
+    const essence = entry.type.split(";")[0]?.trim() ?? "";
+
+    // Read-only opt-in: a client asking for `application/json` gets JSON-LD.
+    // This alias lives here, not in `@dwk/rdf`'s RDF media-type registry, so an
+    // incoming `application/json` *request body* is never misparsed as RDF.
+    if (essence === "application/json") {
+      return { mediaType: "application/ld+json", format: "JSON-LD" };
+    }
+
     const format = formatForMediaType(entry.type);
     if (format) {
-      // Normalize `application/json` → its canonical JSON-LD media type.
-      const mediaType =
-        entry.type.split(";")[0]?.trim() === "application/json"
-          ? "application/ld+json"
-          : (entry.type.split(";")[0]?.trim() ?? "text/turtle");
-      return { mediaType, format };
+      return { mediaType: essence || "text/turtle", format };
     }
 
     // Wildcard subtypes (`text/*`, `application/*`): pick the first offered

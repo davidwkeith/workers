@@ -45,9 +45,13 @@ const body = await serialize(quads, "text/turtle");
 ```
 
 Recognized media types: `text/turtle`, `application/trig`,
-`application/n-triples`, `application/n-quads`, `application/ld+json`
-(and `application/json`). Media-type parameters (e.g. `; charset=utf-8`,
-`; profile=…`) and casing are ignored.
+`application/n-triples`, `application/n-quads`, `application/ld+json`.
+Media-type parameters (e.g. `; charset=utf-8`, `; profile=…`) and casing are
+ignored. Note `application/json` is **not** treated as RDF — JSON-LD's media
+type is `application/ld+json`, and auto-parsing arbitrary `application/json`
+bodies as a graph is a correctness/security hazard on write. (A read-only
+`application/json` → JSON-LD convenience can be opted into at the negotiation
+layer; `@dwk/solid-pod` does this on read.)
 
 ### Triple ↔ store helpers
 
@@ -85,7 +89,10 @@ toRDF/fromRDF — the decision that resolves
   objects, and node references.
 - Value objects (`@value` + `@type` / `@language`) and native scalars typed per
   JSON-LD rules (string → `xsd:string` or a language string, integer →
-  `xsd:integer`, fractional → `xsd:double`, boolean → `xsd:boolean`).
+  `xsd:integer`, fractional → `xsd:double` in canonical lexical form, boolean →
+  `xsd:boolean`). A `@value` of `null` produces no triple. Relative `@id`/IRIs
+  that no `@base`/`base` resolves to an absolute IRI are dropped rather than
+  emitted as invalid terms.
 - Lists (`@container: @list` and inline `@list`) → `rdf:first`/`rdf:rest`/
   `rdf:nil`.
 - `@graph`: top-level wrapper (default graph) and named graphs (a node with
@@ -93,8 +100,12 @@ toRDF/fromRDF — the decision that resolves
 - `@reverse` properties.
 
 **Serialize (quads → JSON-LD)** emits **expanded / flattened** form (node
-objects keyed by full IRIs, no `@context`). This form round-trips losslessly
-back through `parseJsonLd`.
+objects keyed by full IRIs, no `@context`), reconstructing well-formed
+`rdf:first`/`rdf:rest`/`rdf:nil` chains back into `@list`. This form round-trips
+through `parseJsonLd` at the RDF (quad) level. One inherent caveat: an empty
+`@list` becomes `rdf:nil`, which the JSON-LD data model cannot distinguish from
+a property whose value is literally `rdf:nil`, so empty lists serialize as an
+`rdf:nil` reference.
 
 **Out of scope for v1** (documented limitations; `JsonLdError` is thrown where
 detectable):
