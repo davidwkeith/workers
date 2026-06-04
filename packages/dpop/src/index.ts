@@ -360,13 +360,21 @@ export async function verifyDpopProof(
   }
   // EC: the curve must be the one the alg implies (ES256⇒P-256, …). WebCrypto
   // would also reject a mismatch on import, but check it explicitly up front.
-  if (algSpec.kty === "EC" && jwk.crv !== algSpec.expectedCrv) {
+  // A missing/non-string `crv` is malformed, not a mismatch — let it fall
+  // through to `publicJwk` below, which rejects it as `jwk_invalid`.
+  if (
+    algSpec.kty === "EC" &&
+    typeof jwk.crv === "string" &&
+    jwk.crv !== algSpec.expectedCrv
+  ) {
     return fail("crv_mismatch");
   }
   // RSA: reject undersized moduli whose private half an attacker could control.
+  // A missing/non-string `n` is malformed, not undersized — let it fall through
+  // to `publicJwk` below, which rejects it as `jwk_invalid`.
   if (algSpec.kty === "RSA") {
     const n = jwk.n;
-    if (typeof n !== "string" || rsaModulusBits(n) < MIN_RSA_KEY_BITS) {
+    if (typeof n === "string" && rsaModulusBits(n) < MIN_RSA_KEY_BITS) {
       return fail("rsa_key_too_small");
     }
   }

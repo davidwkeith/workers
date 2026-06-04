@@ -266,6 +266,22 @@ describe("verifyDpopProof — header checks", () => {
     const result = await verifyDpopProof({ ...base(), proof });
     expect(result).toMatchObject({ valid: false, reason: "rsa_key_too_small" });
   });
+
+  it("treats a missing EC crv as jwk_invalid, not crv_mismatch", async () => {
+    const proof = await makeProof(es256, {
+      header: { jwk: { ...es256.publicJwk, crv: undefined } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "jwk_invalid" });
+  });
+
+  it("treats a missing RSA n as jwk_invalid, not rsa_key_too_small", async () => {
+    const proof = await makeProof(rs256, {
+      header: { jwk: { ...rs256.publicJwk, n: undefined } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "jwk_invalid" });
+  });
 });
 
 describe("verifyDpopProof — signature", () => {
