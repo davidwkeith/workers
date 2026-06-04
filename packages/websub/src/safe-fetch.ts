@@ -338,7 +338,13 @@ export async function safeFetch(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const logger = options?.logger ?? noopLogger;
   const metrics = options?.metrics ?? noopMetrics;
-  const signal = AbortSignal.timeout(timeoutMs);
+  // Bound the chain with our own timeout, but don't clobber a caller's signal
+  // (e.g. a worker-shutdown abort): combine them so either can cancel.
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal =
+    init.signal != null
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal;
 
   // A blocked request is the single most security-relevant event here, so log
   // it (with its structured reason + sanitized host) before re-throwing — an

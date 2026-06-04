@@ -87,4 +87,23 @@ describe("safeFetch", () => {
     expect(response.status).toBe(200);
     expect(url).toBe("https://b.example/");
   });
+
+  it("honors a caller-provided abort signal alongside the timeout", async () => {
+    // The fetch observes the merged signal; abort the caller's signal and it
+    // should already be aborted by the time the underlying fetch is called.
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl: FetchLike = vi.fn(async (_input, init) => {
+      if (init?.signal?.aborted) {
+        throw new DOMException("aborted", "AbortError");
+      }
+      return new Response("ok", { status: 200 });
+    });
+    await expect(
+      safeFetch(fetchImpl, "https://a.example/", {
+        method: "GET",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/abort/i);
+  });
 });

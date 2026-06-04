@@ -96,6 +96,9 @@ export function createD1SubscriptionStore(
 
   let ready: Promise<void> | null = null;
   const ensureSchema = (): Promise<void> => {
+    // Clear the cached promise on failure so a transient D1 error during the
+    // first call doesn't permanently wedge the store: a later operation retries
+    // the DDL instead of inheriting the cached rejection.
     ready ??= db
       .prepare(
         `CREATE TABLE IF NOT EXISTS ${table} (` +
@@ -108,7 +111,11 @@ export function createD1SubscriptionStore(
           `PRIMARY KEY (callback, topic))`,
       )
       .run()
-      .then(() => undefined);
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        ready = null;
+        throw err;
+      });
     return ready;
   };
 

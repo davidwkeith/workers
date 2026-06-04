@@ -139,13 +139,19 @@ export function createWebSubQueueConsumer(
           continue;
         }
         const subscribers = await store.listActive(job.topic, now);
-        for (const subscriber of subscribers) {
-          await deliverToSubscriber(subscriber, content, resolved.hubUrl, {
-            fetch: resolved.fetch,
-            logger: resolved.logger,
-            metrics: resolved.metrics,
-          });
-        }
+        // Fan out in parallel: deliverToSubscriber never throws (it reports a
+        // failed/blocked POST as delivered:false), so one slow or dead callback
+        // must not head-of-line block the rest and risk timing out the whole
+        // consumer invocation.
+        await Promise.all(
+          subscribers.map((subscriber) =>
+            deliverToSubscriber(subscriber, content, resolved.hubUrl, {
+              fetch: resolved.fetch,
+              logger: resolved.logger,
+              metrics: resolved.metrics,
+            }),
+          ),
+        );
         message.ack();
       } catch (err) {
         // A store/queue failure must not retry silently — name the kind and
