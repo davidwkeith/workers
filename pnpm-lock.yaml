@@ -39,6 +39,12 @@ importers:
         specifier: 4.95.0
         version: 4.95.0(@cloudflare/workers-types@4.20260530.1)
 
+  packages/activitypub:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/dpop: {}
 
   packages/indieauth:

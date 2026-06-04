@@ -1,0 +1,432 @@
+import { env, runInDurableObject } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+
+import {
+  createActivityPub,
+  type ActivityPubConfig,
+  type ActivityPubEnv,
+} from "./index";
+import { INTERNAL_HEADERS, type ForwardedConfig } from "./config";
+import { deriveIris } from "./config";
+
+/**
+ * End-to-end tests over the real ActivityPub front door + per-actor Durable
+ * Object: the actor document, NodeInfo, paged collections, signed inbox with
+ * dedup, the owner publish endpoint, and the signed `Accept`-on-`Follow`
+ * delivery path (driven inside the DO with a stubbed outbound `fetch`).
+ */
+
+const testEnv = env as unknown as ActivityPubEnv;
+const ctx = {} as ExecutionContext;
+
+const BASE = "https://social.example";
+const REMOTE = "https://remote.example/users/alice";
+
+const RSA = {
+  name: "RSASSA-PKCS1-v1_5",
+  modulusLength: 2048,
+  publicExponent: new Uint8Array([1, 0, 1]),
+  hash: "SHA-256",
+} as const;
+
+let publicKeyPem: string;
+let privateKeyPem: string;
+
+function toPem(der: ArrayBuffer, label: string): string {
+  const bytes = new Uint8Array(der);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  const b64 =
+    btoa(binary)
+      .match(/.{1,64}/g)
+      ?.join("\n") ?? "";
+  return `-----BEGIN ${label}-----\n${b64}\n-----END ${label}-----`;
+}
+
+beforeAll(async () => {
+  const pair = (await crypto.subtle.generateKey(RSA, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  publicKeyPem = toPem(
+    (await crypto.subtle.exportKey("spki", pair.publicKey)) as ArrayBuffer,
+    "PUBLIC KEY",
+  );
+  privateKeyPem = toPem(
+    (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer,
+    "PRIVATE KEY",
+  );
+});
+
+/** A config whose unique username maps to a fresh, isolated Durable Object. */
+function makeConfig(
+  overrides: Partial<ActivityPubConfig> = {},
+): ActivityPubConfig {
+  const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+  return {
+    baseUrl: BASE,
+    actor: { username, name: "Bob" },
+    publicKeyPem,
+    privateKeyPem,
+    ...overrides,
+  };
+}
+
+function actorUrl(config: ActivityPubConfig): string {
+  return `${BASE}/users/${config.actor.username}`;
+}
+
+/** Verify-bypass that accepts every inbox POST as signed by REMOTE. */
+const acceptAll: ActivityPubConfig["verifyInboxSignature"] = () => ({
+  ok: true,
+  keyId: `${REMOTE}#main-key`,
+  actor: REMOTE,
+});
+
+describe("actor document", () => {
+  it("serves the Person actor as activity+json", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("activity+json");
+    const doc = (await res.json()) as Record<string, unknown>;
+    expect(doc.type).toBe("Person");
+    expect(doc.id).toBe(actorUrl(config));
+    expect(doc.inbox).toBe(`${actorUrl(config)}/inbox`);
+    expect((doc.publicKey as Record<string, unknown>).publicKeyPem).toBe(
+      publicKeyPem,
+    );
+  });
+
+  it("rejects a write to the actor IRI", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(actorUrl(config), { method: "DELETE" }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+  });
+});
+
+describe("NodeInfo", () => {
+  it("serves discovery and a 2.1 doc with live usage", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+
+    const discovery = await handler(
+      new Request(`${BASE}/.well-known/nodeinfo`),
+      testEnv,
+      ctx,
+    );
+    expect(discovery.status).toBe(200);
+    const links = ((await discovery.json()) as { links: unknown[] }).links;
+    expect(links).toHaveLength(1);
+
+    const doc = await handler(
+      new Request(`${BASE}/nodeinfo/2.1`),
+      testEnv,
+      ctx,
+    );
+    const body = (await doc.json()) as Record<string, unknown>;
+    expect(body.protocols).toEqual(["activitypub"]);
+    expect((body.usage as Record<string, unknown>).localPosts).toBe(0);
+  });
+});
+
+describe("collections", () => {
+  it("an unfollowed actor has empty collections", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/followers`),
+      testEnv,
+      ctx,
+    );
+    const col = (await res.json()) as Record<string, unknown>;
+    expect(col.type).toBe("OrderedCollection");
+    expect(col.totalItems).toBe(0);
+    expect(col.first).toBeUndefined();
+  });
+});
+
+describe("inbox", () => {
+  it("rejects an unsigned POST with 401", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        body: JSON.stringify({ type: "Follow" }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("refuses an activity whose actor is not the verified signer", async () => {
+    // acceptAll reports REMOTE as the signer; the activity claims a different
+    // actor → impersonation, blocked by the DO.
+    const config = makeConfig({ verifyInboxSignature: acceptAll });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://evil.example/1",
+          type: "Follow",
+          actor: "https://evil.example/users/mallory",
+          object: actorUrl(config),
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a signed Follow, records the follower, and dedups by id", async () => {
+    // manuallyApprovesFollowers avoids an outbound actor fetch in this DO.
+    const config = makeConfig({
+      verifyInboxSignature: acceptAll,
+      actor: {
+        username: `bob-${crypto.randomUUID().slice(0, 8)}`,
+        manuallyApprovesFollowers: true,
+      },
+    });
+    const handler = createActivityPub(config);
+    const follow = {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/1",
+      type: "Follow",
+      actor: REMOTE,
+      object: actorUrl(config),
+    };
+    const post = () =>
+      handler(
+        new Request(`${actorUrl(config)}/inbox`, {
+          method: "POST",
+          headers: { "content-type": "application/activity+json" },
+          body: JSON.stringify(follow),
+        }),
+        testEnv,
+        ctx,
+      );
+
+    const first = await post();
+    expect(first.status).toBe(202);
+    const second = await post(); // same id → deduped, still one follower
+    expect(second.status).toBe(202);
+
+    const followers = (await (
+      await handler(
+        new Request(`${actorUrl(config)}/followers?page=1`),
+        testEnv,
+        ctx,
+      )
+    ).json()) as Record<string, unknown>;
+    expect(followers.totalItems).toBe(1);
+    expect(followers.orderedItems).toEqual([REMOTE]);
+  });
+});
+
+describe("publish endpoint", () => {
+  it("is 404 when no publish token is configured", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/outbox`, {
+        method: "POST",
+        body: "{}",
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("requires the bearer token and publishes a Create to the outbox", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+
+    const unauthorized = await handler(
+      new Request(`${actorUrl(config)}/outbox`, {
+        method: "POST",
+        headers: { authorization: "Bearer wrong" },
+        body: JSON.stringify({ type: "Note", content: "hi" }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(unauthorized.status).toBe(401);
+
+    const created = await handler(
+      new Request(`${actorUrl(config)}/outbox`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer s3cret",
+          "content-type": "application/activity+json",
+        },
+        body: JSON.stringify({ type: "Note", content: "hello world" }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+    const activity = (await created.json()) as Record<string, unknown>;
+    expect(activity.type).toBe("Create");
+    expect((activity.object as Record<string, unknown>).content).toBe(
+      "hello world",
+    );
+
+    const outbox = (await (
+      await handler(
+        new Request(`${actorUrl(config)}/outbox?page=1`),
+        testEnv,
+        ctx,
+      )
+    ).json()) as Record<string, unknown>;
+    expect(outbox.totalItems).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delivery path, driven inside the DO with a stubbed outbound `fetch`.
+// ---------------------------------------------------------------------------
+
+/** The forwarded-config header the front door would set, for direct DO calls. */
+function forwardedHeader(username: string): string {
+  const iris = deriveIris(BASE, username);
+  const config: ForwardedConfig = {
+    iris,
+    actorName: username,
+    manuallyApprovesFollowers: false,
+    pageSize: 50,
+    deliveryMaxAttempts: 8,
+    deliveryBaseDelayMs: 60_000,
+    keyId: iris.keyId,
+    privateKeyPem,
+  };
+  return JSON.stringify(config);
+}
+
+describe("Accept-on-Follow delivery", () => {
+  it("resolves the follower inbox and delivers a signed Accept", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, _state) => {
+      const original = globalThis.fetch;
+      const seen: { url: string; init?: RequestInit }[] = [];
+      // Stub outbound fetch: serve the remote actor doc, capture the Accept POST.
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = typeof url === "string" ? url : url.toString();
+        seen.push({ url: href, init });
+        if (href === REMOTE) {
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: {
+                id: `${REMOTE}#main-key`,
+                owner: REMOTE,
+                publicKeyPem,
+              },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+
+      try {
+        const follow = {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: "https://remote.example/activities/42",
+          type: "Follow",
+          actor: REMOTE,
+          object: iris.id,
+        };
+        const res = await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify(follow),
+          }),
+        );
+        expect(res.status).toBe(202);
+
+        // The remote actor was fetched, then a signed Accept POSTed to its inbox.
+        const delivery = seen.find((s) => s.url === `${REMOTE}/inbox`);
+        expect(delivery).toBeDefined();
+        expect(delivery?.init?.method).toBe("POST");
+        const headers = delivery?.init?.headers as Record<string, string>;
+        expect(headers.Signature).toContain(`keyId="${iris.keyId}"`);
+        expect(headers.Digest).toMatch(/^SHA-256=/);
+        const raw = delivery?.init?.body as ArrayBufferView;
+        const body = JSON.parse(new TextDecoder().decode(raw));
+        expect(body.type).toBe("Accept");
+        expect(body.object.id).toBe("https://remote.example/activities/42");
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("keeps a retryable (5xx) delivery queued with an incremented attempt", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      globalThis.fetch = (async (url: string | URL) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (href === REMOTE) {
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: { publicKeyPem, owner: REMOTE },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        return new Response("busy", { status: 503 });
+      }) as unknown as typeof fetch;
+
+      try {
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify({
+              id: "https://remote.example/activities/99",
+              type: "Follow",
+              actor: REMOTE,
+              object: iris.id,
+            }),
+          }),
+        );
+
+        const row = state.storage.sql
+          .exec<{ attempts: number }>("SELECT attempts FROM delivery LIMIT 1")
+          .toArray()[0];
+        expect(row?.attempts).toBe(1);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+});
