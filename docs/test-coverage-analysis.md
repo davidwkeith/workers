@@ -16,9 +16,9 @@ than a cosmetic one.
 which the Workers runtime does not provide, so every workerd project errors out.
 The numbers below were therefore gathered with **two providers**:
 
-| Environment            | Packages                                                              | Provider   |
-| ---------------------- | -------------------------------------------------------------------- | ---------- |
-| Node (`environment: "node"`) | `dpop`, `http-signatures`, `log`, `rdf`, `wac`, `webfinger`    | `v8`       |
+| Environment                  | Packages                                                                             | Provider   |
+| ---------------------------- | ------------------------------------------------------------------------------------ | ---------- |
+| Node (`environment: "node"`) | `dpop`, `http-signatures`, `log`, `rdf`, `wac`, `webfinger`                          | `v8`       |
 | `workerd` (pool-workers)     | `activitypub`, `indieauth`, `micropub`, `solid-pod`, `store`, `webmention`, `websub` | `istanbul` |
 
 `istanbul` (babel-instrumented) works under both, so it is the right choice if
@@ -27,24 +27,24 @@ we want one provider for the whole repo (see recommendation **I-1**). A build
 
 ## Current coverage (statements / branch)
 
-| Package           | Stmts | Branch | Notable weak spots (file — stmt/branch)                                   |
-| ----------------- | ----: | -----: | ------------------------------------------------------------------------- |
-| `webfinger`       | 97.5  | 96.8   | healthy                                                                   |
-| `wac`             | 96.3  | 96.8   | healthy                                                                   |
-| `log`             | 96.4  | 80.8   | `metrics.ts` funcs 72% (uncalled metric helpers)                          |
-| `store`           | 93.6  | 86.4   | `sql.ts` 86/80                                                            |
-| `webmention`      | 93.5  | 85.8   | `fetch.ts` 84/70, `verify.ts` branch 75                                   |
-| `dpop`            | 91.6  | 91.5   | healthy                                                                   |
-| `rdf`             | 89.7  | 78.5   | `jsonld.ts` branch 78                                                     |
-| `indieauth`       | 89.3  | 83.6   | **`handler.ts` funcs 51%**, `token.ts` 81/81, `metadata.ts` 75/50         |
-| `websub`          | 85.9  | 77.4   | **`fetch.ts` 69/41**, **`safe-fetch.ts` 79/70**, `distribute.ts` funcs 60 |
-| `micropub`        | 84.3  | 76.3   | `handler.ts` 80/70, `mf2.ts` 86/76                                        |
-| `activitypub`     | 83.1  | 70.7   | **`config.ts` 39/54**, `object.ts` 79/58, `signature.ts` branch 75       |
-| `http-signatures` | ~84   | ~70    | **`components.ts` 67/43**, `algorithms.ts` 74/61, `sf.ts` 80/58           |
-| `solid-pod`       | 80.6  | 70.0   | **`auth.ts` 64/59**, **`pod.ts` 77/65**, **`gc.ts` 0%**, `encoding.ts` 69/50 |
+| Package           | Stmts | Branch | Notable weak spots (file — stmt/branch)                                      |
+| ----------------- | ----: | -----: | ---------------------------------------------------------------------------- |
+| `webfinger`       |  97.5 |   96.8 | healthy                                                                      |
+| `wac`             |  96.3 |   96.8 | healthy                                                                      |
+| `log`             |  96.4 |   80.8 | `metrics.ts` funcs 72% (uncalled metric helpers)                             |
+| `store`           |  93.6 |   86.4 | `sql.ts` 86/80                                                               |
+| `webmention`      |  93.5 |   85.8 | `fetch.ts` 84/70, `verify.ts` branch 75                                      |
+| `dpop`            |  91.6 |   91.5 | healthy                                                                      |
+| `rdf`             |  89.7 |   78.5 | `jsonld.ts` branch 78                                                        |
+| `indieauth`       |  89.3 |   83.6 | **`handler.ts` funcs 51%**, `token.ts` 81/81, `metadata.ts` 75/50            |
+| `websub`          |  85.9 |   77.4 | **`fetch.ts` 69/41**, **`safe-fetch.ts` 79/70**, `distribute.ts` funcs 60    |
+| `micropub`        |  84.3 |   76.3 | `handler.ts` 80/70, `mf2.ts` 86/76                                           |
+| `activitypub`     |  83.1 |   70.7 | **`config.ts` 39/54**, `object.ts` 79/58, `signature.ts` branch 75           |
+| `http-signatures` |   ~84 |    ~70 | **`components.ts` 67/43**, `algorithms.ts` 74/61, `sf.ts` 80/58              |
+| `solid-pod`       |  80.6 |   70.0 | **`auth.ts` 64/59**, **`pod.ts` 77/65**, **`gc.ts` 0%**, `encoding.ts` 69/50 |
 
-The aggregate hides the real risk: the *lowest-covered files are the
-security-critical ones* (edge-token validation, the authz Durable Object, the
+The aggregate hides the real risk: the _lowest-covered files are the
+security-critical ones_ (edge-token validation, the authz Durable Object, the
 SSRF guards, HTTP-signature verification), while the high scorers are the
 pure-data libs.
 
@@ -66,13 +66,13 @@ malformed _and_ in the future), `webid_missing`, `cnf_missing`, `dpop_missing`,
 
 **2. SSRF redirect-following guards — `websub/src/safe-fetch.ts` (70% branch),
 `websub/src/fetch.ts` (41% branch), `webmention/src/fetch.ts` (70% branch).**
-The static `assertPublicUrl` checks are tested; the *redirect chain* is the gap,
+The static `assertPublicUrl` checks are tested; the _redirect chain_ is the gap,
 and it is where the guarantees actually live. Add cases for: a public host that
 302-redirects to a private/loopback/link-local host (must be re-blocked on the
 hop, not just the first URL); `> maxRedirects` → `too_many_redirects`; a redirect
 with empty/missing `Location`; and **cross-origin credential stripping** (verify
 `authorization`, `cookie`, `x-hub-signature`, etc. are dropped when the origin
-changes, and *preserved* when it does not).
+changes, and _preserved_ when it does not).
 
 **3. `indieauth/src/handler.ts` (funcs 51%) and `token.ts` (81/81).** Half the
 handler functions are never entered. Exercise the authorization-endpoint and
