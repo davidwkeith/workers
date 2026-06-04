@@ -94,6 +94,14 @@
         "cases": []
       }
     },
+    "@dwk/http-signatures": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/log": {
       "standard": null,
       "suites": {},

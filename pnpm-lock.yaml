@@ -41,6 +41,8 @@ importers:
 
   packages/dpop: {}
 
+  packages/http-signatures: {}
+
   packages/indieauth:
     dependencies:
       '@dwk/dpop':
