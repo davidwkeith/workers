@@ -61,6 +61,14 @@ export interface MicropubConfig {
    * strongly-consistent `AUTH_DB` rather than any cache.
    */
   readonly checkRevocation?: boolean;
+  /**
+   * Whether to reject replayed DPoP proofs by tracking each accepted proof's
+   * `jti` in the strongly-consistent `MICROPUB_DB`. Defaults to `true` — a
+   * captured proof must not be replayable within its acceptance window to
+   * repeat a state-changing request (RFC 9449 delegates replay detection to the
+   * resource server).
+   */
+  readonly checkDpopReplay?: boolean;
   /** Post-URL policy (see {@link GeneratePostUrl}). */
   readonly generatePostUrl?: GeneratePostUrl;
   /**
@@ -90,6 +98,7 @@ export interface ResolvedConfig {
   readonly syndicateTo: readonly SyndicationTarget[];
   readonly maxMediaBytes: number;
   readonly checkRevocation: boolean;
+  readonly checkDpopReplay: boolean;
   readonly generatePostUrl: GeneratePostUrl;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -179,6 +188,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     syndicateTo: config.syndicateTo ?? [],
     maxMediaBytes: config.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
     checkRevocation: config.checkRevocation ?? true,
+    checkDpopReplay: config.checkDpopReplay ?? true,
     generatePostUrl:
       config.generatePostUrl ?? defaultGeneratePostUrl(config.baseUrl),
     logger: config.logger ?? noopLogger,

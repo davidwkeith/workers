@@ -11,7 +11,7 @@
  * strongly-consistent issued-token store — never a cache.
  */
 
-import { verifyDpopProof } from "@dwk/dpop";
+import { DEFAULT_MAX_AGE_SECONDS, verifyDpopProof } from "@dwk/dpop";
 import {
   createIndieAuthStore,
   verifyAccessToken,
@@ -20,9 +20,11 @@ import {
 } from "@dwk/indieauth";
 
 import type { ResolvedConfig } from "./config";
+import { createDpopReplayStore } from "./replay";
+import type { MicropubStoreEnv } from "./store";
 
 /** Bindings the authorization path needs. */
-export interface AuthEnv extends IndieAuthStoreEnv {
+export interface AuthEnv extends IndieAuthStoreEnv, MicropubStoreEnv {
   /** HMAC key the IndieAuth token endpoint signed access tokens with. */
   readonly TOKEN_SIGNING_KEY: string;
 }
@@ -137,6 +139,28 @@ export async function authorize(
       `DPoP proof verification failed: ${dpop.reason}`,
       401,
     );
+  }
+
+  // Replay: `@dwk/dpop` proves a single proof is fresh but, per RFC 9449,
+  // delegates replay detection to the caller. Record the accepted `jti` in the
+  // strongly-consistent store and reject a duplicate, so a captured proof can't
+  // be replayed within its acceptance window to repeat this request. The TTL
+  // spans `2 × DEFAULT_MAX_AGE_SECONDS` because a proof's `iat` may sit anywhere
+  // in `±DEFAULT_MAX_AGE_SECONDS`, so it stays acceptable across that full span.
+  if (config.checkDpopReplay && dpop.jti) {
+    const now = Math.floor(Date.now() / 1000);
+    const fresh = await createDpopReplayStore(env).recordProof(
+      dpop.jti,
+      now + 2 * DEFAULT_MAX_AGE_SECONDS,
+      now,
+    );
+    if (!fresh) {
+      return failure(
+        "invalid_token",
+        "DPoP proof has already been used (replay detected)",
+        401,
+      );
+    }
   }
 
   // Revocation: staleness here is a security bug, so hit the strongly-consistent

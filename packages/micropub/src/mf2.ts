@@ -39,6 +39,31 @@ export interface UpdateOperations {
 
 const RESERVED_FORM_KEYS = new Set(["access_token", "action", "url", "h"]);
 
+/**
+ * Whether a key is an `mp-*` Micropub command rather than a stored property.
+ * Create strips these via {@link extractCommands}; update operands run through
+ * the same gate so an update cannot persist a command a create would reject.
+ *
+ * Only the `mp-*` namespace is stripped — `url`, `name`, etc. are legitimate
+ * microformats2 properties that JSON create keeps (the post's canonical
+ * identity URL is a separate store column, not the mf2 `url` property), so
+ * stripping them would silently drop a valid edit.
+ */
+function isCommandKey(key: string): boolean {
+  return key.startsWith("mp-");
+}
+
+/** Drop `mp-*` command keys from a property map (see {@link isCommandKey}). */
+function stripCommandKeys(
+  map: Record<string, unknown[]>,
+): Record<string, unknown[]> {
+  const out: Record<string, unknown[]> = {};
+  for (const [key, values] of Object.entries(map)) {
+    if (!isCommandKey(key)) out[key] = values;
+  }
+  return out;
+}
+
 /** A `prop[sub]` / `prop[]` / `prop` form key, split into its parts. */
 function parseFormKey(rawKey: string): { key: string; sub?: string } {
   const match = /^([^[]+)\[([^\]]*)\]$/.exec(rawKey);
@@ -208,11 +233,15 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
     delete?: string[] | Record<string, unknown[]>;
   } = {};
 
+  // Strip `mp-*` command keys from every operand, mirroring create: an update
+  // must not be able to persist `mp-slug`/`mp-syndicate-to` into stored
+  // properties where create rejects them (they would otherwise surface via
+  // `q=source`). Real mf2 properties (`url`, `name`, …) pass through unchanged.
   if (body.replace !== undefined) {
-    ops.replace = asPropertyMap(body.replace, "replace");
+    ops.replace = stripCommandKeys(asPropertyMap(body.replace, "replace"));
   }
   if (body.add !== undefined) {
-    ops.add = asPropertyMap(body.add, "add");
+    ops.add = stripCommandKeys(asPropertyMap(body.add, "add"));
   }
   if (body.delete !== undefined) {
     const del = body.delete;
@@ -220,9 +249,9 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
       if (!del.every((k) => typeof k === "string")) {
         throw new Mf2ParseError("`delete` array must contain property names");
       }
-      ops.delete = del as string[];
+      ops.delete = (del as string[]).filter((k) => !isCommandKey(k));
     } else {
-      ops.delete = asPropertyMap(del, "delete");
+      ops.delete = stripCommandKeys(asPropertyMap(del, "delete"));
     }
   }
   return ops;
