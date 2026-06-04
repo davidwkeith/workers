@@ -1,8 +1,8 @@
 /**
  * The single storage interface `@dwk/solid-pod` talks to from inside its
  * Durable Object: a DO-SQLite quad store for RDF plus R2 copy-on-write blob
- * bodies, with TOCTOU-free `If-Match` writes and a transactional orphan outbox
- * feeding the out-of-band GC path (see `gc.ts`).
+ * bodies, with TOCTOU-free `If-Match` / `If-None-Match` writes and a
+ * transactional orphan outbox feeding the out-of-band GC path (see `gc.ts`).
  */
 
 import type { StoredQuad } from "@dwk/rdf";
@@ -63,8 +63,25 @@ export interface WriteOptions {
    * it is TOCTOU-free.
    */
   readonly ifMatch?: string;
+  /**
+   * `If-None-Match` precondition: `"*"` requires the resource to **not** already
+   * exist (create-only); a concrete ETag rejects the write when it matches the
+   * current pointer. Like {@link WriteOptions.ifMatch} it is checked inside the
+   * same SQLite transaction as the write, so it is TOCTOU-free.
+   */
+  readonly ifNoneMatch?: string;
   /** Content type recorded on the pointer. */
   readonly contentType?: string;
+}
+
+/** Preconditions for {@link Store.delete}. */
+export interface DeleteOptions extends Pick<WriteOptions, "ifMatch"> {
+  /**
+   * Invariant checked inside the delete transaction, after `ifMatch` and before
+   * any mutation. Throw to abort the delete (the transaction rolls back and the
+   * error propagates); the thrown error is the caller's to map to a response.
+   */
+  readonly guard?: () => void;
 }
 
 /** A pending orphaned R2 key, read from the transactional outbox. */
@@ -134,9 +151,14 @@ export interface Store {
    * Delete a resource. Drops the pointer first, then records any
    * now-unreferenced blob key to the outbox — both in one SQLite transaction.
    * The R2 object itself is reclaimed later by the GC path, never here.
+   *
+   * An optional `guard` runs inside the same transaction, after the `ifMatch`
+   * check but before any mutation; if it throws, the delete is rolled back.
+   * Callers use it to enforce delete-time invariants (e.g. LDP container
+   * emptiness) without a TOCTOU window between the check and the delete.
    * @throws {PreconditionFailedError} if `ifMatch` does not hold.
    */
-  delete(key: string, options?: Pick<WriteOptions, "ifMatch">): void;
+  delete(key: string, options?: DeleteOptions): void;
 
   /** Read pending orphan rows from the transactional outbox. */
   collectOrphans(limit?: number): OrphanRecord[];
@@ -145,11 +167,11 @@ export interface Store {
   removeForwardedOrphans(ids: readonly number[]): void;
 }
 
-/** Thrown when an `If-Match` precondition fails (maps to HTTP 412). */
+/** Thrown when an `If-Match` / `If-None-Match` precondition fails (maps to HTTP 412). */
 export class PreconditionFailedError extends Error {
   readonly status = 412;
   constructor(key: string) {
-    super(`@dwk/store: If-Match precondition failed for "${key}"`);
+    super(`@dwk/store: write precondition failed for "${key}"`);
     this.name = "PreconditionFailedError";
   }
 }
@@ -226,15 +248,29 @@ export function createStore(
     };
   }
 
-  /** Enforce an `If-Match` precondition against the current pointer. */
-  function assertIfMatch(
+  /**
+   * Enforce `If-Match` / `If-None-Match` preconditions against the current
+   * pointer. Always called inside the write `transactionSync`, so the check and
+   * the write commit together with no TOCTOU window.
+   */
+  function assertPreconditions(
     key: string,
     current: ResourceRow | null,
-    ifMatch?: string,
+    options: Pick<WriteOptions, "ifMatch" | "ifNoneMatch">,
   ) {
-    if (ifMatch === undefined) return;
-    if (current === null || (ifMatch !== "*" && current.etag !== ifMatch)) {
+    const { ifMatch, ifNoneMatch } = options;
+    if (
+      ifMatch !== undefined &&
+      (current === null || (ifMatch !== "*" && current.etag !== ifMatch))
+    ) {
       throw new PreconditionFailedError(key);
+    }
+    if (ifNoneMatch !== undefined && current !== null) {
+      // `*` forbids any existing resource (create-only); a concrete ETag only
+      // conflicts when it matches the current pointer.
+      if (ifNoneMatch === "*" || current.etag === ifNoneMatch) {
+        throw new PreconditionFailedError(key);
+      }
     }
   }
 
@@ -345,7 +381,7 @@ export function createStore(
       const contentType = options.contentType ?? "text/turtle";
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
-        assertIfMatch(key, current, options.ifMatch);
+        assertPreconditions(key, current, options);
         // Replacing RDF with RDF: if the previous body was a blob, its key may
         // become orphaned.
         if (current?.kind === "blob" && current.blobKey) {
@@ -363,7 +399,7 @@ export function createStore(
       const etag = randomEtag();
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
-        assertIfMatch(key, current, options.ifMatch);
+        assertPreconditions(key, current, options);
         if (current?.kind === "blob" && current.blobKey) {
           // A patch only makes sense against RDF; drop the blob pointer first.
           sql.exec("DELETE FROM resources WHERE key = ?", key);
@@ -396,7 +432,7 @@ export function createStore(
       // 2. Atomically flip the pointer and outbox the displaced key.
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
-        assertIfMatch(key, current, options.ifMatch);
+        assertPreconditions(key, current, options);
         sql.exec("DELETE FROM quads WHERE resource = ?", key);
         sql.exec(
           `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
@@ -451,11 +487,10 @@ export function createStore(
     delete(key, options = {}) {
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
-        if (!current) {
-          assertIfMatch(key, current, options.ifMatch);
-          return;
-        }
-        assertIfMatch(key, current, options.ifMatch);
+        assertPreconditions(key, current, options);
+        if (!current) return;
+        // Caller invariant (e.g. container emptiness), checked in-transaction.
+        options.guard?.();
         // Drop the pointer first ...
         sql.exec("DELETE FROM resources WHERE key = ?", key);
         sql.exec("DELETE FROM quads WHERE resource = ?", key);

@@ -558,6 +558,22 @@ describe("@dwk/solid-pod LDP", () => {
     expect(get.status).toBe(404);
   });
 
+  it("refuses to DELETE a non-empty container (409), then allows it once emptied", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/c/kid", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+
+    const blocked = await pod.send("DELETE", "/c/", { webid: OWNER });
+    expect(blocked.status).toBe(409);
+
+    await pod.send("DELETE", "/c/kid", { webid: OWNER });
+    const emptied = await pod.send("DELETE", "/c/", { webid: OWNER });
+    expect(emptied.status).toBe(204);
+  });
+
   it("OPTIONS advertises Accept-Patch", async () => {
     const pod = freshPod();
     const res = await pod.send("OPTIONS", "/anything");

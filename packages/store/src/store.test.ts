@@ -117,6 +117,51 @@ describe("@dwk/store quad store", () => {
     });
     expect(read).toHaveLength(QUADS.length);
   });
+
+  it("enforces If-None-Match: * (create-only) inside the write transaction", async () => {
+    const read = await withStore(({ store }) => {
+      // First write creates the resource.
+      store.writeQuads("/doc", QUADS, { ifNoneMatch: "*" });
+      // A second create-only write must fail and leave state untouched.
+      expect(() =>
+        store.writeQuads("/doc", [INSERTED], { ifNoneMatch: "*" }),
+      ).toThrow(PreconditionFailedError);
+      return store.readQuads("/doc");
+    });
+    expect(read).toHaveLength(QUADS.length);
+  });
+
+  it("enforces If-None-Match: * for blob and patch writes", async () => {
+    await withStore(async ({ store }) => {
+      const bytes = new TextEncoder().encode("opaque");
+      await store.putBlob("/blob", bytes, { ifNoneMatch: "*" });
+      await expect(
+        store.putBlob("/blob", bytes, { ifNoneMatch: "*" }),
+      ).rejects.toThrow(PreconditionFailedError);
+
+      store.writeQuads("/rdf", QUADS);
+      expect(() =>
+        store.patchQuads(
+          "/rdf",
+          { deletes: [], inserts: [INSERTED] },
+          { ifNoneMatch: "*" },
+        ),
+      ).toThrow(PreconditionFailedError);
+    });
+  });
+
+  it("rejects If-None-Match against a matching ETag but allows a stale one", async () => {
+    await withStore(({ store }) => {
+      const etag = store.writeQuads("/doc", QUADS);
+      expect(() =>
+        store.writeQuads("/doc", [INSERTED], { ifNoneMatch: etag }),
+      ).toThrow(PreconditionFailedError);
+      // A non-matching ETag does not conflict, so this write proceeds.
+      expect(() =>
+        store.writeQuads("/doc", [INSERTED], { ifNoneMatch: '"other"' }),
+      ).not.toThrow();
+    });
+  });
 });
 
 describe("@dwk/store blob copy-on-write", () => {
@@ -193,6 +238,23 @@ describe("@dwk/store delete → GC ordering", () => {
     });
     expect(reclaimed).toContain(blobKey);
     expect(await harness.BLOBS.get(blobKey)).toBeNull();
+  });
+
+  it("rolls back the delete when the in-transaction guard throws", async () => {
+    const stillThere = await withStore(({ store }) => {
+      store.writeQuads("/doc", QUADS);
+      class Blocked extends Error {}
+      expect(() =>
+        store.delete("/doc", {
+          guard: () => {
+            throw new Blocked();
+          },
+        }),
+      ).toThrow(Blocked);
+      // The guard aborted the transaction, so the pointer survives.
+      return store.head("/doc");
+    });
+    expect(stillThere).not.toBeNull();
   });
 });
 

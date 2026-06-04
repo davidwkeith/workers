@@ -28,6 +28,7 @@ import {
   forwardOrphans,
   PreconditionFailedError,
   type Store,
+  type WriteOptions,
 } from "@dwk/store";
 import type { AccessMode } from "@dwk/wac";
 
@@ -404,10 +405,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (!this.#checkReplay(jti)) return this.#replayed();
 
     const existed = store.head(path) !== null;
-    const precondition = this.#preconditionResponse(store, path, request);
-    if (precondition) return precondition;
-
-    await this.#writeBody(store, origin, path, request, ifMatchOf(request));
+    // Both preconditions are threaded into the store write and re-checked
+    // inside its transaction, so there is no TOCTOU window here. `existed` is
+    // only used to pick the 201/204 status; it is not relied on for safety.
+    await this.#writeBody(store, origin, path, request, {
+      ifMatch: ifMatchOf(request),
+      ifNoneMatch: ifNoneMatchOf(request),
+    });
     this.#ensureContainerChain(store, origin, path);
     await this.#drainOrphans(store);
 
@@ -443,7 +447,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       key = childKey(path, null, asContainer);
     }
 
-    await this.#writeBody(store, origin, key, request, undefined);
+    // A POST always mints a fresh, non-colliding key, so it is unconditional.
+    await this.#writeBody(store, origin, key, request, {});
     this.#ensureContainerChain(store, origin, key);
     await this.#drainOrphans(store);
 
@@ -549,15 +554,29 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const meta = store.head(path);
     if (!meta) return text(404, "Not Found");
 
-    if (isContainer(path)) {
-      // Refuse to delete a non-empty container (LDP).
-      const remaining = store
-        .readQuads(path)
-        .some((q) => isContainsQuad(q, toIri(origin, path)));
-      if (remaining) return text(409, "Container is not empty");
+    try {
+      store.delete(path, {
+        ifMatch: ifMatchOf(request),
+        // Re-check container emptiness inside the delete transaction so a
+        // concurrent child write cannot slip in between the check and the
+        // delete (LDP: a non-empty container MUST NOT be deleted).
+        guard: () => {
+          if (
+            isContainer(path) &&
+            store
+              .readQuads(path)
+              .some((q) => isContainsQuad(q, toIri(origin, path)))
+          ) {
+            throw new ContainerNotEmptyError();
+          }
+        },
+      });
+    } catch (error) {
+      if (error instanceof ContainerNotEmptyError) {
+        return text(409, "Container is not empty");
+      }
+      throw error;
     }
-
-    store.delete(path, { ifMatch: ifMatchOf(request) });
     this.#removeContainment(store, origin, path);
     await this.#drainOrphans(store);
     this.#broadcast(toIri(origin, path), "Delete");
@@ -585,26 +604,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     });
   }
 
-  /** Enforce `If-None-Match: *` (create-only) before a write. */
-  #preconditionResponse(
-    store: Store,
-    path: string,
-    request: Request,
-  ): Response | null {
-    const ifNoneMatch = request.headers.get("if-none-match");
-    if (ifNoneMatch === "*" && store.head(path) !== null) {
-      return text(412, "Precondition Failed");
-    }
-    return null;
-  }
-
   /** Parse RDF into the quad store, or offload an opaque/oversized body to R2. */
   async #writeBody(
     store: Store,
     origin: string,
     path: string,
     request: Request,
-    ifMatch: string | undefined,
+    preconditions: Pick<WriteOptions, "ifMatch" | "ifNoneMatch">,
   ): Promise<void> {
     const contentType =
       request.headers.get("content-type")?.split(";")[0]?.trim() ||
@@ -634,7 +640,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       await store.putResource(path, bytes, {
         quads: withType,
         contentType,
-        ...(ifMatch !== undefined ? { ifMatch } : {}),
+        ...preconditions,
       });
       return;
     }
@@ -642,7 +648,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     // Non-RDF, or RDF over the DO-cell ceiling: store as an opaque blob.
     await store.putBlob(path, bytes, {
       contentType,
-      ...(ifMatch !== undefined ? { ifMatch } : {}),
+      ...preconditions,
     });
   }
 
@@ -762,6 +768,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
 const ALLOW = "GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE";
 
+/** Thrown from a delete guard to abort the transaction for a non-empty LDP container. */
+class ContainerNotEmptyError extends Error {}
+
 function baseHeaders(path: string, etag: string, contentType: string): Headers {
   const headers = new Headers({
     etag,
@@ -786,6 +795,10 @@ function containerTypeQuads(iri: string): StoredQuad[] {
 
 function ifMatchOf(request: Request): string | undefined {
   return request.headers.get("if-match") ?? undefined;
+}
+
+function ifNoneMatchOf(request: Request): string | undefined {
+  return request.headers.get("if-none-match") ?? undefined;
 }
 
 /** Whether a `Link` header marks the POSTed resource as an LDP container. */
