@@ -53,6 +53,11 @@ export const SCHEMA: readonly string[] = [
      enqueued_at  INTEGER NOT NULL,
      forwarded_at INTEGER
    )`,
+  // Index for the per-write resurrection lookup/cancel (`WHERE blob_key = ?`),
+  // which runs on every `putBlob`, and for the pruning sweep over retained
+  // forwarded rows (`WHERE forwarded_at IS NOT NULL AND forwarded_at <= ?`).
+  `CREATE INDEX IF NOT EXISTS orphan_outbox_by_blob ON orphan_outbox (blob_key)`,
+  `CREATE INDEX IF NOT EXISTS orphan_outbox_by_forwarded ON orphan_outbox (forwarded_at)`,
   // Pending "un-orphan" tombstones: when `putBlob` resurrects a key whose
   // orphan row was already forwarded to the shared GC store, it records the key
   // here so the forwarder can delete the forwarded GC row before the cron GC

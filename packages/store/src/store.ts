@@ -581,13 +581,15 @@ export function createStore(
     },
 
     markOrphansForwarded(ids, forwardedAt) {
-      for (const id of ids) {
-        sql.exec(
-          "UPDATE orphan_outbox SET forwarded_at = ? WHERE id = ?",
-          forwardedAt,
-          id,
-        );
-      }
+      state.storage.transactionSync(() => {
+        for (const id of ids) {
+          sql.exec(
+            "UPDATE orphan_outbox SET forwarded_at = ? WHERE id = ?",
+            forwardedAt,
+            id,
+          );
+        }
+      });
     },
 
     pruneForwardedOrphans(before) {
@@ -608,9 +610,11 @@ export function createStore(
     },
 
     removeForwardedCancels(ids) {
-      for (const id of ids) {
-        sql.exec("DELETE FROM orphan_cancels WHERE id = ?", id);
-      }
+      state.storage.transactionSync(() => {
+        for (const id of ids) {
+          sql.exec("DELETE FROM orphan_cancels WHERE id = ?", id);
+        }
+      });
     },
   };
 
