@@ -17,6 +17,19 @@ export function isAclPath(path: string): boolean {
   return path.endsWith(".acl");
 }
 
+/**
+ * Suffixes of server-governed auxiliary resources. Writing one requires
+ * `acl:Control` on the resource it governs (WAC), so a client `Slug` must
+ * never be allowed to mint one through a container `POST` (which is only
+ * authorized for `Append`/`Write` on the parent).
+ */
+const RESERVED_AUXILIARY_SUFFIXES = [".acl", ".meta"] as const;
+
+/** Whether a name/path ends in a reserved auxiliary suffix (`.acl`/`.meta`). */
+export function hasReservedAuxiliarySuffix(value: string): boolean {
+  return RESERVED_AUXILIARY_SUFFIXES.some((suffix) => value.endsWith(suffix));
+}
+
 /** The ACL document path that governs `path` (`<path>.acl`). */
 export function aclPath(path: string): string {
   return `${path}.acl`;
@@ -73,6 +86,14 @@ export function childKey(
     ?.trim()
     .replace(SLUG_UNSAFE, "-")
     .replace(/^-+|-+$/g, "");
-  const name = cleaned && cleaned.length > 0 ? cleaned : crypto.randomUUID();
+  // A Slug must never mint a reserved auxiliary resource (`.acl`/`.meta`):
+  // those govern a sibling's access/metadata and require `acl:Control` to
+  // write, which a container POST (authorized only for Append/Write on the
+  // parent) does not confer. Treat such a Slug as unusable and fall back to a
+  // random name, closing a privilege-escalation path (issue #28).
+  const name =
+    cleaned && cleaned.length > 0 && !hasReservedAuxiliarySuffix(cleaned)
+      ? cleaned
+      : crypto.randomUUID();
   return `${container}${name}${asContainer ? "/" : ""}`;
 }

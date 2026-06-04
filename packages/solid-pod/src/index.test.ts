@@ -487,6 +487,37 @@ describe("@dwk/solid-pod LDP", () => {
     expect(await root.text()).toContain("contains");
   });
 
+  it("refuses to mint an .acl via Slug for an Append-only agent (issue #28)", async () => {
+    const pod = freshPod();
+    // Grant BOB only acl:Append on container /c/.
+    const aclRes = await pod.send("PUT", "/c/.acl", {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+<#r> a acl:Authorization ;
+  acl:accessTo <${pod.base}/c/> ;
+  acl:agent <${BOB}> ;
+  acl:mode acl:Append .`,
+      headers: { "content-type": TURTLE },
+    });
+    expect(aclRes.status).toBe(201);
+
+    // BOB POSTs with a Slug that would mint the ACL document /c/evil.acl.
+    const post = await pod.send("POST", "/c/", {
+      webid: BOB,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE, slug: "evil.acl" },
+    });
+    // The POST is allowed (BOB holds Append on the container), but the server
+    // must not honor a Slug that produces a reserved auxiliary resource: a
+    // random name is assigned instead of the attacker-chosen `.acl`.
+    expect(post.status).toBe(201);
+    expect(post.headers.get("location")).not.toMatch(/\.acl$/);
+
+    // No ACL document exists at the attacker-chosen key.
+    const probe = await pod.send("GET", "/c/evil.acl", { webid: OWNER });
+    expect(probe.status).toBe(404);
+  });
+
   it("preserves ldp:contains when a container is PUT-updated", async () => {
     const pod = freshPod();
     // Create a child so the container gains an ldp:contains link.
