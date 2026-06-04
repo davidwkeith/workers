@@ -2,11 +2,13 @@ import { env } from "cloudflare:test";
 import { describe, expect, it, beforeAll } from "vitest";
 
 import {
+  addProof,
   buildDidDocument,
   createVc,
   decodeBitstring,
   encodeEd25519Multikey,
   getBit,
+  importSigner,
   verifyProof,
   type DidResolver,
   type JsonObject,
@@ -206,6 +208,40 @@ describe("createVc — verify + revocation lifecycle", () => {
     const subject = listCred.credentialSubject as JsonObject;
     const bits = await decodeBitstring(subject.encodedList as string);
     expect(getBit(bits, index)).toBe(true);
+  });
+});
+
+describe("createVc — verify status SSRF guard", () => {
+  it("does not fetch a non-https foreign status list, warns instead", async () => {
+    const handler = makeHandler();
+    const signer = await importSigner(privateJwk);
+    // A credential whose status list points at an internal http URL.
+    const credential: JsonObject = {
+      ...sampleCredential(),
+      credentialStatus: {
+        type: "BitstringStatusListEntry",
+        statusPurpose: "revocation",
+        statusListIndex: "0",
+        statusListCredential: "http://169.254.169.254/list",
+      },
+    };
+    const signed = await addProof(credential, signer, {
+      verificationMethod: VM_ID,
+    });
+
+    const res = await handler(
+      post("/credentials/verify", { verifiableCredential: signed }),
+      testEnv,
+      ctx,
+    );
+    const body = (await res.json()) as {
+      verified: boolean;
+      warnings: string[];
+    };
+    // The proof is valid and the list was never fetched, so the credential is
+    // not rejected — but the unchecked status surfaces as a warning.
+    expect(body.verified).toBe(true);
+    expect(body.warnings).toContain("status list URL must use https");
   });
 });
 

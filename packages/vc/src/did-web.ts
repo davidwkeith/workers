@@ -44,7 +44,15 @@ export function didWebToUrl(did: string): string {
         `@dwk/vc: did:web identifier "${did}" has an empty path segment`,
       );
     }
-    return decodeURIComponent(segment);
+    const decoded = decodeURIComponent(segment);
+    // Reject `.`/`..` so a crafted identifier cannot traverse out of its path
+    // when the URL is built and fetched.
+    if (decoded === "." || decoded === "..") {
+      throw new Error(
+        `@dwk/vc: did:web identifier "${did}" has an invalid path segment "${decoded}"`,
+      );
+    }
+    return decoded;
   });
   const path =
     segments.length === 0
@@ -169,20 +177,26 @@ export function buildDidDocument(options: BuildDidDocumentOptions): JsonObject {
   return document;
 }
 
-/** Locate a verification method in a DID document by its (absolute) id. */
+/**
+ * Locate a verification method in a DID document by its id. A method `id` that
+ * is a relative reference (`#key-0`) is resolved against the document's `id`
+ * before comparison, per DID Core — foreign documents commonly use relative ids.
+ */
 export function findVerificationMethod(
   didDocument: JsonObject,
   id: string,
 ): VerificationMethod | undefined {
+  const docId = typeof didDocument.id === "string" ? didDocument.id : "";
   const methods = didDocument.verificationMethod;
   if (!Array.isArray(methods)) return undefined;
   for (const entry of methods) {
-    if (
-      entry !== null &&
-      typeof entry === "object" &&
-      !Array.isArray(entry) &&
-      (entry as JsonObject).id === id
-    ) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const entryId = (entry as JsonObject).id;
+    if (typeof entryId !== "string") continue;
+    const resolved = entryId.startsWith("#") ? `${docId}${entryId}` : entryId;
+    if (resolved === id) {
       return entry as unknown as VerificationMethod;
     }
   }

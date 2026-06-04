@@ -41,6 +41,11 @@ describe("bitstring bit operations", () => {
   it("throws when setting an out-of-range bit", () => {
     expect(() => setBit(new Uint8Array(1), 99, true)).toThrow(/out of range/);
   });
+
+  it("rejects negative indices", () => {
+    expect(getBit(new Uint8Array(1), -1)).toBe(false);
+    expect(() => setBit(new Uint8Array(1), -1, true)).toThrow(/out of range/);
+  });
 });
 
 describe("encodeBitstring / buildEncodedList", () => {
@@ -124,5 +129,18 @@ describe("createVcStatusStore (D1)", () => {
 
     // Purposes are independent.
     expect(await store.getStatus(list, "suspension", a)).toBe(false);
+  });
+
+  it("clears a bit by deleting its row (no tombstone)", async () => {
+    const store = createVcStatusStore(storeEnv);
+    await store.init();
+    const list = `urn:list:${crypto.randomUUID()}`;
+
+    await store.setStatus(list, "suspension", 3, true);
+    expect(await store.setIndices(list, "suspension")).toEqual([3]);
+
+    await store.setStatus(list, "suspension", 3, false);
+    expect(await store.getStatus(list, "suspension", 3)).toBe(false);
+    expect(await store.setIndices(list, "suspension")).toEqual([]);
   });
 });

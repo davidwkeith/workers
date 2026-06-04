@@ -79,6 +79,11 @@ function emit(
   config.metrics.count(event, fields);
 }
 
+// Importing a key with crypto.subtle is comparatively expensive, and the secret
+// binding is stable for the life of the isolate. Cache the resolved Signer by the
+// raw JWK string so a hot issuance path imports the key once, not per request.
+const signerCache = new Map<string, Signer>();
+
 /** Parse and validate the signing-key secret binding (fail loudly). */
 async function loadSigner(env: VcEnv): Promise<Signer> {
   if (!env.VC_SIGNING_KEY || typeof env.VC_SIGNING_KEY !== "string") {
@@ -86,13 +91,18 @@ async function loadSigner(env: VcEnv): Promise<Signer> {
       "@dwk/vc: missing required secret binding `VC_SIGNING_KEY`",
     );
   }
+  const cached = signerCache.get(env.VC_SIGNING_KEY);
+  if (cached !== undefined) return cached;
+
   let jwk: JsonWebKey;
   try {
     jwk = JSON.parse(env.VC_SIGNING_KEY) as JsonWebKey;
   } catch {
     throw new Error("@dwk/vc: `VC_SIGNING_KEY` is not valid JWK JSON");
   }
-  return importSigner(jwk);
+  const signer = await importSigner(jwk);
+  signerCache.set(env.VC_SIGNING_KEY, signer);
+  return signer;
 }
 
 function getStore(env: VcEnv): VcStatusStore | undefined {
@@ -216,8 +226,23 @@ async function checkStatus(
   }
 
   // Foreign list: fetch the published status list credential and decode it.
+  // Only https: is fetched — a foreign `statusListCredential` is attacker-
+  // controlled, so refusing other schemes blunts SSRF into internal services.
+  let listUrl: URL;
   try {
-    const response = await fetch(listCredential, {
+    listUrl = new URL(listCredential);
+  } catch {
+    return { checked: false, revoked: false, error: "status list malformed" };
+  }
+  if (listUrl.protocol !== "https:") {
+    return {
+      checked: false,
+      revoked: false,
+      error: "status list URL must use https",
+    };
+  }
+  try {
+    const response = await fetch(listUrl.toString(), {
       headers: { accept: "application/json" },
     });
     if (!response.ok) {

@@ -35,6 +35,7 @@ export type StatusPurpose = "revocation" | "suspension" | (string & {});
 
 /** Get the bit at `index` in a most-significant-bit-first bitstring. */
 export function getBit(bits: Uint8Array, index: number): boolean {
+  if (index < 0) return false;
   const byteIndex = index >> 3;
   if (byteIndex >= bits.length) return false;
   const bit = 7 - (index & 7);
@@ -43,8 +44,10 @@ export function getBit(bits: Uint8Array, index: number): boolean {
 
 /** Set the bit at `index` in a most-significant-bit-first bitstring. */
 export function setBit(bits: Uint8Array, index: number, value: boolean): void {
+  // A negative index shifts to a negative byteIndex, which would slip past the
+  // upper-bound check, so guard both ends explicitly.
   const byteIndex = index >> 3;
-  if (byteIndex >= bits.length) {
+  if (index < 0 || byteIndex >= bits.length) {
     throw new Error(`@dwk/vc: status index ${index} is out of range`);
   }
   const bit = 7 - (index & 7);
@@ -56,21 +59,17 @@ export function setBit(bits: Uint8Array, index: number, value: boolean): void {
 }
 
 async function gzip(input: Uint8Array): Promise<Uint8Array> {
-  const stream = new CompressionStream("gzip");
-  const writer = stream.writable.getWriter();
-  void writer.write(input as unknown as BufferSource);
-  void writer.close();
-  const compressed = await new Response(stream.readable).arrayBuffer();
-  return new Uint8Array(compressed);
+  const stream = new Response(input).body!.pipeThrough(
+    new CompressionStream("gzip"),
+  );
+  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 async function gunzip(input: Uint8Array): Promise<Uint8Array> {
-  const stream = new DecompressionStream("gzip");
-  const writer = stream.writable.getWriter();
-  void writer.write(input as unknown as BufferSource);
-  void writer.close();
-  const decompressed = await new Response(stream.readable).arrayBuffer();
-  return new Uint8Array(decompressed);
+  const stream = new Response(input).body!.pipeThrough(
+    new DecompressionStream("gzip"),
+  );
+  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 /** GZIP-compress a bitstring and multibase base64url-encode it (`encodedList`). */
@@ -266,15 +265,29 @@ export function createVcStatusStore(env: VcStatusStoreEnv): VcStatusStore {
     },
 
     async setStatus(listId, statusPurpose, index, value) {
-      await db
-        .prepare(
-          `INSERT INTO status_entries (list_id, status_purpose, idx, value)
-             VALUES (?, ?, ?, ?)
-           ON CONFLICT (list_id, status_purpose, idx)
-             DO UPDATE SET value = excluded.value`,
-        )
-        .bind(listId, statusPurpose, index, value ? 1 : 0)
-        .run();
+      // Only set (value-1) bits are stored; clearing a bit deletes the row so the
+      // table stays sparse (one row per set bit) rather than accumulating
+      // value-0 tombstones. `getStatus`/`setIndices` already treat a missing row
+      // as unset.
+      if (value) {
+        await db
+          .prepare(
+            `INSERT INTO status_entries (list_id, status_purpose, idx, value)
+               VALUES (?, ?, ?, 1)
+             ON CONFLICT (list_id, status_purpose, idx)
+               DO UPDATE SET value = 1`,
+          )
+          .bind(listId, statusPurpose, index)
+          .run();
+      } else {
+        await db
+          .prepare(
+            `DELETE FROM status_entries
+             WHERE list_id = ? AND status_purpose = ? AND idx = ?`,
+          )
+          .bind(listId, statusPurpose, index)
+          .run();
+      }
     },
 
     async getStatus(listId, statusPurpose, index) {

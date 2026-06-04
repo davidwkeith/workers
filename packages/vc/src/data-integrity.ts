@@ -301,10 +301,14 @@ export interface VerifyProofResult {
   readonly errors: readonly string[];
 }
 
+function isJsonObject(value: JcsValue | undefined): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function asProofArray(proof: JcsValue | undefined): JsonObject[] {
-  if (proof === undefined) return [];
-  if (Array.isArray(proof)) return proof as JsonObject[];
-  return [proof as JsonObject];
+  if (proof === undefined || proof === null) return [];
+  if (Array.isArray(proof)) return proof.filter(isJsonObject);
+  return isJsonObject(proof) ? [proof] : [];
 }
 
 async function verifySingleProof(

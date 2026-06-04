@@ -31,6 +31,16 @@ describe("didWebToUrl", () => {
   it("rejects a non-did:web identifier", () => {
     expect(() => didWebToUrl("did:key:z6Mk")).toThrow(/not a did:web/);
   });
+
+  it("rejects path-traversal segments", () => {
+    expect(() => didWebToUrl("did:web:example.com:..:secret")).toThrow(
+      /invalid path segment/,
+    );
+    // `.` and `..` only reachable via percent-encoding are also rejected.
+    expect(() => didWebToUrl("did:web:example.com:%2e%2e")).toThrow(
+      /invalid path segment/,
+    );
+  });
 });
 
 describe("urlToDidWeb", () => {
@@ -111,6 +121,17 @@ describe("findVerificationMethod / createDidWebResolver", () => {
     expect(
       findVerificationMethod(didDoc, "did:web:example.com#missing"),
     ).toBeUndefined();
+  });
+
+  it("resolves a relative method id against the document id", () => {
+    const relativeDoc: JsonObject = {
+      id: "did:web:example.com",
+      verificationMethod: [
+        { id: "#key-0", type: "Multikey", publicKeyMultibase: "z6Mk" },
+      ],
+    };
+    const vm = findVerificationMethod(relativeDoc, "did:web:example.com#key-0");
+    expect(vm?.publicKeyMultibase).toBe("z6Mk");
   });
 
   it("resolves via an injected fetch and ignores non-did:web ids", async () => {

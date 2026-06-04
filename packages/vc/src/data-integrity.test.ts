@@ -8,6 +8,7 @@ import {
   type VerificationMethod,
 } from "./data-integrity";
 import { encodeEd25519Multikey } from "./multibase";
+import type { JcsValue } from "./jcs";
 
 const VM_ID = "did:web:example.com#key-0";
 
@@ -196,6 +197,20 @@ describe("verifyProof", () => {
       verified: false,
       errors: ["document has no proof"],
     });
+  });
+
+  it("treats a null or non-object proof as no proof (no crash)", async () => {
+    const proofs: JcsValue[] = [null as unknown as JcsValue, "nope", [null]];
+    for (const proof of proofs) {
+      const result = await verifyProof(
+        { ...sampleDoc(), proof },
+        { resolveVerificationMethod: () => undefined },
+      );
+      expect(result).toEqual({
+        verified: false,
+        errors: ["document has no proof"],
+      });
+    }
   });
 });
 
