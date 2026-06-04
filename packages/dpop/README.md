@@ -48,11 +48,19 @@ const result = await verifyDpopProof({
 });
 ```
 
+A Resource Server enforcing `ath` MUST pass `expectedJkt` too: `ath` only proves
+the proof was made for this token, while `cnf.jkt` proves the proof key is the
+one the token was issued to. Supplying `accessToken` without `expectedJkt` is
+rejected with `jkt_required` rather than validating an unbound proof
+(RFC 9449 §7.1).
+
 ## What is verified
 
-- **Header** — `typ` is exactly `dpop+jwt`; `alg` is an asymmetric algorithm
-  from the allow-list (`ES256`, `ES384`, `RS256`, `PS256` — never `none` or
-  HMAC); `jwk` is present and carries no private key material.
+- **Header** — `typ` is exactly `dpop+jwt`; no `crit` parameter is present
+  (RFC 7515 §4.1.11); `alg` is an asymmetric algorithm from the allow-list
+  (`ES256`, `ES384`, `RS256`, `PS256` — never `none` or HMAC); `jwk` is present,
+  carries no private key material, has an EC `crv` matching the `alg`, and (for
+  RSA) a modulus of at least 2048 bits.
 - **Signature** — over `header.payload` using the embedded `jwk`.
 - **Claims** — `htm` matches the request method (case-insensitive); `htu`
   matches the request URI after normalization (scheme/host lowercased, default
