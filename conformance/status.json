@@ -43,6 +43,20 @@
         "cases": []
       }
     },
+    "@dwk/websub": {
+      "standard": "WebSub",
+      "suites": {
+        "websub.rocks/hub": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/webfinger": {
       "standard": "WebFinger",
       "suites": {},

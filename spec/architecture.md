@@ -14,6 +14,7 @@ bundle stays inside the platform limits (see
 | `@dwk/indieauth` | endpoint | IndieAuth authorization + token + metadata endpoints; PKCE; profile-URL verification; scope issuance. |
 | `@dwk/micropub` | endpoint | Micropub create/update/delete; JSON + form-encoded; media endpoint (R2); `q=config` / `q=source`. Consumes IndieAuth tokens. |
 | `@dwk/webmention` | endpoint | Webmention receiver (async verification queue) + sender (on publish); inbox store. |
+| `@dwk/websub` | endpoint | WebSub (W3C) hub: D1 subscription store with lease expiry, intent-verification callbacks, HMAC-signed content distribution via queue. |
 | `@dwk/solid-pod` | endpoint + DO | Edge Solid Pod: LDP verbs, content negotiation, N3 Patch, WAC, notifications. Exports the per-pod **Durable Object** class. |
 | `@dwk/wac` | lib | Web Access Control evaluation (effective-ACL walk, Append vs Write). Used by `solid-pod`. |
 | `@dwk/dpop` | lib | DPoP proof verification. Shared by `indieauth` token validation and `solid-pod` Resource Server. |

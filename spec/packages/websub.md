@@ -5,7 +5,7 @@
 | **Type** | endpoint |
 | **Ships a DO?** | no |
 | **Standard** | [WebSub](https://www.w3.org/TR/websub/) (ex-PubSubHubbub) |
-| **Status** | proposed — tracked in [#60](https://github.com/davidwkeith/workers/issues/60) |
+| **Status** | implemented, unreleased — tracked in [#60](https://github.com/davidwkeith/workers/issues/60) |
 
 A WebSub hub: the publish-side, real-time complement to
 [`@dwk/webmention`](webmention.md)'s interaction side. Subscribers receive a
