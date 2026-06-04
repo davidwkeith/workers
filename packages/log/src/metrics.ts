@@ -108,17 +108,31 @@ function utf8ByteLength(value: string): number {
   return utf8.encode(value).length;
 }
 
-/** Truncate `value` to at most `maxBytes` UTF-8 bytes, dropping a split char. */
+/** Truncate `value` to at most `maxBytes` UTF-8 bytes, on a char boundary. */
 function truncateUtf8(value: string, maxBytes: number): string {
   const bytes = utf8.encode(value);
   if (bytes.length <= maxBytes) {
     return value;
   }
-  // The default decoder is non-fatal, so a multibyte char split at the byte
-  // boundary becomes U+FFFD rather than throwing.
-  const decoded = new TextDecoder().decode(bytes.slice(0, maxBytes));
-  // A multibyte char split at the boundary decodes to U+FFFD; drop it.
-  return decoded.replace(/�$/, "");
+  // Find the boundary by inspecting the bytes rather than decoding a partial
+  // slice: that way we never emit U+FFFD for a split char (and never mistake a
+  // genuine trailing U+FFFD in the input for one). First back off any
+  // continuation bytes (0b10xxxxxx) sitting at the cut...
+  let len = maxBytes;
+  while (len > 0 && ((bytes[len - 1] ?? 0) & 0xc0) === 0x80) {
+    len--;
+  }
+  // ...then, if we're left just after a lead byte whose multibyte sequence the
+  // cut would split, drop that lead byte too; otherwise the whole sequence fit,
+  // so keep up to maxBytes.
+  const lead = bytes[len - 1] ?? 0;
+  if (len > 0 && lead >= 0xc0) {
+    const seqLen = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
+    len = len - 1 + seqLen > maxBytes ? len - 1 : maxBytes;
+  }
+  // subarray is a zero-copy view (unlike slice), and the bytes are now a whole
+  // number of UTF-8 sequences, so the decode is exact.
+  return new TextDecoder().decode(bytes.subarray(0, len));
 }
 
 /** Cap a blob list to AE's count and total-byte limits, truncating the last. */

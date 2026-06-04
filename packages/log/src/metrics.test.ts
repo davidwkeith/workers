@@ -121,6 +121,26 @@ describe("analyticsEngineMetrics", () => {
     expect((index as string).length).toBe(96);
   });
 
+  it("truncates the index on a UTF-8 char boundary, never splitting a char", () => {
+    const dataset = spyDataset();
+    const metrics = analyticsEngineMetrics(dataset);
+    // "😀" is 4 UTF-8 bytes; 25 of them = 100 bytes, over the 96-byte index cap.
+    metrics.count("😀".repeat(25));
+    const index = dataset.points[0]?.indexes?.[0] as string;
+    expect(new TextEncoder().encode(index).length).toBeLessThanOrEqual(96);
+    expect(index).not.toContain("�"); // no split char left behind
+    expect(index).toBe("😀".repeat(24)); // 24 * 4 = 96 bytes, exactly
+  });
+
+  it("preserves a genuine trailing U+FFFD that the cut does not split", () => {
+    const dataset = spyDataset();
+    const metrics = analyticsEngineMetrics(dataset);
+    // 93 ASCII + U+FFFD (3 bytes) = 96 bytes, then an extra char past the cut.
+    metrics.count("a".repeat(93) + "�" + "X");
+    const index = dataset.points[0]?.indexes?.[0] as string;
+    expect(index).toBe("a".repeat(93) + "�");
+  });
+
   it("caps blob count at 20 (event + 19 fields)", () => {
     const dataset = spyDataset();
     const metrics = analyticsEngineMetrics(dataset);
