@@ -514,7 +514,10 @@ describe("@dwk/store fails loudly on missing bindings", () => {
     const id = harness.POD_DO.idFromName(crypto.randomUUID());
     const stub = harness.POD_DO.get(id);
     await runInDurableObject(stub, (instance, state) => {
-      const broken = { ...instance.bindings, BLOBS: undefined } as HarnessEnv;
+      const broken = {
+        ...instance.bindings,
+        BLOBS: undefined,
+      } as unknown as HarnessEnv;
       expect(() => createStore(state, broken)).toThrow(/BLOBS/);
     });
   });
