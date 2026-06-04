@@ -329,18 +329,19 @@ export function createStore(
    *
    * R2 has no server-side copy, so the promotion re-streams through the Worker;
    * that is still bounded and never fully buffered.
+   *
+   * No `httpMetadata.contentType` is recorded on the R2 object: the key is
+   * content-addressed, so distinct resources with the same bytes share one
+   * object, and a per-object content type would be whatever the last writer set —
+   * corrupting a direct-bucket read of another resource. The authoritative
+   * content type lives on the per-resource pointer; reads go through the Worker.
    */
-  async function stageAndHash(
-    stream: ReadableStream,
-    contentType: string,
-  ): Promise<string> {
+  async function stageAndHash(stream: ReadableStream): Promise<string> {
     const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
     try {
       // 1. Stream to staging. A single consumer (R2) means upload backpressure
       //    propagates to the source, so the DO holds only chunks in flight.
-      await env.BLOBS.put(stagingKey, stream, {
-        httpMetadata: { contentType },
-      });
+      await env.BLOBS.put(stagingKey, stream);
       // 2. Hash by streaming the staged object back through a DigestStream.
       const staged = await env.BLOBS.get(stagingKey);
       if (!staged) {
@@ -358,9 +359,7 @@ export function createStore(
             "@dwk/store: staged blob disappeared before promotion",
           );
         }
-        await env.BLOBS.put(blobKey, toCopy.body, {
-          httpMetadata: { contentType },
-        });
+        await env.BLOBS.put(blobKey, toCopy.body);
       }
       return hash;
     } finally {
@@ -370,20 +369,15 @@ export function createStore(
   }
 
   /** Write a blob body to its content-addressed R2 key, returning its hash. */
-  async function writeBlobObject(
-    body: BlobBodyInit,
-    contentType: string,
-  ): Promise<string> {
+  async function writeBlobObject(body: BlobBodyInit): Promise<string> {
     if (body instanceof ReadableStream || body instanceof Blob) {
       const stream = body instanceof Blob ? body.stream() : body;
-      return stageAndHash(stream, contentType);
+      return stageAndHash(stream);
     }
     // Already-resident bytes (small RDF offload): hash and write directly.
     const bytes = toBytes(body);
     const hash = await sha256Hex(bytes);
-    await env.BLOBS.put(`${blobPrefix}/sha256-${hash}`, bytes, {
-      httpMetadata: { contentType },
-    });
+    await env.BLOBS.put(`${blobPrefix}/sha256-${hash}`, bytes);
     return hash;
   }
 
@@ -541,12 +535,15 @@ export function createStore(
       // in-transaction check below remains the TOCTOU-free authority.
       assertPreconditions(key, readResourceRow(key), options);
 
-      // 1. Write the new content-addressed object first, recording the content
-      //    type on the R2 object for direct/public bucket access. Streamed
-      //    bodies are hashed without ever being buffered in the DO.
-      const hash = await writeBlobObject(body, contentType);
+      // 1. Write the new content-addressed object first. Streamed bodies are
+      //    hashed without ever being buffered in the DO. The content hash is the
+      //    R2 key (so identical bytes dedupe to one object), but the ETag is a
+      //    fresh per-write opaque validator — a content-addressed ETag would
+      //    collide across distinct resources sharing the same bytes, so an
+      //    `If-Match` against one could be satisfied by an unrelated other.
+      const hash = await writeBlobObject(body);
       const blobKey = `${blobPrefix}/sha256-${hash}`;
-      const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
+      const etag = randomEtag();
 
       // 2. Atomically flip the pointer and outbox the displaced key.
       try {
