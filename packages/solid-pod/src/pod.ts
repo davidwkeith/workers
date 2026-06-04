@@ -632,18 +632,16 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const declared = parseContentLength(request.headers.get("content-length"));
 
     // Resolve the bytes to keep in memory (small bodies only) versus a body to
-    // stream straight to R2.
+    // stream straight to R2. The declared length only fast-paths the
+    // known-large case; for everything else we read the *actual* body up to the
+    // ceiling rather than trust the header, so a understated `Content-Length`
+    // cannot smuggle an oversized body into memory.
     let inlineBytes: Uint8Array | null;
-    if (declared !== null) {
-      if (declared <= store.maxInlineBytes) {
-        // Known-small: safe to materialize within the ceiling.
-        inlineBytes = new Uint8Array(await request.arrayBuffer());
-      } else {
-        // Known-large: stream to R2, never resident in the DO.
-        inlineBytes = null;
-      }
+    if (declared !== null && declared > store.maxInlineBytes) {
+      // Known-large: stream to R2, never resident in the DO.
+      inlineBytes = null;
     } else {
-      // Undeclared length: probe up to the ceiling without trusting the header.
+      // Small or undeclared: probe up to the ceiling, trusting nothing.
       const peeked = await readUpToLimit(request.body, store.maxInlineBytes);
       if (peeked.kind === "overflow") {
         // Too big to hold and unsized to stream — demand a Content-Length.
@@ -830,9 +828,12 @@ function concatChunks(
  * it is absent or malformed (treated as "length unknown").
  */
 function parseContentLength(header: string | null): number | null {
-  if (header === null) return null;
+  // RFC 9110: Content-Length is 1*DIGIT. Reject anything `Number()` would coerce
+  // loosely (whitespace, "", "0x10", "1e3", signs); a value past safe-integer
+  // range is treated as undeclared so the bounded probe still backstops it.
+  if (header === null || !/^\d+$/.test(header)) return null;
   const value = Number(header);
-  return Number.isInteger(value) && value >= 0 ? value : null;
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 /**

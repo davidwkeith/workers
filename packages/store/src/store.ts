@@ -292,38 +292,50 @@ export function createStore(
 
   /**
    * Stream a blob body to R2 without ever buffering it in the DO, returning its
-   * content hash. The body is `tee`'d: one branch uploads to a random staging
-   * key, the other is hashed by a `DigestStream` (a WritableStream that retains
-   * no data). Once the hash is known, the staged object is promoted to its
-   * content-addressed key — skipped when an identical body already exists, so
-   * writes still dedupe. R2 has no server-side copy, so the promotion re-streams
-   * through the Worker; that is still bounded and never fully buffered.
+   * content hash. Each step is a single-consumer stream so R2 backpressure
+   * governs the flow — no `tee`, whose faster branch could buffer the whole body
+   * in the DO:
+   *
+   *   1. stream the body straight to a random staging key (R2 throttles it);
+   *   2. read the staged object back through a `DigestStream` (a WritableStream
+   *      that retains no data) to compute its content hash;
+   *   3. promote the staged object to its content-addressed key — skipped when
+   *      an identical body already exists, so writes still dedupe.
+   *
+   * R2 has no server-side copy, so the promotion re-streams through the Worker;
+   * that is still bounded and never fully buffered.
    */
   async function stageAndHash(
     stream: ReadableStream,
     contentType: string,
   ): Promise<string> {
     const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
-    const [toStore, toHash] = stream.tee();
-    const digest = new crypto.DigestStream("SHA-256");
-    // Hash concurrently with the upload; `put` drives the other tee branch. The
-    // pipe is settled via `digest.digest` below; guard it so a failed upload
-    // doesn't surface the same error as an unhandled rejection.
-    const hashed = toHash.pipeTo(digest).catch(() => {});
     try {
-      await env.BLOBS.put(stagingKey, toStore, {
+      // 1. Stream to staging. A single consumer (R2) means upload backpressure
+      //    propagates to the source, so the DO holds only chunks in flight.
+      await env.BLOBS.put(stagingKey, stream, {
         httpMetadata: { contentType },
       });
-      await hashed;
+      // 2. Hash by streaming the staged object back through a DigestStream.
+      const staged = await env.BLOBS.get(stagingKey);
+      if (!staged) {
+        throw new Error("@dwk/store: staged blob disappeared before hashing");
+      }
+      const digest = new crypto.DigestStream("SHA-256");
+      await staged.body.pipeTo(digest);
       const hash = toHex(await digest.digest);
+      // 3. Promote to the content-addressed key, deduping on an existing body.
       const blobKey = `${blobPrefix}/sha256-${hash}`;
       if ((await env.BLOBS.head(blobKey)) === null) {
-        const staged = await env.BLOBS.get(stagingKey);
-        if (staged) {
-          await env.BLOBS.put(blobKey, staged.body, {
-            httpMetadata: { contentType },
-          });
+        const toCopy = await env.BLOBS.get(stagingKey);
+        if (!toCopy) {
+          throw new Error(
+            "@dwk/store: staged blob disappeared before promotion",
+          );
         }
+        await env.BLOBS.put(blobKey, toCopy.body, {
+          httpMetadata: { contentType },
+        });
       }
       return hash;
     } finally {

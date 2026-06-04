@@ -121,7 +121,9 @@ function absoluteUrl(value: string, base: string): string {
  */
 function contentLengthExceeds(request: Request, limit: number): boolean {
   const header = request.headers.get("content-length");
-  if (header === null) return false;
+  // RFC 9110: Content-Length is 1*DIGIT. Only a strictly-numeric header is a
+  // usable early gate; anything else falls through to the `file.size` check.
+  if (header === null || !/^\d+$/.test(header)) return false;
   const length = Number(header);
   return Number.isFinite(length) && length > limit;
 }
