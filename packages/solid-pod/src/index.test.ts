@@ -175,7 +175,10 @@ interface Pod {
   send(method: string, path: string, init?: ReqInit): Promise<Response>;
 }
 
-function freshPod(owner: string = OWNER): Pod {
+function freshPod(
+  owner: string = OWNER,
+  opts: { allowAnonymousWrites?: boolean } = {},
+): Pod {
   const base = `https://${crypto.randomUUID()}.pod.example`;
   const handler = createSolidPod({
     baseUrl: base,
@@ -183,6 +186,9 @@ function freshPod(owner: string = OWNER): Pod {
     audience: "solid",
     jwks: [issuerJwk],
     owner,
+    ...(opts.allowAnonymousWrites !== undefined
+      ? { allowAnonymousWrites: opts.allowAnonymousWrites }
+      : {}),
   });
   return {
     base,
@@ -447,6 +453,111 @@ describe("@dwk/solid-pod DPoP replay", () => {
       jti,
     });
     expect(replay.status).toBe(401);
+  });
+
+  it("does not burn the jti when a precondition fails (issue #34)", async () => {
+    const pod = freshPod();
+    const created = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const etag = created.headers.get("etag")!;
+    expect(etag).toBeTruthy();
+
+    // A stale If-Match rejects the write (412) before the jti is consumed.
+    const jti = crypto.randomUUID();
+    const stale = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#d> .",
+      headers: { "content-type": TURTLE, "if-match": '"stale"' },
+      jti,
+    });
+    expect(stale.status).toBe(412);
+
+    // Reusing the same jti on a now-valid retry succeeds: the failed
+    // precondition rolled back the replay row instead of burning the proof.
+    const retry = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#d> .",
+      headers: { "content-type": TURTLE, "if-match": etag },
+      jti,
+    });
+    expect(retry.status).toBe(204);
+  });
+
+  it("does not burn the jti when a patch fails to bind (issue #34)", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/card", {
+      webid: OWNER,
+      body: `@prefix ex: <http://example.org/> .
+<https://x/me> ex:name "Old" .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const jti = crypto.randomUUID();
+    const noBind = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:where   { <https://x/me> ex:name "Nope" . } ;
+  solid:inserts { <https://x/me> ex:note "x" . } .`;
+    const conflict = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: noBind,
+      headers: { "content-type": "text/n3" },
+      jti,
+    });
+    expect(conflict.status).toBe(409);
+
+    // The same jti drives a patch that does bind — proof was not consumed.
+    const binds = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:where   { <https://x/me> ex:name "Old" . } ;
+  solid:inserts { <https://x/me> ex:note "x" . } .`;
+    const ok = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: binds,
+      headers: { "content-type": "text/n3" },
+      jti,
+    });
+    expect(ok.status).toBe(204);
+  });
+});
+
+describe("@dwk/solid-pod anonymous writes", () => {
+  /** Owner grants the public agent class Read+Write on `path`. */
+  async function grantPublicWrite(pod: Pod, path: string): Promise<void> {
+    const acl = await pod.send("PUT", `${path}.acl`, {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+<#r> a acl:Authorization ; acl:accessTo <${pod.base}${path}> ;
+  acl:agentClass foaf:Agent ; acl:mode acl:Read, acl:Write .`,
+      headers: { "content-type": TURTLE },
+    });
+    expect(acl.status).toBe(201);
+  }
+
+  it("refuses a proof-less write even where WAC grants the public (issue #34)", async () => {
+    const pod = freshPod();
+    await grantPublicWrite(pod, "/pub");
+    const anon = await pod.send("PUT", "/pub", {
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    expect(anon.status).toBe(401);
+    expect(anon.headers.get("www-authenticate")).toContain("DPoP");
+  });
+
+  it("permits a proof-less public write only when explicitly opted in", async () => {
+    const pod = freshPod(OWNER, { allowAnonymousWrites: true });
+    await grantPublicWrite(pod, "/pub");
+    const anon = await pod.send("PUT", "/pub", {
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    expect(anon.status).toBe(201);
   });
 });
 
