@@ -67,7 +67,10 @@ describe("readBytesCapped", () => {
 
   it("reads a null-body response via arrayBuffer", async () => {
     // A 204 has no body; arrayBuffer() yields an empty buffer.
-    const bytes = await readBytesCapped(new Response(null, { status: 204 }), 10);
+    const bytes = await readBytesCapped(
+      new Response(null, { status: 204 }),
+      10,
+    );
     expect(bytes).not.toBeNull();
     expect(bytes!.byteLength).toBe(0);
   });

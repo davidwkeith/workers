@@ -137,7 +137,8 @@ describe("safeFetch", () => {
 
   it("returns a redirect response whose Location is empty", async () => {
     const doFetch: FetchLike = vi.fn(
-      async () => new Response(null, { status: 301, headers: { location: "" } }),
+      async () =>
+        new Response(null, { status: 301, headers: { location: "" } }),
     );
     const { response } = await safeFetch(doFetch, "https://example.com/", {
       method: "GET",
