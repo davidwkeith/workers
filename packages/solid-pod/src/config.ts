@@ -72,6 +72,16 @@ export interface SolidPodConfig {
    */
   readonly audience?: string | readonly string[];
 
+  /**
+   * Required access-token header `typ`. Solid-OIDC / RFC 9068 access tokens
+   * carry `typ: at+jwt`; enforcing it stops an ID token or other issuer-signed
+   * JWT sharing the same `iss`/`aud`/`webid` from being replayed as an access
+   * token (token-type confusion). Compared case-insensitively, tolerating the
+   * `application/at+jwt` media-type form. Set to `null` to skip the check for
+   * issuers that omit `typ`. Defaults to `"at+jwt"`.
+   */
+  readonly accessTokenType?: string | null;
+
   /** Static JWK verification keys for the issuer (hermetic alternative to {@link jwksUri}). */
   readonly jwks?: Jwks;
 
@@ -133,6 +143,7 @@ export interface ResolvedConfig {
   readonly owners: readonly string[];
   readonly issuer?: string;
   readonly audience: readonly string[];
+  readonly accessTokenType: string | null;
   readonly jwks?: Jwks;
   readonly jwksUri?: string;
   readonly maxInlineBytes?: number;
@@ -190,6 +201,8 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
     owners,
     issuer: config.issuer,
     audience,
+    accessTokenType:
+      config.accessTokenType === undefined ? "at+jwt" : config.accessTokenType,
     jwks: config.jwks,
     jwksUri: config.jwksUri,
     maxInlineBytes: config.maxInlineBytes,
