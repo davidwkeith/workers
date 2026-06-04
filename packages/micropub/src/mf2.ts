@@ -40,22 +40,26 @@ export interface UpdateOperations {
 const RESERVED_FORM_KEYS = new Set(["access_token", "action", "url", "h"]);
 
 /**
- * Whether a key may never appear as a stored mf2 property: the `mp-*` command
- * namespace plus the structural/reserved request fields. Create strips these
- * (via {@link extractCommands} and `RESERVED_FORM_KEYS`); update operands run
- * through the same gate so an update cannot persist a key a create would reject.
+ * Whether a key is an `mp-*` Micropub command rather than a stored property.
+ * Create strips these via {@link extractCommands}; update operands run through
+ * the same gate so an update cannot persist a command a create would reject.
+ *
+ * Only the `mp-*` namespace is stripped — `url`, `name`, etc. are legitimate
+ * microformats2 properties that JSON create keeps (the post's canonical
+ * identity URL is a separate store column, not the mf2 `url` property), so
+ * stripping them would silently drop a valid edit.
  */
-function isReservedPropertyKey(key: string): boolean {
-  return key.startsWith("mp-") || RESERVED_FORM_KEYS.has(key);
+function isCommandKey(key: string): boolean {
+  return key.startsWith("mp-");
 }
 
-/** Drop reserved/command keys from a property map (see {@link isReservedPropertyKey}). */
-function stripReservedKeys(
+/** Drop `mp-*` command keys from a property map (see {@link isCommandKey}). */
+function stripCommandKeys(
   map: Record<string, unknown[]>,
 ): Record<string, unknown[]> {
   const out: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(map)) {
-    if (!isReservedPropertyKey(key)) out[key] = values;
+    if (!isCommandKey(key)) out[key] = values;
   }
   return out;
 }
@@ -229,14 +233,15 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
     delete?: string[] | Record<string, unknown[]>;
   } = {};
 
-  // Strip `mp-*`/reserved keys from every operand, mirroring create: an update
-  // must not be able to persist `mp-slug`, `url`, etc. into stored properties
-  // where create rejects them (they would otherwise surface via `q=source`).
+  // Strip `mp-*` command keys from every operand, mirroring create: an update
+  // must not be able to persist `mp-slug`/`mp-syndicate-to` into stored
+  // properties where create rejects them (they would otherwise surface via
+  // `q=source`). Real mf2 properties (`url`, `name`, …) pass through unchanged.
   if (body.replace !== undefined) {
-    ops.replace = stripReservedKeys(asPropertyMap(body.replace, "replace"));
+    ops.replace = stripCommandKeys(asPropertyMap(body.replace, "replace"));
   }
   if (body.add !== undefined) {
-    ops.add = stripReservedKeys(asPropertyMap(body.add, "add"));
+    ops.add = stripCommandKeys(asPropertyMap(body.add, "add"));
   }
   if (body.delete !== undefined) {
     const del = body.delete;
@@ -244,9 +249,9 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
       if (!del.every((k) => typeof k === "string")) {
         throw new Mf2ParseError("`delete` array must contain property names");
       }
-      ops.delete = (del as string[]).filter((k) => !isReservedPropertyKey(k));
+      ops.delete = (del as string[]).filter((k) => !isCommandKey(k));
     } else {
-      ops.delete = stripReservedKeys(asPropertyMap(del, "delete"));
+      ops.delete = stripCommandKeys(asPropertyMap(del, "delete"));
     }
   }
   return ops;

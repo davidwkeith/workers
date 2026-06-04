@@ -902,7 +902,7 @@ describe("@dwk/micropub error codes", () => {
 });
 
 describe("@dwk/micropub update key stripping", () => {
-  it("strips mp-*/reserved keys from update operands", async () => {
+  it("strips mp-* commands from update operands but keeps real properties", async () => {
     const minted = await mintToken("create update");
     const create = await handler(
       new Request(MICROPUB, {
@@ -934,9 +934,11 @@ describe("@dwk/micropub update key stripping", () => {
           replace: {
             content: ["edited"],
             "mp-slug": ["sneaky"],
-            url: ["https://evil.example/"],
+            // `url` is a legitimate mf2 property (e.g. a bookmark target) and
+            // must survive the command-key filter.
+            url: ["https://example.com/canonical"],
           },
-          add: { "mp-syndicate-to": ["https://evil.example/feed"] },
+          add: { "mp-syndicate-to": ["https://example.org/feed"] },
         }),
       }),
       harness,
@@ -955,10 +957,13 @@ describe("@dwk/micropub update key stripping", () => {
       properties: Record<string, unknown[]>;
     };
     expect(sourceBody.properties.content).toEqual(["edited"]);
-    // The command/reserved keys never reach stored properties.
+    // `mp-*` commands never reach stored properties...
     expect(sourceBody.properties["mp-slug"]).toBeUndefined();
     expect(sourceBody.properties["mp-syndicate-to"]).toBeUndefined();
-    expect(sourceBody.properties.url).toBeUndefined();
+    // ...but a real mf2 property like `url` is updated normally.
+    expect(sourceBody.properties.url).toEqual([
+      "https://example.com/canonical",
+    ]);
   });
 });
 

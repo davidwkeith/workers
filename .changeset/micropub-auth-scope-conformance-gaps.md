@@ -21,8 +21,9 @@ Close four auth/scope and conformance gaps in `@dwk/micropub` (issue #39):
   non-standard `not_found`/`conflict` codes now use `invalid_request` while
   keeping their `404`/`409` HTTP status, so conformance clients keying on
   `error` recognize them.
-- **Update operands are stripped of `mp-*`/reserved keys.** `applyUpdate`
-  previously applied `replace`/`add`/`delete` operands directly, letting a
-  client persist `mp-slug`/`url`/etc. into stored properties (surfacing via
-  `q=source`) where create rejects them. Update operands now run through the
-  same command/reserved-key filtering as create.
+- **Update operands are stripped of `mp-*` commands.** `applyUpdate` previously
+  applied `replace`/`add`/`delete` operands directly, letting a client persist
+  `mp-slug`/`mp-syndicate-to` into stored properties (surfacing via `q=source`)
+  where create rejects them. Update operands now run through the same `mp-*`
+  command filtering as create, while real mf2 properties (`url`, `name`, …) pass
+  through unchanged.
