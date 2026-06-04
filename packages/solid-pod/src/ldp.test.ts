@@ -4,6 +4,7 @@ import {
   aclPath,
   ancestorContainers,
   childKey,
+  hasReservedAuxiliarySuffix,
   isAclPath,
   isContainer,
   parentContainer,
@@ -48,5 +49,17 @@ describe("@dwk/solid-pod ldp helpers", () => {
     // No usable slug → a random (uuid-shaped) name.
     expect(childKey("/c/", null, false)).toMatch(/^\/c\/[0-9a-f-]{36}$/);
     expect(childKey("/c/", "  ", false)).toMatch(/^\/c\/[0-9a-f-]{36}$/);
+  });
+
+  it("never mints a reserved auxiliary resource from a Slug (issue #28)", () => {
+    expect(hasReservedAuxiliarySuffix("evil.acl")).toBe(true);
+    expect(hasReservedAuxiliarySuffix("evil.meta")).toBe(true);
+    expect(hasReservedAuxiliarySuffix("evil")).toBe(false);
+    // A Slug that would create an `.acl`/`.meta` falls back to a random name,
+    // never the reserved key the client asked for.
+    expect(childKey("/c/", "evil.acl", false)).toMatch(/^\/c\/[0-9a-f-]{36}$/);
+    expect(childKey("/c/", "evil.meta", false)).toMatch(/^\/c\/[0-9a-f-]{36}$/);
+    // A benign name with an inner dot is still honored.
+    expect(childKey("/c/", "notes.txt", false)).toBe("/c/notes.txt");
   });
 });
