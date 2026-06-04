@@ -25,7 +25,9 @@
  * @packageDocumentation
  */
 
+import { noopLogger, type Logger } from "@dwk/log";
 import type { FetchLike } from "./fetch";
+import { WebmentionLogEvent } from "./log";
 
 /** Default cap on redirect hops before a fetch is abandoned. */
 export const DEFAULT_MAX_REDIRECTS = 5;
@@ -36,14 +38,35 @@ export const DEFAULT_TIMEOUT_MS = 10_000;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
+ * Machine-readable cause of an {@link SsrfError}, suitable for logging as a
+ * structured field (no free-text parsing required).
+ */
+export type SsrfReason =
+  | "invalid_url"
+  | "disallowed_scheme"
+  | "blocked_host"
+  | "too_many_redirects";
+
+/**
  * Raised when a request is refused on SSRF grounds (blocked host, disallowed
  * scheme, or too many redirects). Callers catch this exactly like a network
- * failure — a blocked attempt looks the same as an unreachable host.
+ * failure — a blocked attempt looks the same as an unreachable host — but
+ * {@link safeFetch} logs it first (event `webmention.ssrf.blocked`) so the
+ * single most security-relevant event in the package still produces a signal.
+ *
+ * Carries the structured {@link reason} and, when known, the sanitized
+ * {@link host} so a logger can record them as queryable fields.
  */
 export class SsrfError extends Error {
-  constructor(message: string) {
+  /** Machine-readable cause. */
+  readonly reason: SsrfReason;
+  /** The offending host (name plus any port), when one is known. */
+  readonly host?: string;
+  constructor(message: string, reason: SsrfReason, host?: string) {
     super(message);
     this.name = "SsrfError";
+    this.reason = reason;
+    this.host = host;
   }
 }
 
@@ -252,13 +275,21 @@ export function assertPublicUrl(rawUrl: string): URL {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new SsrfError(`invalid URL: ${rawUrl}`);
+    throw new SsrfError(`invalid URL: ${rawUrl}`, "invalid_url");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new SsrfError(`disallowed scheme: ${url.protocol}`);
+    throw new SsrfError(
+      `disallowed scheme: ${url.protocol}`,
+      "disallowed_scheme",
+      url.hostname,
+    );
   }
   if (isPrivateOrReservedHost(url.hostname)) {
-    throw new SsrfError(`blocked host: ${url.hostname}`);
+    throw new SsrfError(
+      `blocked host: ${url.hostname}`,
+      "blocked_host",
+      url.hostname,
+    );
   }
   return url;
 }
@@ -269,6 +300,8 @@ export interface SafeFetchOptions {
   readonly maxRedirects?: number;
   /** Overall timeout in ms, redirects included (default {@link DEFAULT_TIMEOUT_MS}). */
   readonly timeoutMs?: number;
+  /** Logger for SSRF blocks; defaults to a no-op (see `@dwk/log`). */
+  readonly logger?: Logger;
 }
 
 /** A completed {@link safeFetch}: the final response and the URL it came from. */
@@ -301,51 +334,69 @@ export async function safeFetch(
 ): Promise<SafeFetchResult> {
   const maxRedirects = options?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const logger = options?.logger ?? noopLogger;
   const signal = AbortSignal.timeout(timeoutMs);
 
-  let currentUrl = assertPublicUrl(rawUrl).toString();
-  let currentInit: RequestInit = { ...init };
-  for (let hop = 0; ; hop++) {
-    const response = await doFetch(currentUrl, {
-      ...currentInit,
-      redirect: "manual",
-      signal,
-    });
+  // A blocked request is the single most security-relevant event here, so log
+  // it (with its structured reason + sanitized host) before re-throwing — an
+  // operator being actively probed sees a distinct signal instead of silence.
+  try {
+    let currentUrl = assertPublicUrl(rawUrl).toString();
+    let currentInit: RequestInit = { ...init };
+    for (let hop = 0; ; hop++) {
+      const response = await doFetch(currentUrl, {
+        ...currentInit,
+        redirect: "manual",
+        signal,
+      });
 
-    if (!REDIRECT_STATUSES.has(response.status)) {
-      return { response, url: currentUrl };
-    }
-
-    const location = response.headers.get("location");
-    if (location === null || location === "") {
-      // A redirect with nothing to follow — hand it back as the final response.
-      return { response, url: currentUrl };
-    }
-    if (hop >= maxRedirects) {
-      throw new SsrfError(`too many redirects (> ${maxRedirects})`);
-    }
-
-    // Resolve the next hop against the current URL and re-validate its host
-    // before following — a public host must not be able to bounce us inward.
-    const next = assertPublicUrl(new URL(location, currentUrl).toString());
-    // Drain the redirect body so the connection can be reused/closed.
-    await response.body?.cancel().catch(() => undefined);
-
-    // Strip credential-bearing headers on a cross-origin hop, matching what a
-    // browser's `fetch` does, so a redirect cannot leak them to a new origin.
-    if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
-      const headers = new Headers(currentInit.headers as HeadersInit);
-      for (const name of [
-        "authorization",
-        "cookie",
-        "cookie2",
-        "proxy-authorization",
-        "set-cookie",
-      ]) {
-        headers.delete(name);
+      if (!REDIRECT_STATUSES.has(response.status)) {
+        return { response, url: currentUrl };
       }
-      currentInit = { ...currentInit, headers };
+
+      const location = response.headers.get("location");
+      if (location === null || location === "") {
+        // A redirect with nothing to follow — hand back as the final response.
+        return { response, url: currentUrl };
+      }
+      if (hop >= maxRedirects) {
+        throw new SsrfError(
+          `too many redirects (> ${maxRedirects})`,
+          "too_many_redirects",
+          new URL(currentUrl).host,
+        );
+      }
+
+      // Resolve the next hop against the current URL and re-validate its host
+      // before following — a public host must not be able to bounce us inward.
+      const next = assertPublicUrl(new URL(location, currentUrl).toString());
+      // Drain the redirect body so the connection can be reused/closed.
+      await response.body?.cancel().catch(() => undefined);
+
+      // Strip credential-bearing headers on a cross-origin hop, matching what a
+      // browser's `fetch` does, so a redirect cannot leak them to a new origin.
+      if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
+        const headers = new Headers(currentInit.headers as HeadersInit);
+        for (const name of [
+          "authorization",
+          "cookie",
+          "cookie2",
+          "proxy-authorization",
+          "set-cookie",
+        ]) {
+          headers.delete(name);
+        }
+        currentInit = { ...currentInit, headers };
+      }
+      currentUrl = next.toString();
     }
-    currentUrl = next.toString();
+  } catch (err) {
+    if (err instanceof SsrfError) {
+      logger.warn(WebmentionLogEvent.SsrfBlocked, {
+        reason: err.reason,
+        host: err.host,
+      });
+    }
+    throw err;
   }
 }

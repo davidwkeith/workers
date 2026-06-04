@@ -8,14 +8,18 @@
  * @packageDocumentation
  */
 
+import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
 import { discoverEndpoint } from "./discovery";
 import type { FetchLike } from "./fetch";
+import { WebmentionLogEvent } from "./log";
 import { safeFetch } from "./safe-fetch";
 
 /** Options for {@link sendWebmention} / {@link sendWebmentions}. */
 export interface SendOptions {
   /** `fetch` implementation to use; defaults to the global `fetch`. */
   readonly fetch?: FetchLike;
+  /** Logger for send outcomes; defaults to a no-op (see `@dwk/log`). */
+  readonly logger?: Logger;
 }
 
 /** Outcome of attempting to notify a single target. */
@@ -41,12 +45,24 @@ export async function sendWebmention(
 ): Promise<SendResult> {
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
+  const logger = options?.logger ?? noopLogger;
 
-  const endpoint = await discoverEndpoint(target, { fetch: doFetch });
+  const logOutcome = (result: SendResult): SendResult => {
+    logger.info(WebmentionLogEvent.SendCompleted, {
+      targetHost: hostFromUrl(target),
+      endpointHost:
+        result.endpoint === null ? undefined : hostFromUrl(result.endpoint),
+      delivered: result.delivered,
+      status: result.status,
+    });
+    return result;
+  };
+
+  const endpoint = await discoverEndpoint(target, { fetch: doFetch, logger });
   // Only notify http(s) endpoints: a page could advertise a `javascript:`,
   // `file:`, or `mailto:` endpoint, which we must never fetch.
   if (endpoint === null || !/^https?:$/i.test(new URL(endpoint).protocol)) {
-    return { target, endpoint: null, delivered: false, status: 0 };
+    return logOutcome({ target, endpoint: null, delivered: false, status: 0 });
   }
 
   const body = new URLSearchParams({ source, target }).toString();
@@ -55,22 +71,27 @@ export async function sendWebmention(
     // Notify through the SSRF-safe wrapper: the discovered endpoint host (and
     // any redirect hop) is validated against private/loopback ranges and the
     // POST is bounded by a timeout.
-    const result = await safeFetch(doFetch, endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
+    const result = await safeFetch(
+      doFetch,
+      endpoint,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      },
+      { logger },
+    );
     response = result.response;
   } catch {
-    return { target, endpoint, delivered: false, status: 0 };
+    return logOutcome({ target, endpoint, delivered: false, status: 0 });
   }
 
-  return {
+  return logOutcome({
     target,
     endpoint,
     delivered: response.ok,
     status: response.status,
-  };
+  });
 }
 
 /**

@@ -44,6 +44,21 @@ Implications:
 - **No ACL / decision caching outside strongly-consistent layers.**
 - **Least-privilege bindings** — a package gets only the bindings it declares.
 
+## Observability
+
+- Packages MUST expose an **injectable** logging seam (the `Logger` interface
+  from [`@dwk/log`](../packages/log)) via their config/options, defaulting to a
+  **no-op** — logging is opt-in and packages MUST NOT reach for a global logger
+  or read the environment for one.
+- Logs MUST be **structured events** (a stable dotted event name + structured
+  fields), not free text, so they are queryable. Security-relevant events (a
+  blocked SSRF attempt, auth/authz rejections, validation rejections) MUST be
+  first-class and MUST NOT be silently swallowed.
+- **Redaction:** tokens, credentials, and full request/response bodies MUST NOT
+  be logged; URLs are logged as host-only.
+- See [observability.md](observability.md) for the full requirement, the
+  severity guide, and the event-taxonomy convention.
+
 ## Distribution
 
 - **Independent semver per package.**

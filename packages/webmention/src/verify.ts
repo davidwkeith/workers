@@ -11,6 +11,7 @@
  * @packageDocumentation
  */
 
+import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
 import {
   getAttr,
   matchTags,
@@ -19,6 +20,7 @@ import {
   stripComments,
 } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
+import { WebmentionLogEvent } from "./log";
 import { safeFetch } from "./safe-fetch";
 
 /** Elements whose `href` may constitute a link to the target. */
@@ -85,6 +87,24 @@ export function sourceLinksTo(
 export interface VerifyOptions {
   /** `fetch` implementation to use; defaults to the global `fetch`. */
   readonly fetch?: FetchLike;
+  /** Logger for verification outcomes/failures; defaults to a no-op. */
+  readonly logger?: Logger;
+}
+
+/** Log a verification outcome (sanitized hosts only) and return the result. */
+function logVerifyOutcome(
+  logger: Logger,
+  source: string,
+  target: string,
+  result: VerifyResult,
+): VerifyResult {
+  logger.info(WebmentionLogEvent.VerifyCompleted, {
+    sourceHost: hostFromUrl(source),
+    targetHost: hostFromUrl(target),
+    links: result.links,
+    status: result.status,
+  });
+  return result;
 }
 
 /** Outcome of fetching and checking a source document. */
@@ -112,33 +132,48 @@ export async function verifySource(
 ): Promise<VerifyResult> {
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
+  const logger = options?.logger ?? noopLogger;
 
   let response: Response;
   let base: string;
   try {
-    const result = await safeFetch(doFetch, source, {
-      method: "GET",
-      headers: { accept: "text/html, */*" },
-    });
+    const result = await safeFetch(
+      doFetch,
+      source,
+      { method: "GET", headers: { accept: "text/html, */*" } },
+      { logger },
+    );
     response = result.response;
     base = result.url;
-  } catch {
+  } catch (err) {
+    // A blocked attempt is already logged as `ssrf.blocked` inside safeFetch;
+    // record the verification-level failure too so the outcome isn't silent.
+    logger.debug(WebmentionLogEvent.VerifyFetchFailed, {
+      sourceHost: hostFromUrl(source),
+      error: err instanceof Error ? err.name : "unknown",
+    });
     return { links: false, status: 0 };
   }
 
   if (!response.ok) {
-    return { links: false, status: response.status };
+    return logVerifyOutcome(logger, source, target, {
+      links: false,
+      status: response.status,
+    });
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   const body = await readBodyCapped(response);
   if (body === null) {
     // Unreadable or oversized body: treat as no longer endorsing the mention.
-    return { links: false, status: response.status };
+    return logVerifyOutcome(logger, source, target, {
+      links: false,
+      status: response.status,
+    });
   }
 
-  return {
+  return logVerifyOutcome(logger, source, target, {
     links: sourceLinksTo(body, target, base, contentType),
     status: response.status,
-  };
+  });
 }

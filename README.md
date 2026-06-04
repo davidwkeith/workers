@@ -34,6 +34,7 @@ serverless edge compute that scales to zero.
 | [`@dwk/wac`](spec/packages/wac.md) | lib | Web Access Control evaluation (effective-ACL walk, Append vs Write). Used by `solid-pod`. |
 | [`@dwk/dpop`](spec/packages/dpop.md) | lib | DPoP proof verification. Shared by `indieauth` token validation and `solid-pod` Resource Server. |
 | [`@dwk/rdf`](spec/packages/rdf.md) | lib | Thin Turtle/JSON-LD parse + serialize over N3.js; triple ↔ store helpers. Edge-budget-conscious. |
+| [`@dwk/log`](spec/packages/log.md) | lib | Injectable structured-logging seam (`Logger` + no-op/console loggers). Cross-standard reusable; protocol-agnostic. |
 | [`@dwk/store`](spec/packages/store.md) | lib | DO-SQLite quad store + R2 copy-on-write blob bodies behind one storage-agnostic interface. |
 
 **Mental model:** stateless Worker front door → per-pod Durable Object as the

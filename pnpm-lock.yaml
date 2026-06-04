@@ -47,6 +47,8 @@ importers:
         specifier: workspace:*
         version: link:../dpop
 
+  packages/log: {}
+
   packages/micropub:
     dependencies:
       '@dwk/dpop':
@@ -92,7 +94,11 @@ importers:
         specifier: workspace:*
         version: link:../rdf
 
-  packages/webmention: {}
+  packages/webmention:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
 
 packages:
 

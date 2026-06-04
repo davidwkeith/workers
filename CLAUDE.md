@@ -12,7 +12,7 @@ central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
 **Status: draft / pre-implementation.** The libraries `@dwk/dpop`, `@dwk/rdf`,
-`@dwk/wac`, and `@dwk/store` carry real logic; the endpoint packages
+`@dwk/wac`, `@dwk/log`, and `@dwk/store` carry real logic; the endpoint packages
 (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`, `@dwk/solid-pod`) ship a
 typed, stubbed public surface that returns `501 Not Implemented`. When
 implementing behaviour, the authoritative requirements are the per-package specs
@@ -68,9 +68,10 @@ pushing.
 
 - **Endpoint packages** — named for the standard: `@dwk/indieauth`,
   `@dwk/micropub`, `@dwk/webmention`, `@dwk/solid-pod`.
-- **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`. These MUST stay
-  free of IndieWeb/Solid assumptions so future `@dwk` standards adopt them
-  unchanged. This is a hard constraint, not a preference.
+- **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`. These
+  MUST stay free of IndieWeb/Solid assumptions so future `@dwk` standards adopt
+  them unchanged. This is a hard constraint, not a preference. `@dwk/log` is the
+  injectable structured-logging seam (see `spec/observability.md`).
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 
@@ -142,7 +143,7 @@ Each package's `vitest.config.ts` picks one of two environments — get this rig
 when adding a package:
 
 - **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
-  `@dwk/wac`. They take plain-data inputs and need no Workers runtime.
+  `@dwk/wac`, `@dwk/log`. They take plain-data inputs and need no Workers runtime.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`,

@@ -18,6 +18,7 @@ bundle stays inside the platform limits (see
 | `@dwk/wac` | lib | Web Access Control evaluation (effective-ACL walk, Append vs Write). Used by `solid-pod`. |
 | `@dwk/dpop` | lib | DPoP proof verification. Shared by `indieauth` token validation and `solid-pod` Resource Server. |
 | `@dwk/rdf` | lib | Thin Turtle/JSON-LD parse + serialize over N3.js; triple ↔ store helpers. Edge-budget-conscious. |
+| `@dwk/log` | lib | Injectable structured-logging seam (the `Logger` interface + no-op/console loggers). Cross-standard reusable; protocol-agnostic. |
 | `@dwk/store` | lib | Encapsulates the DO-SQLite quad store + R2 copy-on-write blob bodies behind one interface, keeping endpoint packages storage-agnostic and unit-testable. |
 
 ## Mental model
@@ -55,7 +56,7 @@ This matters because `@dwk` will grow to cover more standards.
   (`@dwk/micropub`, `@dwk/solid-pod`).
 - **Primitives** are two kinds:
   - **Cross-standard reusables** that future `@dwk` packages should share
-    (`@dwk/rdf`, `@dwk/dpop`). These MUST stay free of IndieWeb/Solid
+    (`@dwk/rdf`, `@dwk/dpop`, `@dwk/log`). These MUST stay free of IndieWeb/Solid
     assumptions so the next standard can adopt them unchanged.
   - **Standard-specific helpers** (`@dwk/wac`) — tied to one standard by design.
 

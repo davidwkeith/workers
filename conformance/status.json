@@ -86,6 +86,14 @@
         "cases": []
       }
     },
+    "@dwk/log": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/store": {
       "standard": null,
       "suites": {},
