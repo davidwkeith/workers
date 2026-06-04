@@ -996,3 +996,114 @@ describe("@dwk/micropub fails loudly on missing bindings", () => {
     ).rejects.toThrow(/TOKEN_SIGNING_KEY/);
   });
 });
+
+describe("@dwk/micropub routing and method handling", () => {
+  it("answers an OPTIONS preflight with CORS headers", async () => {
+    const res = await handler(
+      new Request(MICROPUB, { method: "OPTIONS" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("returns 405 for an unsupported method on the micropub endpoint", async () => {
+    const res = await handler(
+      new Request(MICROPUB, { method: "PUT" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toContain("POST");
+  });
+
+  it("returns 405 for a non-POST on the media endpoint", async () => {
+    const res = await handler(new Request(MEDIA), harness, ctx);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toContain("POST");
+  });
+
+  it("returns 404 for an unrouted path", async () => {
+    const res = await handler(new Request(`${BASE}/nope`), harness, ctx);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("@dwk/micropub query and action edge cases", () => {
+  it("rejects an unsupported query type", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=mystery`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("rejects q=source without a url", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=source`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for q=source on a non-existent post", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=source&url=${BASE}/posts/ghost`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects an unknown action", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "frobnicate", url: `${BASE}/posts/x` }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("rejects a malformed JSON body", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "application/json",
+        },
+        body: "{not valid json",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+});

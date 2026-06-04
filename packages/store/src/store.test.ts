@@ -508,3 +508,17 @@ describe("@dwk/store size-threshold routing", () => {
     );
   });
 });
+
+describe("@dwk/store fails loudly on missing bindings", () => {
+  it("throws when the required R2 binding is absent", async () => {
+    const id = harness.POD_DO.idFromName(crypto.randomUUID());
+    const stub = harness.POD_DO.get(id);
+    await runInDurableObject(stub, (instance, state) => {
+      const broken = {
+        ...instance.bindings,
+        BLOBS: undefined,
+      } as unknown as HarnessEnv;
+      expect(() => createStore(state, broken)).toThrow(/BLOBS/);
+    });
+  });
+});

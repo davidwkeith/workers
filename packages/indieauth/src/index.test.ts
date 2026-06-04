@@ -753,6 +753,193 @@ describe("@dwk/indieauth hardening (issue #41)", () => {
   });
 });
 
+describe("@dwk/indieauth routing and method handling", () => {
+  it("returns 405 for a non-GET on the metadata endpoint", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/.well-known/oauth-authorization-server`, {
+        method: "POST",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("GET");
+  });
+
+  it("returns 405 for a non-POST on the token endpoint", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(new Request(`${BASE}/token`), harness, ctx);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+  });
+
+  it("returns 405 for a non-POST on the revocation endpoint", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(new Request(`${BASE}/revocation`), harness, ctx);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+  });
+
+  it("returns 405 for an unsupported method on the authorization endpoint", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/authorize`, { method: "DELETE" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("GET, POST");
+  });
+
+  it("returns 404 for an unrouted path", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(new Request(`${BASE}/nope`), harness, ctx);
+    expect(res.status).toBe(404);
+  });
+
+  it("redirects with unsupported_response_type for response_type=token", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "token");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("state", "s");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("error")).toBe("unsupported_response_type");
+  });
+});
+
+describe("@dwk/indieauth token endpoint error paths", () => {
+  async function codeFor(
+    handler: ReturnType<typeof createIndieAuth>,
+  ): Promise<string> {
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    return new URL(authRes.headers.get("location")!).searchParams.get("code")!;
+  }
+
+  it("rejects an unsupported grant_type", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        body: new URLSearchParams({ grant_type: "client_credentials" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "unsupported_grant_type",
+    );
+  });
+
+  it("rejects a request missing required fields", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        body: new URLSearchParams({ grant_type: "authorization_code" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("rejects when the client_id does not match the authorization request", async () => {
+    const handler = autoApproveHandler();
+    const code = await codeFor(handler);
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: "https://other-app.example/",
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_grant",
+    );
+  });
+
+  it("rejects a present-but-invalid DPoP proof", async () => {
+    const handler = autoApproveHandler();
+    const code = await codeFor(handler);
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        headers: { DPoP: "not.a.valid.proof" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_dpop_proof",
+    );
+  });
+});
+
+describe("@dwk/indieauth revocation no-ops (RFC 7009)", () => {
+  it("returns 200 with no token parameter", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/revocation`, {
+        method: "POST",
+        body: new URLSearchParams({}),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 200 for an unparseable token (silently accepted)", async () => {
+    const handler = autoApproveHandler();
+    const res = await handler(
+      new Request(`${BASE}/revocation`, {
+        method: "POST",
+        body: new URLSearchParams({ token: "not-a-real-token" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("@dwk/indieauth fails loudly on missing bindings", () => {
   it("throws when the signing key is absent", async () => {
     const handler = autoApproveHandler();
