@@ -9,6 +9,8 @@
  * purely on the request URL.
  */
 
+import { hostFromUrl, type LogFields } from "@dwk/log";
+
 import {
   INTERNAL_HEADERS,
   resolveConfig,
@@ -17,6 +19,7 @@ import {
   type SolidPodEnv,
 } from "./config";
 import { authenticate } from "./auth";
+import { PodOutcome, SolidPodLogEvent } from "./log";
 
 /** A `fetch`-compatible Worker handler. */
 export type SolidPodHandler = (
@@ -104,6 +107,64 @@ function unauthorized(reason: string): Response {
 }
 
 /**
+ * Emit a structured event on both the logger and the metrics seam, which share
+ * one event vocabulary (see `@dwk/log`): `warn` for handled-but-notable
+ * rejections, `info` for normal outcomes. Honors the redaction policy — callers
+ * pass only reason codes, HTTP method/status, and sanitized hosts.
+ */
+function emit(
+  config: ResolvedConfig,
+  level: "info" | "warn",
+  event: string,
+  fields?: LogFields,
+): void {
+  config.logger[level](event, fields);
+  config.metrics.count(event, fields);
+}
+
+/**
+ * Translate the Durable Object's internal authorization-outcome header into the
+ * matching {@link SolidPodLogEvent} on the injected seams, then strip the header
+ * before the response reaches the client. The DO cannot hold the injected
+ * logger/metrics (they do not cross the isolate boundary), so it signals its WAC
+ * denial / anonymous-write refusal / replay rejection here, at the composition
+ * boundary, where the seams are wired. Responses without the header (including
+ * WebSocket upgrades) pass through untouched.
+ */
+function logPodOutcome(
+  config: ResolvedConfig,
+  request: Request,
+  response: Response,
+): Response {
+  const outcome = response.headers.get(INTERNAL_HEADERS.outcome);
+  if (!outcome) return response;
+
+  const method = request.method;
+  switch (outcome) {
+    case PodOutcome.WacDenied:
+      emit(config, "warn", SolidPodLogEvent.AccessDenied, {
+        method,
+        status: response.status,
+      });
+      break;
+    case PodOutcome.AnonymousWriteRefused:
+      emit(config, "warn", SolidPodLogEvent.AnonymousWriteRefused, { method });
+      break;
+    case PodOutcome.Replay:
+      emit(config, "warn", SolidPodLogEvent.ReplayRejected, { method });
+      break;
+  }
+
+  const headers = new Headers(response.headers);
+  headers.delete(INTERNAL_HEADERS.outcome);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+/**
  * Create the stateless Solid Pod front-door handler. Writes funnel through the
  * per-pod {@link SolidPodObject}; reads and notifications likewise route through
  * it so the DO remains the single consistency authority.
@@ -115,13 +176,24 @@ export function createSolidPod(config: SolidPodConfig): SolidPodHandler {
     assertBindings(env);
 
     const result = await authenticate(request, resolved);
-    if (result.kind === "rejected") return unauthorized(result.reason);
+    if (result.kind === "rejected") {
+      emit(resolved, "warn", SolidPodLogEvent.AuthRejected, {
+        reason: result.reason,
+      });
+      return unauthorized(result.reason);
+    }
 
     const auth = result.kind === "authenticated" ? result.context : null;
+    if (auth) {
+      emit(resolved, "info", SolidPodLogEvent.AuthAccepted, {
+        agentHost: hostFromUrl(auth.webid),
+      });
+    }
     const forwarded = internalRequest(request, resolved, auth);
 
     // One Durable Object per pod, keyed by the identity root (no sharding).
     const id = env.POD.idFromName(resolved.baseUrl);
-    return env.POD.get(id).fetch(forwarded);
+    const response = await env.POD.get(id).fetch(forwarded);
+    return logPodOutcome(resolved, request, response);
   };
 }

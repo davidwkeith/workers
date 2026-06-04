@@ -119,6 +119,19 @@ Redaction is the caller's responsibility, but the seam helps.
 - **First consumer:** `@dwk/webmention` emits, on **both** seams, the same
   events — SSRF blocks (by reason), receive accepted/rejected, verification
   outcomes (by links/status), queue-consumer retry reasons, and send outcomes
-  (by delivered/status). The other endpoint packages (`@dwk/indieauth`,
-  `@dwk/micropub`, `@dwk/solid-pod`) adopt the same two seams for auth/authz
-  decisions and validation rejections as they are implemented.
+  (by delivered/status).
+- **All endpoint packages now emit on both seams.** Each owns an exported event
+  taxonomy and passes the same `(event, fields)` to logger and metrics:
+  - `@dwk/indieauth` (`IndieAuthLogEvent`): authorization rejections (by
+    reason), code issuance, token issuance, token-endpoint rejections (by
+    reason), and revocations.
+  - `@dwk/micropub` (`MicropubLogEvent`): authorization rejections (by error
+    code), validation rejections (by reason), action completions (by verb), and
+    media stored.
+  - `@dwk/solid-pod` (`SolidPodLogEvent`): edge-authentication rejections (by
+    reason) and acceptances. Because a Durable Object cannot receive the injected
+    seams across the isolate boundary, the DO signals its WAC denials,
+    anonymous-write refusals, and DPoP replay rejections back to the stateless
+    front door via an internal response header (`x-solid-outcome`); the front
+    door — where the seams are wired, at the composition boundary — emits the
+    events and strips the header before replying.

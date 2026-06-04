@@ -62,3 +62,6 @@ export {
 } from "./profile";
 
 export { buildServerMetadata, type ServerMetadata } from "./metadata";
+
+export { IndieAuthLogEvent } from "./log";
+export type { Logger, Metrics } from "@dwk/log";

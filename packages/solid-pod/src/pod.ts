@@ -34,6 +34,7 @@ import {
 import type { AccessMode } from "@dwk/wac";
 
 import { INTERNAL_HEADERS, type SolidPodEnv } from "./config";
+import { PodOutcome } from "./log";
 import {
   ancestorContainers,
   childKey,
@@ -302,6 +303,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #denied(status: 401 | 403): Response {
     return text(status, status === 401 ? "Unauthorized" : "Forbidden", {
       ...(status === 401 ? { "www-authenticate": 'DPoP realm="solid"' } : {}),
+      // Signal the WAC denial to the front door, which logs it via the injected
+      // observability seams and strips this header before replying to the client.
+      [INTERNAL_HEADERS.outcome]: PodOutcome.WacDenied,
     });
   }
 
@@ -329,6 +333,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (jti !== undefined || this.#allowAnonymousWrites) return null;
     return text(401, "DPoP proof required for writes", {
       "www-authenticate": 'DPoP realm="solid", error="invalid_token"',
+      [INTERNAL_HEADERS.outcome]: PodOutcome.AnonymousWriteRefused,
     });
   }
 
@@ -663,6 +668,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #replayed(): Response {
     return text(401, "DPoP proof replay detected", {
       "www-authenticate": 'DPoP error="invalid_token"',
+      [INTERNAL_HEADERS.outcome]: PodOutcome.Replay,
     });
   }
 

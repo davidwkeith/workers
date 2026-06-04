@@ -58,3 +58,6 @@ export {
   type AuthSuccess,
   type AuthFailure,
 } from "./auth";
+
+export { MicropubLogEvent } from "./log";
+export type { Logger, Metrics } from "@dwk/log";

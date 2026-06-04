@@ -6,6 +6,7 @@
  */
 
 import { verifyDpopProof } from "@dwk/dpop";
+import { hostFromUrl, type LogFields } from "@dwk/log";
 
 import {
   resolveConfig,
@@ -15,6 +16,7 @@ import {
   type ProfileInfo,
   type ResolvedConfig,
 } from "./config";
+import { IndieAuthLogEvent } from "./log";
 import { buildServerMetadata } from "./metadata";
 import { isSupportedChallengeMethod, verifyPkce } from "./pkce";
 import { signAccessToken, verifyAccessToken } from "./token";
@@ -55,6 +57,22 @@ function oauthError(
   status = 400,
 ): Response {
   return json({ error, error_description: description }, status);
+}
+
+/**
+ * Emit a structured event on both the logger and the metrics seam, which share
+ * one event vocabulary (see `@dwk/log`): `warn` for handled-but-notable
+ * rejections, `info` for normal outcomes. Honors the redaction policy — callers
+ * pass only reason codes, sanitized hosts, and scopes, never codes or tokens.
+ */
+function emit(
+  config: ResolvedConfig,
+  level: "info" | "warn",
+  event: string,
+  fields?: LogFields,
+): void {
+  config.logger[level](event, fields);
+  config.metrics.count(event, fields);
 }
 
 function randomCode(): string {
@@ -120,18 +138,29 @@ async function handleAuthorizationGet(
   // client_id and redirect_uri must be valid, fragment-free URLs before we can
   // redirect anywhere.
   if (!isHttpUrl(clientId)) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "client_id_invalid",
+    });
     return oauthError(
       "invalid_request",
       "`client_id` must be a valid URL without a fragment",
     );
   }
   if (!isHttpUrl(redirectUri)) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "redirect_uri_invalid",
+      clientHost: hostFromUrl(clientId),
+    });
     return oauthError(
       "invalid_request",
       "`redirect_uri` must be a valid URL without a fragment",
     );
   }
   if (!(await config.redirectUriPolicy(clientId, redirectUri))) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "redirect_uri_not_permitted",
+      clientHost: hostFromUrl(clientId),
+    });
     return oauthError(
       "invalid_request",
       "`redirect_uri` is not permitted for this `client_id`",
@@ -141,6 +170,10 @@ async function handleAuthorizationGet(
   // From here, protocol errors are reported by redirecting back to the client.
   const responseType = params.get("response_type") ?? "code";
   if (responseType !== "code") {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "unsupported_response_type",
+      clientHost: hostFromUrl(clientId),
+    });
     return redirectError(
       redirectUri,
       "unsupported_response_type",
@@ -153,6 +186,10 @@ async function handleAuthorizationGet(
   const codeChallenge = params.get("code_challenge") ?? "";
   const codeChallengeMethod = params.get("code_challenge_method") ?? "";
   if (!codeChallenge || !isSupportedChallengeMethod(codeChallengeMethod)) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "pkce_required",
+      clientHost: hostFromUrl(clientId),
+    });
     return redirectError(
       redirectUri,
       "invalid_request",
@@ -204,6 +241,9 @@ async function issueCode(
       Math.floor(Date.now() / 1000) + config.authorizationCodeLifetimeSeconds,
   });
 
+  emit(config, "info", IndieAuthLogEvent.AuthorizeApproved, {
+    clientHost: hostFromUrl(authRequest.clientId),
+  });
   const url = new URL(authRequest.redirectUri);
   url.searchParams.set("code", code);
   if (authRequest.state) url.searchParams.set("state", authRequest.state);
@@ -219,9 +259,13 @@ async function issueCode(
 async function redeemCode(
   request: Request,
   store: ReturnType<typeof createIndieAuthStore>,
+  config: ResolvedConfig,
 ): Promise<AuthorizationCodeRecord | Response> {
   const form = await readForm(request);
   if (form.get("grant_type") !== "authorization_code") {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "unsupported_grant_type",
+    });
     return oauthError(
       "unsupported_grant_type",
       "only `grant_type=authorization_code` is supported",
@@ -232,6 +276,9 @@ async function redeemCode(
   const redirectUri = form.get("redirect_uri") ?? "";
   const codeVerifier = form.get("code_verifier") ?? "";
   if (!code || !clientId || !redirectUri || !codeVerifier) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "invalid_request",
+    });
     return oauthError(
       "invalid_request",
       "`code`, `client_id`, `redirect_uri`, and `code_verifier` are required",
@@ -243,12 +290,20 @@ async function redeemCode(
     Math.floor(Date.now() / 1000),
   );
   if (record === null) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "invalid_grant",
+      clientHost: hostFromUrl(clientId),
+    });
     return oauthError(
       "invalid_grant",
       "authorization code is invalid or expired",
     );
   }
   if (record.clientId !== clientId || record.redirectUri !== redirectUri) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "client_mismatch",
+      clientHost: hostFromUrl(clientId),
+    });
     return oauthError(
       "invalid_grant",
       "`client_id`/`redirect_uri` do not match the authorization request",
@@ -261,6 +316,10 @@ async function redeemCode(
       record.codeChallengeMethod,
     ))
   ) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "pkce_failed",
+      clientHost: hostFromUrl(clientId),
+    });
     return oauthError("invalid_grant", "PKCE `code_verifier` does not match");
   }
   return record;
@@ -276,12 +335,16 @@ async function handleToken(
   store: ReturnType<typeof createIndieAuthStore>,
   signingKey: string,
 ): Promise<Response> {
-  const redeemed = await redeemCode(request, store);
+  const redeemed = await redeemCode(request, store, config);
   if (redeemed instanceof Response) return redeemed;
 
   // Tokens issued here are DPoP-bound: require a valid proof for this request.
   const proof = request.headers.get("DPoP");
   if (!proof) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "dpop_missing",
+      clientHost: hostFromUrl(redeemed.clientId),
+    });
     return oauthError(
       "invalid_dpop_proof",
       "a DPoP proof is required at the token endpoint",
@@ -293,6 +356,10 @@ async function handleToken(
     htu: request.url,
   });
   if (!dpop.valid || !dpop.jkt) {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "dpop_invalid",
+      clientHost: hostFromUrl(redeemed.clientId),
+    });
     return oauthError(
       "invalid_dpop_proof",
       `DPoP proof verification failed: ${dpop.reason ?? "unknown"}`,
@@ -319,6 +386,10 @@ async function handleToken(
     expiresAt: minted.claims.exp,
   });
 
+  emit(config, "info", IndieAuthLogEvent.TokenIssued, {
+    clientHost: hostFromUrl(redeemed.clientId),
+    scope: redeemed.scope,
+  });
   const profile = parseProfile(redeemed.profile);
   return json({
     access_token: minted.token,
@@ -338,8 +409,9 @@ async function handleToken(
 async function handleProfileExchange(
   request: Request,
   store: ReturnType<typeof createIndieAuthStore>,
+  config: ResolvedConfig,
 ): Promise<Response> {
-  const redeemed = await redeemCode(request, store);
+  const redeemed = await redeemCode(request, store, config);
   if (redeemed instanceof Response) return redeemed;
   const profile = parseProfile(redeemed.profile);
   return json({ me: redeemed.me, ...(profile ? { profile } : {}) });
@@ -360,7 +432,12 @@ async function handleRevocation(
     const result = await verifyAccessToken(token, signingKey, {
       issuer: config.issuer,
     });
-    if (result.valid) await store.revokeToken(result.claims.jti);
+    if (result.valid) {
+      await store.revokeToken(result.claims.jti);
+      emit(config, "info", IndieAuthLogEvent.TokenRevoked, {
+        clientHost: hostFromUrl(result.claims.client_id),
+      });
+    }
   }
   return new Response(null, { status: 200 });
 }
@@ -418,7 +495,7 @@ export function createIndieAuth(config: IndieAuthConfig): IndieAuthHandler {
         return handleAuthorizationGet(request, resolved, store);
       }
       if (method === "POST") {
-        return handleProfileExchange(request, store);
+        return handleProfileExchange(request, store, resolved);
       }
       return methodNotAllowed("GET, POST");
     }
