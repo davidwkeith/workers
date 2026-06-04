@@ -80,17 +80,18 @@ export interface WriteOptions {
   readonly ifNoneMatch?: string;
   /** Content type recorded on the pointer. */
   readonly contentType?: string;
-}
-
-/** Preconditions for {@link Store.delete}. */
-export interface DeleteOptions extends Pick<WriteOptions, "ifMatch"> {
   /**
-   * Invariant checked inside the delete transaction, after `ifMatch` and before
-   * any mutation. Throw to abort the delete (the transaction rolls back and the
-   * error propagates); the thrown error is the caller's to map to a response.
+   * Invariant or side effect run inside the write transaction, after the
+   * `ifMatch` / `ifNoneMatch` checks pass and before any mutation. Throw to
+   * abort the write: the transaction rolls back and the error propagates, so
+   * anything the guard wrote (e.g. a single-use DPoP-`jti` row) is rolled back
+   * together with the write — making the guard and the write atomic.
    */
   readonly guard?: () => void;
 }
+
+/** Preconditions for {@link Store.delete}. */
+export type DeleteOptions = Pick<WriteOptions, "ifMatch" | "guard">;
 
 /** A pending orphaned R2 key, read from the transactional outbox. */
 export interface OrphanRecord {
@@ -494,6 +495,7 @@ export function createStore(
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
         assertPreconditions(key, current, options);
+        options.guard?.();
         // Replacing RDF with RDF: if the previous body was a blob, its key may
         // become orphaned.
         if (current?.kind === "blob" && current.blobKey) {
@@ -512,6 +514,7 @@ export function createStore(
       state.storage.transactionSync(() => {
         const current = readResourceRow(key);
         assertPreconditions(key, current, options);
+        options.guard?.();
         if (current?.kind === "blob" && current.blobKey) {
           // A patch only makes sense against RDF; drop the blob pointer first.
           sql.exec("DELETE FROM resources WHERE key = ?", key);
@@ -550,6 +553,7 @@ export function createStore(
         state.storage.transactionSync(() => {
           const current = readResourceRow(key);
           assertPreconditions(key, current, options);
+          options.guard?.();
           sql.exec("DELETE FROM quads WHERE resource = ?", key);
           sql.exec(
             `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)

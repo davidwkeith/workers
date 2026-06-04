@@ -231,6 +231,40 @@ describe("@dwk/store blob copy-on-write", () => {
     expect(out.orphanCount).toBe(0);
     expect(out.r2KeyCount).toBe(1);
   });
+
+  it("outboxes the freshly uploaded key when the write transaction rolls back", async () => {
+    const body = new TextEncoder().encode("rolled-back");
+    const out = await withStore(async ({ store, env }) => {
+      // A `guard` that throws stands in for an in-transaction abort that the
+      // pre-check cannot catch (a DPoP replay): unlike a deterministic
+      // precondition failure, the R2 object has already landed when the pointer
+      // flip rolls back, so it must be outboxed for GC instead of leaking.
+      const boom = new Error("guard abort");
+      await expect(
+        store.putBlob("/blob", body, {
+          guard: () => {
+            throw boom;
+          },
+        }),
+      ).rejects.toBe(boom);
+
+      const orphans = store.collectOrphans();
+      const orphanKey = orphans[0]?.blobKey ?? null;
+      return {
+        head: store.head("/blob"),
+        orphanCount: orphans.length,
+        // The uploaded object is still in R2 and now tracked for reclamation.
+        orphanInR2:
+          orphanKey !== null
+            ? (await env.BLOBS.get(orphanKey)) !== null
+            : false,
+      };
+    });
+    // No pointer was created, but the orphaned blob is queued for GC.
+    expect(out.head).toBeNull();
+    expect(out.orphanCount).toBe(1);
+    expect(out.orphanInR2).toBe(true);
+  });
 });
 
 describe("@dwk/store streaming blob writes", () => {

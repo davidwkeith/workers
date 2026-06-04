@@ -12,6 +12,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 
+import { DEFAULT_MAX_AGE_SECONDS } from "@dwk/dpop";
 import {
   parse as parseRdf,
   serialize as serializeRdf,
@@ -50,8 +51,16 @@ const LDP = "http://www.w3.org/ns/ldp#";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const ACTIVITYSTREAMS = "https://www.w3.org/ns/activitystreams";
 
-/** DPoP proofs are accepted for at most this long; replay rows expire with it. */
-const JTI_TTL_SECONDS = 300;
+/**
+ * How long a write's DPoP `jti` is remembered for replay rejection. `@dwk/dpop`
+ * accepts a proof whose `iat` lands anywhere in `±DEFAULT_MAX_AGE_SECONDS` of
+ * now (`auth.ts` does not override `maxAgeSeconds`), so a single proof stays
+ * cryptographically acceptable across a span of `2 × DEFAULT_MAX_AGE_SECONDS`.
+ * The replay row MUST outlive that full window — otherwise it could be pruned
+ * while the proof is still valid, reopening a replay hole — so the TTL is
+ * anchored to it rather than a bare 5 minutes.
+ */
+const JTI_TTL_SECONDS = 2 * DEFAULT_MAX_AGE_SECONDS;
 
 const SERIALIZE_PREFIXES: Record<string, string> = {
   ldp: LDP,
@@ -68,6 +77,8 @@ interface ForwardedConfig {
   readonly maxInlineBytes?: number;
   /** Owner WebIDs, always granted full access (bootstraps ACL management). */
   readonly owners?: readonly string[];
+  /** Permit unauthenticated (proof-less) writes where WAC grants the public. */
+  readonly allowAnonymousWrites?: boolean;
 }
 
 /** A change to announce to notification subscribers. */
@@ -110,6 +121,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   readonly #sql: SqlStorage;
   /** Owner WebIDs (deployment-constant), set from the forwarded config. */
   #owners: readonly string[] = [];
+  /** Whether proof-less (anonymous) writes are permitted; see {@link JTI_TTL_SECONDS}. */
+  #allowAnonymousWrites = false;
 
   constructor(state: DurableObjectState, env: SolidPodEnv) {
     super(state, env);
@@ -150,6 +163,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     })();
 
     this.#owners = config.owners ?? [];
+    this.#allowAnonymousWrites = config.allowAnonymousWrites ?? false;
     const store = this.#getStore(config);
     const url = new URL(request.url);
     const origin = url.origin;
@@ -228,6 +242,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       if (error instanceof LengthRequiredError) {
         return text(411, "Length Required");
       }
+      // A `jti` collision surfaces from inside the write transaction (the row
+      // and the write commit or roll back together — see `#consumeJti`).
+      if (error instanceof DpopReplayError) {
+        return this.#replayed();
+      }
       throw error;
     }
   }
@@ -300,12 +319,35 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   // -- DPoP replay -----------------------------------------------------------
 
   /**
-   * Enforce strict single-use of a write's DPoP `jti`. Prunes expired rows
-   * first, then inserts; a duplicate `jti` means replay. No-op when the request
-   * is unauthenticated (a public-write grant carries no proof).
+   * Refuse a proof-less write unless the deployment opted into anonymous writes.
+   * A tokenless request reaches a write handler only when WAC granted the public
+   * agent class; without a DPoP proof there is no `jti`, hence no replay /
+   * anti-abuse control, so "DPoP everywhere" requires we reject by default.
+   * Returns a `401` challenge to block the write, or `null` to let it proceed.
    */
-  #checkReplay(jti: string | undefined): boolean {
-    if (!jti) return true;
+  #denyAnonymousWrite(jti: string | undefined): Response | null {
+    if (jti !== undefined || this.#allowAnonymousWrites) return null;
+    return text(401, "DPoP proof required for writes", {
+      "www-authenticate": 'DPoP realm="solid", error="invalid_token"',
+    });
+  }
+
+  /**
+   * Build the in-transaction guard that enforces strict single-use of a write's
+   * DPoP `jti`. The store runs it inside the write `transactionSync`, *after*
+   * the `If-Match` / `solid:where` preconditions pass, so a `jti` is consumed
+   * only when the write actually commits: a failed precondition (412/409) rolls
+   * the row back and leaves the proof reusable for a legitimate retry, and a
+   * replayed `jti` aborts the write atomically. No-op for an anonymous write
+   * (it carries no proof; admission is gated by {@link #denyAnonymousWrite}).
+   */
+  #replayGuard(jti: string | undefined): () => void {
+    return () => this.#consumeJti(jti);
+  }
+
+  /** Prune expired rows, reject a duplicate `jti`, then record this one. */
+  #consumeJti(jti: string | undefined): void {
+    if (!jti) return;
     const nowSec = Math.floor(Date.now() / 1000);
     this.#sql.exec("DELETE FROM dpop_jti WHERE expires_at < ?", nowSec);
     const existing = this.#sql
@@ -313,13 +355,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         n: number;
       }>("SELECT COUNT(*) AS n FROM dpop_jti WHERE jti = ?", jti)
       .one().n;
-    if (existing > 0) return false;
+    if (existing > 0) throw new DpopReplayError();
     this.#sql.exec(
       "INSERT INTO dpop_jti (jti, expires_at) VALUES (?, ?)",
       jti,
       nowSec + JTI_TTL_SECONDS,
     );
-    return true;
   }
 
   // -- read ------------------------------------------------------------------
@@ -405,15 +446,19 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     request: Request,
     jti: string | undefined,
   ): Promise<Response> {
-    if (!this.#checkReplay(jti)) return this.#replayed();
+    const blocked = this.#denyAnonymousWrite(jti);
+    if (blocked) return blocked;
 
     const existed = store.head(path) !== null;
     // Both preconditions are threaded into the store write and re-checked
     // inside its transaction, so there is no TOCTOU window here. `existed` is
     // only used to pick the 201/204 status; it is not relied on for safety.
+    // The `jti` replay row is consumed in that same transaction (`replayGuard`),
+    // so a rejected precondition does not burn the proof.
     await this.#writeBody(store, origin, path, request, {
       ifMatch: ifMatchOf(request),
       ifNoneMatch: ifNoneMatchOf(request),
+      guard: this.#replayGuard(jti),
     });
     this.#ensureContainerChain(store, origin, path);
     await this.#drainOrphans(store);
@@ -440,7 +485,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (!isContainer(path)) {
       return text(405, "POST target must be a container", { allow: ALLOW });
     }
-    if (!this.#checkReplay(jti)) return this.#replayed();
+    const blocked = this.#denyAnonymousWrite(jti);
+    if (blocked) return blocked;
 
     const asContainer = linkIndicatesContainer(request.headers.get("link"));
     const slug = request.headers.get("slug");
@@ -450,8 +496,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       key = childKey(path, null, asContainer);
     }
 
-    // A POST always mints a fresh, non-colliding key, so it is unconditional.
-    await this.#writeBody(store, origin, key, request, {});
+    // A POST always mints a fresh, non-colliding key, so it is unconditional;
+    // the `jti` is still consumed inside the write transaction.
+    await this.#writeBody(store, origin, key, request, {
+      guard: this.#replayGuard(jti),
+    });
     this.#ensureContainerChain(store, origin, key);
     await this.#drainOrphans(store);
 
@@ -505,7 +554,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     );
     if (denied) return this.#denied(denied.status);
 
-    if (!this.#checkReplay(jti)) return this.#replayed();
+    const blocked = this.#denyAnonymousWrite(jti);
+    if (blocked) return blocked;
 
     const existed = store.head(path) !== null;
     const current = store.readQuads(path);
@@ -525,7 +575,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       store.patchQuads(
         path,
         { deletes: resolved.deletes, inserts: resolved.inserts },
-        { ifMatch: ifMatchOf(request), contentType: "text/turtle" },
+        {
+          ifMatch: ifMatchOf(request),
+          contentType: "text/turtle",
+          guard: this.#replayGuard(jti),
+        },
       );
     } catch (error) {
       if (error instanceof PreconditionFailedError)
@@ -552,7 +606,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     request: Request,
     jti: string | undefined,
   ): Promise<Response> {
-    if (!this.#checkReplay(jti)) return this.#replayed();
+    const blocked = this.#denyAnonymousWrite(jti);
+    if (blocked) return blocked;
 
     const meta = store.head(path);
     if (!meta) return text(404, "Not Found");
@@ -562,7 +617,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         ifMatch: ifMatchOf(request),
         // Re-check container emptiness inside the delete transaction so a
         // concurrent child write cannot slip in between the check and the
-        // delete (LDP: a non-empty container MUST NOT be deleted).
+        // delete (LDP: a non-empty container MUST NOT be deleted), then consume
+        // the `jti` in that same transaction. The emptiness check runs first so
+        // a 409 leaves the proof reusable; the `jti` is burned only if the
+        // delete commits.
         guard: () => {
           if (
             isContainer(path) &&
@@ -572,6 +630,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
           ) {
             throw new ContainerNotEmptyError();
           }
+          this.#consumeJti(jti);
         },
       });
     } catch (error) {
@@ -623,7 +682,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     origin: string,
     path: string,
     request: Request,
-    preconditions: Pick<WriteOptions, "ifMatch" | "ifNoneMatch">,
+    preconditions: Pick<WriteOptions, "ifMatch" | "ifNoneMatch" | "guard">,
   ): Promise<void> {
     const contentType =
       request.headers.get("content-type")?.split(";")[0]?.trim() ||
@@ -867,6 +926,13 @@ class ContainerNotEmptyError extends Error {}
 
 /** Thrown by `#writeBody` when an unsized body is too large to buffer or stream (→ 411). */
 class LengthRequiredError extends Error {}
+
+/**
+ * Thrown from a write's replay guard when its DPoP `jti` was already seen. It
+ * propagates out of the store's write `transactionSync`, rolling the write back
+ * with it, and is mapped to a `401` by {@link SolidPodObject.fetch}.
+ */
+class DpopReplayError extends Error {}
 
 function baseHeaders(path: string, etag: string, contentType: string): Headers {
   const headers = new Headers({

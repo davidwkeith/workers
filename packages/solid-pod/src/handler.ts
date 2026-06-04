@@ -76,6 +76,7 @@ function internalRequest(
     INTERNAL_HEADERS.config,
     JSON.stringify({
       owners: config.owners,
+      allowAnonymousWrites: config.allowAnonymousWrites,
       ...(config.maxInlineBytes !== undefined
         ? { maxInlineBytes: config.maxInlineBytes }
         : {}),

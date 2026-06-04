@@ -102,6 +102,17 @@ export interface SolidPodConfig {
   readonly readReplayWindowSeconds?: number;
 
   /**
+   * Allow **unauthenticated** writes (`PUT`/`POST`/`PATCH`/`DELETE`) when WAC
+   * grants the public agent class (`acl:agentClass foaf:Agent`) the needed
+   * mode. Such requests carry no DPoP proof, so they get **no `jti` replay /
+   * anti-abuse protection** — the "DPoP everywhere" guarantee does not hold for
+   * them. Defaults to `false`: a tokenless write is refused `401` even where a
+   * public-write ACL would otherwise permit it. Set `true` to opt into
+   * public write as an explicit, documented tradeoff.
+   */
+  readonly allowAnonymousWrites?: boolean;
+
+  /**
    * GC safety window (ms) advertised to the cron handler; an orphaned R2 object
    * is only reclaimed once it is older than this. MUST be ≥ the maximum write
    * duration. Defaults to five minutes.
@@ -148,6 +159,7 @@ export interface ResolvedConfig {
   readonly jwksUri?: string;
   readonly maxInlineBytes?: number;
   readonly readReplayWindowSeconds: number;
+  readonly allowAnonymousWrites: boolean;
   readonly gcSafetyWindowMs: number;
   readonly now: () => number;
   readonly fetch: typeof fetch;
@@ -207,6 +219,7 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
     jwksUri: config.jwksUri,
     maxInlineBytes: config.maxInlineBytes,
     readReplayWindowSeconds: config.readReplayWindowSeconds ?? 0,
+    allowAnonymousWrites: config.allowAnonymousWrites ?? false,
     gcSafetyWindowMs: config.gcSafetyWindowMs ?? DEFAULT_GC_SAFETY_WINDOW_MS,
     now: config.now ?? (() => Date.now()),
     fetch: config.fetch ?? fetch,
