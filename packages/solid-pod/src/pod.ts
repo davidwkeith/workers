@@ -38,13 +38,14 @@ import { PodOutcome } from "./log";
 import {
   ancestorContainers,
   childKey,
+  hasReservedAuxiliarySuffix,
   isAclPath,
   isContainer,
   parentContainer,
   resourceForAcl,
   toIri,
 } from "./ldp";
-import { negotiateMediaType } from "./negotiation";
+import { negotiateMediaType, type Negotiated } from "./negotiation";
 import { parsePatch, PatchProblem, resolvePatch } from "./patch";
 import { authorize } from "./wac";
 
@@ -381,7 +382,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (!meta) return text(404, "Not Found");
 
     const ifNoneMatch = request.headers.get("if-none-match");
-    if (ifNoneMatch && (ifNoneMatch === "*" || ifNoneMatch === meta.etag)) {
+    if (ifNoneMatch && ifNoneMatchSatisfied(ifNoneMatch, meta.etag)) {
       return new Response(null, { status: 304, headers: { etag: meta.etag } });
     }
 
@@ -396,8 +397,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       );
     }
 
-    const quads = store.readQuads(path).map(storedToQuad);
     const negotiated = negotiateMediaType(request.headers.get("accept"));
+    if (negotiated === null) {
+      return text(406, "Not Acceptable");
+    }
+
+    const quads = store.readQuads(path).map(storedToQuad);
     return this.#serializeResponse(
       quads,
       negotiated,
@@ -428,7 +433,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
   async #serializeResponse(
     quads: Quad[],
-    negotiated: ReturnType<typeof negotiateMediaType>,
+    negotiated: Negotiated,
     origin: string,
     path: string,
     etag: string,
@@ -661,7 +666,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       headers: {
         allow: ALLOW,
         "accept-patch": "text/n3, application/sparql-update",
-        ...(isContainer(path) ? { "accept-post": "*/*" } : {}),
+        ...(isContainer(path) ? { "accept-post": ACCEPT_POST } : {}),
       },
     });
   }
@@ -787,7 +792,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         this.#setContainment(store, origin, grandparent, container, true);
       }
     }
-    this.#setContainment(store, origin, parent, key, true);
+    // Auxiliary resources (`.acl`/`.meta`) are not contained members per Solid;
+    // listing them would leak the existence/paths of ACL documents to anyone
+    // with container Read. Skip the containment triple for them.
+    if (!hasReservedAuxiliarySuffix(key)) {
+      this.#setContainment(store, origin, parent, key, true);
+    }
   }
 
   /** Drop `key` from its parent container's `ldp:contains` listing. */
@@ -871,6 +881,31 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 // ---------------------------------------------------------------------------
 
 const ALLOW = "GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE";
+
+/**
+ * Concrete RDF media types a container `POST` accepts, advertised on `OPTIONS`.
+ * A bare catch-all wildcard is uninformative; listing the guaranteed
+ * serializations (plus the wildcard for opaque bodies) lets clients pick a body
+ * format they can produce.
+ */
+const ACCEPT_POST = "text/turtle, application/ld+json, */*";
+
+/**
+ * Whether a stored representation's `etag` satisfies an `If-None-Match` header
+ * per RFC 7232 §3.2. `*` matches any current representation; otherwise the
+ * header is a comma-separated list of entity-tags compared with the *weak*
+ * comparison function — the `W/` prefix is ignored, so `W/"x"`, `"x"`, and a
+ * list like `"a", "x"` all match the stored `"x"`.
+ */
+function ifNoneMatchSatisfied(header: string, etag: string): boolean {
+  if (header.trim() === "*") return true;
+  const opaque = (tag: string) => tag.trim().replace(/^W\//, "");
+  const target = opaque(etag);
+  return header.split(",").some((tag) => {
+    const candidate = opaque(tag);
+    return candidate.length > 0 && candidate === target;
+  });
+}
 
 /** The outcome of {@link readUpToLimit}: a fully-buffered body or an overflow signal. */
 type PeekedBody =
