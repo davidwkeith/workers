@@ -74,7 +74,7 @@ with empty/missing `Location`; and **cross-origin credential stripping** (verify
 `authorization`, `cookie`, `x-hub-signature`, etc. are dropped when the origin
 changes, and _preserved_ when it does not).
 
-**3. `indieauth/src/handler.ts` (funcs 51%) and `token.ts` (81/81).** Half the
+**3. `indieauth/src/handler.ts` (funcs 51%) and `indieauth/src/token.ts` (81/81).** Half the
 handler functions are never entered. Exercise the authorization-endpoint and
 token-endpoint error responses end to end: invalid/expired/replayed auth codes,
 PKCE `code_verifier` mismatch, redirect-uri mismatch, unsupported
@@ -112,7 +112,7 @@ explicit "missing binding throws" test per package, especially `solid-pod`.
 two thin tests: throws without `BLOBS`, throws without `GC_DB`, and calls through
 on the happy path.
 
-**9. `http-signatures/src/components.ts` (43% branch) and `sf.ts` (58% branch).**
+**9. `http-signatures/src/components.ts` (43% branch) and `http-signatures/src/sf.ts` (58% branch).**
 The `@`-derived component switch is largely one-path: add `@query` with no query
 string (the `"?"` fallback), `@scheme`/`@authority` lowercasing,
 `@request-target`/`@path`, an unsupported `@`-name → `null`, an absent header →
