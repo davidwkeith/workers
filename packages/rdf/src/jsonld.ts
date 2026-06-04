@@ -45,6 +45,7 @@ const RDF_TYPE = `${RDF}type`;
 const RDF_FIRST = `${RDF}first`;
 const RDF_REST = `${RDF}rest`;
 const RDF_NIL = `${RDF}nil`;
+const RDF_LIST = `${RDF}List`;
 const RDF_LANGSTRING = `${RDF}langString`;
 const XSD_STRING = `${XSD}string`;
 const XSD_BOOLEAN = `${XSD}boolean`;
@@ -88,6 +89,14 @@ function isKeyword(value: string): boolean {
 
 function isIriType(type: string | undefined): type is string {
   return type !== undefined && type !== "@id" && type !== "@vocab";
+}
+
+// An absolute IRI begins with a scheme (`http:`, `urn:`, …). A value without a
+// scheme is a relative reference; JSON-LD 1.0 drops it (rather than emitting a
+// bogus RDF term) when no base resolves it to an absolute IRI.
+const ABSOLUTE_IRI = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+function isAbsoluteIri(value: string): boolean {
+  return ABSOLUTE_IRI.test(value);
 }
 
 function resolveIri(base: string | undefined, value: string): string {
@@ -268,15 +277,22 @@ class RdfEmitter {
     }
   }
 
+  /**
+   * Resolve an already-expanded `@id` to a subject/object term, or `null` when
+   * it is still a relative reference (JSON-LD 1.0 drops such terms rather than
+   * minting an invalid NamedNode).
+   */
+  private idToTerm(id: string): NamedNode | BlankNode | null {
+    if (id.startsWith("_:")) return this.blankFor(id);
+    return isAbsoluteIri(id) ? DataFactory.namedNode(id) : null;
+  }
+
   private nodeSubject(
     node: JsonObject,
     active: ActiveContext,
-  ): NamedNode | BlankNode {
+  ): NamedNode | BlankNode | null {
     if ("@id" in node && node["@id"] != null) {
-      const id = expandIri(active, String(node["@id"]));
-      return id.startsWith("_:")
-        ? this.blankFor(id)
-        : DataFactory.namedNode(id);
+      return this.idToTerm(expandIri(active, String(node["@id"])));
     }
     return this.fresh();
   }
@@ -285,14 +301,16 @@ class RdfEmitter {
     node: JsonObject,
     context: ActiveContext,
     graph: Quad_Graph,
-  ): NamedNode | BlankNode {
+  ): NamedNode | BlankNode | null {
     const active =
       "@context" in node ? processContext(context, node["@context"]) : context;
     const subject = this.nodeSubject(node, active);
+    // An explicit but unresolvable (relative) @id drops the whole node.
+    if (!subject) return null;
 
     for (const type of arrayify(node["@type"])) {
       const iri = expandIri(active, String(type), { vocab: true });
-      if (iri && !isKeyword(iri)) {
+      if (iri && !isKeyword(iri) && isAbsoluteIri(iri)) {
         this.emit(
           subject,
           DataFactory.namedNode(RDF_TYPE),
@@ -318,7 +336,13 @@ class RdfEmitter {
       if (isKeyword(key)) continue; // @index, @included, … unsupported — skip
 
       const predicateIri = expandIri(active, key, { vocab: true });
-      if (!predicateIri || isKeyword(predicateIri)) continue;
+      if (
+        !predicateIri ||
+        isKeyword(predicateIri) ||
+        !isAbsoluteIri(predicateIri)
+      ) {
+        continue;
+      }
       const predicate = DataFactory.namedNode(predicateIri);
       const def = active.terms.get(key);
 
@@ -362,7 +386,13 @@ class RdfEmitter {
   ): void {
     for (const [key, value] of Object.entries(reverse)) {
       const predicateIri = expandIri(active, key, { vocab: true });
-      if (!predicateIri || isKeyword(predicateIri)) continue;
+      if (
+        !predicateIri ||
+        isKeyword(predicateIri) ||
+        !isAbsoluteIri(predicateIri)
+      ) {
+        continue;
+      }
       const predicate = DataFactory.namedNode(predicateIri);
       const def = active.terms.get(key);
       for (const item of arrayify(value)) {
@@ -385,13 +415,11 @@ class RdfEmitter {
 
     if (typeof value === "string") {
       if (def?.type === "@id") {
-        const id = expandIri(active, value);
-        return id.startsWith("_:")
-          ? this.blankFor(id)
-          : DataFactory.namedNode(id);
+        return this.idToTerm(expandIri(active, value));
       }
       if (def?.type === "@vocab") {
-        return DataFactory.namedNode(expandIri(active, value, { vocab: true }));
+        const id = expandIri(active, value, { vocab: true });
+        return isAbsoluteIri(id) ? DataFactory.namedNode(id) : null;
       }
       return this.literalFor(value, def, active);
     }
@@ -405,10 +433,7 @@ class RdfEmitter {
       return this.buildList(arrayify(value["@list"]), def, active, graph);
     }
     if ("@id" in value && Object.keys(value).length === 1) {
-      const id = expandIri(active, String(value["@id"]));
-      return id.startsWith("_:")
-        ? this.blankFor(id)
-        : DataFactory.namedNode(id);
+      return this.idToTerm(expandIri(active, String(value["@id"])));
     }
     return this.processNode(value, active, graph);
   }
@@ -428,9 +453,9 @@ class RdfEmitter {
     if (typeof value === "number") {
       const datatype = isIriType(def?.type)
         ? def.type
-        : Number.isInteger(value)
-          ? XSD_INTEGER
-          : XSD_DOUBLE;
+        : isJsonLdDouble(value)
+          ? XSD_DOUBLE
+          : XSD_INTEGER;
       return DataFactory.literal(
         numberToLexical(value, datatype),
         DataFactory.namedNode(datatype),
@@ -448,8 +473,19 @@ class RdfEmitter {
   private valueObjectToLiteral(
     valueObject: JsonObject,
     active: ActiveContext,
-  ): Literal {
+  ): Literal | null {
     const raw = valueObject["@value"];
+    // JSON-LD 1.0: a value object whose @value is null (or absent) produces no
+    // triple — drop it rather than emit a bogus "null" literal.
+    if (raw === null || raw === undefined) return null;
+
+    // Resolve the explicit datatype first so a numeric @value coerced to
+    // xsd:double uses the canonical double lexical form.
+    const explicitType =
+      "@type" in valueObject && valueObject["@type"] != null
+        ? expandIri(active, String(valueObject["@type"]), { vocab: true })
+        : undefined;
+
     const lexical =
       typeof raw === "boolean"
         ? raw
@@ -458,15 +494,12 @@ class RdfEmitter {
         : typeof raw === "number"
           ? numberToLexical(
               raw,
-              Number.isInteger(raw) ? XSD_INTEGER : XSD_DOUBLE,
+              explicitType ?? (isJsonLdDouble(raw) ? XSD_DOUBLE : XSD_INTEGER),
             )
           : String(raw);
 
-    if ("@type" in valueObject && valueObject["@type"] != null) {
-      const datatype = expandIri(active, String(valueObject["@type"]), {
-        vocab: true,
-      });
-      return DataFactory.literal(lexical, DataFactory.namedNode(datatype));
+    if (explicitType !== undefined) {
+      return DataFactory.literal(lexical, DataFactory.namedNode(explicitType));
     }
     if ("@language" in valueObject && valueObject["@language"] != null) {
       return DataFactory.literal(
@@ -480,7 +513,7 @@ class RdfEmitter {
     if (typeof raw === "number") {
       return DataFactory.literal(
         lexical,
-        DataFactory.namedNode(Number.isInteger(raw) ? XSD_INTEGER : XSD_DOUBLE),
+        DataFactory.namedNode(isJsonLdDouble(raw) ? XSD_DOUBLE : XSD_INTEGER),
       );
     }
     if (active.language) return DataFactory.literal(lexical, active.language);
@@ -512,14 +545,30 @@ class RdfEmitter {
   }
 }
 
+/**
+ * Whether a JSON number maps to `xsd:double` rather than `xsd:integer`. Matches
+ * conformant processors: a number is a double when it has a fractional part or
+ * its magnitude is `>= 1e21` (the point past which decimal integer notation is
+ * no longer used); otherwise it is an integer.
+ */
+function isJsonLdDouble(value: number): boolean {
+  return !Number.isInteger(value) || Math.abs(value) >= 1e21;
+}
+
 function numberToLexical(value: number, datatype: string): string {
-  if (datatype === XSD_INTEGER) return String(Math.trunc(value));
   // xsd:double/float canonical forms for the non-finite values; reachable only
   // via pre-parsed object input since JSON itself has no NaN/Infinity.
   if (Number.isNaN(value)) return "NaN";
   if (value === Infinity) return "INF";
   if (value === -Infinity) return "-INF";
-  return String(value);
+  // Canonical xsd:double lexical form (forced by an explicit xsd:double type or
+  // by the value itself): a mantissa with a decimal point and no trailing zeros,
+  // an uppercase "E", and a signed exponent (100 → "1.0E2", 1e-7 → "1.0E-7").
+  if (datatype === XSD_DOUBLE || isJsonLdDouble(value)) {
+    return value.toExponential(15).replace(/(\d)0*e\+?/, "$1E");
+  }
+  // Canonical xsd:integer form.
+  return value.toFixed(0);
 }
 
 /** Options for {@link parseJsonLd}. */
@@ -589,9 +638,102 @@ function pushValue(node: JsonObject, key: string, value: JsonValue): void {
   else node[key] = [value];
 }
 
+/** Where a blank node is referenced as an object value within a graph. */
+interface ListUsage {
+  node: JsonObject;
+  property: string;
+  value: JsonObject;
+}
+
+function isBlankId(value: JsonValue | undefined): value is string {
+  return typeof value === "string" && value.startsWith("_:");
+}
+
+/**
+ * A node that is a well-formed list cell: exactly one `rdf:first` and one
+ * `rdf:rest`, and at most a `@type` of `rdf:List`.
+ */
+function isListNode(node: JsonObject): boolean {
+  const first = node[RDF_FIRST];
+  const rest = node[RDF_REST];
+  if (!Array.isArray(first) || first.length !== 1) return false;
+  if (!Array.isArray(rest) || rest.length !== 1) return false;
+  for (const key of Object.keys(node)) {
+    if (key === "@id" || key === RDF_FIRST || key === RDF_REST) continue;
+    if (key === "@type") {
+      const type = node["@type"];
+      if (Array.isArray(type) && type.length === 1 && type[0] === RDF_LIST) {
+        continue;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Collapse well-formed `rdf:first`/`rdf:rest`/`rdf:nil` chains in a graph back
+ * into JSON-LD `@list` value objects (the fromRDF list-conversion step), so
+ * lists round-trip through their `@list` abstraction rather than as a raw cell
+ * chain. An empty list is `rdf:nil`, which — per the JSON-LD data model — is
+ * indistinguishable from a property whose value is literally `rdf:nil`, so it is
+ * left as a node reference.
+ */
+function convertLists(nodes: Map<string, JsonObject>): void {
+  // Record, for every blank-node object reference, the single place it is used
+  // (`false` once referenced more than once), plus every use of `rdf:nil`.
+  const referencedOnce = new Map<string, ListUsage | false>();
+  const nilUsages: ListUsage[] = [];
+
+  for (const node of nodes.values()) {
+    for (const [property, values] of Object.entries(node)) {
+      if (property === "@id" || !Array.isArray(values)) continue;
+      for (const value of values) {
+        if (!isObject(value)) continue;
+        const ref = value["@id"];
+        if (ref === RDF_NIL) {
+          nilUsages.push({ node, property, value });
+        } else if (isBlankId(ref)) {
+          referencedOnce.set(
+            ref,
+            referencedOnce.has(ref) ? false : { node, property, value },
+          );
+        }
+      }
+    }
+  }
+
+  // Walk each `rdf:nil` terminator back up the `rdf:rest` chain, gathering a
+  // list whose cells are each referenced exactly once.
+  for (const nilUsage of nilUsages) {
+    let { node, property, value: head } = nilUsage;
+    const list: JsonValue[] = [];
+    const listNodes: string[] = [];
+
+    while (property === RDF_REST) {
+      const id = node["@id"];
+      if (!isBlankId(id)) break;
+      const usage = referencedOnce.get(id);
+      if (!usage || !isListNode(node)) break;
+      list.push((node[RDF_FIRST] as JsonValue[])[0] as JsonValue);
+      listNodes.push(id);
+      ({ node, property, value: head } = usage);
+    }
+
+    if (listNodes.length === 0) continue;
+    // `head` is the reference that points at the list head; rewrite it in place.
+    delete head["@id"];
+    list.reverse();
+    head["@list"] = list;
+    for (const id of listNodes) nodes.delete(id);
+  }
+}
+
 /**
  * Serialize quads into JSON-LD in **expanded / flattened** form (node objects,
- * no `@context`). This form round-trips losslessly through {@link parseJsonLd}.
+ * no `@context`). Lists are re-emitted as `@list`. This form round-trips
+ * through {@link parseJsonLd} at the RDF (quad) level; note an empty list and a
+ * literal `rdf:nil` reference share one representation (see {@link convertLists}).
  */
 function quadsToJsonLd(quads: Quad[]): JsonValue[] {
   interface GraphBucket {
@@ -626,6 +768,8 @@ function quadsToJsonLd(quads: Quad[]): JsonValue[] {
       pushValue(node, quad.predicate.value, objectToValue(quad.object));
     }
   }
+
+  for (const bucket of graphs.values()) convertLists(bucket.nodes);
 
   const output: JsonValue[] = [];
   const defaultBucket = graphs.get("");

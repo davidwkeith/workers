@@ -65,6 +65,9 @@ describe("@dwk/rdf content negotiation", () => {
     );
     expect(formatForMediaType("Application/N-Quads")).toBe("N-Quads");
     expect(formatForMediaType("text/html")).toBeUndefined();
+    // `application/json` is intentionally not an RDF type (it must not be
+    // auto-parsed as a graph on write).
+    expect(formatForMediaType("application/json")).toBeUndefined();
     // A missing Content-Type header passed straight through must not throw.
     expect(formatForMediaType(undefined as unknown as string)).toBeUndefined();
   });
