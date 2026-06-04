@@ -1,12 +1,15 @@
 /**
- * `@dwk/webmention` — structured log event taxonomy.
+ * `@dwk/webmention` — structured observability event taxonomy.
  *
- * The package's logging is opt-in via an injected {@link Logger} (see
- * `@dwk/log`). Event names are stable, dotted, and queryable — operators filter
- * on these rather than grepping free text. Security-relevant events (a blocked
- * SSRF attempt, a receiver rejection, a poison-message retry) are first-class
- * here so that being actively probed produces a distinct signal instead of
- * looking like a dead link. See `spec/observability.md`.
+ * The package's logging and metrics are opt-in via an injected {@link Logger}
+ * and {@link Metrics} (see `@dwk/log`), and **share this one vocabulary**: the
+ * same dotted event name is passed to `logger.warn(...)` and
+ * `metrics.count(...)` so a log line and its counter line up. Event names are
+ * stable, dotted, and queryable — operators filter on these rather than grepping
+ * free text. Security-relevant events (a blocked SSRF attempt, a receiver
+ * rejection, a poison-message retry) are first-class here so that being actively
+ * probed produces a distinct signal instead of looking like a dead link. See
+ * `spec/observability.md`.
  *
  * @packageDocumentation
  */

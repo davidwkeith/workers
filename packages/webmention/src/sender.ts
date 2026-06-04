@@ -8,7 +8,13 @@
  * @packageDocumentation
  */
 
-import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
+import {
+  hostFromUrl,
+  noopLogger,
+  noopMetrics,
+  type Logger,
+  type Metrics,
+} from "@dwk/log";
 import { discoverEndpoint } from "./discovery";
 import type { FetchLike } from "./fetch";
 import { WebmentionLogEvent } from "./log";
@@ -20,6 +26,8 @@ export interface SendOptions {
   readonly fetch?: FetchLike;
   /** Logger for send outcomes; defaults to a no-op (see `@dwk/log`). */
   readonly logger?: Logger;
+  /** Metrics sink for send-outcome counters; defaults to a no-op (see `@dwk/log`). */
+  readonly metrics?: Metrics;
 }
 
 /** Outcome of attempting to notify a single target. */
@@ -46,19 +54,27 @@ export async function sendWebmention(
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
   const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
 
   const logOutcome = (result: SendResult): SendResult => {
-    logger.info(WebmentionLogEvent.SendCompleted, {
+    const fields = {
       targetHost: hostFromUrl(target),
       endpointHost:
         result.endpoint === null ? undefined : hostFromUrl(result.endpoint),
       delivered: result.delivered,
       status: result.status,
-    });
+    };
+    logger.info(WebmentionLogEvent.SendCompleted, fields);
+    // Mirror the log as a counter so "deliveries (by delivered/status)" charts.
+    metrics.count(WebmentionLogEvent.SendCompleted, fields);
     return result;
   };
 
-  const endpoint = await discoverEndpoint(target, { fetch: doFetch, logger });
+  const endpoint = await discoverEndpoint(target, {
+    fetch: doFetch,
+    logger,
+    metrics,
+  });
   // Only notify http(s) endpoints: a page could advertise a `javascript:`,
   // `file:`, or `mailto:` endpoint, which we must never fetch.
   if (endpoint === null || !/^https?:$/i.test(new URL(endpoint).protocol)) {

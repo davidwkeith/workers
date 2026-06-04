@@ -26,6 +26,58 @@ config, no global-env reads) and
   wires a concrete logger (`consoleLogger`, or an adapter to Logpush / Analytics
   Engine) **once** at the composition boundary.
 
+## The injectable metrics seam
+
+Logs answer "what happened?"; **metrics** answer "how often / how much?" — so an
+operator can chart "SSRF blocks/min", "verification success rate", or "queue
+retries by reason" rather than scraping log lines. Metrics follow the **same
+injection discipline** as logging.
+
+- Packages MUST NOT reach for a global metrics client or read the environment
+  for one. A package's config/options accepts an **optional** `metrics`,
+  defaulting to a **no-op** (`noopMetrics`), exactly like `logger`.
+- The seam is the small `Metrics` interface in [`@dwk/log`](../packages/log) —
+  `count(event, fields?)` and `observe(event, value, fields?)`. It is a
+  **cross-standard reusable** alongside `Logger`: protocol-agnostic, no
+  Workers-runtime dependency.
+- Metrics **reuse the same event taxonomy and field bags as logs** (e.g.
+  `WebmentionLogEvent`), so a log line and its counter share one vocabulary: the
+  same `(event, fields)` is passed to both seams.
+- The composed Worker wires a concrete adapter **once** at the composition
+  boundary. `@dwk/log` ships `analyticsEngineMetrics(dataset)`, targeting
+  [Cloudflare Workers Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/)
+  through a **structural** binding type so the library stays Cloudflare-free
+  (the same trick `consoleLogger` uses for `console`).
+- Two **independent** optional injectables (`logger`, `metrics`), not one
+  combined `Observer`, so each seam stays minimal and independently testable.
+- **Counters first.** `count` is the first-class operation; `observe` exists for
+  later durations/histograms (e.g. fetch latency) and is not yet a first
+  consumer.
+
+### Analytics Engine field mapping
+
+`analyticsEngineMetrics` maps each call onto `writeDataPoint` deterministically,
+so positions are stable per event:
+
+- **`indexes[0]`** = the `event` name — the queryable **sampling key** (one
+  index only, truncated to 96 bytes).
+- **`blobs`** = `[event, …string-valued fields]`, fields in **sorted key
+  order**.
+- **`doubles`** = `[lead, …number/boolean fields]` in sorted key order, where
+  `lead` is `1` for `count` or the observed value for `observe`, and booleans
+  map to `1`/`0`.
+
+Non-scalar fields and `undefined`/`null`/non-finite numbers are dropped. Because
+field positions follow sorted key order, an event SHOULD carry a **stable field
+shape** so `blobN` / `doubleN` mean the same thing across data points. AE limits
+are respected: ≤ 1 index (96 B), ≤ 20 blobs (≤ 16 KB total), ≤ 20 doubles. A
+failing `writeDataPoint` is swallowed — like `Logger`, **`Metrics` MUST NOT
+throw** into the operation being measured.
+
+The **redaction policy below applies identically to metrics**: only hosts,
+ports, status, reason/result codes, booleans, and counts become data points —
+never tokens, bodies, or full URLs.
+
 ## Structured events, not free text
 
 - Every log call MUST name a **stable, dotted event** of the form
@@ -61,10 +113,12 @@ Redaction is the caller's responsibility, but the seam helps.
 
 ## Scope (current)
 
-- **Structured logs first.** Metrics/counters (e.g. Analytics Engine) are a
-  separate, later concern and are intentionally out of scope here; the same
-  injected seam can host a metrics adapter when needed.
-- **First consumer:** `@dwk/webmention` (SSRF blocks, verification outcomes,
-  queue-consumer retry reasons). The other endpoint packages
-  (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/solid-pod`) adopt the same seam for
-  auth/authz decisions and validation rejections as they are implemented.
+- **Structured logs and counters.** Both seams ship: structured logs (`Logger`)
+  and metrics counters (`Metrics`, with the Analytics Engine adapter). Durations
+  and histograms via `observe` are available but not yet a first consumer.
+- **First consumer:** `@dwk/webmention` emits, on **both** seams, the same
+  events — SSRF blocks (by reason), receive accepted/rejected, verification
+  outcomes (by links/status), queue-consumer retry reasons, and send outcomes
+  (by delivered/status). The other endpoint packages (`@dwk/indieauth`,
+  `@dwk/micropub`, `@dwk/solid-pod`) adopt the same two seams for auth/authz
+  decisions and validation rejections as they are implemented.

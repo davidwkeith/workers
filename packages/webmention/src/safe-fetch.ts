@@ -25,7 +25,7 @@
  * @packageDocumentation
  */
 
-import { noopLogger, type Logger } from "@dwk/log";
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { FetchLike } from "./fetch";
 import { WebmentionLogEvent } from "./log";
 
@@ -302,6 +302,8 @@ export interface SafeFetchOptions {
   readonly timeoutMs?: number;
   /** Logger for SSRF blocks; defaults to a no-op (see `@dwk/log`). */
   readonly logger?: Logger;
+  /** Metrics sink for SSRF-block counters; defaults to a no-op (see `@dwk/log`). */
+  readonly metrics?: Metrics;
 }
 
 /** A completed {@link safeFetch}: the final response and the URL it came from. */
@@ -335,6 +337,7 @@ export async function safeFetch(
   const maxRedirects = options?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
   const signal = AbortSignal.timeout(timeoutMs);
 
   // A blocked request is the single most security-relevant event here, so log
@@ -392,10 +395,10 @@ export async function safeFetch(
     }
   } catch (err) {
     if (err instanceof SsrfError) {
-      logger.warn(WebmentionLogEvent.SsrfBlocked, {
-        reason: err.reason,
-        host: err.host,
-      });
+      const fields = { reason: err.reason, host: err.host };
+      logger.warn(WebmentionLogEvent.SsrfBlocked, fields);
+      // Mirror the log as a counter so "SSRF blocks/min by reason" is chartable.
+      metrics.count(WebmentionLogEvent.SsrfBlocked, fields);
     }
     throw err;
   }

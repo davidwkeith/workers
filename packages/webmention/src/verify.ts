@@ -11,7 +11,13 @@
  * @packageDocumentation
  */
 
-import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
+import {
+  hostFromUrl,
+  noopLogger,
+  noopMetrics,
+  type Logger,
+  type Metrics,
+} from "@dwk/log";
 import {
   getAttr,
   matchTags,
@@ -89,21 +95,30 @@ export interface VerifyOptions {
   readonly fetch?: FetchLike;
   /** Logger for verification outcomes/failures; defaults to a no-op. */
   readonly logger?: Logger;
+  /** Metrics sink for verification-outcome counters; defaults to a no-op. */
+  readonly metrics?: Metrics;
 }
 
-/** Log a verification outcome (sanitized hosts only) and return the result. */
-function logVerifyOutcome(
+/**
+ * Record a verification outcome on both seams (sanitized hosts only) and return
+ * the result. The counter mirrors the log so "verification success rate" is
+ * chartable from the `links`/`status` fields.
+ */
+function recordVerifyOutcome(
   logger: Logger,
+  metrics: Metrics,
   source: string,
   target: string,
   result: VerifyResult,
 ): VerifyResult {
-  logger.info(WebmentionLogEvent.VerifyCompleted, {
+  const fields = {
     sourceHost: hostFromUrl(source),
     targetHost: hostFromUrl(target),
     links: result.links,
     status: result.status,
-  });
+  };
+  logger.info(WebmentionLogEvent.VerifyCompleted, fields);
+  metrics.count(WebmentionLogEvent.VerifyCompleted, fields);
   return result;
 }
 
@@ -133,6 +148,7 @@ export async function verifySource(
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
   const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
 
   let response: Response;
   let base: string;
@@ -141,7 +157,7 @@ export async function verifySource(
       doFetch,
       source,
       { method: "GET", headers: { accept: "text/html, */*" } },
-      { logger },
+      { logger, metrics },
     );
     response = result.response;
     base = result.url;
@@ -156,7 +172,7 @@ export async function verifySource(
   }
 
   if (!response.ok) {
-    return logVerifyOutcome(logger, source, target, {
+    return recordVerifyOutcome(logger, metrics, source, target, {
       links: false,
       status: response.status,
     });
@@ -166,13 +182,13 @@ export async function verifySource(
   const body = await readBodyCapped(response);
   if (body === null) {
     // Unreadable or oversized body: treat as no longer endorsing the mention.
-    return logVerifyOutcome(logger, source, target, {
+    return recordVerifyOutcome(logger, metrics, source, target, {
       links: false,
       status: response.status,
     });
   }
 
-  return logVerifyOutcome(logger, source, target, {
+  return recordVerifyOutcome(logger, metrics, source, target, {
     links: sourceLinksTo(body, target, base, contentType),
     status: response.status,
   });

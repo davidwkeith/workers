@@ -85,6 +85,31 @@ into a pod.
 | `allowedHosts` | `string[]`   | `[]`           | Extra controlled hostnames.                   |
 | `inbox`        | `InboxStore` | D1 from `env`  | Override the default inbox store.             |
 | `fetch`        | `FetchLike`  | global `fetch` | Override `fetch` (verification/discovery).     |
+| `logger`       | `Logger`     | `noopLogger`   | Structured logs (see `@dwk/log`).             |
+| `metrics`      | `Metrics`    | `noopMetrics`  | Queryable counters (see `@dwk/log`).          |
+
+## Observability
+
+Logging and metrics are **opt-in and injected** (see [`@dwk/log`](../log)),
+defaulting to no-ops. Both seams share one event vocabulary
+(`WebmentionLogEvent`), so a log line and its counter line up — SSRF blocks (by
+reason), receive accepted/rejected, verification outcomes (by links/status),
+queue retries (by reason), and send outcomes (by delivered/status):
+
+```ts
+import { consoleLogger, analyticsEngineMetrics } from "@dwk/log";
+import { createWebmention } from "@dwk/webmention";
+
+const webmention = createWebmention({
+  baseUrl: "https://example.com",
+  logger: consoleLogger({ minLevel: "info" }),
+  // env.WEBMENTION_METRICS is an AnalyticsEngineDataset binding.
+  metrics: analyticsEngineMetrics(env.WEBMENTION_METRICS),
+});
+```
+
+Both honor the redaction policy: only sanitized hosts, status, reason codes,
+booleans, and counts — never tokens, bodies, or full URLs.
 
 ## Federation handoff (documented config, not core code)
 

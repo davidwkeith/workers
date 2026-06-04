@@ -18,7 +18,13 @@ import type {
   MessageBatch,
   Queue,
 } from "@cloudflare/workers-types";
-import { hostFromUrl, noopLogger, type Logger } from "@dwk/log";
+import {
+  hostFromUrl,
+  noopLogger,
+  noopMetrics,
+  type Logger,
+  type Metrics,
+} from "@dwk/log";
 import { createD1Inbox, type InboxStore } from "./inbox";
 import type { FetchLike } from "./fetch";
 import { WebmentionLogEvent } from "./log";
@@ -68,7 +74,7 @@ export {
   type SsrfReason,
 } from "./safe-fetch";
 export { WebmentionLogEvent } from "./log";
-export type { Logger } from "@dwk/log";
+export type { Logger, Metrics } from "@dwk/log";
 
 /** A queued verification job: confirm that `source` links to `target`. */
 export interface WebmentionJob {
@@ -108,6 +114,13 @@ export interface WebmentionConfig {
    * poison-message retries instead of swallowing them.
    */
   readonly logger?: Logger;
+  /**
+   * Metrics sink for receiver/queue counters; defaults to a no-op. Wire an
+   * adapter (e.g. `analyticsEngineMetrics` from `@dwk/log`, bound to an
+   * `AnalyticsEngineDataset`) to chart the same events the logger names —
+   * "SSRF blocks/min", "verification success rate", "queue retries by reason".
+   */
+  readonly metrics?: Metrics;
 }
 
 /** A `fetch`-compatible Worker handler. */
@@ -162,6 +175,7 @@ function formValue(value: string | File | null): string | null {
  */
 export function createWebmention(config: WebmentionConfig): WebmentionHandler {
   const logger = config.logger ?? noopLogger;
+  const metrics = config.metrics ?? noopMetrics;
   return async (request, env, _ctx) => {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", {
@@ -193,7 +207,9 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       allowedHosts: config.allowedHosts,
     });
     if (!result.ok) {
-      logger.warn(WebmentionLogEvent.ReceiveRejected, { reason: result.error });
+      const fields = { reason: result.error };
+      logger.warn(WebmentionLogEvent.ReceiveRejected, fields);
+      metrics.count(WebmentionLogEvent.ReceiveRejected, fields);
       return textResponse(400, result.error);
     }
 
@@ -202,10 +218,12 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       target: result.target,
     });
 
-    logger.info(WebmentionLogEvent.ReceiveAccepted, {
+    const fields = {
       sourceHost: hostFromUrl(result.source),
       targetHost: hostFromUrl(result.target),
-    });
+    };
+    logger.info(WebmentionLogEvent.ReceiveAccepted, fields);
+    metrics.count(WebmentionLogEvent.ReceiveAccepted, fields);
     return new Response(null, { status: 202 });
   };
 }
@@ -222,6 +240,7 @@ export function createWebmentionQueueConsumer(
   config: WebmentionConfig,
 ): WebmentionQueueConsumer {
   const logger = config.logger ?? noopLogger;
+  const metrics = config.metrics ?? noopMetrics;
   return async (batch, env, _ctx) => {
     const inbox = resolveInbox(config, env);
     for (const message of batch.messages) {
@@ -230,6 +249,7 @@ export function createWebmentionQueueConsumer(
         const result = await verifySource(source, target, {
           fetch: config.fetch,
           logger,
+          metrics,
         });
         if (result.links) {
           await inbox.store({ source, target, verifiedAt: Date.now() });
@@ -240,11 +260,13 @@ export function createWebmentionQueueConsumer(
       } catch (err) {
         // A poison message must not retry silently — record why so an operator
         // can tell a transient failure from a wedged one.
-        logger.warn(WebmentionLogEvent.QueueRetry, {
+        const fields = {
           sourceHost: hostFromUrl(source),
           targetHost: hostFromUrl(target),
           error: err instanceof Error ? err.name : "unknown",
-        });
+        };
+        logger.warn(WebmentionLogEvent.QueueRetry, fields);
+        metrics.count(WebmentionLogEvent.QueueRetry, fields);
         message.retry();
       }
     }
