@@ -346,21 +346,32 @@ function solve(
     const last = i === where.length - 1;
     const next: Map<string, StoredTerm>[] = [];
     for (const partial of solutions) {
+      // The variables this triple would newly bind in `partial`. `matchTerm`
+      // binds into the map it is given, so we match against `partial` directly
+      // and roll these back after each quad — cloning a fresh candidate per
+      // quad would, on the abort path, allocate up to MAX_SOLVE_WORK maps and
+      // thrash GC inside the single-threaded DO. Only successful matches clone.
+      const newVars: string[] = [];
+      for (const term of [triple.subject, triple.predicate, triple.object]) {
+        if (term.kind === "var" && !partial.has(term.name)) {
+          newVars.push(term.name);
+        }
+      }
       for (const quad of current) {
         if (++work > MAX_SOLVE_WORK) {
           throw new PatchProblem("where_too_complex");
         }
-        const candidate = new Map(partial);
         if (
-          matchTerm(triple.subject, quad.subject, candidate) &&
-          matchTerm(triple.predicate, quad.predicate, candidate) &&
-          matchTerm(triple.object, quad.object, candidate)
+          matchTerm(triple.subject, quad.subject, partial) &&
+          matchTerm(triple.predicate, quad.predicate, partial) &&
+          matchTerm(triple.object, quad.object, partial)
         ) {
-          next.push(candidate);
+          next.push(new Map(partial));
           // On the final triple, two complete solutions already prove the
           // match is ambiguous; stop before enumerating the rest.
           if (last && next.length > 1) return next;
         }
+        for (const name of newVars) partial.delete(name);
       }
     }
     if (next.length === 0) return [];
