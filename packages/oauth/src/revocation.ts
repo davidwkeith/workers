@@ -54,7 +54,15 @@ export function createRevocationHandler(
       return methodNotAllowed("POST");
     }
 
-    if (config.authenticate && !(await config.authenticate(request))) {
+    // Clone before consuming the body so the authenticator can read it too.
+    const authRequest = request.clone();
+    const form = await readForm(request);
+
+    const clientId = form.get("client_id") ?? undefined;
+    if (
+      config.authenticate &&
+      !(await config.authenticate(authRequest, clientId))
+    ) {
       emit(obs, "warn", OAuthLogEvent.RevocationRejected, {
         reason: "unauthenticated",
       });
@@ -66,7 +74,6 @@ export function createRevocationHandler(
       );
     }
 
-    const form = await readForm(request);
     const token = form.get("token") ?? "";
     // A missing `token` is the one malformed-request case RFC 7009 §2.1 lets us
     // reject; a present-but-unknown token is still a success.

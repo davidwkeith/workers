@@ -104,18 +104,8 @@ export function createPushedAuthorizationRequestHandler(
       return methodNotAllowed("POST");
     }
 
-    if (config.authenticate && !(await config.authenticate(request))) {
-      emit(obs, "warn", OAuthLogEvent.PushedRequestRejected, {
-        reason: "unauthenticated",
-      });
-      return oauthErrorResponse(
-        OAuthError.InvalidClient,
-        "pushed authorization requests require client authentication",
-        401,
-        { "WWW-Authenticate": "Bearer" },
-      );
-    }
-
+    // Clone before consuming the body so the authenticator can read it too.
+    const authRequest = request.clone();
     const form = await readForm(request);
 
     // RFC 9126 §2.1: the PAR body MUST NOT itself contain a `request_uri`.
@@ -137,6 +127,23 @@ export function createPushedAuthorizationRequestHandler(
       return oauthErrorResponse(
         OAuthError.InvalidRequest,
         "`client_id` is required",
+      );
+    }
+
+    // Authenticate with the extracted `client_id` in hand, so the authenticator
+    // can enforce the RFC 9126 §2.1 match (authenticated client == client_id).
+    if (
+      config.authenticate &&
+      !(await config.authenticate(authRequest, clientId))
+    ) {
+      emit(obs, "warn", OAuthLogEvent.PushedRequestRejected, {
+        reason: "unauthenticated",
+      });
+      return oauthErrorResponse(
+        OAuthError.InvalidClient,
+        "pushed authorization requests require client authentication",
+        401,
+        { "WWW-Authenticate": "Bearer" },
       );
     }
 

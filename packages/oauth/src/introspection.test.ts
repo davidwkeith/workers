@@ -157,6 +157,32 @@ describe("createIntrospectionHandler", () => {
     expect(lookupToken).not.toHaveBeenCalled();
   });
 
+  it("passes the request and any extracted client_id to the authenticator", async () => {
+    const authenticate = vi.fn((_req: Request, _clientId?: string) => true);
+    await handler({ authenticate })(
+      postForm({ token: "tok", client_id: "https://app.example/" }),
+    );
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    const [req, clientId] = authenticate.mock.calls[0]!;
+    expect(req).toBeInstanceOf(Request);
+    expect(clientId).toBe("https://app.example/");
+  });
+
+  it("lets a body-reading authenticator coexist with the handler's parse", async () => {
+    // The authenticator consumes its own (cloned) copy of the body; the
+    // handler must still parse `token` from the original — a 400 here would
+    // mean the body was consumed out from under it.
+    const authenticate = async (req: Request) => {
+      const body = await req.formData();
+      return body.get("client_id") === "https://app.example/";
+    };
+    const res = await handler({ authenticate })(
+      postForm({ token: "tok", client_id: "https://app.example/" }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ active: false });
+  });
+
   it("rejects non-POST with 405", async () => {
     const res = await handler()(new Request(ENDPOINT, { method: "GET" }));
     expect(res.status).toBe(405);

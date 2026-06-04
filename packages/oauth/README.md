@@ -130,6 +130,13 @@ const reference = parseRequestUri(url.searchParams.get("request_uri")!);
 const pushed = reference ? await store.consumePushedRequest(reference, now) : null;
 ```
 
+The `authenticate` hook is `(request, clientId?) => boolean | Promise<boolean>`:
+the handler parses the body, hands the extracted `client_id` to the hook, and
+passes a **pre-parse clone** of the request, so an authenticator can read the
+body itself (e.g. a `client_secret_post` credential) without disturbing the
+handler's own parse. This is what lets a PAR authenticator enforce the RFC 9126
+§2.1 requirement that the authenticated client match the request's `client_id`.
+
 ### Dynamic client registration (RFC 7591)
 
 ```ts

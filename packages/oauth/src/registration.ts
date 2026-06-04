@@ -282,7 +282,10 @@ export function createClientRegistrationHandler(
       return methodNotAllowed("POST");
     }
 
-    if (config.authenticate && !(await config.authenticate(request))) {
+    // Clone so an authenticator that reads the body (e.g. an initial access
+    // token in the body) does not disturb the handler's own JSON parse. A
+    // registration request carries no `client_id` (one is being issued).
+    if (config.authenticate && !(await config.authenticate(request.clone()))) {
       emit(obs, "warn", OAuthLogEvent.ClientRegistrationRejected, {
         reason: "unauthenticated",
       });

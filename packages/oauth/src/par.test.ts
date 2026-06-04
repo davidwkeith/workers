@@ -142,6 +142,32 @@ describe("createPushedAuthorizationRequestHandler", () => {
     expect(saved?.jkt).toBeUndefined();
   });
 
+  it("passes the extracted client_id to the authenticator (RFC 9126 §2.1)", async () => {
+    const authenticate = vi.fn((_req: Request, _clientId?: string) => true);
+    await handler({ authenticate })(
+      postForm({ client_id: "https://app.example/", response_type: "code" }),
+    );
+    const [req, clientId] = authenticate.mock.calls[0]!;
+    expect(req).toBeInstanceOf(Request);
+    expect(clientId).toBe("https://app.example/");
+  });
+
+  it("lets a body-reading authenticator coexist with the handler's store", async () => {
+    let saved: PushedRequestRecord | undefined;
+    const authenticate = async (req: Request) => {
+      const body = await req.formData();
+      return body.get("client_id") === "https://app.example/";
+    };
+    const res = await handler({
+      authenticate,
+      saveRequest: async (record) => {
+        saved = record;
+      },
+    })(postForm({ client_id: "https://app.example/", response_type: "code" }));
+    expect(res.status).toBe(201);
+    expect(saved?.params.response_type).toBe("code");
+  });
+
   it("rejects non-POST with 405", async () => {
     const res = await handler()(new Request(ENDPOINT, { method: "GET" }));
     expect(res.status).toBe(405);

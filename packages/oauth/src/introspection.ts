@@ -27,9 +27,18 @@ import {
 } from "./observability";
 import type { IntrospectionTokenRecord } from "./store";
 
-/** Authenticates the calling Resource Server / client at a protected endpoint. */
+/**
+ * Authenticates the calling Resource Server / client at a protected endpoint.
+ *
+ * Receives the request and, when the handler could extract one from the body,
+ * the requested `client_id`. The handler passes a **pre-parse clone** of the
+ * request, so an authenticator that itself reads the body (e.g. a
+ * `client_secret_post` credential, or matching the authenticated client against
+ * `clientId` per RFC 9126 §2.1) does not disturb the handler's own parse.
+ */
 export type EndpointAuthenticator = (
   request: Request,
+  clientId?: string,
 ) => boolean | Promise<boolean>;
 
 /** Configuration for {@link createIntrospectionHandler}. */
@@ -131,9 +140,15 @@ export function createIntrospectionHandler(
       return methodNotAllowed("POST");
     }
 
+    // Clone before consuming the body so the authenticator can read it too.
+    const authRequest = request.clone();
+    const form = await readForm(request);
+
     // Protect the endpoint first, so an unauthenticated caller learns nothing
-    // about any token (not even "unknown" vs "known").
-    if (!(await config.authenticate(request))) {
+    // about any token (not even "unknown" vs "known") — the token lookup stays
+    // after this gate. Reading the (small) form body up front is not sensitive.
+    const clientId = form.get("client_id") ?? undefined;
+    if (!(await config.authenticate(authRequest, clientId))) {
       emit(obs, "warn", OAuthLogEvent.IntrospectionRejected, {
         reason: "unauthenticated",
       });
@@ -145,7 +160,6 @@ export function createIntrospectionHandler(
       );
     }
 
-    const form = await readForm(request);
     const token = form.get("token") ?? "";
     if (!token) {
       return oauthErrorResponse(

@@ -58,6 +58,23 @@ describe("createRevocationHandler", () => {
     expect(revokeToken).not.toHaveBeenCalled();
   });
 
+  it("lets a body-reading authenticator coexist with the handler's parse", async () => {
+    const revokeToken = vi.fn(async () => {});
+    const authenticate = async (req: Request, clientId?: string) => {
+      // Reads its own clone of the body and sees the extracted client_id.
+      const body = await req.formData();
+      return (
+        body.get("client_id") === "https://app.example/" &&
+        clientId === "https://app.example/"
+      );
+    };
+    const res = await handler({ authenticate, revokeToken })(
+      postForm({ token: "tok", client_id: "https://app.example/" }),
+    );
+    expect(res.status).toBe(200);
+    expect(revokeToken).toHaveBeenCalledWith("tok", undefined);
+  });
+
   it("rejects non-POST with 405", async () => {
     const res = await handler()(new Request(ENDPOINT, { method: "DELETE" }));
     expect(res.status).toBe(405);
