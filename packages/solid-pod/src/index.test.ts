@@ -350,6 +350,22 @@ describe("@dwk/solid-pod access-token validation (issue #35)", () => {
     );
   });
 
+  it("rejects a token whose nbf is present but not a number (RFC 7519 §4.1.5)", async () => {
+    const pod = freshPod();
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: "not-a-number" },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(
+      "token_not_yet_valid",
+    );
+  });
+
   it("accepts a token whose nbf is already in the past", async () => {
     const pod = freshPod();
     await pod.send("PUT", "/doc", {

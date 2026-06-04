@@ -154,7 +154,9 @@ export async function authenticate(
     return { kind: "rejected", reason: "token_expired" };
   }
   // Honor `nbf` when present: a token is not valid before its not-before time.
-  if (typeof nbf === "number" && now < nbf) {
+  // Per RFC 7519 §4.1.5 `nbf` MUST be a number; a present-but-malformed value is
+  // rejected rather than silently bypassed (mirrors the `exp` handling above).
+  if (nbf !== undefined && (typeof nbf !== "number" || now < nbf)) {
     return { kind: "rejected", reason: "token_not_yet_valid" };
   }
 
