@@ -52,11 +52,13 @@ function parseAccept(accept: string): AcceptEntry[] {
 }
 
 /**
- * Choose the RDF serialization to write for an `Accept` header. Honors explicit
- * RDF media types and wildcards (`text/*`, `application/*`, and the catch-all
- * `*` `/` `*`); falls back to Turtle when nothing acceptable matches.
+ * Choose the RDF serialization to write for an `Accept` header, or `null` when
+ * the header is present but lists nothing this server can serve (the caller MUST
+ * then answer `406 Not Acceptable`). An absent/empty `Accept` or a `*` `/` `*`
+ * wildcard yields the Turtle default; concrete RDF media types and family
+ * wildcards (`text/*`, `application/*`) negotiate to a supported type.
  */
-export function negotiateMediaType(accept: string | null): Negotiated {
+export function negotiateMediaType(accept: string | null): Negotiated | null {
   if (!accept || accept.trim() === "") return DEFAULT;
 
   for (const entry of parseAccept(accept)) {
@@ -85,5 +87,7 @@ export function negotiateMediaType(accept: string | null): Negotiated {
     }
   }
 
-  return DEFAULT;
+  // An `Accept` was supplied but nothing in it is acceptable: signal 406 rather
+  // than silently serving Turtle the client said it could not handle.
+  return null;
 }

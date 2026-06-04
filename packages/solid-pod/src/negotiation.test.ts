@@ -41,7 +41,15 @@ describe("@dwk/solid-pod content negotiation", () => {
     });
   });
 
-  it("falls back to Turtle for unsupported types", () => {
-    expect(negotiateMediaType("text/html")).toMatchObject({ format: "Turtle" });
+  it("returns null (→ 406) when nothing in Accept is acceptable", () => {
+    expect(negotiateMediaType("text/html")).toBeNull();
+    expect(negotiateMediaType("application/pdf")).toBeNull();
+    expect(negotiateMediaType("image/*")).toBeNull();
+  });
+
+  it("honors */* even alongside unsupported concrete types", () => {
+    expect(negotiateMediaType("application/pdf, */*;q=0.1")).toMatchObject({
+      format: "Turtle",
+    });
   });
 });

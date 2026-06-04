@@ -791,6 +791,54 @@ describe("@dwk/solid-pod content negotiation", () => {
     const json = (await res.json()) as unknown;
     expect(Array.isArray(json) || typeof json === "object").toBe(true);
   });
+
+  it("returns 406 when the Accept header offers no serializable type", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const res = await pod.send("GET", "/doc", {
+      webid: OWNER,
+      headers: { accept: "application/pdf" },
+    });
+    expect(res.status).toBe(406);
+  });
+});
+
+describe("@dwk/solid-pod conditional GET (If-None-Match)", () => {
+  it("matches a strong ETag inside a list and a weak validator", async () => {
+    const pod = freshPod();
+    const created = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const etag = created.headers.get("etag")!;
+    expect(etag).toMatch(/^".+"$/);
+
+    // The current ETag appears within a comma-separated list ⇒ 304.
+    const list = await pod.send("GET", "/doc", {
+      webid: OWNER,
+      headers: { "if-none-match": `"nomatch", ${etag}` },
+    });
+    expect(list.status).toBe(304);
+
+    // A weak form of the same validator still matches (weak comparison).
+    const weak = await pod.send("GET", "/doc", {
+      webid: OWNER,
+      headers: { "if-none-match": `W/${etag}` },
+    });
+    expect(weak.status).toBe(304);
+
+    // A non-matching validator returns the full representation.
+    const miss = await pod.send("GET", "/doc", {
+      webid: OWNER,
+      headers: { "if-none-match": '"stale"' },
+    });
+    expect(miss.status).toBe(200);
+  });
 });
 
 describe("@dwk/solid-pod LDP", () => {
@@ -903,5 +951,39 @@ describe("@dwk/solid-pod LDP", () => {
     const res = await pod.send("OPTIONS", "/anything");
     expect(res.status).toBe(204);
     expect(res.headers.get("accept-patch")).toContain("text/n3");
+  });
+
+  it("OPTIONS on a container advertises concrete Accept-Post types", async () => {
+    const pod = freshPod();
+    const res = await pod.send("OPTIONS", "/c/");
+    expect(res.status).toBe(204);
+    const acceptPost = res.headers.get("accept-post");
+    expect(acceptPost).toContain("text/turtle");
+    expect(acceptPost).toContain("application/ld+json");
+  });
+
+  it("does not list .acl auxiliaries in a container's ldp:contains", async () => {
+    const pod = freshPod();
+    // A regular child is a contained member.
+    await pod.send("PUT", "/c/kid", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    // An ACL document governing that child is an auxiliary, not a member.
+    const acl = await pod.send("PUT", "/c/kid.acl", {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+<#r> a acl:Authorization ; acl:accessTo <${pod.base}/c/kid> ;
+  acl:agent <${BOB}> ; acl:mode acl:Read .`,
+      headers: { "content-type": TURTLE },
+    });
+    expect(acl.status).toBe(201);
+
+    const listing = await pod.send("GET", "/c/", { webid: OWNER });
+    const body = await listing.text();
+    expect(body).toContain("/c/kid");
+    // The auxiliary's existence/path must not leak through the listing.
+    expect(body).not.toContain("kid.acl");
   });
 });
