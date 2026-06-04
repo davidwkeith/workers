@@ -238,9 +238,12 @@ async function handleMediaUpload(
   env: MicropubEnv,
   config: ResolvedConfig,
 ): Promise<Response> {
+  // Least privilege: the media endpoint requires the dedicated `media` scope.
+  // A `create`-only token authorizes creating posts (including photos folded
+  // into a multipart create), not arbitrary blob uploads to the media endpoint
+  // — `q=config` advertises `media` as a distinct scope.
   const auth = await authorize(request, env, config, tokenFromHeader(request), [
     "media",
-    "create",
   ]);
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {
@@ -362,7 +365,7 @@ async function handleQuery(
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {
-      return error("not_found", "no post exists at that URL", 404);
+      return error("invalid_request", "no post exists at that URL", 404);
     }
     const filter = [
       ...params.getAll("properties[]"),
@@ -514,7 +517,11 @@ async function doCreate(
   emit(config, "warn", MicropubLogEvent.RequestRejected, {
     reason: "url_conflict",
   });
-  return error("conflict", "could not allocate a unique URL for the post", 409);
+  return error(
+    "invalid_request",
+    "could not allocate a unique URL for the post",
+    409,
+  );
 }
 
 /** Apply a JSON `update` to an existing post. */
@@ -543,7 +550,7 @@ async function doUpdate(
   }
   const record = await store.getPost(url);
   if (!record || record.deleted) {
-    return error("not_found", "no post exists at that URL", 404);
+    return error("invalid_request", "no post exists at that URL", 404);
   }
   let ops;
   try {
@@ -565,7 +572,7 @@ async function doUpdate(
   );
   // The post may have been deleted between the read above and this write.
   if (!updated) {
-    return error("not_found", "no post exists at that URL", 404);
+    return error("invalid_request", "no post exists at that URL", 404);
   }
   emit(config, "info", MicropubLogEvent.ActionCompleted, { action: "update" });
   return noContent();
@@ -584,7 +591,7 @@ async function doDelete(
     return error("invalid_request", "`url` is required for `delete`", 400);
   }
   const ok = await store.setDeleted(url, true, Math.floor(Date.now() / 1000));
-  if (!ok) return error("not_found", "no post exists at that URL", 404);
+  if (!ok) return error("invalid_request", "no post exists at that URL", 404);
   emit(config, "info", MicropubLogEvent.ActionCompleted, { action: "delete" });
   return noContent();
 }
@@ -602,7 +609,7 @@ async function doUndelete(
     return error("invalid_request", "`url` is required for `undelete`", 400);
   }
   const ok = await store.setDeleted(url, false, Math.floor(Date.now() / 1000));
-  if (!ok) return error("not_found", "no post exists at that URL", 404);
+  if (!ok) return error("invalid_request", "no post exists at that URL", 404);
   emit(config, "info", MicropubLogEvent.ActionCompleted, {
     action: "undelete",
   });

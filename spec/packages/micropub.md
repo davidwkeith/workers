@@ -25,7 +25,14 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
   owner `me` (after canonicalization). Otherwise any token minted by the same
   issuer for a *different* `me` carrying the right scope could publish here — an
   authorization bypass in any multi-user or shared-issuer deployment.
-- Tokens are DPoP-bound; validation reuses [`@dwk/dpop`](dpop.md).
+- Tokens are DPoP-bound; validation reuses [`@dwk/dpop`](dpop.md). `@dwk/dpop`
+  proves a proof fresh but delegates **replay** detection to the caller
+  (RFC 9449): each accepted proof `jti` is recorded in a strongly-consistent,
+  short-TTL store (D1), and a duplicate is rejected, so a captured proof cannot
+  be replayed within its acceptance window to repeat a state-changing request.
+- **Least privilege.** The media endpoint requires the dedicated `media` scope;
+  a `create`-only token authorizes creating posts (including photos folded into
+  a multipart create) but not arbitrary blob uploads to the media endpoint.
 
 ## Bindings (declared `Env` fragment)
 

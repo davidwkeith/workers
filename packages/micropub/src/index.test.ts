@@ -147,6 +147,7 @@ const handler = createMicropub({
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
   await (await import("./store")).createMicropubStore(harness).init();
+  await (await import("./replay")).createDpopReplayStore(harness).init();
 });
 
 // --- Tests ------------------------------------------------------------------
@@ -535,7 +536,7 @@ describe("@dwk/micropub media endpoint", () => {
     expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
   });
 
-  it("requires the media scope", async () => {
+  it("rejects a media upload without the media scope (least privilege)", async () => {
     const minted = await mintToken("create");
     const form = new FormData();
     form.set("file", new File(["x"], "a.txt", { type: "text/plain" }));
@@ -548,9 +549,12 @@ describe("@dwk/micropub media endpoint", () => {
       harness,
       ctx,
     );
-    // `create` is accepted as a fallback for media, so this must NOT be a scope
-    // failure — but with only `create` granted and no file issues it succeeds.
-    expect(res.status).toBe(201);
+    // A `create`-only token does not authorize arbitrary blob uploads to the
+    // media endpoint; that requires the dedicated `media` scope.
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "insufficient_scope",
+    );
   });
 
   it("folds an uploaded photo into a multipart create", async () => {
@@ -809,6 +813,152 @@ describe("@dwk/micropub authorization", () => {
       ctx,
     );
     expect(res2.status).toBe(401);
+  });
+});
+
+describe("@dwk/micropub DPoP replay", () => {
+  it("rejects a replayed proof on a state-changing request", async () => {
+    const minted = await mintToken("create");
+    // Capture one proof and reuse it verbatim, so both requests carry the same
+    // `jti` (a legitimate client mints a fresh proof per request).
+    const headers = {
+      "content-type": "application/json",
+      ...(await authHeaders(minted, "POST", MICROPUB)),
+    };
+    const body = JSON.stringify({
+      type: ["h-entry"],
+      properties: { content: ["once"] },
+    });
+
+    const first = await handler(
+      new Request(MICROPUB, { method: "POST", headers, body }),
+      harness,
+      ctx,
+    );
+    expect(first.status).toBe(201);
+
+    const replay = await handler(
+      new Request(MICROPUB, { method: "POST", headers, body }),
+      harness,
+      ctx,
+    );
+    expect(replay.status).toBe(401);
+    expect(((await replay.json()) as { error: string }).error).toBe(
+      "invalid_token",
+    );
+  });
+
+  it("allows reuse of a proof when replay detection is disabled", async () => {
+    const lax = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      checkDpopReplay: false,
+    });
+    const minted = await mintToken("create");
+    const headers = await authHeaders(minted, "GET", MICROPUB);
+    const a = await handler(
+      new Request(`${MICROPUB}?q=config`, { headers }),
+      harness,
+      ctx,
+    );
+    const b = await lax(
+      new Request(`${MICROPUB}?q=config`, { headers }),
+      harness,
+      ctx,
+    );
+    // Same proof twice: the default handler burns the `jti` on the first read,
+    // but the lax handler accepts both.
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+  });
+});
+
+describe("@dwk/micropub error codes", () => {
+  it("uses a registered error code for a missing post", async () => {
+    const minted = await mintToken("create update");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: `${BASE}/does-not-exist`,
+          replace: { content: ["x"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+    // `not_found` is not in the Micropub/OAuth error registry; the body uses
+    // `invalid_request` while keeping the 404 status.
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+});
+
+describe("@dwk/micropub update key stripping", () => {
+  it("strips mp-*/reserved keys from update operands", async () => {
+    const minted = await mintToken("create update");
+    const create = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: { content: ["original"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    const url = create.headers.get("location")!;
+
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url,
+          replace: {
+            content: ["edited"],
+            "mp-slug": ["sneaky"],
+            url: ["https://evil.example/"],
+          },
+          add: { "mp-syndicate-to": ["https://evil.example/feed"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(204);
+
+    const source = await handler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(url)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const sourceBody = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(sourceBody.properties.content).toEqual(["edited"]);
+    // The command/reserved keys never reach stored properties.
+    expect(sourceBody.properties["mp-slug"]).toBeUndefined();
+    expect(sourceBody.properties["mp-syndicate-to"]).toBeUndefined();
+    expect(sourceBody.properties.url).toBeUndefined();
   });
 });
 

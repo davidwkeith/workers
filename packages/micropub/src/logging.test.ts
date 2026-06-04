@@ -182,6 +182,7 @@ function build() {
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
   await (await import("./store")).createMicropubStore(harness).init();
+  await (await import("./replay")).createDpopReplayStore(harness).init();
 });
 
 describe("@dwk/micropub auth logging", () => {

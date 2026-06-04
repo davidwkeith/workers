@@ -39,6 +39,27 @@ export interface UpdateOperations {
 
 const RESERVED_FORM_KEYS = new Set(["access_token", "action", "url", "h"]);
 
+/**
+ * Whether a key may never appear as a stored mf2 property: the `mp-*` command
+ * namespace plus the structural/reserved request fields. Create strips these
+ * (via {@link extractCommands} and `RESERVED_FORM_KEYS`); update operands run
+ * through the same gate so an update cannot persist a key a create would reject.
+ */
+function isReservedPropertyKey(key: string): boolean {
+  return key.startsWith("mp-") || RESERVED_FORM_KEYS.has(key);
+}
+
+/** Drop reserved/command keys from a property map (see {@link isReservedPropertyKey}). */
+function stripReservedKeys(
+  map: Record<string, unknown[]>,
+): Record<string, unknown[]> {
+  const out: Record<string, unknown[]> = {};
+  for (const [key, values] of Object.entries(map)) {
+    if (!isReservedPropertyKey(key)) out[key] = values;
+  }
+  return out;
+}
+
 /** A `prop[sub]` / `prop[]` / `prop` form key, split into its parts. */
 function parseFormKey(rawKey: string): { key: string; sub?: string } {
   const match = /^([^[]+)\[([^\]]*)\]$/.exec(rawKey);
@@ -208,11 +229,14 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
     delete?: string[] | Record<string, unknown[]>;
   } = {};
 
+  // Strip `mp-*`/reserved keys from every operand, mirroring create: an update
+  // must not be able to persist `mp-slug`, `url`, etc. into stored properties
+  // where create rejects them (they would otherwise surface via `q=source`).
   if (body.replace !== undefined) {
-    ops.replace = asPropertyMap(body.replace, "replace");
+    ops.replace = stripReservedKeys(asPropertyMap(body.replace, "replace"));
   }
   if (body.add !== undefined) {
-    ops.add = asPropertyMap(body.add, "add");
+    ops.add = stripReservedKeys(asPropertyMap(body.add, "add"));
   }
   if (body.delete !== undefined) {
     const del = body.delete;
@@ -220,9 +244,9 @@ export function parseUpdateOperations(body: unknown): UpdateOperations {
       if (!del.every((k) => typeof k === "string")) {
         throw new Mf2ParseError("`delete` array must contain property names");
       }
-      ops.delete = del as string[];
+      ops.delete = (del as string[]).filter((k) => !isReservedPropertyKey(k));
     } else {
-      ops.delete = asPropertyMap(del, "delete");
+      ops.delete = stripReservedKeys(asPropertyMap(del, "delete"));
     }
   }
   return ops;
