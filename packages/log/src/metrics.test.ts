@@ -178,6 +178,24 @@ describe("analyticsEngineMetrics", () => {
     expect(total).toBeLessThanOrEqual(16_384);
   });
 
+  it("drops a multibyte char the cut would split past the byte cap", () => {
+    const dataset = spyDataset();
+    const metrics = analyticsEngineMetrics(dataset);
+    // 95 ASCII + "한" (3 bytes) = 98 bytes: the lead byte sits at offset 95, so
+    // the whole sequence would run past the 96-byte index cap and is dropped.
+    metrics.count("a".repeat(95) + "한");
+    const index = dataset.points[0]?.indexes?.[0] as string;
+    expect(index).toBe("a".repeat(95));
+    expect(index).not.toContain("�");
+  });
+
+  it("treats a non-finite observed value as a lead of 0", () => {
+    const dataset = spyDataset();
+    const metrics = analyticsEngineMetrics(dataset);
+    metrics.observe("e", Number.POSITIVE_INFINITY, { host: "a.example" });
+    expect(dataset.points[0]?.doubles?.[0]).toBe(0);
+  });
+
   it("never throws when writeDataPoint throws", () => {
     const dataset: AnalyticsEngineDatasetLike = {
       writeDataPoint: vi.fn(() => {
