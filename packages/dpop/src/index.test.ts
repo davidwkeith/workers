@@ -62,6 +62,17 @@ const SIGNERS: Record<string, SignerSpec> = {
     sign: { name: "RSASSA-PKCS1-v1_5" },
     alg: "RS256",
   },
+  // Undersized RSA key (below the 2048-bit floor) — still advertises RS256.
+  "RS256-1024": {
+    generate: {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 1024,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    sign: { name: "RSASSA-PKCS1-v1_5" },
+    alg: "RS256",
+  },
 };
 
 interface KeyMaterial {
@@ -233,6 +244,28 @@ describe("verifyDpopProof — header checks", () => {
     const result = await verifyDpopProof({ ...base(), proof });
     expect(result).toMatchObject({ valid: false, reason: "jwk_invalid" });
   });
+
+  it("rejects a JWS with a crit header parameter (RFC 7515 §4.1.11)", async () => {
+    const proof = await makeProof(es256, { header: { crit: ["b64"] } });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "crit_unsupported" });
+  });
+
+  it("rejects an EC jwk whose crv does not match the alg", async () => {
+    // ES256 implies P-256; advertise P-384 instead.
+    const proof = await makeProof(es256, {
+      header: { jwk: { ...es256.publicJwk, crv: "P-384" } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "crv_mismatch" });
+  });
+
+  it("rejects an RSA key below the 2048-bit floor", async () => {
+    const weak = await makeKey("RS256-1024");
+    const proof = await makeProof(weak);
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "rsa_key_too_small" });
+  });
 });
 
 describe("verifyDpopProof — signature", () => {
@@ -345,24 +378,57 @@ describe("verifyDpopProof — Resource Server bindings", () => {
   }
 
   it("accepts a proof with a matching ath", async () => {
+    const computed = (
+      await verifyDpopProof({ ...base(), proof: await makeProof(es256) })
+    ).jkt!;
+    const proof = await makeProof(es256, {
+      payload: { ath: await ath(accessToken) },
+    });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      accessToken,
+      expectedJkt: computed,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects an access token presented without an expected jkt binding", async () => {
+    // Enforcing ath without cnf.jkt would defeat proof-of-possession.
     const proof = await makeProof(es256, {
       payload: { ath: await ath(accessToken) },
     });
     const result = await verifyDpopProof({ ...base(), proof, accessToken });
-    expect(result.valid).toBe(true);
+    expect(result).toMatchObject({ valid: false, reason: "jkt_required" });
   });
 
   it("rejects a proof missing ath when an access token is presented", async () => {
+    const computed = (
+      await verifyDpopProof({ ...base(), proof: await makeProof(es256) })
+    ).jkt!;
     const proof = await makeProof(es256);
-    const result = await verifyDpopProof({ ...base(), proof, accessToken });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      accessToken,
+      expectedJkt: computed,
+    });
     expect(result).toMatchObject({ valid: false, reason: "ath_mismatch" });
   });
 
   it("rejects a proof whose ath is for a different token", async () => {
+    const computed = (
+      await verifyDpopProof({ ...base(), proof: await makeProof(es256) })
+    ).jkt!;
     const proof = await makeProof(es256, {
       payload: { ath: await ath("some-other-token") },
     });
-    const result = await verifyDpopProof({ ...base(), proof, accessToken });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      accessToken,
+      expectedJkt: computed,
+    });
     expect(result).toMatchObject({ valid: false, reason: "ath_mismatch" });
   });
 

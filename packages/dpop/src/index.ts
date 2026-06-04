@@ -31,10 +31,13 @@ export type DpopFailureReason =
   | "header_invalid"
   | "payload_invalid"
   | "typ_invalid"
+  | "crit_unsupported"
   | "alg_unsupported"
   | "jwk_missing"
   | "jwk_private"
   | "jwk_invalid"
+  | "crv_mismatch"
+  | "rsa_key_too_small"
   | "signature_invalid"
   | "htm_mismatch"
   | "htu_invalid"
@@ -44,6 +47,7 @@ export type DpopFailureReason =
   | "proof_future"
   | "jti_missing"
   | "ath_mismatch"
+  | "jkt_required"
   | "jkt_mismatch";
 
 /** Plain-data inputs required to verify a DPoP proof. */
@@ -57,9 +61,18 @@ export interface DpopVerifyInput {
   /**
    * Expected access-token hash binding (Resource Server case). When provided,
    * the proof MUST carry an `ath` claim equal to `base64url(SHA-256(accessToken))`.
+   *
+   * A Resource Server enforcing `ath` MUST also supply {@link expectedJkt}: the
+   * `ath` proves the proof was made for this token, but only the `cnf.jkt`
+   * binding proves the proof key is the one the token was issued to. Passing
+   * `accessToken` without `expectedJkt` defeats proof-of-possession
+   * (RFC 9449 §7.1) and is rejected with `jkt_required` rather than validating.
    */
   accessToken?: string;
-  /** Token confirmation thumbprint (`cnf.jkt`) to match against the proof key. */
+  /**
+   * Token confirmation thumbprint (`cnf.jkt`) to match against the proof key.
+   * Required whenever {@link accessToken} is supplied (see its note).
+   */
   expectedJkt?: string;
   /** Current time in seconds since the epoch. Defaults to `Date.now()`. */
   now?: number;
@@ -96,6 +109,8 @@ interface VerifyAlg {
 
 interface AlgSpec {
   kty: "EC" | "RSA";
+  /** For EC algorithms, the curve the `alg` implies (`jwk.crv` must match it). */
+  expectedCrv?: string;
   importParams: ImportAlg;
   verifyParams: VerifyAlg;
 }
@@ -103,11 +118,13 @@ interface AlgSpec {
 const ALGS: Record<DpopAlgorithm, AlgSpec> = {
   ES256: {
     kty: "EC",
+    expectedCrv: "P-256",
     importParams: { name: "ECDSA", namedCurve: "P-256" },
     verifyParams: { name: "ECDSA", hash: "SHA-256" },
   },
   ES384: {
     kty: "EC",
+    expectedCrv: "P-384",
     importParams: { name: "ECDSA", namedCurve: "P-384" },
     verifyParams: { name: "ECDSA", hash: "SHA-384" },
   },
@@ -122,6 +139,13 @@ const ALGS: Record<DpopAlgorithm, AlgSpec> = {
     verifyParams: { name: "RSA-PSS", saltLength: 32 },
   },
 };
+
+/**
+ * Minimum accepted RSA modulus size in bits. Keys below this are rejected
+ * regardless of a valid signature: an attacker who controls an undersized
+ * key's private half could otherwise mint accepted proofs.
+ */
+const MIN_RSA_KEY_BITS = 2048;
 
 /** RSA/EC private-key JWK members; their presence means a private key was sent. */
 const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"] as const;
@@ -162,6 +186,26 @@ function decodeJsonSegment(segment: string): unknown {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Bit length of an RSA modulus encoded as a base64url big-endian integer
+ * (the JWK `n` member). Leading zero bytes are ignored. Returns 0 if `n`
+ * cannot be decoded or is empty.
+ */
+function rsaModulusBits(n: string): number {
+  let bytes: Uint8Array;
+  try {
+    bytes = base64urlToBytes(n);
+  } catch {
+    return 0;
+  }
+  let i = 0;
+  while (i < bytes.length && bytes[i] === 0) i++;
+  if (i >= bytes.length) return 0;
+  let bits = (bytes.length - i - 1) * 8;
+  for (let v = bytes[i]!; v > 0; v >>= 1) bits++;
+  return bits;
 }
 
 /**
@@ -288,9 +332,14 @@ export async function verifyDpopProof(
     return fail("header_invalid");
   }
 
-  // 2. Header checks: typ, alg allow-list, public-only jwk.
+  // 2. Header checks: typ, crit, alg allow-list, public-only jwk.
   if (header.typ !== "dpop+jwt") {
     return fail("typ_invalid");
+  }
+  // RFC 7515 §4.1.11: reject any JWS carrying critical header parameters this
+  // library does not understand. It understands no extensions, so any `crit`.
+  if ("crit" in header) {
+    return fail("crit_unsupported");
   }
   const alg = header.alg;
   const algSpec =
@@ -308,6 +357,18 @@ export async function verifyDpopProof(
   }
   if (jwk.kty !== algSpec.kty) {
     return fail("jwk_invalid");
+  }
+  // EC: the curve must be the one the alg implies (ES256⇒P-256, …). WebCrypto
+  // would also reject a mismatch on import, but check it explicitly up front.
+  if (algSpec.kty === "EC" && jwk.crv !== algSpec.expectedCrv) {
+    return fail("crv_mismatch");
+  }
+  // RSA: reject undersized moduli whose private half an attacker could control.
+  if (algSpec.kty === "RSA") {
+    const n = jwk.n;
+    if (typeof n !== "string" || rsaModulusBits(n) < MIN_RSA_KEY_BITS) {
+      return fail("rsa_key_too_small");
+    }
   }
   const importable = publicJwk(jwk, algSpec.kty);
   if (importable === null) {
@@ -387,8 +448,14 @@ export async function verifyDpopProof(
     return fail("jwk_invalid");
   }
 
-  // 5. Resource Server: access-token hash binding.
+  // 5. Resource Server: access-token hash binding. Enforcing `ath` without the
+  //    `cnf.jkt` binding would let a proof made for the token but signed by any
+  //    key validate, defeating proof-of-possession (RFC 9449 §7.1), so an
+  //    access token requires the expected thumbprint too.
   if (input.accessToken !== undefined) {
+    if (input.expectedJkt === undefined) {
+      return fail("jkt_required");
+    }
     const expectedAth = await sha256Base64url(input.accessToken);
     if (typeof payload.ath !== "string" || payload.ath !== expectedAth) {
       return fail("ath_mismatch");
