@@ -561,14 +561,23 @@ function numberToLexical(value: number, datatype: string): string {
   if (Number.isNaN(value)) return "NaN";
   if (value === Infinity) return "INF";
   if (value === -Infinity) return "-INF";
-  // Canonical xsd:double lexical form (forced by an explicit xsd:double type or
-  // by the value itself): a mantissa with a decimal point and no trailing zeros,
-  // an uppercase "E", and a signed exponent (100 → "1.0E2", 1e-7 → "1.0E-7").
-  if (datatype === XSD_DOUBLE || isJsonLdDouble(value)) {
+  // Canonical xsd:double lexical form — a mantissa with a decimal point and no
+  // trailing zeros, an uppercase "E", and a signed exponent (100 → "1.0E2",
+  // 1e-7 → "1.0E-7"). Used when the datatype is xsd:double, the value has a
+  // fractional part, or (when not explicitly typed xsd:integer) its magnitude is
+  // >= 1e21. An explicit xsd:integer is kept in integer form so it never lands
+  // outside that datatype's lexical space.
+  if (
+    datatype === XSD_DOUBLE ||
+    !Number.isInteger(value) ||
+    (datatype !== XSD_INTEGER && Math.abs(value) >= 1e21)
+  ) {
     return value.toExponential(15).replace(/(\d)0*e\+?/, "$1E");
   }
-  // Canonical xsd:integer form.
-  return value.toFixed(0);
+  // Canonical xsd:integer form. `toFixed(0)` renders magnitudes >= 1e21 in
+  // exponential notation (invalid for xsd:integer), so fall back to BigInt for
+  // those — only reachable when a value is explicitly typed xsd:integer.
+  return Math.abs(value) < 1e21 ? value.toFixed(0) : BigInt(value).toString();
 }
 
 /** Options for {@link parseJsonLd}. */

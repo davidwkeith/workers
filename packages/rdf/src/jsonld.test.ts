@@ -244,6 +244,22 @@ describe("@dwk/rdf JSON-LD parse", () => {
     );
   });
 
+  it("keeps an explicit xsd:integer in integer lexical space (BigInt past 1e21)", async () => {
+    const XSD_INTEGER = "http://www.w3.org/2001/XMLSchema#integer";
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      // A magnitude >= 1e21 explicitly typed xsd:integer must not be emitted in
+      // exponential notation (which is outside xsd:integer's lexical space).
+      big: { "@value": 1e21, "@type": XSD_INTEGER },
+    });
+    const object = quads[0]?.object;
+    expect(object?.value).toBe("1000000000000000000000");
+    expect((object as { datatype: { value: string } }).datatype.value).toBe(
+      XSD_INTEGER,
+    );
+  });
+
   it("drops a value object whose @value is null", async () => {
     const quads = await parseJsonLd({
       "@context": { "@vocab": "https://ex/" },
