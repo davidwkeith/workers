@@ -1,12 +1,15 @@
 /**
- * `@dwk/webmention` — small HTML / `Link`-header parsing helpers.
+ * `@dwk/webmention` — HTML / `Link`-header parsing helpers.
  *
- * Pure, dependency-free string scanning shared by endpoint discovery (sender)
- * and source verification (receiver). We deliberately avoid a full HTML or
- * microformats parser: the runtime budget rules out shipping a heavy parser
- * into the Worker bundle, and Webmention only needs to find links by `rel` and
- * enumerate `href`/`src` targets. No I/O lives here, so it unit-tests without a
- * network. See `spec/non-functional-requirements.md`.
+ * Shared by endpoint discovery (sender) and source verification (receiver).
+ * `Link`-header parsing is plain string scanning; HTML scanning uses the
+ * Workers runtime's streaming `HTMLRewriter` rather than regex tag matching, so
+ * it handles comments, attribute quoting, and malformed markup correctly
+ * without pulling a parser into the bundle (`HTMLRewriter` is built into the
+ * runtime — zero script-size cost; see `spec/non-functional-requirements.md`).
+ *
+ * Because `HTMLRewriter` is a `workerd` global, the HTML scanners are async and
+ * exercised under the Workers test pool, not bare Node.
  *
  * @packageDocumentation
  */
@@ -144,42 +147,6 @@ export function splitTokens(value: string | null): string[] {
     .filter((token) => token !== "");
 }
 
-/**
- * Strip HTML comments (`<!-- … -->`) from markup before tag scanning, so a
- * `rel="webmention"` element hidden inside a comment is not mistaken for a real
- * endpoint (webmention.rocks discovery test 13).
- */
-export function stripComments(html: string): string {
-  return html.replace(/<!--[\s\S]*?-->/g, "");
-}
-
-/**
- * Return every opening tag in `html` whose name is one of `tagNames`
- * (case-insensitive), e.g. `["a", "link"]`.
- */
-export function matchTags(html: string, tagNames: readonly string[]): string[] {
-  const pattern = new RegExp(`<(?:${tagNames.join("|")})\\b[^>]*>`, "gi");
-  return html.match(pattern) ?? [];
-}
-
-/**
- * Read a single attribute value off an opening tag, or `null` when absent.
- *
- * The attribute name must be standalone — preceded by whitespace, `<`, or the
- * start of the string — so a query for `href` does not match `data-href`.
- */
-export function getAttr(tag: string, name: string): string | null {
-  const pattern = new RegExp(
-    `(?:^|[\\s<])${name}\\s*=\\s*("([^"]*)"|'([^']*)'|[^\\s>]+)`,
-    "i",
-  );
-  const match = pattern.exec(tag);
-  if (match === null) {
-    return null;
-  }
-  return match[2] ?? match[3] ?? match[1] ?? "";
-}
-
 /** Resolve `uri` against `base`, returning a normalized absolute URL or `null`. */
 export function resolveUrl(uri: string, base: string): string | null {
   try {
@@ -189,21 +156,41 @@ export function resolveUrl(uri: string, base: string): string | null {
   }
 }
 
+/** An element seen by {@link scanElements}: its (lowercased) tag name and the requested attributes. */
+export interface ScannedElement {
+  /** Lowercased tag name, e.g. `"a"`, `"link"`, `"base"`. */
+  readonly name: string;
+  /** Requested attribute values; `null` when the attribute is absent, `""` when present but empty. */
+  readonly attrs: Readonly<Record<string, string | null>>;
+}
+
 /**
- * Resolve the effective base URL for a document: the `href` of the first
- * `<base>` tag (resolved against `documentUrl`), or `documentUrl` itself when
- * there is no usable `<base>`. Standard HTML resolution requires relative links
- * to be resolved against this base.
+ * Scan `html` with the runtime's streaming `HTMLRewriter`, returning — in
+ * document order — every element matching `selector` together with the
+ * requested attribute values.
+ *
+ * Using a real tokenizer (rather than regex) means elements inside comments are
+ * never reported (the parser treats comment contents as text, satisfying
+ * webmention.rocks discovery test 13), attribute quoting is handled correctly,
+ * and a `data-href` attribute is never mistaken for `href`. An absent attribute
+ * is reported as `null`; a present-but-empty one (`href=""`) as `""`.
  */
-export function resolveDocumentBase(html: string, documentUrl: string): string {
-  const baseTags = matchTags(html, ["base"]);
-  const first = baseTags[0];
-  if (first === undefined) {
-    return documentUrl;
-  }
-  const href = getAttr(first, "href");
-  if (href === null || href === "") {
-    return documentUrl;
-  }
-  return resolveUrl(href, documentUrl) ?? documentUrl;
+export async function scanElements(
+  html: string,
+  selector: string,
+  attrNames: readonly string[],
+): Promise<ScannedElement[]> {
+  const elements: ScannedElement[] = [];
+  const rewriter = new HTMLRewriter().on(selector, {
+    element(el) {
+      const attrs: Record<string, string | null> = {};
+      for (const name of attrNames) {
+        attrs[name] = el.getAttribute(name);
+      }
+      elements.push({ name: el.tagName, attrs });
+    },
+  });
+  // Drive the parser to completion by consuming the transformed body.
+  await rewriter.transform(new Response(html)).text();
+  return elements;
 }

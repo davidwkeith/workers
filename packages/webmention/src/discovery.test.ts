@@ -5,8 +5,8 @@ import type { FetchLike } from "./fetch";
 const doc = "https://target.example/post";
 
 describe("findWebmentionEndpoint", () => {
-  it("prefers the HTTP Link header over HTML", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("prefers the HTTP Link header over HTML", async () => {
+    const endpoint = await findWebmentionEndpoint(
       '<https://target.example/wm>; rel="webmention"',
       '<link rel="webmention" href="/html-wm">',
       doc,
@@ -14,13 +14,17 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/wm");
   });
 
-  it("resolves a relative Link header endpoint against the document URL", () => {
-    const endpoint = findWebmentionEndpoint('</wm>; rel="webmention"', "", doc);
+  it("resolves a relative Link header endpoint against the document URL", async () => {
+    const endpoint = await findWebmentionEndpoint(
+      '</wm>; rel="webmention"',
+      "",
+      doc,
+    );
     expect(endpoint).toBe("https://target.example/wm");
   });
 
-  it("falls back to the first <link rel=webmention> in document order", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("falls back to the first <link rel=webmention> in document order", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<link rel="webmention" href="https://target.example/a">' +
         '<link rel="webmention" href="https://target.example/b">',
@@ -29,8 +33,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/a");
   });
 
-  it("accepts <a rel=webmention> and multi-token rels", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("accepts <a rel=webmention> and multi-token rels", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<a href="/mentions" rel="me webmention">wm</a>',
       doc,
@@ -38,8 +42,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/mentions");
   });
 
-  it("accepts the legacy http://webmention.org/ rel", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("accepts the legacy http://webmention.org/ rel", async () => {
+    const endpoint = await findWebmentionEndpoint(
       '<https://target.example/legacy>; rel="http://webmention.org/"',
       "",
       doc,
@@ -47,8 +51,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/legacy");
   });
 
-  it("treats an empty href as the document itself", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("treats an empty href as the document itself", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<link rel="webmention" href="">',
       doc,
@@ -56,8 +60,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe(doc);
   });
 
-  it("resolves a relative HTML endpoint against a <base href>", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("resolves a relative HTML endpoint against a <base href>", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<base href="https://cdn.example/p/"><link rel="webmention" href="wm">',
       doc,
@@ -65,13 +69,15 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://cdn.example/p/wm");
   });
 
-  it("returns null when no endpoint is advertised", () => {
-    expect(findWebmentionEndpoint(null, "<p>nothing</p>", doc)).toBeNull();
+  it("returns null when no endpoint is advertised", async () => {
+    expect(
+      await findWebmentionEndpoint(null, "<p>nothing</p>", doc),
+    ).toBeNull();
   });
 
   // webmention.rocks discovery conformance cases.
-  it("ignores a false endpoint inside an HTML comment (rocks #13)", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("ignores a false endpoint inside an HTML comment (rocks #13)", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       "<!-- <link rel=\"webmention\" href='/false'> -->" +
         '<link rel="webmention" href="/real">',
@@ -80,8 +86,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/real");
   });
 
-  it("ignores a non-webmention rel that contains the substring (rocks #12)", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("ignores a non-webmention rel that contains the substring (rocks #12)", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<link rel="not-webmention" href="/false">' +
         '<link rel="webmention" href="/real">',
@@ -90,8 +96,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/real");
   });
 
-  it("skips a rel=webmention tag with no href attribute (rocks #20)", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("skips a rel=webmention tag with no href attribute (rocks #20)", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<link rel="webmention">' + '<a rel="webmention" href="/real">x</a>',
       doc,
@@ -99,8 +105,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/real");
   });
 
-  it("takes the first endpoint across <a> then <link> in document order (rocks #16)", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("takes the first endpoint across <a> then <link> in document order (rocks #16)", async () => {
+    const endpoint = await findWebmentionEndpoint(
       null,
       '<a rel="webmention" href="/first">x</a>' +
         '<link rel="webmention" href="/second">',
@@ -109,8 +115,8 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/first");
   });
 
-  it("keeps an endpoint with query-string parameters intact (rocks #21)", () => {
-    const endpoint = findWebmentionEndpoint(
+  it("keeps an endpoint with query-string parameters intact (rocks #21)", async () => {
+    const endpoint = await findWebmentionEndpoint(
       '<https://target.example/wm?query=1>; rel="webmention"',
       "",
       doc,

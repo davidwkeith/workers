@@ -1,38 +1,52 @@
 import { describe, it, expect } from "vitest";
-import {
-  getAttr,
-  parseLinkHeader,
-  resolveDocumentBase,
-  splitTokens,
-  stripComments,
-} from "./html";
+import { parseLinkHeader, scanElements, splitTokens } from "./html";
 
-describe("stripComments", () => {
-  it("removes single and multi-line HTML comments", () => {
-    expect(stripComments("a<!-- x -->b")).toBe("ab");
-    expect(stripComments("a<!--\nmulti\nline\n-->b")).toBe("ab");
-  });
-
-  it("leaves markup without comments untouched", () => {
-    expect(stripComments("<a href='x'>y</a>")).toBe("<a href='x'>y</a>");
-  });
-});
-
-describe("getAttr", () => {
-  it("reads a quoted attribute value", () => {
-    expect(getAttr('<a href="https://x.example/">', "href")).toBe(
-      "https://x.example/",
+describe("scanElements", () => {
+  it("reports matching elements in document order with requested attributes", async () => {
+    const els = await scanElements(
+      '<a href="https://x.example/">x</a><link rel="webmention" href="/wm">',
+      "a, link",
+      ["rel", "href"],
     );
+    expect(els).toEqual([
+      { name: "a", attrs: { rel: null, href: "https://x.example/" } },
+      { name: "link", attrs: { rel: "webmention", href: "/wm" } },
+    ]);
   });
 
-  it("does not match a different attribute that ends with the name", () => {
-    // `href` must not match `data-href`.
-    expect(getAttr('<a data-href="foo" href="bar">', "href")).toBe("bar");
-    expect(getAttr('<a data-href="foo">', "href")).toBeNull();
+  it("does not report elements inside comments", async () => {
+    const els = await scanElements(
+      '<!-- <a href="/false">x</a> --><a href="/real">y</a>',
+      "a",
+      ["href"],
+    );
+    expect(els).toEqual([{ name: "a", attrs: { href: "/real" } }]);
   });
 
-  it("reads an unquoted value", () => {
-    expect(getAttr("<link rel=webmention>", "rel")).toBe("webmention");
+  it('distinguishes an absent attribute (null) from an empty one ("")', async () => {
+    const els = await scanElements(
+      '<link rel="webmention"><link rel="webmention" href="">',
+      "link",
+      ["href"],
+    );
+    expect(els).toEqual([
+      { name: "link", attrs: { href: null } },
+      { name: "link", attrs: { href: "" } },
+    ]);
+  });
+
+  it("does not confuse a data- prefixed attribute with the bare name", async () => {
+    const els = await scanElements(
+      '<a data-href="decoy" href="real">x</a>',
+      "a",
+      ["href"],
+    );
+    expect(els).toEqual([{ name: "a", attrs: { href: "real" } }]);
+  });
+
+  it("reads unquoted attribute values", async () => {
+    const els = await scanElements("<link rel=webmention>", "link", ["rel"]);
+    expect(els).toEqual([{ name: "link", attrs: { rel: "webmention" } }]);
   });
 });
 
@@ -75,28 +89,5 @@ describe("splitTokens", () => {
   it("splits on whitespace and drops empties", () => {
     expect(splitTokens("  me  webmention ")).toEqual(["me", "webmention"]);
     expect(splitTokens(null)).toEqual([]);
-  });
-});
-
-describe("resolveDocumentBase", () => {
-  it("returns the document URL when there is no <base>", () => {
-    expect(resolveDocumentBase("<p>hi</p>", "https://x.example/a/b")).toBe(
-      "https://x.example/a/b",
-    );
-  });
-
-  it("resolves a relative <base href> against the document URL", () => {
-    expect(
-      resolveDocumentBase('<base href="/root/">', "https://x.example/a/b"),
-    ).toBe("https://x.example/root/");
-  });
-
-  it("uses an absolute <base href>", () => {
-    expect(
-      resolveDocumentBase(
-        '<base href="https://cdn.example/">',
-        "https://x.example/a/b",
-      ),
-    ).toBe("https://cdn.example/");
   });
 });

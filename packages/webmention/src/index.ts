@@ -6,8 +6,9 @@
  * verification; the queue consumer fetches the source, confirms it links to the
  * target, and persists (or removes) the mention in an inbox. The sender
  * discovers a target's Webmention endpoint and notifies it on publish. Cloud
- * specifics (Queue, D1) are confined here; the parsing and verification logic is
- * pure and unit-tests without a Workers runtime. See `spec/packages/webmention.md`.
+ * specifics (Queue, D1) are confined here; HTML scanning uses the runtime's
+ * streaming `HTMLRewriter`, so the parsing/verification helpers are async and
+ * exercised under the Workers test pool. See `spec/packages/webmention.md`.
  *
  * @packageDocumentation
  */

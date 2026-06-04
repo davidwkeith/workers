@@ -13,14 +13,11 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import {
-  getAttr,
   isHtmlContentType,
-  matchTags,
   parseLinkHeader,
-  resolveDocumentBase,
   resolveUrl,
+  scanElements,
   splitTokens,
-  stripComments,
 } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
 import { safeFetch } from "./safe-fetch";
@@ -35,15 +32,16 @@ function isWebmentionRel(rel: string): boolean {
 /**
  * Find the Webmention endpoint declared by a fetched document.
  *
- * Pure: pass the `Link` header value, the response body, and the document URL
- * (used as the base for relative resolution). Returns the absolute endpoint URL
- * or `null` when none is advertised.
+ * Pass the `Link` header value, the response body, and the document URL (used
+ * as the base for relative resolution). Returns the absolute endpoint URL or
+ * `null` when none is advertised. Async because HTML scanning runs through the
+ * runtime's `HTMLRewriter`.
  */
-export function findWebmentionEndpoint(
+export async function findWebmentionEndpoint(
   linkHeader: string | null,
   html: string,
   documentUrl: string,
-): string | null {
+): Promise<string | null> {
   // 1. HTTP Link header wins, in header order.
   for (const entry of parseLinkHeader(linkHeader)) {
     if (entry.rels.some(isWebmentionRel)) {
@@ -52,19 +50,33 @@ export function findWebmentionEndpoint(
   }
   // 2. Fall back to the first <link>/<a rel="webmention"> in document order,
   //    resolving relative hrefs against the document's <base href> if present.
-  //    Comments are stripped first so a commented-out endpoint is ignored.
-  const markup = stripComments(html);
-  const documentBase = resolveDocumentBase(markup, documentUrl);
-  for (const tag of matchTags(markup, ["link", "a"])) {
-    const rels = splitTokens(getAttr(tag, "rel"));
+  //    HTMLRewriter does not report elements inside comments, so a commented-out
+  //    endpoint is ignored without a separate stripping pass.
+  if (html === "") {
+    return null;
+  }
+  const elements = await scanElements(html, "base, link, a", ["rel", "href"]);
+  // The first <base href> anywhere in the document governs relative resolution.
+  let documentBase = documentUrl;
+  for (const el of elements) {
+    if (el.name === "base" && el.attrs.href) {
+      documentBase = resolveUrl(el.attrs.href, documentUrl) ?? documentUrl;
+      break;
+    }
+  }
+  for (const el of elements) {
+    if (el.name === "base") {
+      continue;
+    }
+    const rels = splitTokens(el.attrs.rel ?? null);
     if (!rels.some(isWebmentionRel)) {
       continue;
     }
-    const href = getAttr(tag, "href");
+    const href = el.attrs.href;
     // A tag with no `href` attribute at all is malformed — skip it and keep
     // looking (test 20). An empty `href=""` is valid and advertises the
     // document itself as the endpoint (test 15).
-    if (href === null) {
+    if (href === null || href === undefined) {
       continue;
     }
     return resolveUrl(href, documentBase);
@@ -115,7 +127,7 @@ export async function discoverEndpoint(
     return null;
   }
 
-  const fromHeader = findWebmentionEndpoint(
+  const fromHeader = await findWebmentionEndpoint(
     response.headers.get("link"),
     "",
     base,

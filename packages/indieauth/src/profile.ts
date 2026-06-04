@@ -5,8 +5,10 @@
  * canonicalization rules below are taken from the IndieAuth specification's
  * "User Profile URL" section. The `rel=me` parser supports profile-URL
  * verification (web sign-in): a profile is confirmed when it links back to the
- * authenticating identity. The parser takes HTML as plain data so it unit-tests
- * without any network access — the caller fetches the document.
+ * authenticating identity. The parser takes already-fetched HTML as plain data
+ * (the caller does the network I/O) and scans it with the Workers runtime's
+ * streaming `HTMLRewriter`, so it is async and exercised under the Workers test
+ * pool rather than bare Node.
  *
  * @see https://indieauth.spec.indieweb.org/#user-profile-url
  */
@@ -50,47 +52,37 @@ export function canonicalizeProfileUrl(input: string): string | null {
  * Extract `rel=me` link targets from an HTML document, resolved against
  * `baseUrl`. Scans both `<a>` and `<link>` elements whose space-separated `rel`
  * token list contains `me`. Returns a de-duplicated list in document order.
+ *
+ * Scanning uses the Workers runtime's streaming `HTMLRewriter` (hence async):
+ * elements inside comments are never reported, so a commented-out `<a rel="me">`
+ * cannot forge a back-link, and a `data-rel`/`data-href` attribute is never
+ * mistaken for `rel`/`href`.
  */
-export function parseRelMeLinks(html: string, baseUrl: string): string[] {
-  // Strip HTML comments first so a commented-out `<a rel="me">` is not treated
-  // as a live back-link (comment injection).
-  const cleanHtml = html.replace(/<!--[\s\S]*?-->/g, "");
+export async function parseRelMeLinks(
+  html: string,
+  baseUrl: string,
+): Promise<string[]> {
   const found = new Set<string>();
-  // Match <a ...> and <link ...> start tags; inspect their attributes.
-  const tagPattern = /<(a|link)\b([^>]*)>/gi;
-  for (const match of cleanHtml.matchAll(tagPattern)) {
-    const attrs = match[2] ?? "";
-    const rel = attrValue(attrs, "rel");
-    if (rel === null) continue;
-    const hasMe = rel
-      .split(/\s+/)
-      .some((token) => token.toLowerCase() === "me");
-    if (!hasMe) continue;
-    const href = attrValue(attrs, "href");
-    if (href === null) continue;
-    try {
-      found.add(new URL(href, baseUrl).toString());
-    } catch {
-      // Skip unparseable href values.
-    }
-  }
+  const rewriter = new HTMLRewriter().on("a, link", {
+    element(el) {
+      const rel = el.getAttribute("rel");
+      if (rel === null) return;
+      const hasMe = rel
+        .split(/\s+/)
+        .some((token) => token.toLowerCase() === "me");
+      if (!hasMe) return;
+      const href = el.getAttribute("href");
+      if (href === null) return;
+      try {
+        found.add(new URL(href, baseUrl).toString());
+      } catch {
+        // Skip unparseable href values.
+      }
+    },
+  });
+  // Drive the parser to completion by consuming the transformed body.
+  await rewriter.transform(new Response(html)).text();
   return [...found];
-}
-
-/**
- * Read an attribute value (double-quoted, single-quoted, or unquoted) from a
- * raw attribute string. Anchors the name on a preceding start-or-whitespace
- * boundary rather than `\b`, so `data-rel`/`data-href` are not mistaken for
- * `rel`/`href` (a hyphen is a `\b` boundary).
- */
-function attrValue(attrs: string, name: string): string | null {
-  const pattern = new RegExp(
-    `(?:^|\\s)${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`,
-    "i",
-  );
-  const m = pattern.exec(attrs);
-  if (!m) return null;
-  return m[2] ?? m[3] ?? m[4] ?? null;
 }
 
 /**
@@ -98,14 +90,13 @@ function attrValue(attrs: string, name: string): string | null {
  * `rel=me` link in `candidate`'s HTML points back at the profile (compared
  * after profile-URL canonicalization).
  */
-export function relMeLinksBack(
+export async function relMeLinksBack(
   candidateHtml: string,
   candidateUrl: string,
   profileUrl: string,
-): boolean {
+): Promise<boolean> {
   const target = canonicalizeProfileUrl(profileUrl);
   if (target === null) return false;
-  return parseRelMeLinks(candidateHtml, candidateUrl).some(
-    (link) => canonicalizeProfileUrl(link) === target,
-  );
+  const links = await parseRelMeLinks(candidateHtml, candidateUrl);
+  return links.some((link) => canonicalizeProfileUrl(link) === target);
 }
