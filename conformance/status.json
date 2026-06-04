@@ -84,6 +84,25 @@
         ]
       }
     },
+    "@dwk/vc": {
+      "standard": "Verifiable Credentials",
+      "suites": {
+        "vc-data-model-2.0": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "issue a credential and verify its Data Integrity proof",
+          "revoke via the status list, then verification fails",
+          "served status list credential is itself signed and verifiable",
+          "did:web verification method round-trips issuance"
+        ]
+      }
+    },
     "@dwk/solid-pod": {
       "standard": "Solid",
       "suites": {

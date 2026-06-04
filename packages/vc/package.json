@@ -1,0 +1,48 @@
+{
+  "name": "@dwk/vc",
+  "version": "0.0.0",
+  "description": "did:web identity plus Verifiable Credential (VCDM 2.0) issuance, verification, and Bitstring Status List revocation.",
+  "keywords": [
+    "verifiable-credentials",
+    "vc",
+    "did",
+    "did-web",
+    "data-integrity",
+    "decentralized-identity",
+    "cloudflare-workers"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/vc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/vc"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/log": "workspace:*"
+  }
+}

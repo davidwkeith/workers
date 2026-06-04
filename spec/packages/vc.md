@@ -5,7 +5,7 @@
 | **Type** | endpoint (+ lib) |
 | **Ships a DO?** | no |
 | **Standard** | [did:web](https://w3c-ccg.github.io/did-method-web/) · [VC Data Model 2.0](https://www.w3.org/TR/vc-data-model-2.0/) · [Data Integrity](https://www.w3.org/TR/vc-data-integrity/) |
-| **Status** | proposed — tracked in [#61](https://github.com/davidwkeith/workers/issues/61) |
+| **Status** | implemented (unreleased) — tracked in [#61](https://github.com/davidwkeith/workers/issues/61) |
 
 Decentralized identity rooted at the user's own domain. `did:web` reuses the
 same WebID / IndieAuth identity root, expressed as a DID; Verifiable Credential

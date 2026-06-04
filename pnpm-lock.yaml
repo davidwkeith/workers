@@ -108,6 +108,12 @@ importers:
         specifier: workspace:*
         version: link:../rdf
 
+  packages/vc:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/wac:
     dependencies:
       '@dwk/rdf':
