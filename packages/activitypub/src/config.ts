@@ -201,6 +201,8 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
     try {
       response = await fetchImpl(actorUrl, {
         headers: { accept: "application/activity+json" },
+        // Bound key resolution so a slow remote cannot stall inbox verification.
+        signal: AbortSignal.timeout(10_000),
       });
     } catch {
       return null;

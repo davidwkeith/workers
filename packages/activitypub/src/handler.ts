@@ -12,12 +12,7 @@
 
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
-import {
-  AS2_CONTENT_TYPE,
-  buildActorDocument,
-  wantsActivityJson,
-  type JsonValue,
-} from "./as2";
+import { AS2_CONTENT_TYPE, buildActorDocument, type JsonValue } from "./as2";
 import {
   buildNodeInfo21,
   buildNodeInfoDiscovery,
@@ -216,11 +211,11 @@ export function createActivityPub(
       if (method !== "GET" && method !== "HEAD") {
         return text(405, "Method Not Allowed");
       }
+      // Serve AS2 to federation peers; an HTML profile page is out of scope, so
+      // the response does not vary on `Accept`.
       const body = JSON.stringify(
         buildActorDocument(iris, resolved.actor, resolved.publicKeyPem),
       );
-      // Serve AS2 to federation peers; an HTML profile page is out of scope.
-      void wantsActivityJson(request.headers.get("accept"));
       return new Response(method === "HEAD" ? null : body, {
         status: 200,
         headers: { "content-type": AS2_CONTENT_TYPE },
@@ -265,7 +260,7 @@ export function createActivityPub(
         });
         return text(404, "Not Found");
       }
-      if (!authorizedPublish(request, resolved.publishToken)) {
+      if (!(await authorizedPublish(request, resolved.publishToken))) {
         emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
           reason: "unauthorized",
         });
@@ -296,20 +291,34 @@ export function createActivityPub(
 }
 
 /** Whether a publish request carries the configured bearer token. */
-function authorizedPublish(request: Request, token: string): boolean {
+async function authorizedPublish(
+  request: Request,
+  token: string,
+): Promise<boolean> {
   const header = request.headers.get("authorization");
   if (!header) return false;
   const match = /^Bearer\s+(.+)$/i.exec(header);
-  return match !== null && timingSafeEqual(match[1] as string, token);
+  if (match === null) return false;
+  return constantTimeEqual(match[1] as string, token);
 }
 
-/** Constant-time string comparison so token checks do not leak length/content. */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
+/**
+ * Constant-time string comparison that leaks neither the content **nor the
+ * length** of the secret. Both inputs are hashed to fixed-length SHA-256
+ * digests (via WebCrypto, so the package needs no `node:crypto` /
+ * `nodejs_compat`) and the digests are compared without an early return.
+ */
+async function constantTimeEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a) as BufferSource),
+    crypto.subtle.digest("SHA-256", enc.encode(b) as BufferSource),
+  ]);
+  const va = new Uint8Array(ha);
+  const vb = new Uint8Array(hb);
   let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
+  for (let i = 0; i < va.length; i++)
+    diff |= (va[i] as number) ^ (vb[i] as number);
   return diff === 0;
 }
 

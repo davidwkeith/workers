@@ -38,6 +38,8 @@ import type { ActivityPubEnv } from "./config";
 const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Max delivery rows processed per alarm wake. */
 const DELIVERY_BATCH = 20;
+/** Timeout (ms) bounding any single outbound fetch (actor lookup / delivery). */
+const OUTBOUND_TIMEOUT_MS = 10_000;
 
 function json(
   status: number,
@@ -243,17 +245,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       object: activityAsObject(activity),
     };
     this.#enqueueDelivery(inbox, JSON.stringify(accept));
-    await this.#processDeliveries();
+    // Don't deliver inline — that would block the peer's POST on our outbound
+    // network. Arm the alarm; the single alarm worker is the only delivery
+    // driver, so retries never race a second concurrent pass.
+    await this.#armAlarm();
   }
 
   /** Handle `Undo` of a `Follow` (unfollow); other undos are ignored. */
   #onUndo(activity: ActivityObject): void {
-    const undone = activity.object;
-    if (objectType(undone) === "Follow" || typeof undone === "string") {
-      const follower = actorIri(activity.actor);
-      if (follower)
-        this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, follower);
-    }
+    // Only an embedded `Follow` object is an unfollow. A bare string `object`
+    // is an activity IRI we cannot classify (we do not store inbound `Follow`s),
+    // so treating it as a `Follow` would let an `Undo Like`/`Undo Announce`
+    // carrying a string id silently drop a follower. Require the typed form.
+    if (objectType(activity.object) !== "Follow") return;
+    const follower = actorIri(activity.actor);
+    if (follower)
+      this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, follower);
   }
 
   /** Handle a remote `Accept` of our `Follow`: mark that following confirmed. */
@@ -320,7 +327,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray()) {
       if (row.inbox) this.#enqueueDelivery(row.inbox, body);
     }
-    await this.#processDeliveries();
+    // Fan-out runs in the background alarm worker, not inline, so a large
+    // follower set never slows the owner's publish response.
+    await this.#armAlarm();
 
     return json(201, activity as JsonValue, { location: id });
   }
@@ -517,13 +526,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
   #rescheduleOrDrop(seq: number, attempts: number): void {
     const next = attempts + 1;
-    const config = this.#config;
-    const max = config?.deliveryMaxAttempts ?? 8;
+    const max = this.#deliveryPolicy("deliveryMaxAttempts", 8);
     if (next >= max) {
       this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, seq);
       return;
     }
-    const base = config?.deliveryBaseDelayMs ?? 60_000;
+    const base = this.#deliveryPolicy("deliveryBaseDelayMs", 60_000);
     const delay = base * 2 ** attempts;
     this.#sql.exec(
       `UPDATE delivery SET attempts = ?, next_at = ? WHERE seq = ?`,
@@ -566,6 +574,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     try {
       response = await fetch(actor, {
         headers: { accept: "application/activity+json" },
+        // Bound the lookup so a slow/hung remote cannot pin the inbound request.
+        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
       });
     } catch {
       return null;
@@ -599,6 +609,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       this.#kvPut("privateKeyPem", config.privateKeyPem);
       this.#kvPut("keyId", config.keyId);
     }
+    // Persist the retry policy too: an alarm can wake on a cold isolate where
+    // `#config` is null, and the backoff must still honor the configured policy
+    // rather than silently fall back to defaults.
+    this.#kvPut("deliveryMaxAttempts", String(config.deliveryMaxAttempts));
+    this.#kvPut("deliveryBaseDelayMs", String(config.deliveryBaseDelayMs));
+  }
+
+  /** A numeric delivery-policy value: live config first, then the persisted copy. */
+  #deliveryPolicy(
+    key: "deliveryMaxAttempts" | "deliveryBaseDelayMs",
+    fallback: number,
+  ): number {
+    const live = this.#config?.[key];
+    if (typeof live === "number") return live;
+    const stored = this.#kvGet(key);
+    const parsed = stored === null ? NaN : Number(stored);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
   #kvGet(key: string): string | null {

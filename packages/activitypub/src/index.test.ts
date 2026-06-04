@@ -232,6 +232,64 @@ describe("inbox", () => {
     expect(followers.totalItems).toBe(1);
     expect(followers.orderedItems).toEqual([REMOTE]);
   });
+
+  it("does not unfollow on an Undo of a non-Follow activity", async () => {
+    const config = makeConfig({
+      verifyInboxSignature: acceptAll,
+      actor: {
+        username: `bob-${crypto.randomUUID().slice(0, 8)}`,
+        manuallyApprovesFollowers: true,
+      },
+    });
+    const handler = createActivityPub(config);
+    const send = (activity: Record<string, unknown>) =>
+      handler(
+        new Request(`${actorUrl(config)}/inbox`, {
+          method: "POST",
+          headers: { "content-type": "application/activity+json" },
+          body: JSON.stringify(activity),
+        }),
+        testEnv,
+        ctx,
+      );
+    const followers = async () =>
+      (
+        (await (
+          await handler(
+            new Request(`${actorUrl(config)}/followers`),
+            testEnv,
+            ctx,
+          )
+        ).json()) as Record<string, unknown>
+      ).totalItems;
+
+    await send({
+      id: "https://remote.example/act/follow",
+      type: "Follow",
+      actor: REMOTE,
+      object: actorUrl(config),
+    });
+    expect(await followers()).toBe(1);
+
+    // An Undo of a Like, with the liked object as a bare string IRI, must not
+    // be mistaken for an unfollow.
+    await send({
+      id: "https://remote.example/act/undo-like",
+      type: "Undo",
+      actor: REMOTE,
+      object: "https://remote.example/likes/1",
+    });
+    expect(await followers()).toBe(1);
+
+    // An Undo carrying an embedded Follow is a genuine unfollow.
+    await send({
+      id: "https://remote.example/act/undo-follow",
+      type: "Undo",
+      actor: REMOTE,
+      object: { type: "Follow", actor: REMOTE, object: actorUrl(config) },
+    });
+    expect(await followers()).toBe(0);
+  });
 });
 
 describe("publish endpoint", () => {
@@ -364,6 +422,13 @@ describe("Accept-on-Follow delivery", () => {
         );
         expect(res.status).toBe(202);
 
+        // Delivery is alarm-driven (not inline); drive the queue deterministically.
+        await instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
+
         // The remote actor was fetched, then a signed Accept POSTed to its inbox.
         const delivery = seen.find((s) => s.url === `${REMOTE}/inbox`);
         expect(delivery).toBeDefined();
@@ -417,6 +482,13 @@ describe("Accept-on-Follow delivery", () => {
               actor: REMOTE,
               object: iris.id,
             }),
+          }),
+        );
+
+        // One delivery pass (alarm-driven) hits the 503 and requeues with backoff.
+        await instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
           }),
         );
 

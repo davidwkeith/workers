@@ -123,6 +123,7 @@ export async function deliverActivity(
   signer: SignerKey,
   fetchImpl: typeof fetch,
   now: () => number = () => Date.now(),
+  timeoutMs = 10_000,
 ): Promise<DeliveryResult> {
   // Throws DeliveryBlockedError for an unsafe target — the caller drops the row.
   assertPublicHttpsTarget(inboxUrl);
@@ -136,6 +137,8 @@ export async function deliverActivity(
       method: "POST",
       headers: signed.headers,
       body: signed.body as BufferSource,
+      // A hung peer must not pin the delivery worker; a timeout is retryable.
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return { ok: false, status: 0, retryable: true };
