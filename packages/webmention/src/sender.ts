@@ -76,8 +76,13 @@ export async function sendWebmention(
     metrics,
   });
   // Only notify http(s) endpoints: a page could advertise a `javascript:`,
-  // `file:`, or `mailto:` endpoint, which we must never fetch.
-  if (endpoint === null || !/^https?:$/i.test(new URL(endpoint).protocol)) {
+  // `file:`, or `mailto:` endpoint, which we must never fetch. `URL.protocol`
+  // is already lowercased and includes the trailing colon.
+  if (endpoint === null) {
+    return logOutcome({ target, endpoint: null, delivered: false, status: 0 });
+  }
+  const protocol = new URL(endpoint).protocol;
+  if (protocol !== "http:" && protocol !== "https:") {
     return logOutcome({ target, endpoint: null, delivered: false, status: 0 });
   }
 

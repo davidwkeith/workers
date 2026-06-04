@@ -5,11 +5,11 @@ const source = "https://blog.example/post";
 const target = "https://example.com/article";
 
 describe("extractLinks", () => {
-  it("collects href and src links, resolved against the base", () => {
+  it("collects href and src links, resolved against the base", async () => {
     const html =
       '<a href="/a">a</a><link rel="x" href="https://x.example/b">' +
       '<img src="img.png"><area href="/c">';
-    expect(extractLinks(html, source)).toEqual([
+    expect(await extractLinks(html, source)).toEqual([
       "https://blog.example/a",
       "https://x.example/b",
       "https://blog.example/c",
@@ -17,49 +17,56 @@ describe("extractLinks", () => {
     ]);
   });
 
-  it("resolves relative links against a <base href>", () => {
+  it("resolves relative links against a <base href>", async () => {
     const html = '<base href="https://cdn.example/x/"><a href="rel">a</a>';
-    expect(extractLinks(html, source)).toEqual(["https://cdn.example/x/rel"]);
+    expect(await extractLinks(html, source)).toEqual([
+      "https://cdn.example/x/rel",
+    ]);
   });
 
-  it("ignores links inside HTML comments", () => {
+  it("ignores links inside HTML comments", async () => {
     const html =
       `<!-- <a href="${target}">commented</a> -->` +
       '<a href="https://kept.example/">real</a>';
-    expect(extractLinks(html, source)).toEqual(["https://kept.example/"]);
+    expect(await extractLinks(html, source)).toEqual(["https://kept.example/"]);
   });
 });
 
 describe("sourceLinksTo", () => {
-  it("is true when an anchor links to the target", () => {
+  it("is true when an anchor links to the target", async () => {
     const html = `<p>see <a href="${target}">this</a></p>`;
-    expect(sourceLinksTo(html, target, source, "text/html")).toBe(true);
+    expect(await sourceLinksTo(html, target, source, "text/html")).toBe(true);
   });
 
-  it("resolves relative links before comparing", () => {
+  it("resolves relative links before comparing", async () => {
     const html = '<a href="/article">x</a>';
     expect(
-      sourceLinksTo(html, "https://blog.example/article", source, "text/html"),
+      await sourceLinksTo(
+        html,
+        "https://blog.example/article",
+        source,
+        "text/html",
+      ),
     ).toBe(true);
   });
 
-  it("is false when the source does not link to the target", () => {
+  it("is false when the source does not link to the target", async () => {
     const html = '<a href="https://elsewhere.example/">x</a>';
-    expect(sourceLinksTo(html, target, source, "text/html")).toBe(false);
+    expect(await sourceLinksTo(html, target, source, "text/html")).toBe(false);
   });
 
-  it("is false when the only link to the target is inside a comment", () => {
+  it("is false when the only link to the target is inside a comment", async () => {
     const html = `<!-- <a href="${target}">x</a> -->`;
-    expect(sourceLinksTo(html, target, source, "text/html")).toBe(false);
+    expect(await sourceLinksTo(html, target, source, "text/html")).toBe(false);
   });
 
-  it("falls back to a substring match for non-html bodies", () => {
+  it("falls back to a substring match for non-html bodies", async () => {
     expect(
-      sourceLinksTo(`mentions ${target}`, target, source, "text/plain"),
+      await sourceLinksTo(`mentions ${target}`, target, source, "text/plain"),
     ).toBe(true);
-    expect(sourceLinksTo("nothing here", target, source, "text/plain")).toBe(
-      false,
-    );
+    expect(
+      await sourceLinksTo("nothing here", target, source, "text/plain"),
+    ).toBe(false);
   });
 });
 

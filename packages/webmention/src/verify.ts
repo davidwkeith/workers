@@ -18,36 +18,47 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import {
-  getAttr,
-  matchTags,
-  resolveDocumentBase,
-  resolveUrl,
-  stripComments,
-} from "./html";
+import { isHtmlContentType, resolveUrl, scanElements } from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
 import { WebmentionLogEvent } from "./log";
 import { safeFetch } from "./safe-fetch";
 
 /** Elements whose `href` may constitute a link to the target. */
-const HREF_TAGS = ["a", "link", "area"] as const;
+const HREF_TAGS = new Set(["a", "link", "area"]);
 /** Elements whose `src` may constitute a link to the target. */
-const SRC_TAGS = ["img", "video", "audio", "source", "track"] as const;
+const SRC_TAGS = new Set(["img", "video", "audio", "source", "track"]);
+
+const LINK_SELECTOR = "base, a, link, area, img, video, audio, source, track";
 
 /**
  * Extract every absolute link URL (`href` and `src`) from an HTML document,
- * resolved against `baseUrl`.
+ * resolved against `baseUrl`. `href` links are listed before `src` links.
+ *
+ * Async because HTML scanning runs through the runtime's `HTMLRewriter`, which
+ * also means links inside comments are ignored without a separate stripping
+ * pass.
  */
-export function extractLinks(html: string, baseUrl: string): string[] {
+export async function extractLinks(
+  html: string,
+  baseUrl: string,
+): Promise<string[]> {
+  const elements = await scanElements(html, LINK_SELECTOR, ["href", "src"]);
+  // The first <base href> anywhere in the document governs relative resolution.
+  let documentBase = baseUrl;
+  for (const el of elements) {
+    if (el.name === "base" && el.attrs.href) {
+      documentBase = resolveUrl(el.attrs.href, baseUrl) ?? baseUrl;
+      break;
+    }
+  }
   const links: string[] = [];
-  // Strip comments so a commented-out link doesn't count as a real one, then
-  // respect a <base href> if present, per standard HTML link resolution.
-  const markup = stripComments(html);
-  const documentBase = resolveDocumentBase(markup, baseUrl);
-  const collect = (tags: readonly string[], attr: "href" | "src") => {
-    for (const tag of matchTags(markup, tags)) {
-      const value = getAttr(tag, attr);
-      if (value === null || value === "") {
+  const collect = (tags: ReadonlySet<string>, attr: "href" | "src") => {
+    for (const el of elements) {
+      if (!tags.has(el.name)) {
+        continue;
+      }
+      const value = el.attrs[attr];
+      if (value === null || value === undefined || value === "") {
         continue;
       }
       const resolved = resolveUrl(value, documentBase);
@@ -61,28 +72,24 @@ export function extractLinks(html: string, baseUrl: string): string[] {
   return links;
 }
 
-function isHtml(contentType: string): boolean {
-  return /text\/html|application\/xhtml\+xml/i.test(contentType);
-}
-
 /**
  * Decide whether `body` (a fetched source document) links to `target`.
  *
  * HTML bodies are scanned for an `href`/`src` resolving to the target; other
  * content types fall back to a substring match on the target URL.
  */
-export function sourceLinksTo(
+export async function sourceLinksTo(
   body: string,
   target: string,
   baseUrl: string,
   contentType: string,
-): boolean {
+): Promise<boolean> {
   const normalizedTarget = resolveUrl(target, target);
   if (normalizedTarget === null) {
     return false;
   }
-  if (isHtml(contentType)) {
-    return extractLinks(body, baseUrl).some(
+  if (isHtmlContentType(contentType)) {
+    return (await extractLinks(body, baseUrl)).some(
       (link) => link === normalizedTarget,
     );
   }
@@ -189,7 +196,7 @@ export async function verifySource(
   }
 
   return recordVerifyOutcome(logger, metrics, source, target, {
-    links: sourceLinksTo(body, target, base, contentType),
+    links: await sourceLinksTo(body, target, base, contentType),
     status: response.status,
   });
 }
