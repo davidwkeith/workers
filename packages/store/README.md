@@ -30,6 +30,11 @@ unit-testable. Authoritative state lives only in DO SQLite and R2 — never KV.
   drains the outbox into a shared D1 tracking store, and `collectGarbage`
   reclaims R2 objects after a safety window using **only D1 and R2** — it never
   scans or wakes a per-pod Durable Object.
+- **Resurrection-safe reclaim.** Because keys are content-addressed, a deleted
+  key can be revived by a later `putBlob` of identical content. `collectGarbage`
+  deletes version-conditionally (re-checking the R2 `version` between `head` and
+  `delete`) and `putBlob` cancels an already-forwarded GC row, so GC never
+  reclaims an object a live resource points at.
 
 ```ts
 import { createStore } from "@dwk/store";

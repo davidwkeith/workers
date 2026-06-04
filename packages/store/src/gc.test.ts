@@ -53,6 +53,57 @@ describe("@dwk/store GC requires no Durable Object sweep", () => {
     );
   });
 
+  it("dedups orphan inserts on blob_key, keeping the max enqueued_at", async () => {
+    const blobKey = `pod-dedup/blobs/sha256-${crypto.randomUUID()}`;
+    const sink = d1OrphanSink(harness.GC_DB);
+    const earlier = Date.now() - 30_000;
+    const later = Date.now();
+    // Forward the same key twice (at-least-once forwarding / re-orphaning),
+    // out of order, to prove the latest orphaning wins.
+    await sink.enqueue([{ blobKey, enqueuedAt: later }]);
+    await sink.enqueue([{ blobKey, enqueuedAt: earlier }]);
+
+    const { results } = await harness.GC_DB.prepare(
+      "SELECT blob_key, enqueued_at FROM orphan_blobs WHERE blob_key = ?",
+    )
+      .bind(blobKey)
+      .all<{ blob_key: string; enqueued_at: number }>();
+    expect(results).toHaveLength(1);
+    expect(results[0]!.enqueued_at).toBe(later);
+  });
+
+  it("treats an object uploaded within the clock-skew margin as a genuine orphan", async () => {
+    const blobKey = `pod-skew/blobs/sha256-${crypto.randomUUID()}`;
+    await harness.BLOBS.put(blobKey, new TextEncoder().encode("x"));
+    // Orphaned ~2s before the (just-now) upload: inside the default 5s skew
+    // margin, so the timestamp guard must not mistake it for a resurrection.
+    const enqueuedAt = Date.now() - 2_000;
+    await d1OrphanSink(harness.GC_DB).enqueue([{ blobKey, enqueuedAt }]);
+
+    const reclaimed = await collectGarbage(harness, {
+      now: Date.now() + 120_000,
+      safetyWindowMs: 60_000,
+    });
+    expect(reclaimed).toContain(blobKey);
+    expect(await harness.BLOBS.get(blobKey)).toBeNull();
+  });
+
+  it("honours a configurable clock-skew margin", async () => {
+    const blobKey = `pod-skew2/blobs/sha256-${crypto.randomUUID()}`;
+    await harness.BLOBS.put(blobKey, new TextEncoder().encode("x"));
+    const enqueuedAt = Date.now() - 2_000;
+    await d1OrphanSink(harness.GC_DB).enqueue([{ blobKey, enqueuedAt }]);
+
+    // With a 1s margin the just-uploaded object reads as resurrected → kept.
+    const reclaimed = await collectGarbage(harness, {
+      now: Date.now() + 120_000,
+      safetyWindowMs: 60_000,
+      clockSkewMs: 1_000,
+    });
+    expect(reclaimed).not.toContain(blobKey);
+    expect(await harness.BLOBS.get(blobKey)).not.toBeNull();
+  });
+
   it("does not reclaim more than the requested limit", async () => {
     const keys = Array.from(
       { length: 3 },
