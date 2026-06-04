@@ -6,6 +6,8 @@
  * the handler can be instantiated multiple times and tested in isolation.
  */
 
+import { canonicalizeProfileUrl } from "@dwk/indieauth";
+
 import type { Mf2Object, MicropubCommands } from "./mf2";
 
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
@@ -30,6 +32,13 @@ export type GeneratePostUrl = (
 export interface MicropubConfig {
   /** The identity root / base URL (e.g. `https://example.com`). */
   readonly baseUrl: string;
+  /**
+   * The site owner's IndieAuth profile URL (`me`). A token only authorizes a
+   * request when its subject (`sub`) equals this, after canonicalization — so a
+   * token minted by the same issuer for a *different* `me` cannot publish here.
+   * Required: a Micropub endpoint serves exactly one user's site.
+   */
+  readonly me: string;
   /** Absolute Micropub endpoint URL. Defaults to `${origin}/micropub`. */
   readonly micropubEndpoint?: string;
   /** Absolute media endpoint URL. Defaults to `${origin}/media`. */
@@ -57,6 +66,8 @@ export interface MicropubConfig {
 
 /** Fully resolved configuration with defaults applied and URLs parsed. */
 export interface ResolvedConfig {
+  /** The site owner's canonical IndieAuth profile URL (`me`). */
+  readonly me: string;
   readonly micropubEndpoint: string;
   readonly mediaEndpoint: string;
   readonly micropubPath: string;
@@ -129,10 +140,16 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
   }
   const origin = base.origin;
 
+  const me = canonicalizeProfileUrl(config.me);
+  if (me === null) {
+    throw new Error("@dwk/micropub: `me` is not a valid profile URL");
+  }
+
   const micropubEndpoint = config.micropubEndpoint ?? `${origin}/micropub`;
   const mediaEndpoint = config.mediaEndpoint ?? `${origin}/media`;
 
   return {
+    me,
     micropubEndpoint,
     mediaEndpoint,
     micropubPath: pathOf(micropubEndpoint, "micropubEndpoint"),

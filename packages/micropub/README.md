@@ -18,6 +18,9 @@ import { createMicropub } from "@dwk/micropub";
 
 const micropub = createMicropub({
   baseUrl: "https://example.com",
+  // the site owner's IndieAuth profile URL; tokens minted for any other `me`
+  // are rejected even if they carry the right scope
+  me: "https://example.com/",
   // optional: defaults are `${origin}/micropub` and `${origin}/media`
   micropubEndpoint: "https://example.com/micropub",
   mediaEndpoint: "https://example.com/media",
