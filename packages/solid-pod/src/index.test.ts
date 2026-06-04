@@ -240,8 +240,11 @@ describe("@dwk/solid-pod blob bodies", () => {
       headers: { "content-type": "application/octet-stream" },
     });
     expect(put.status).toBe(201);
-    // A content-addressed blob carries a `sha256-` strong ETag.
-    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+    // A blob write returns a strong, per-resource opaque ETag (not the content
+    // hash, which would collide across distinct resources sharing the bytes).
+    expect(put.headers.get("etag")).toMatch(
+      /^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$/,
+    );
 
     const get = await pod.send("GET", "/blob", { webid: OWNER });
     expect(get.status).toBe(200);
@@ -263,7 +266,9 @@ describe("@dwk/solid-pod blob bodies", () => {
       headers: { "content-type": TURTLE },
     });
     expect(put.status).toBe(201);
-    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+    expect(put.headers.get("etag")).toMatch(
+      /^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$/,
+    );
 
     // It round-trips verbatim (opaque blob), not re-serialized from quads.
     const get = await pod.send("GET", "/big.ttl", { webid: OWNER });

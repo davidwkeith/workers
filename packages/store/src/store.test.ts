@@ -270,9 +270,9 @@ describe("@dwk/store blob copy-on-write", () => {
 describe("@dwk/store streaming blob writes", () => {
   it("hashes a ReadableStream body content-addressably without buffering it", async () => {
     const payload = "streamed-body-contents";
-    const out = await withStore(async ({ store }) => {
-      // A streamed write and the equivalent in-memory write must agree on the
-      // content-addressed ETag (both are SHA-256 of the same bytes).
+    const out = await withStore(async ({ store, env, state }) => {
+      // A streamed write and the equivalent in-memory write dedupe to one
+      // content-addressed R2 object (both are SHA-256 of the same bytes) ...
       const streamed = await store.putBlob(
         "/streamed",
         new Response(payload).body!,
@@ -283,17 +283,26 @@ describe("@dwk/store streaming blob writes", () => {
         new TextEncoder().encode(payload),
         { contentType: "text/plain" },
       );
+      const blobs = await env.BLOBS.list({
+        prefix: `${state.id.toString()}/blobs/sha256-`,
+      });
       const body = await store.readBlob("/streamed");
       const bytes = body ? await streamToBytes(body.stream) : null;
       return {
         streamed,
         buffered,
+        blobObjectCount: blobs.objects.length,
         roundTrip: bytes ? new TextDecoder().decode(bytes) : null,
         head: store.head("/streamed"),
       };
     });
-    expect(out.streamed).toMatch(/^"sha256-[0-9a-f]{64}"$/);
-    expect(out.streamed).toEqual(out.buffered);
+    // ... but each write gets a fresh per-resource opaque ETag, never a
+    // content-addressed one that would collide across distinct resources.
+    expect(out.streamed).toMatch(
+      /^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$/,
+    );
+    expect(out.streamed).not.toEqual(out.buffered);
+    expect(out.blobObjectCount).toBe(1);
     expect(out.roundTrip).toBe(payload);
     expect(out.head).toMatchObject({ kind: "blob", etag: out.streamed });
   });
@@ -307,7 +316,9 @@ describe("@dwk/store streaming blob writes", () => {
       store.delete("/a");
       return { a, b, orphans: store.collectOrphans().length };
     });
-    expect(out.a).toEqual(out.b);
+    // Shared bytes dedupe to one R2 object, but each resource keeps its own
+    // opaque ETag so an `If-Match` on one cannot be satisfied by the other.
+    expect(out.a).not.toEqual(out.b);
     expect(out.orphans).toBe(0);
   });
 

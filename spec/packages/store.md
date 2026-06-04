@@ -18,6 +18,13 @@ unit-testable.
 - **Copy-on-write blob bodies in R2:**
   - write a new **content-addressed** key, then **atomically flip** the DO
     pointer to it;
+  - the content hash is the **R2 key** (so identical bytes dedupe to one
+    object), but each write's **ETag is a fresh per-resource opaque validator**,
+    never the content hash — a content-addressed ETag would collide across
+    distinct resources sharing the same bytes, so an `If-Match` on one could be
+    satisfied by an unrelated other. For the same reason the shared R2 object
+    carries **no per-object `Content-Type`**; the authoritative content type
+    lives on the per-resource pointer (reads go through the Worker);
   - on delete, **drop the pointer first** and enqueue the now-orphaned key to a
     shared tracking store (a D1 table or a queue) in the same transaction; a
     cron Worker drains that list and deletes the R2 objects after a safety
