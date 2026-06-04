@@ -78,11 +78,14 @@ for the full rules.
 
 ## Status
 
-**Draft / pre-implementation.** The authoritative requirements live in
+**Implemented, unreleased.** The authoritative requirements live in
 [issue #1](https://github.com/davidwkeith/workers/issues/1) and are decomposed
-into technical specifications under [`spec/`](spec/). The monorepo is scaffolded
-(pnpm workspaces, TypeScript, vitest, changesets, CI) and each package ships a
-typed, stubbed public surface; the standards behaviour is not yet implemented.
+into technical specifications under [`spec/`](spec/). Every package now carries
+real logic with colocated tests — there are no remaining `501 Not Implemented`
+stubs — but all packages still sit at version `0.0.0`: nothing has been
+published. Per-standard conformance (micropub.rocks, webmention.rocks, Solid)
+is tracked in [`conformance/status.json`](conformance/status.json) and gates any
+stable (`>=1.0.0`) release; those hosted suites are still `pending`.
 
 ## Documentation
 
