@@ -32,6 +32,26 @@ built and what "done" means.
 | `@dwk/log` | [packages/log.md](packages/log.md) | lib |
 | `@dwk/store` | [packages/store.md](packages/store.md) | lib |
 
+## Proposed packages (next-standard candidates)
+
+Beyond the committed IndieWeb + Solid cohort, these specs draft additional open
+standards a self-owned presence could support on Workers. They are **proposals**,
+each tracked by a GitHub issue, not part of the v1 scope. Standards whose
+`.well-known` response is a **static document** (e.g. `security.txt`, `gpc.json`,
+`did.json`, the OAuth/feeds artifacts) are left to **Anglesite** (the static site
+generator) and intentionally have no package here.
+
+| Package | Spec | Type | Tracking |
+|---------|------|------|----------|
+| `@dwk/webfinger` | [packages/webfinger.md](packages/webfinger.md) | endpoint | [#57](https://github.com/davidwkeith/workers/issues/57) |
+| `@dwk/activitypub` | [packages/activitypub.md](packages/activitypub.md) | endpoint + Durable Object | [#58](https://github.com/davidwkeith/workers/issues/58) |
+| `@dwk/http-signatures` | [packages/http-signatures.md](packages/http-signatures.md) | lib | [#59](https://github.com/davidwkeith/workers/issues/59) |
+| `@dwk/websub` | [packages/websub.md](packages/websub.md) | endpoint | [#60](https://github.com/davidwkeith/workers/issues/60) |
+| `@dwk/vc` | [packages/vc.md](packages/vc.md) | endpoint (+ lib) | [#61](https://github.com/davidwkeith/workers/issues/61) |
+| `@dwk/oauth` | [packages/oauth.md](packages/oauth.md) | lib | [#62](https://github.com/davidwkeith/workers/issues/62) |
+| `@dwk/ldn` | [packages/ldn.md](packages/ldn.md) | endpoint (extraction candidate) | [#63](https://github.com/davidwkeith/workers/issues/63) |
+| `@dwk/webauthn` | [packages/webauthn.md](packages/webauthn.md) | endpoint + Durable Object | [#64](https://github.com/davidwkeith/workers/issues/64) |
+
 ## Conventions used in these specs
 
 Requirement strength follows [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119):
