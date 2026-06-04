@@ -19,6 +19,7 @@ import {
 import { IndieAuthLogEvent } from "./log";
 import { buildServerMetadata } from "./metadata";
 import { isSupportedChallengeMethod, verifyPkce } from "./pkce";
+import { canonicalizeProfileUrl } from "./profile";
 import { signAccessToken, verifyAccessToken } from "./token";
 import {
   createIndieAuthStore,
@@ -219,6 +220,24 @@ async function handleAuthorizationGet(
   return issueCode(decision, authRequest, config, store);
 }
 
+/**
+ * Constrain granted scopes to those the server advertises as supported. When
+ * `scopesSupported` is empty the server declares no scope constraint (the
+ * metadata document omits `scopes_supported`, see `metadata.ts`), so the
+ * granted scopes pass through unchanged; otherwise any scope outside the
+ * supported set is dropped, so neither the approval hook nor the client can
+ * obtain a scope the server claims not to support — an over-broad scope here is
+ * a privilege concern because `@dwk/micropub` consumes these scopes for authz.
+ */
+function constrainScopes(
+  granted: readonly string[],
+  supported: readonly string[],
+): readonly string[] {
+  if (supported.length === 0) return granted;
+  const allowed = new Set(supported);
+  return granted.filter((scope) => allowed.has(scope));
+}
+
 /** Persist the code and redirect back to the client with `code`/`state`/`iss`. */
 async function issueCode(
   approval: AuthorizationApproval,
@@ -226,14 +245,35 @@ async function issueCode(
   config: ResolvedConfig,
   store: ReturnType<typeof createIndieAuthStore>,
 ): Promise<Response> {
-  const grantedScopes = approval.scopes ?? authRequest.scopes;
+  // The approved `me` is the user's identity; canonicalize it per the IndieAuth
+  // profile-URL rules and reject a hook that returns one we cannot canonicalize
+  // rather than persisting/echoing it verbatim.
+  const canonicalMe = canonicalizeProfileUrl(approval.me);
+  if (canonicalMe === null) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "me_invalid",
+      clientHost: hostFromUrl(authRequest.clientId),
+    });
+    return redirectError(
+      authRequest.redirectUri,
+      "server_error",
+      "the approved profile URL (`me`) is not a valid IndieAuth profile URL",
+      authRequest.state,
+      config.issuer,
+    );
+  }
+
+  const grantedScopes = constrainScopes(
+    approval.scopes ?? authRequest.scopes,
+    config.scopesSupported,
+  );
   const code = randomCode();
   await store.saveAuthorizationCode({
     code,
     clientId: authRequest.clientId,
     redirectUri: authRequest.redirectUri,
     scope: grantedScopes.join(" "),
-    me: approval.me,
+    me: canonicalMe,
     codeChallenge: authRequest.codeChallenge,
     codeChallengeMethod: authRequest.codeChallengeMethod as "S256",
     profile: approval.profile ? JSON.stringify(approval.profile) : null,
@@ -353,7 +393,10 @@ async function handleToken(
   const dpop = await verifyDpopProof({
     proof,
     htm: "POST",
-    htu: request.url,
+    // Bind to the advertised token endpoint, not `request.url`: behind a
+    // path-rewriting proxy or a differing public origin the latter can diverge
+    // from the client's view of `token_endpoint` in the metadata document.
+    htu: config.tokenEndpoint,
   });
   if (!dpop.valid || !dpop.jkt) {
     emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
@@ -458,18 +501,31 @@ async function readForm(request: Request): Promise<URLSearchParams> {
 }
 
 /**
- * Whether `value` is an `https`/`http` URL with no fragment. IndieAuth requires
- * both `client_id` and `redirect_uri` to be URLs and to carry no fragment
- * component, which guards against fragment-injection on the redirect.
+ * Whether `value` is an acceptable `client_id`/`redirect_uri`: an `https` URL,
+ * or an `http` URL on a loopback host, with no fragment. IndieAuth requires
+ * both to be URLs carrying no fragment component (guarding against
+ * fragment-injection on the redirect) and permits plain `http` only for
+ * loopback clients (local development) — every other client must use `https`.
  */
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-    return url.hash === "";
+    if (url.hash !== "") return false;
+    if (url.protocol === "https:") return true;
+    if (url.protocol === "http:") return isLoopbackHost(url.hostname);
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether `hostname` is an IPv4/IPv6 loopback literal. Per the IndieAuth/OAuth
+ * native-app guidance only the loopback IPs (`127.0.0.1`, `[::1]`) qualify;
+ * `localhost` is intentionally excluded since it can resolve elsewhere.
+ */
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 /**

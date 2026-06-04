@@ -554,6 +554,157 @@ describe("@dwk/indieauth revocation", () => {
   });
 });
 
+describe("@dwk/indieauth hardening (issue #41)", () => {
+  const key = makeDpopKey();
+
+  async function exchange(
+    handler: ReturnType<typeof createIndieAuth>,
+    code: string,
+    tokenUrl = `${BASE}/token`,
+  ): Promise<Response> {
+    const dpopKey = await key;
+    return handler(
+      new Request(tokenUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: await makeProof(dpopKey, "POST", `${BASE}/token`),
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("drops granted scopes the server does not advertise as supported", async () => {
+    // scopesSupported is ["create", "update", "media"]; the hook tries to grant
+    // an unsupported "delete" scope alongside a supported "create".
+    const handler = autoApproveHandler(["create", "delete"]);
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(handler, code);
+    expect(tokenRes.status).toBe(200);
+    const body = (await tokenRes.json()) as { scope: string };
+    expect(body.scope).toBe("create");
+  });
+
+  it("canonicalizes the approved `me` before persisting it", async () => {
+    // The hook returns a non-canonical profile URL (empty path).
+    const handler = createIndieAuth(
+      baseConfig(() => ({ me: "https://alice.example.com" })),
+    );
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(handler, code);
+    expect(tokenRes.status).toBe(200);
+    const body = (await tokenRes.json()) as { me: string };
+    expect(body.me).toBe("https://alice.example.com/");
+  });
+
+  it("rejects an approval whose `me` is not a valid profile URL", async () => {
+    const handler = createIndieAuth(
+      baseConfig(() => ({ me: "https://user:pw@alice.example.com/" })),
+    );
+    const res = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("error")).toBe("server_error");
+    expect(loc.searchParams.get("code")).toBeNull();
+  });
+
+  it("binds the DPoP proof to the advertised token endpoint, not request.url", async () => {
+    // Simulate a path-rewriting proxy: the request arrives on a different
+    // origin but the same `/token` path, while the proof targets the advertised
+    // token endpoint. Binding to request.url would reject this; binding to the
+    // configured endpoint accepts it.
+    const handler = autoApproveHandler();
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(
+      handler,
+      code,
+      "https://internal-proxy.example/token",
+    );
+    expect(tokenRes.status).toBe(200);
+  });
+
+  it("rejects an http (non-loopback) client_id / redirect_uri", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", "http://app.example.org/");
+    url.searchParams.set("redirect_uri", "http://app.example.org/callback");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("permits an http loopback client_id / redirect_uri for local dev", async () => {
+    const handler = createIndieAuth(baseConfig(() => ({ me: ME })));
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", "http://127.0.0.1/");
+    url.searchParams.set("redirect_uri", "http://127.0.0.1/callback");
+    url.searchParams.set("state", "s");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(302);
+    expect(
+      new URL(res.headers.get("location")!).searchParams.get("code"),
+    ).toBeTruthy();
+  });
+});
+
 describe("@dwk/indieauth fails loudly on missing bindings", () => {
   it("throws when the signing key is absent", async () => {
     const handler = autoApproveHandler();
