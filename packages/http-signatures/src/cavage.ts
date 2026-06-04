@@ -7,6 +7,7 @@
  */
 
 import {
+  deriveAlgFromKey,
   isSupportedAlgorithm,
   signBytes,
   validateKey,
@@ -44,30 +45,6 @@ function tokenToAlg(token: string): SignatureAlgorithm | "derive" | null {
       return "ed25519";
     case "hs2019":
       return "derive";
-    default:
-      return null;
-  }
-}
-
-interface KeyAlgorithm {
-  name: string;
-  namedCurve?: string;
-}
-
-/** For `hs2019`, the algorithm is implied by the resolved key's type. */
-function deriveAlgFromKey(key: CryptoKey): SignatureAlgorithm | null {
-  const a = key.algorithm as KeyAlgorithm;
-  switch (a.name) {
-    case "RSA-PSS":
-      return "rsa-pss-sha512";
-    case "RSASSA-PKCS1-v1_5":
-      return "rsa-v1_5-sha256";
-    case "ECDSA":
-      return a.namedCurve === "P-384"
-        ? "ecdsa-p384-sha384"
-        : "ecdsa-p256-sha256";
-    case "Ed25519":
-      return "ed25519";
     default:
       return null;
   }
@@ -269,6 +246,13 @@ export async function verifyCavage(
     return fail("signature_future");
   if (expiresRaw !== undefined && now > expiresRaw + tolerance)
     return fail("signature_expired");
+  // RFC 9421 §2.3 / draft-cavage: `expires` MUST NOT precede `created`.
+  if (
+    createdRaw !== undefined &&
+    expiresRaw !== undefined &&
+    expiresRaw < createdRaw
+  )
+    return fail("expires_invalid");
 
   // Required-component policy.
   if (params.requiredComponents) {

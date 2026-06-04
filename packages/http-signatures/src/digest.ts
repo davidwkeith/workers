@@ -64,10 +64,10 @@ export type DigestRejection =
   | "digest_mismatch";
 
 /**
- * Verify a received `Content-Digest` field value against `body`. Every
- * algorithm entry the verifier recognises must match; an unrecognised or
- * malformed entry is reported rather than ignored, and at least one supported
- * entry must be present.
+ * Verify a received `Content-Digest` field value against `body`. Per RFC 9530
+ * §3, entries whose algorithm the verifier does not support are ignored; every
+ * supported entry must match, and at least one supported entry must be present
+ * (otherwise the value is rejected as `digest_unsupported`).
  */
 export async function verifyContentDigest(
   headerValue: string | null | undefined,
@@ -77,23 +77,23 @@ export async function verifyContentDigest(
   let sawSupported = false;
   for (const entry of headerValue.split(",")) {
     const eq = entry.indexOf("=");
-    if (eq < 0) return "digest_unsupported";
+    if (eq < 0) continue;
     const alg = entry.slice(0, eq).trim().toLowerCase() as DigestAlgorithm;
-    if (!(alg in SUBTLE_HASH)) return "digest_unsupported";
+    if (!(alg in SUBTLE_HASH)) continue;
     const wrapped = entry.slice(eq + 1).trim();
     if (
       !wrapped.startsWith(":") ||
       !wrapped.endsWith(":") ||
       wrapped.length < 2
     ) {
-      return "digest_unsupported";
+      return "digest_mismatch";
     }
     if (!constantTimeEqualBase64(wrapped.slice(1, -1), await hash(body, alg))) {
       return "digest_mismatch";
     }
     sawSupported = true;
   }
-  return sawSupported ? null : "digest_missing";
+  return sawSupported ? null : "digest_unsupported";
 }
 
 /**
@@ -108,16 +108,16 @@ export async function verifyDigest(
   let sawSupported = false;
   for (const entry of headerValue.split(",")) {
     const eq = entry.indexOf("=");
-    if (eq < 0) return "digest_unsupported";
+    if (eq < 0) continue;
     const alg = entry.slice(0, eq).trim().toLowerCase() as DigestAlgorithm;
-    if (!(alg in SUBTLE_HASH)) return "digest_unsupported";
+    if (!(alg in SUBTLE_HASH)) continue;
     const value = entry.slice(eq + 1).trim();
     if (!constantTimeEqualBase64(value, await hash(body, alg))) {
       return "digest_mismatch";
     }
     sawSupported = true;
   }
-  return sawSupported ? null : "digest_missing";
+  return sawSupported ? null : "digest_unsupported";
 }
 
 /**

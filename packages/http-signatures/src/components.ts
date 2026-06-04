@@ -16,8 +16,13 @@ import type { HttpMessage } from "./types";
 function headerMap(headers: HttpMessage["headers"]): Map<string, string> {
   const map = new Map<string, string>();
   for (const [name, value] of Object.entries(headers)) {
-    const joined = Array.isArray(value) ? value.join(", ") : value;
-    map.set(name.toLowerCase(), joined.trim().replace(/\s+/g, " "));
+    // RFC 9421 §2.1: strip leading/trailing OWS from each field value and join
+    // multiple values with ", ". Internal whitespace is preserved verbatim —
+    // collapsing it would change the signed value and break verification.
+    const joined = Array.isArray(value)
+      ? value.map((v) => v.trim()).join(", ")
+      : value.trim();
+    map.set(name.toLowerCase(), joined);
   }
   return map;
 }

@@ -115,6 +115,30 @@ export function validateKey(
   return null;
 }
 
+/**
+ * Derive the signature algorithm implied by a resolved key's type. Used when a
+ * signature omits its algorithm (RFC 9421 `alg` is OPTIONAL; the legacy
+ * `hs2019` token is intentionally key-derived). Returns `null` for a key type
+ * outside the allow-list.
+ */
+export function deriveAlgFromKey(key: CryptoKey): SignatureAlgorithm | null {
+  const a = key.algorithm as KeyAlgorithm;
+  switch (a.name) {
+    case "RSA-PSS":
+      return "rsa-pss-sha512";
+    case "RSASSA-PKCS1-v1_5":
+      return "rsa-v1_5-sha256";
+    case "ECDSA":
+      return a.namedCurve === "P-384"
+        ? "ecdsa-p384-sha384"
+        : "ecdsa-p256-sha256";
+    case "Ed25519":
+      return "ed25519";
+    default:
+      return null;
+  }
+}
+
 /** Sign `data` with `key` under `alg`. */
 export function signBytes(
   key: CryptoKey,

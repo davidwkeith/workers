@@ -5,6 +5,7 @@
  */
 
 import {
+  deriveAlgFromKey,
   isSupportedAlgorithm,
   signBytes,
   validateKey,
@@ -172,11 +173,16 @@ export async function verifyRfc9421(
   if (signature === undefined) return fail("signature_missing");
 
   const sigParams = paramMap(input.params);
+  // RFC 9421 §2.3: `alg` is OPTIONAL. When present it must be allow-listed;
+  // when absent the algorithm is derived from the resolved key below.
   const algRaw = sigParams.get("alg");
-  if (typeof algRaw !== "string" || !isSupportedAlgorithm(algRaw)) {
-    return fail("alg_unsupported");
+  let alg: SignatureAlgorithm | null = null;
+  if (algRaw !== undefined) {
+    if (typeof algRaw !== "string" || !isSupportedAlgorithm(algRaw)) {
+      return fail("alg_unsupported");
+    }
+    alg = algRaw;
   }
-  const alg = algRaw;
   const keyIdRaw = sigParams.get("keyid");
   const keyId = typeof keyIdRaw === "string" ? keyIdRaw : null;
   if (keyId === null) return fail("keyid_missing");
@@ -201,6 +207,10 @@ export async function verifyRfc9421(
       return fail("expires_invalid");
     expires = e;
     if (now > e + tolerance) return fail("signature_expired");
+  }
+  // RFC 9421 §2.3: `expires` MUST NOT precede `created`.
+  if (created !== undefined && expires !== undefined && expires < created) {
+    return fail("expires_invalid");
   }
 
   const coveredComponents = input.items.map((item) => String(item.value));
@@ -228,9 +238,14 @@ export async function verifyRfc9421(
   }
   const base = [...lines, `"@signature-params": ${input.raw}`].join("\n");
 
-  // Resolve and validate the key, then verify.
+  // Resolve and validate the key, then verify. When `alg` was omitted, derive
+  // it from the resolved key's type (RFC 9421 §2.3).
   const key = await params.resolveKey({ keyId, alg });
   if (key === null) return fail("key_unresolved");
+  if (alg === null) {
+    alg = deriveAlgFromKey(key);
+    if (alg === null) return fail("alg_unsupported");
+  }
   const rejection = validateKey(key, alg);
   if (rejection !== null) return fail(rejection);
 

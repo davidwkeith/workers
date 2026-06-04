@@ -398,6 +398,57 @@ describe("RFC 9421 failure modes", () => {
     });
     expect(picked).toMatchObject({ valid: true, label: "sig2" });
   });
+
+  it("derives the algorithm from the key when alg is omitted (RFC 9421 §2.3)", async () => {
+    const k = keys["ed25519"]!;
+    // Hand-build a signature whose Signature-Input carries no `alg` parameter.
+    const sigParams = `("@method" "host");created=${NOW};keyid="k"`;
+    const base = `"@method": POST\n"host": example.com\n"@signature-params": ${sigParams}`;
+    const sig = new Uint8Array(
+      await crypto.subtle.sign(
+        { name: "Ed25519" },
+        k.privateKey,
+        new TextEncoder().encode(base),
+      ),
+    );
+    const b64 = btoa(String.fromCharCode(...sig));
+    const received: HttpMessage = {
+      ...baseMessage(),
+      headers: {
+        ...baseMessage().headers,
+        "signature-input": `sig1=${sigParams}`,
+        signature: `sig1=:${b64}:`,
+      },
+    };
+    let seenAlg: SignatureAlgorithm | null | undefined;
+    const result = await verifyMessage(received, {
+      resolveKey: ({ alg }) => {
+        seenAlg = alg;
+        return k.publicKey;
+      },
+      now: NOW,
+    });
+    expect(seenAlg).toBeNull();
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects expires before created", async () => {
+    const k = keys["ecdsa-p256-sha256"]!;
+    const message = baseMessage();
+    const headers = await signMessage(message, {
+      key: k.privateKey,
+      keyId: "k",
+      alg: "ecdsa-p256-sha256",
+      components: ["@method", "host"],
+      created: NOW,
+      expires: NOW - 100,
+    });
+    const result = await verifyMessage(
+      { ...message, headers: { ...message.headers, ...headers } },
+      { resolveKey: resolverFor(k.publicKey), now: NOW },
+    );
+    expect(result.reason).toBe("expires_invalid");
+  });
 });
 
 // --- Content-Digest ---------------------------------------------------------
@@ -416,6 +467,17 @@ describe("Content-Digest", () => {
     const cd = await createContentDigest(body, "sha-512");
     expect(cd.startsWith("sha-512=:")).toBe(true);
     expect(await verifyContentDigest(cd, body)).toBeNull();
+  });
+
+  it("ignores unsupported algorithms when a supported one verifies (RFC 9530 §3)", async () => {
+    const body = '{"type":"Create"}';
+    const cd = await createContentDigest(body);
+    // A supported entry alongside one this verifier does not implement.
+    expect(await verifyContentDigest(`md5=:AAAA:, ${cd}`, body)).toBeNull();
+    // Only an unsupported entry: nothing to verify against.
+    expect(await verifyContentDigest("md5=:AAAA:", body)).toBe(
+      "digest_unsupported",
+    );
   });
 
   it("verifies a covered digest against the body during verification", async () => {
@@ -591,6 +653,29 @@ describe("draft-cavage round-trip", () => {
       toleranceSeconds: 5,
     });
     expect(result.reason).toBe("signature_expired");
+  });
+
+  it("rejects a cavage signature whose expires precedes created", async () => {
+    const k = keys["rsa-v1_5-sha256"]!;
+    const message = baseMessage();
+    const headers = await signMessage(message, {
+      profile: "cavage",
+      key: k.privateKey,
+      keyId: "k",
+      alg: "rsa-v1_5-sha256",
+      components: ["(request-target)", "(created)", "(expires)", "host"],
+      created: NOW,
+      expires: NOW - 100,
+    });
+    const received: HttpMessage = {
+      ...message,
+      headers: { ...message.headers, ...headers },
+    };
+    const result = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW,
+    });
+    expect(result.reason).toBe("expires_invalid");
   });
 });
 
