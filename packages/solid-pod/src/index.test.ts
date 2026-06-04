@@ -230,6 +230,65 @@ describe("@dwk/solid-pod auth", () => {
   });
 });
 
+describe("@dwk/solid-pod blob bodies", () => {
+  it("streams a binary PUT to R2 and serves it back", async () => {
+    const pod = freshPod();
+    const payload = "binary body-not-rdf";
+    const put = await pod.send("PUT", "/blob", {
+      webid: OWNER,
+      body: payload,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    expect(put.status).toBe(201);
+    // A content-addressed blob carries a `sha256-` strong ETag.
+    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+
+    const get = await pod.send("GET", "/blob", { webid: OWNER });
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toContain(
+      "application/octet-stream",
+    );
+    const bytes = new Uint8Array(await get.arrayBuffer());
+    expect(new TextDecoder().decode(bytes)).toBe(payload);
+  });
+
+  it("offloads RDF over the inline ceiling to R2 as an opaque blob", async () => {
+    // Tiny ceiling so a perfectly ordinary Turtle body overflows it and is
+    // streamed to R2 instead of parsed into the quad store.
+    const pod = freshPod(OWNER, { maxInlineBytes: 16 });
+    const turtle = `<#a> <#b> <#c> .\n<#d> <#e> <#f> .\n<#g> <#h> <#i> .`;
+    const put = await pod.send("PUT", "/big.ttl", {
+      webid: OWNER,
+      body: turtle,
+      headers: { "content-type": TURTLE },
+    });
+    expect(put.status).toBe(201);
+    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+
+    // It round-trips verbatim (opaque blob), not re-serialized from quads.
+    const get = await pod.send("GET", "/big.ttl", { webid: OWNER });
+    expect(get.status).toBe(200);
+    expect(await get.text()).toBe(turtle);
+  });
+
+  it("still parses small RDF into the quad store (PATCH applies)", async () => {
+    // A small body under the ceiling stays in the quad store, so N3 Patch works.
+    const pod = freshPod(OWNER, { maxInlineBytes: 1024 });
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const patch = await pod.send("PATCH", "/doc", {
+      webid: OWNER,
+      body: `_:p a <http://www.w3.org/ns/solid/terms#InsertDeletePatch> ;
+  <http://www.w3.org/ns/solid/terms#inserts> { <#x> <#y> <#z> . } .`,
+      headers: { "content-type": "text/n3" },
+    });
+    expect(patch.status).toBe(204);
+  });
+});
+
 describe("@dwk/solid-pod access-token validation (issue #35)", () => {
   /**
    * Build DPoP-bound auth headers for `webid` with a fully custom token header

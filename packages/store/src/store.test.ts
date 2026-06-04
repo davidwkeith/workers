@@ -233,6 +233,70 @@ describe("@dwk/store blob copy-on-write", () => {
   });
 });
 
+describe("@dwk/store streaming blob writes", () => {
+  it("hashes a ReadableStream body content-addressably without buffering it", async () => {
+    const payload = "streamed-body-contents";
+    const out = await withStore(async ({ store }) => {
+      // A streamed write and the equivalent in-memory write must agree on the
+      // content-addressed ETag (both are SHA-256 of the same bytes).
+      const streamed = await store.putBlob(
+        "/streamed",
+        new Response(payload).body!,
+        { contentType: "text/plain" },
+      );
+      const buffered = await store.putBlob(
+        "/buffered",
+        new TextEncoder().encode(payload),
+        { contentType: "text/plain" },
+      );
+      const body = await store.readBlob("/streamed");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        streamed,
+        buffered,
+        roundTrip: bytes ? new TextDecoder().decode(bytes) : null,
+        head: store.head("/streamed"),
+      };
+    });
+    expect(out.streamed).toMatch(/^"sha256-[0-9a-f]{64}"$/);
+    expect(out.streamed).toEqual(out.buffered);
+    expect(out.roundTrip).toBe(payload);
+    expect(out.head).toMatchObject({ kind: "blob", etag: out.streamed });
+  });
+
+  it("accepts a Blob body and dedupes identical streamed content", async () => {
+    const out = await withStore(async ({ store }) => {
+      const a = await store.putBlob("/a", new Blob(["same-bytes"]));
+      const b = await store.putBlob("/b", new Blob(["same-bytes"]));
+      // Two resources, one shared content-addressed object: removing one must
+      // not orphan a key the other still references.
+      store.delete("/a");
+      return { a, b, orphans: store.collectOrphans().length };
+    });
+    expect(out.a).toEqual(out.b);
+    expect(out.orphans).toBe(0);
+  });
+
+  it("streams an oversized body through to R2 intact", async () => {
+    // Larger than the default tee/chunk sizes so the streaming path is exercised
+    // across multiple reads.
+    const big = "x".repeat(500_000);
+    const out = await withStore(async ({ store }) => {
+      await store.putBlob("/big", new Response(big).body!, {
+        contentType: "application/octet-stream",
+      });
+      const body = await store.readBlob("/big");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        size: body?.size,
+        matches: bytes ? new TextDecoder().decode(bytes) === big : false,
+      };
+    });
+    expect(out.size).toBe(big.length);
+    expect(out.matches).toBe(true);
+  });
+});
+
 describe("@dwk/store delete → GC ordering", () => {
   it("drops the pointer immediately but reclaims R2 only after the safety window", async () => {
     const body = new TextEncoder().encode("doomed");

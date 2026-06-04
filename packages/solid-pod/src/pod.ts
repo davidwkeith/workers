@@ -225,6 +225,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       if (error instanceof PreconditionFailedError) {
         return text(412, "Precondition Failed");
       }
+      if (error instanceof LengthRequiredError) {
+        return text(411, "Length Required");
+      }
       throw error;
     }
   }
@@ -604,7 +607,17 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     });
   }
 
-  /** Parse RDF into the quad store, or offload an opaque/oversized body to R2. */
+  /**
+   * Parse RDF into the quad store, or offload an opaque/oversized body to R2 —
+   * without ever buffering a full blob in the DO.
+   *
+   * Routing keys off the declared `Content-Length`: a body known to fit the
+   * SQLite-cell ceiling is read into memory (bounded) and, if it is RDF, parsed
+   * into quads; anything larger is streamed straight to R2 as an opaque blob.
+   * When the length is undeclared we read only up to the ceiling to classify it;
+   * a body that overflows that probe cannot be sized to stream safely, so it is
+   * rejected (411) rather than risk buffering it whole.
+   */
   async #writeBody(
     store: Store,
     origin: string,
@@ -615,38 +628,61 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const contentType =
       request.headers.get("content-type")?.split(";")[0]?.trim() ||
       (isContainer(path) ? "text/turtle" : "application/octet-stream");
-    const bytes = new Uint8Array(await request.arrayBuffer());
-
     const rdfFormat = formatForMediaType(contentType);
-    const fitsInline = store.route(bytes.byteLength) === "sqlite";
+    const declared = parseContentLength(request.headers.get("content-length"));
 
-    if (rdfFormat && fitsInline) {
-      const bodyText = new TextDecoder().decode(bytes);
-      const quads = await parseRdf(bodyText, contentType, {
-        baseIRI: toIri(origin, path),
-      });
-      const stored = quads.map(quadToStored);
-      // A container's `ldp:contains` listing is server-managed; clients never
-      // send it, so a PUT that replaced all quads would orphan every child.
-      // Preserve existing containment (and re-assert the container types).
-      const containerIri = toIri(origin, path);
-      const preserved =
-        isContainer(path) && store.head(path) !== null
-          ? store.readQuads(path).filter((q) => isContainsQuad(q, containerIri))
-          : [];
-      const withType = isContainer(path)
-        ? [...stored, ...containerTypeQuads(containerIri), ...preserved]
-        : stored;
-      await store.putResource(path, bytes, {
-        quads: withType,
+    // Resolve the bytes to keep in memory (small bodies only) versus a body to
+    // stream straight to R2. The declared length only fast-paths the
+    // known-large case; for everything else we read the *actual* body up to the
+    // ceiling rather than trust the header, so a understated `Content-Length`
+    // cannot smuggle an oversized body into memory.
+    let inlineBytes: Uint8Array | null;
+    if (declared !== null && declared > store.maxInlineBytes) {
+      // Known-large: stream to R2, never resident in the DO.
+      inlineBytes = null;
+    } else {
+      // Small or undeclared: probe up to the ceiling, trusting nothing.
+      const peeked = await readUpToLimit(request.body, store.maxInlineBytes);
+      if (peeked.kind === "overflow") {
+        // Too big to hold and unsized to stream — demand a Content-Length.
+        throw new LengthRequiredError();
+      }
+      inlineBytes = peeked.bytes;
+    }
+
+    if (inlineBytes === null) {
+      // Oversized (binary or RDF): stream the body straight through to R2.
+      await store.putBlob(path, request.body ?? new Blob([]), {
         contentType,
         ...preconditions,
       });
       return;
     }
 
-    // Non-RDF, or RDF over the DO-cell ceiling: store as an opaque blob.
-    await store.putBlob(path, bytes, {
+    if (!rdfFormat) {
+      // Small opaque body: already in hand, write it as a blob.
+      await store.putBlob(path, inlineBytes, { contentType, ...preconditions });
+      return;
+    }
+
+    const bodyText = new TextDecoder().decode(inlineBytes);
+    const quads = await parseRdf(bodyText, contentType, {
+      baseIRI: toIri(origin, path),
+    });
+    const stored = quads.map(quadToStored);
+    // A container's `ldp:contains` listing is server-managed; clients never
+    // send it, so a PUT that replaced all quads would orphan every child.
+    // Preserve existing containment (and re-assert the container types).
+    const containerIri = toIri(origin, path);
+    const preserved =
+      isContainer(path) && store.head(path) !== null
+        ? store.readQuads(path).filter((q) => isContainsQuad(q, containerIri))
+        : [];
+    const withType = isContainer(path)
+      ? [...stored, ...containerTypeQuads(containerIri), ...preserved]
+      : stored;
+    await store.putResource(path, inlineBytes, {
+      quads: withType,
       contentType,
       ...preconditions,
     });
@@ -768,8 +804,69 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
 const ALLOW = "GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE";
 
+/** The outcome of {@link readUpToLimit}: a fully-buffered body or an overflow signal. */
+type PeekedBody =
+  | { readonly kind: "buffered"; readonly bytes: Uint8Array }
+  | { readonly kind: "overflow" };
+
+/** Concatenate read chunks into one `Uint8Array` of `total` bytes. */
+function concatChunks(
+  chunks: readonly Uint8Array[],
+  total: number,
+): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Parse a `Content-Length` header into a non-negative integer, or `null` when
+ * it is absent or malformed (treated as "length unknown").
+ */
+function parseContentLength(header: string | null): number | null {
+  // RFC 9110: Content-Length is 1*DIGIT. Reject anything `Number()` would coerce
+  // loosely (whitespace, "", "0x10", "1e3", signs); a value past safe-integer
+  // range is treated as undeclared so the bounded probe still backstops it.
+  if (header === null || !/^\d+$/.test(header)) return null;
+  const value = Number(header);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+/**
+ * Read at most `limit` bytes from `body` to classify an undeclared-length body
+ * without buffering an oversized one. Returns the buffered bytes if the body
+ * ends within `limit`; signals `overflow` (cancelling the body) the moment it
+ * exceeds `limit`. A body of exactly `limit` bytes still fits the cell.
+ */
+async function readUpToLimit(
+  body: ReadableStream<Uint8Array> | null,
+  limit: number,
+): Promise<PeekedBody> {
+  if (!body) return { kind: "buffered", bytes: new Uint8Array(0) };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { kind: "buffered", bytes: concatChunks(chunks, total) };
+    chunks.push(value);
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return { kind: "overflow" };
+    }
+  }
+}
+
 /** Thrown from a delete guard to abort the transaction for a non-empty LDP container. */
 class ContainerNotEmptyError extends Error {}
+
+/** Thrown by `#writeBody` when an unsized body is too large to buffer or stream (→ 411). */
+class LengthRequiredError extends Error {}
 
 function baseHeaders(path: string, etag: string, contentType: string): Headers {
   const headers = new Headers({

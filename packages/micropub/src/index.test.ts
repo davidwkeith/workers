@@ -610,6 +610,30 @@ describe("@dwk/micropub media endpoint", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("rejects an oversized media upload with 413 before buffering it", async () => {
+    const tiny = createMicropub({ baseUrl: BASE, me: ME, maxMediaBytes: 2 });
+    const minted = await mintToken("media");
+    const form = new FormData();
+    form.set(
+      "file",
+      new File([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])], "big.png", {
+        type: "image/png",
+      }),
+    );
+    const res = await tiny(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MEDIA),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    // The multipart Content-Length comfortably exceeds the 2-byte limit, so the
+    // request is rejected on the header before `formData()` reads the body.
+    expect(res.status).toBe(413);
+  });
 });
 
 describe("@dwk/micropub post-URL policy", () => {
