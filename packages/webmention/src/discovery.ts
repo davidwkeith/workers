@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { noopLogger, type Logger } from "@dwk/log";
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import {
   getAttr,
   matchTags,
@@ -77,6 +77,8 @@ export interface DiscoverOptions {
   readonly fetch?: FetchLike;
   /** Logger passed through to the SSRF-safe fetch; defaults to a no-op. */
   readonly logger?: Logger;
+  /** Metrics sink passed through to the SSRF-safe fetch; defaults to a no-op. */
+  readonly metrics?: Metrics;
 }
 
 /**
@@ -95,6 +97,7 @@ export async function discoverEndpoint(
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
   const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
 
   let response: Response;
   let base: string;
@@ -103,7 +106,7 @@ export async function discoverEndpoint(
       doFetch,
       target,
       { method: "GET", headers: { accept: "text/html, */*" } },
-      { logger },
+      { logger, metrics },
     );
     response = result.response;
     base = result.url;

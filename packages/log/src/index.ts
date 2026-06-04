@@ -24,9 +24,22 @@
  * prefer {@link hostFromUrl} so an attacker-supplied path/query never lands in a
  * log line.
  *
+ * Logs answer "what happened?"; the companion {@link Metrics} seam (same file
+ * family, same injection discipline) answers "how often / how much?" for the
+ * same events. See {@link ./metrics}.
+ *
  * @see spec/observability.md
  * @packageDocumentation
  */
+
+export {
+  type Metrics,
+  noopMetrics,
+  analyticsEngineMetrics,
+  type AnalyticsEngineDatasetLike,
+  type AnalyticsEngineDataPoint,
+  type AnalyticsEngineMetricsOptions,
+} from "./metrics";
 
 /** Severity of a log record, in increasing order of importance. */
 export type LogLevel = "debug" | "info" | "warn" | "error";

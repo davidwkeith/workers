@@ -62,11 +62,57 @@ const handler = createWebmention({ baseUrl, logger });
 
 | Export                       | Purpose                                                         |
 | ---------------------------- | -------------------------------------------------------------- |
-| `Logger`, `LogLevel`, `LogFields` | The seam types.                                           |
+| `Logger`, `LogLevel`, `LogFields` | The logging seam types.                                  |
 | `noopLogger`                 | Discards everything; the default when no logger is configured. |
 | `consoleLogger(options?)`    | Emits one JSON record per call to `console` (Workers logs).    |
 | `withContext(logger, ctx)`   | Binds request/pod-scoped fields onto every record.             |
 | `hostFromUrl(raw)`           | Redaction helper: a URL's host only, never its path/query.     |
+| `Metrics`                    | The metrics seam type (`count` / `observe`).                   |
+| `noopMetrics`                | Discards everything; the default when no metrics sink is set.  |
+| `analyticsEngineMetrics(dataset, options?)` | Adapter to Cloudflare Workers Analytics Engine. |
+
+## Metrics
+
+The companion **metrics** seam answers "how often / how much?" for the same
+events the logger names, so an operator can chart "SSRF blocks/min" or
+"verification success rate" instead of scraping log lines. It is injected the
+same way — an **optional** `metrics`, defaulting to `noopMetrics` — and reuses
+the same event names and field bags as logs, so logs and counters share one
+vocabulary:
+
+```ts
+import { noopMetrics, type Metrics } from "@dwk/log";
+
+function createThing(config: { metrics?: Metrics }) {
+  const metrics = config.metrics ?? noopMetrics;
+  metrics.count("thing.blocked", { reason: "policy" }); // a counter
+  metrics.observe("thing.latency", 42, { host: "a.example" }); // an observation
+}
+```
+
+The composed Worker wires the real adapter once, from a bound
+`AnalyticsEngineDataset`:
+
+```ts
+import { analyticsEngineMetrics } from "@dwk/log";
+
+// env.WM_METRICS is an AnalyticsEngineDataset binding declared in wrangler.toml.
+const metrics = analyticsEngineMetrics(env.WM_METRICS, {
+  base: { service: "wm" },
+});
+const handler = createWebmention({ baseUrl, logger, metrics });
+```
+
+`analyticsEngineMetrics` maps each call onto `writeDataPoint` deterministically:
+the `event` becomes `indexes[0]` (the sampling key) and `blobs[0]`; string fields
+become further `blobs`, and numeric/boolean fields become `doubles` (with a lead
+`1` for `count` or the observed value for `observe`) — all in sorted key order so
+positions are stable per event. Cloudflare's Analytics Engine limits (1 index ≤
+96 B, ≤ 20 blobs ≤ 16 KB total, ≤ 20 doubles) are enforced, and like `Logger` a
+`Metrics` implementation **never throws** into the operation it measures. The
+binding type is declared structurally (`AnalyticsEngineDatasetLike`), so this
+package keeps no `@cloudflare/workers-types` dependency. The same redaction rules
+apply — never pass tokens, bodies, or full URLs as fields.
 
 ## Redaction
 
