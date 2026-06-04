@@ -467,12 +467,17 @@ export function createStore(
           }
         });
       } catch (err) {
-        // A concurrent write moved the pointer between the pre-check and the
-        // transaction, so the authoritative check rejected after the object had
-        // already landed. Record the just-written key to the outbox (unless a
-        // live resource still references it) so GC can reclaim it.
-        if (err instanceof PreconditionFailedError) {
+        // The transaction rolled back after the object had already landed in
+        // R2 — a concurrent write moved the pointer and the authoritative check
+        // rejected, or any other failure aborted the write. Either way the
+        // pointer never flipped to blobKey, so (unless a live resource still
+        // references the same content) it is now an orphan the full-sweep-free
+        // GC cannot discover. Record it to the outbox so GC can reclaim it.
+        // Best-effort: suppress a secondary failure so it cannot mask `err`.
+        try {
           state.storage.transactionSync(() => outboxIfUnreferenced(blobKey));
+        } catch {
+          // ignore — rethrow the original error below
         }
         throw err;
       }

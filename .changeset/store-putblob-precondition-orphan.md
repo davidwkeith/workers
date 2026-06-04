@@ -11,7 +11,8 @@ via the outbox) could never discover it.
 
 `putBlob` now pre-checks the precondition against the current pointer before
 writing to R2, so a deterministic failure rejects without landing an object.
-The in-transaction check remains the TOCTOU-free authority; if a concurrent
-write moves the pointer between the pre-check and the transaction, the
-just-written key is recorded to the outbox (when no live resource references
-it) before the error is re-thrown, so GC can still reclaim it.
+The in-transaction check remains the TOCTOU-free authority; if the transaction
+rolls back after the object has landed — a concurrent write moving the pointer,
+or any other failure — the just-written key is recorded to the outbox (when no
+live resource references it) before the original error is re-thrown, so GC can
+still reclaim it.
