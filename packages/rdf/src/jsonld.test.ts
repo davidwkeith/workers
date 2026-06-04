@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { DataFactory } from "n3";
 
 import { JsonLdError, parseJsonLd, writeJsonLd } from "./jsonld";
 import type { Quad } from "n3";
+
+const { namedNode, blankNode, literal, quad, defaultGraph, variable } =
+  DataFactory;
+const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+const RDF_FIRST = `${RDF}first`;
+const RDF_REST = `${RDF}rest`;
+const RDF_NIL = `${RDF}nil`;
+const RDF_TYPE = `${RDF}type`;
+const RDF_LIST = `${RDF}List`;
 
 /** Order-independent canonical form for comparing quad sets. */
 function canonical(quads: Quad[]): string[] {
@@ -359,5 +369,501 @@ describe("@dwk/rdf JSON-LD round-trips", () => {
     expect(node["https://ex/tagged"]).toEqual([
       { "@value": "y", "@language": "fr" },
     ]);
+  });
+});
+
+describe("@dwk/rdf JSON-LD context edge cases", () => {
+  it("rejects a term definition that is neither string, object, nor null", async () => {
+    await expect(
+      parseJsonLd({ "@context": { bad: 42 }, "@id": "https://ex/s" }),
+    ).rejects.toBeInstanceOf(JsonLdError);
+  });
+
+  it("rejects a non-object, non-string @context entry", async () => {
+    await expect(
+      parseJsonLd({ "@context": [42], "@id": "https://ex/s" }),
+    ).rejects.toBeInstanceOf(JsonLdError);
+  });
+
+  it("honours @base, @vocab, @language, and ignores @version", async () => {
+    const quads = await parseJsonLd({
+      "@context": {
+        "@version": 1.1,
+        "@base": "https://base.example/dir/",
+        "@vocab": "https://ex/",
+        "@language": "en",
+      },
+      "@id": "rel",
+      name: "hi",
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.subject.value).toBe("https://base.example/dir/rel");
+    expect(quads[0]?.predicate.value).toBe("https://ex/name");
+    expect((quads[0]?.object as { language: string }).language).toBe("en");
+  });
+
+  it("clears @base/@vocab/@language when re-set to null in a later context", async () => {
+    const quads = await parseJsonLd({
+      "@context": [
+        {
+          "@base": "https://base.example/",
+          "@vocab": "https://ex/",
+          "@language": "en",
+        },
+        { "@base": null, "@vocab": null, "@language": null },
+      ],
+      // With @vocab and @base cleared, a bare term and relative @id both drop.
+      "@id": "https://ex/s",
+      "https://ex/name": "kept",
+      dropped: "x",
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/name");
+    expect((quads[0]?.object as { language: string }).language).toBe("");
+  });
+
+  it("resets the active context on a null entry mid-array", async () => {
+    const quads = await parseJsonLd({
+      "@context": [
+        { "@vocab": "https://gone/", old: "https://gone/old" },
+        null,
+        { fresh: "https://ex/fresh" },
+      ],
+      "@id": "https://ex/s",
+      fresh: { "@id": "https://ex/o" },
+      old: "ignored", // term cleared by the null reset
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/fresh");
+  });
+
+  it("supports @reverse, @id:null, @type:@vocab, @language and @container array term defs", async () => {
+    const quads = await parseJsonLd({
+      "@context": {
+        "@vocab": "https://ex/",
+        rev: { "@reverse": "https://ex/back" },
+        disabled: { "@id": null },
+        voc: { "@id": "https://ex/voc", "@type": "@vocab" },
+        lang: { "@id": "https://ex/lang", "@language": "fr" },
+        listy: { "@container": ["@list"] },
+      },
+      "@id": "https://ex/s",
+      rev: { "@id": "https://ex/o" },
+      disabled: "dropped",
+      voc: "Thing",
+      lang: "bonjour",
+      listy: ["a", "b"],
+    });
+
+    // @reverse term: object becomes the subject of the back-edge.
+    const back = quads.find((q) => q.predicate.value === "https://ex/back");
+    expect(back?.subject.value).toBe("https://ex/o");
+    expect(back?.object.value).toBe("https://ex/s");
+
+    // @type:@vocab coerces the string through @vocab into an IRI node.
+    const voc = quads.find((q) => q.predicate.value === "https://ex/voc");
+    expect(voc?.object.termType).toBe("NamedNode");
+    expect(voc?.object.value).toBe("https://ex/Thing");
+
+    // term-level @language wins.
+    const lang = quads.find((q) => q.predicate.value === "https://ex/lang");
+    expect((lang?.object as { language: string }).language).toBe("fr");
+
+    // @container:["@list"] builds an rdf:first/rest chain.
+    expect(quads.filter((q) => q.predicate.value === RDF_FIRST)).toHaveLength(
+      2,
+    );
+
+    // the disabled term emitted nothing.
+    expect(quads.some((q) => q.predicate.value === "https://ex/disabled")).toBe(
+      false,
+    );
+  });
+
+  it("drops a bare term when no @vocab is in scope", async () => {
+    const quads = await parseJsonLd({
+      "@context": { ex: "https://ex/" },
+      "@id": "https://ex/s",
+      bareword: "x", // no prefix, no @vocab -> unresolvable -> dropped
+    });
+    expect(quads).toHaveLength(0);
+  });
+
+  it("drops a relative @id when the base IRI is itself invalid", async () => {
+    const quads = await parseJsonLd(
+      {
+        "@context": { "@vocab": "https://ex/" },
+        "@id": "rel",
+        name: "x",
+      },
+      { base: "::::not-a-valid-base" },
+    );
+    expect(quads).toHaveLength(0);
+  });
+});
+
+describe("@dwk/rdf JSON-LD expansion edge cases", () => {
+  it("skips non-object items in a top-level array", async () => {
+    const quads = await parseJsonLd([
+      "ignored",
+      42,
+      {
+        "@context": { "@vocab": "https://ex/" },
+        "@id": "https://ex/s",
+        name: "ok",
+      },
+    ] as never);
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/name");
+  });
+
+  it("skips keyword @type values and unsupported keyword keys", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      "@type": "@json", // keyword type -> not emitted as a triple
+      "@index": "anything", // unsupported keyword key -> skipped
+      name: "kept",
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("https://ex/name");
+  });
+
+  it("skips @reverse entries whose key expands to a keyword", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      "@reverse": {
+        "@bogus": { "@id": "https://ex/o" }, // keyword key -> skipped
+        child: { "@id": "https://ex/c" },
+      },
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.subject.value).toBe("https://ex/c");
+    expect(quads[0]?.predicate.value).toBe("https://ex/child");
+  });
+
+  it("drops null and nested-array values within a property", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      vals: [null, ["nested"], "keep"], // null + nested array drop, string kept
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.object.value).toBe("keep");
+  });
+
+  it("treats a CURIE with an undefined prefix as an absolute IRI", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      "unknownpfx:term": "x", // no prefix def -> kept verbatim as an IRI
+    });
+    expect(quads).toHaveLength(1);
+    expect(quads[0]?.predicate.value).toBe("unknownpfx:term");
+  });
+
+  it("builds a nested @list inside an outer @list", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", outer: { "@container": "@list" } },
+      "@id": "https://ex/s",
+      outer: [{ "@list": ["a"] }],
+    });
+    // Two cells: the outer cell and the inner one-element list cell.
+    expect(quads.filter((q) => q.predicate.value === RDF_FIRST)).toHaveLength(
+      2,
+    );
+    expect(quads.filter((q) => q.object.value === RDF_NIL)).toHaveLength(2);
+  });
+
+  it("builds a list from an inline @list value object (no container)", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      items: { "@list": ["a", "b"] },
+    });
+    expect(quads.filter((q) => q.predicate.value === RDF_FIRST)).toHaveLength(
+      2,
+    );
+    expect(quads.some((q) => q.object.value === RDF_NIL)).toBe(true);
+  });
+
+  it("applies an IRI datatype term to string, number, and boolean literals", async () => {
+    const quads = await parseJsonLd({
+      "@context": {
+        "@vocab": "https://ex/",
+        s: { "@type": "https://ex/Str" },
+        n: { "@type": "https://ex/Num" },
+        b: { "@type": "https://ex/Bool" },
+      },
+      "@id": "https://ex/x",
+      s: "text",
+      n: 5,
+      b: true,
+    });
+    const dt = (p: string) =>
+      (
+        quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object as {
+          datatype: { value: string };
+        }
+      ).datatype.value;
+    expect(dt("s")).toBe("https://ex/Str");
+    expect(dt("n")).toBe("https://ex/Num");
+    expect(dt("b")).toBe("https://ex/Bool");
+  });
+
+  it("ignores @id/@vocab type coercion on native number values", async () => {
+    const quads = await parseJsonLd({
+      "@context": {
+        "@vocab": "https://ex/",
+        byId: { "@type": "@id" },
+        byVocab: { "@type": "@vocab" },
+      },
+      "@id": "https://ex/s",
+      byId: 7, // a number can't be an @id; falls back to a typed literal
+      byVocab: 8,
+    });
+    const obj = (p: string) =>
+      quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object;
+    expect(obj("byId")?.termType).toBe("Literal");
+    expect(
+      (obj("byId") as { datatype: { value: string } }).datatype.value,
+    ).toBe("http://www.w3.org/2001/XMLSchema#integer");
+    expect(obj("byVocab")?.termType).toBe("Literal");
+  });
+});
+
+describe("@dwk/rdf JSON-LD value object edge cases", () => {
+  it("types boolean @value objects and round-trips true/false", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      yes: { "@value": true },
+      no: { "@value": false },
+    });
+    const obj = (p: string) =>
+      quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object;
+    expect(obj("yes")?.value).toBe("true");
+    expect(obj("no")?.value).toBe("false");
+    expect((obj("yes") as { datatype: { value: string } }).datatype.value).toBe(
+      "http://www.w3.org/2001/XMLSchema#boolean",
+    );
+  });
+
+  it("types untyped numeric @value objects as integer or double", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      whole: { "@value": 7 },
+      frac: { "@value": 7.5 },
+    });
+    const obj = (p: string) =>
+      quads.find((q) => q.predicate.value === `https://ex/${p}`)?.object;
+    expect(
+      (obj("whole") as { datatype: { value: string } }).datatype.value,
+    ).toBe("http://www.w3.org/2001/XMLSchema#integer");
+    expect(obj("whole")?.value).toBe("7");
+    expect(
+      (obj("frac") as { datatype: { value: string } }).datatype.value,
+    ).toBe("http://www.w3.org/2001/XMLSchema#double");
+    expect(obj("frac")?.value).toBe("7.5E0");
+  });
+
+  it("renders an integer @value with a custom datatype past 1e21 in integer space", async () => {
+    const quads = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      // custom (non-xsd:integer, non-xsd:double) datatype with a huge integer:
+      // exercises the magnitude>=1e21 branch under an explicit type.
+      big: { "@value": 1e21, "@type": "https://ex/Big" },
+    });
+    const object = quads[0]?.object;
+    expect((object as { datatype: { value: string } }).datatype.value).toBe(
+      "https://ex/Big",
+    );
+    expect(object?.value).toBe("1.0E21");
+  });
+
+  it("tags a plain string @value with the active @language, else leaves it plain", async () => {
+    const tagged = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/", "@language": "de" },
+      "@id": "https://ex/s",
+      greet: { "@value": "hallo" },
+    });
+    expect((tagged[0]?.object as { language: string }).language).toBe("de");
+
+    const plain = await parseJsonLd({
+      "@context": { "@vocab": "https://ex/" },
+      "@id": "https://ex/s",
+      greet: { "@value": "hello" },
+    });
+    expect((plain[0]?.object as { language: string }).language).toBe("");
+    expect(
+      (plain[0]?.object as { datatype: { value: string } }).datatype.value,
+    ).toBe("http://www.w3.org/2001/XMLSchema#string");
+  });
+});
+
+describe("@dwk/rdf JSON-LD serialization edge cases", () => {
+  const dg = defaultGraph();
+
+  it("serializes rdf:type with a NamedNode object as @type", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode(RDF_TYPE),
+          namedNode("https://ex/Type"),
+          dg,
+        ),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(out[0]!["@type"]).toEqual(["https://ex/Type"]);
+  });
+
+  it("serializes an unusual term type (Variable) via its bare value", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/p"),
+          variable("v") as never,
+          dg,
+        ),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(out[0]!["https://ex/p"]).toEqual([{ "@id": "v" }]);
+  });
+
+  it("collapses a list cell carrying an explicit @type rdf:List", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+        quad(blankNode("l0"), namedNode(RDF_TYPE), namedNode(RDF_LIST), dg),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(out).toHaveLength(1);
+    expect(out[0]!["https://ex/items"]).toEqual([
+      { "@list": [{ "@value": "a" }] },
+    ]);
+  });
+
+  it("does not collapse a cell that carries an extra property", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+        quad(blankNode("l0"), namedNode("https://ex/extra"), literal("x"), dg),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    // The cell stays a node reference; no @list reconstruction.
+    const flat = JSON.stringify(out);
+    expect(flat).not.toContain("@list");
+  });
+
+  it("does not collapse a cell with a non-rdf:List @type", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+        quad(
+          blankNode("l0"),
+          namedNode(RDF_TYPE),
+          namedNode("https://ex/Other"),
+          dg,
+        ),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(out)).not.toContain("@list");
+  });
+
+  it("does not collapse a cell with duplicate rdf:first", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("b"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(out)).not.toContain("@list");
+  });
+
+  it("does not collapse a cell with duplicate rdf:rest", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), blankNode("l1"), dg),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(out)).not.toContain("@list");
+  });
+
+  it("does not collapse an rdf:rest/rdf:nil chain rooted at a named node", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(namedNode("https://ex/n"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(
+          namedNode("https://ex/n"),
+          namedNode(RDF_REST),
+          namedNode(RDF_NIL),
+          dg,
+        ),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(out)).not.toContain("@list");
+  });
+
+  it("does not collapse a list cell that is referenced more than once", async () => {
+    const out = JSON.parse(
+      await writeJsonLd([
+        quad(
+          namedNode("https://ex/s1"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(
+          namedNode("https://ex/s2"),
+          namedNode("https://ex/items"),
+          blankNode("l0"),
+          dg,
+        ),
+        quad(blankNode("l0"), namedNode(RDF_FIRST), literal("a"), dg),
+        quad(blankNode("l0"), namedNode(RDF_REST), namedNode(RDF_NIL), dg),
+      ]),
+    ) as Array<Record<string, unknown>>;
+    expect(JSON.stringify(out)).not.toContain("@list");
   });
 });
