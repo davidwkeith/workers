@@ -175,7 +175,10 @@ interface Pod {
   send(method: string, path: string, init?: ReqInit): Promise<Response>;
 }
 
-function freshPod(owner: string = OWNER): Pod {
+function freshPod(
+  owner: string = OWNER,
+  extra: Partial<Parameters<typeof createSolidPod>[0]> = {},
+): Pod {
   const base = `https://${crypto.randomUUID()}.pod.example`;
   const handler = createSolidPod({
     baseUrl: base,
@@ -183,6 +186,7 @@ function freshPod(owner: string = OWNER): Pod {
     audience: "solid",
     jwks: [issuerJwk],
     owner,
+    ...extra,
   });
   return {
     base,
@@ -223,6 +227,146 @@ describe("@dwk/solid-pod auth", () => {
     const get = await pod.send("GET", "/doc", { webid: OWNER });
     expect(get.status).toBe(200);
     expect(get.headers.get("content-type")).toContain(TURTLE);
+  });
+});
+
+describe("@dwk/solid-pod access-token validation (issue #35)", () => {
+  /**
+   * Build DPoP-bound auth headers for `webid` with a fully custom token header
+   * and extra claims, so individual JWT-validation gaps can be exercised
+   * (header `typ`, an unknown `kid`, a future `nbf`) against the real handler.
+   */
+  async function customAuth(
+    method: string,
+    url: string,
+    webid: string,
+    header: Record<string, unknown>,
+    payloadExtra: Record<string, unknown> = {},
+  ): Promise<Record<string, string>> {
+    const key = await agentKey(webid);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJwt(
+      header,
+      {
+        iss: ISSUER,
+        aud: "solid",
+        sub: webid,
+        webid,
+        iat: now,
+        exp: now + 600,
+        cnf: { jkt },
+        ...payloadExtra,
+      },
+      issuerKey.privateKey,
+    );
+    return {
+      authorization: `DPoP ${token}`,
+      dpop: await dpopProof(method, url, key, token),
+    };
+  }
+
+  it("rejects an access token whose typ is not at+jwt (token-type confusion)", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "id+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_type_invalid");
+  });
+
+  it("rejects an access token with no typ header", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_type_invalid");
+  });
+
+  it("accepts the application/at+jwt media-type form of typ", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "application/at+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
+  });
+
+  it("honors accessTokenType: null to skip the typ check", async () => {
+    const pod = freshPod(OWNER, { accessTokenType: null });
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "id+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a token naming an unknown kid rather than trying other keys", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "at+jwt",
+      kid: "does-not-exist",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("signature_invalid");
+  });
+
+  it("rejects a token that is not yet valid (future nbf)", async () => {
+    const pod = freshPod();
+    const future = Math.floor(Date.now() / 1000) + 600;
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: future },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(
+      "token_not_yet_valid",
+    );
+  });
+
+  it("accepts a token whose nbf is already in the past", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const past = Math.floor(Date.now() / 1000) - 10;
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: past },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
   });
 });
 
