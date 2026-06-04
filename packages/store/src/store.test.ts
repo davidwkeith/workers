@@ -198,6 +198,39 @@ describe("@dwk/store blob copy-on-write", () => {
     expect(out.oldStillInR2).toBe(true);
     expect(out.head).toMatchObject({ kind: "blob", etag: out.etagB });
   });
+
+  it("rejects a failed If-Match before writing R2, leaking no orphan", async () => {
+    const a = new TextEncoder().encode("version-A");
+    const c = new TextEncoder().encode("version-C");
+    const out = await withStore(async ({ store, env, state }) => {
+      const etagA = await store.putBlob("/blob", a);
+      // A write whose If-Match does not hold must reject ...
+      await expect(
+        store.putBlob("/blob", c, { ifMatch: '"wrong"' }),
+      ).rejects.toThrow(PreconditionFailedError);
+      // ... without ever landing the new content-addressed object (the GC has
+      // no way to discover an object that was never outboxed).
+      const rejectedKeyInR2 = await env.BLOBS.list({
+        prefix: `${state.id.toString()}/blobs/`,
+      });
+      const orphans = store.collectOrphans();
+      const body = await store.readBlob("/blob");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        etagA,
+        head: store.head("/blob"),
+        bytes: bytes ? new TextDecoder().decode(bytes) : null,
+        orphanCount: orphans.length,
+        r2KeyCount: rejectedKeyInR2.objects.length,
+      };
+    });
+    // The pointer is untouched, no orphan is recorded, and only the surviving
+    // version-A object exists in R2 — the version-C write left nothing behind.
+    expect(out.head).toMatchObject({ kind: "blob", etag: out.etagA });
+    expect(out.bytes).toBe("version-A");
+    expect(out.orphanCount).toBe(0);
+    expect(out.r2KeyCount).toBe(1);
+  });
 });
 
 describe("@dwk/store delete → GC ordering", () => {
