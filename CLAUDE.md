@@ -11,28 +11,35 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: draft / pre-implementation.** The libraries `@dwk/dpop`, `@dwk/rdf`,
-`@dwk/wac`, `@dwk/log`, and `@dwk/store` carry real logic; the endpoint packages
-(`@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`, `@dwk/solid-pod`) ship a
-typed, stubbed public surface that returns `501 Not Implemented`. When
-implementing behaviour, the authoritative requirements are the per-package specs
-under `spec/packages/`, not guesswork.
+**Status: implemented, unreleased.** Every package — the reusable libs
+(`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/store`) and the endpoint
+packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`,
+`@dwk/solid-pod`) — now carries real logic with colocated tests; there are no
+remaining `501 Not Implemented` stubs. All packages still sit at version
+`0.0.0`: nothing has been published, and the hosted conformance suites tracked
+in `conformance/status.json` are all `pending` (see the release gate below).
+When changing behaviour, the authoritative requirements are the per-package
+specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
 Run from the repo root (pnpm 10, Node >=20):
 
-| Task                    | Command                                                      |
-| ----------------------- | ------------------------------------------------------------ |
-| Install                 | `pnpm install`                                               |
-| Build all packages      | `pnpm build` (runs `tsc -p tsconfig.build.json` per package) |
-| Typecheck all (no emit) | `pnpm typecheck`                                             |
-| Run full test suite     | `pnpm test` (vitest, all package projects)                   |
-| Watch tests             | `pnpm test:watch`                                            |
-| Lint                    | `pnpm lint`                                                  |
-| Format (write)          | `pnpm format`                                                |
-| Format check (CI gate)  | `pnpm format:check`                                          |
-| Record a release        | `pnpm changeset`                                             |
+| Task                    | Command                                                         |
+| ----------------------- | --------------------------------------------------------------- |
+| Install                 | `pnpm install`                                                  |
+| Build all packages      | `pnpm build` (runs `tsc -p tsconfig.build.json` per package)    |
+| Typecheck all (no emit) | `pnpm typecheck`                                                |
+| Run full test suite     | `pnpm test` (vitest, all package projects)                      |
+| Watch tests             | `pnpm test:watch`                                               |
+| Integration lifecycle   | `pnpm test:integration` (`vitest run --project @dwk/solid-pod`) |
+| Unit-test release gate  | `pnpm test:gate` (`node --test scripts/release-gate.test.mjs`)  |
+| Lint                    | `pnpm lint`                                                     |
+| Format (write)          | `pnpm format`                                                   |
+| Format check (CI gate)  | `pnpm format:check`                                             |
+| Record a release        | `pnpm changeset`                                                |
+| Check release gate      | `pnpm release:gate` (`node scripts/release-gate.mjs`)           |
+| Publish (gated)         | `pnpm release` (gate → build → `changeset publish`)             |
 
 Targeting a subset (this is a multi-project vitest setup, so always scope with
 `--project`; a bare file/name filter errors against projects that don't match):
@@ -135,7 +142,15 @@ packages/<name>/
   imports. ESLint flags unused vars unless prefixed with `_`.
 - **`index.ts` carries a doc comment** stating the package's role, whether it is
   pure/protocol-agnostic, and a `@see spec/packages/<name>.md` pointer. Match
-  this style.
+  this style. `index.ts` is the public surface and mostly re-exports from named
+  internal modules; the endpoint packages decompose into the same shape —
+  `config.ts` (the injected config + `Env` fragment), `handler.ts` (the
+  `createX` factory), and feature modules (`auth.ts`, `store.ts`, plus
+  standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
+  `negotiation.ts`, `inbox.ts`/`sender.ts`/`safe-fetch.ts`). `workerd`-bound
+  packages (`@dwk/store`, `@dwk/solid-pod`) keep a `test-harness.ts` for Miniflare
+  setup. `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable Object
+  (from `pod.ts`) and a GC handler (`gc.ts`).
 
 ### Test environment split (important)
 
@@ -161,10 +176,32 @@ both groups in one pass.
   the generated markdown in `.changeset/` alongside the code. `commit: false` —
   changesets does not auto-commit.
 - **Conformance is the release bar** (`spec/conformance-and-testing.md`): a
-  package SHOULD NOT publish a stable (`>=1.0.0`) version until it passes the
+  package MUST NOT publish a stable (`>=1.0.0`) version until it passes the
   conformance suite for its standard (micropub.rocks, webmention.rocks, Solid
-  conformance) and its integration lifecycle tests are green.
+  conformance) and its integration lifecycle tests are green. This is now
+  **enforced mechanically**, not just by convention — see below.
 - **License:** ISC.
+
+## Conformance & release gate
+
+`conformance/status.json` is the single source of truth for per-package
+conformance + integration status, validated against `conformance/status.schema.json`.
+
+- **`scripts/release-gate.mjs`** (`pnpm release:gate`) reads every workspace
+  package's version and cross-checks it against `status.json`. Any package at a
+  stable version (`major >= 1`, no prerelease tag) whose suites or integration
+  status is not `"passing"` is a violation and the gate exits non-zero, so
+  `pnpm release` refuses to proceed. `evaluateReleaseGate` is pure/importable and
+  unit-tested by `scripts/release-gate.test.mjs` (`pnpm test:gate`). Run
+  `node scripts/release-gate.mjs --report` to print the status table only.
+- **`scripts/conformance/run-suite.mjs`** drives the hosted suites
+  (micropub/webmention/solid) against a deployed `--target` URL; it is a
+  documented no-op when no target is supplied.
+- **`.github/workflows/conformance.yml`** wires this into CI: the cheap
+  `release-gate` and `integration` jobs run on every PR/push (and gate stable
+  releases); the `hosted-suite` job needs a deployed, publicly reachable Worker,
+  so it runs only on `workflow_dispatch` or the weekly Monday schedule. This is a
+  separate workflow from `ci.yml` (the lint→format→typecheck→build→test gate).
 
 ## Where the requirements live
 
