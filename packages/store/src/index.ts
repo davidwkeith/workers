@@ -20,6 +20,7 @@ export {
   type StorageTier,
   type ResourceMeta,
   type BlobBody,
+  type BlobBodyInit,
   type QuadPatch,
   type WriteOptions,
   type DeleteOptions,

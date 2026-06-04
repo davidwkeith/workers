@@ -112,6 +112,20 @@ function absoluteUrl(value: string, base: string): string {
 
 // --- Body parsing -----------------------------------------------------------
 
+/**
+ * Whether a request's declared `Content-Length` exceeds `limit`. Used to reject
+ * oversized uploads *before* `formData()` reads the whole body into memory; a
+ * missing or unparseable header falls through to the post-parse `file.size`
+ * guard. The header is a client claim, so it is a cheap early gate, not the
+ * authoritative size check.
+ */
+function contentLengthExceeds(request: Request, limit: number): boolean {
+  const header = request.headers.get("content-length");
+  if (header === null) return false;
+  const length = Number(header);
+  return Number.isFinite(length) && length > limit;
+}
+
 /** Read an `application/x-www-form-urlencoded` body into `[key, value]` pairs. */
 async function readForm(request: Request): Promise<[string, string][]> {
   const entries: [string, string][] = [];
@@ -135,6 +149,12 @@ async function parseMultipartCreate(
   env: MicropubEnv,
   config: ResolvedConfig,
 ): Promise<ParsedBody> {
+  // Guard memory before `formData()` buffers the whole multipart body.
+  if (contentLengthExceeds(request, config.maxMediaBytes)) {
+    throw new Mf2ParseError(
+      `upload exceeds the ${config.maxMediaBytes}-byte limit`,
+    );
+  }
   const form = await request.formData();
   const textEntries: [string, string][] = [];
   const fileFields: [string, File][] = [];
@@ -202,6 +222,15 @@ async function handleMediaUpload(
     "create",
   ]);
   if (!auth.ok) return error(auth.error, auth.description, auth.status);
+
+  // Reject oversized uploads before `formData()` buffers the whole body.
+  if (contentLengthExceeds(request, config.maxMediaBytes)) {
+    return error(
+      "invalid_request",
+      `file exceeds the ${config.maxMediaBytes}-byte limit`,
+      413,
+    );
+  }
 
   const files: File[] = [];
   try {

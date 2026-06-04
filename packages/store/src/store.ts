@@ -49,6 +49,14 @@ export interface BlobBody {
   readonly size: number;
 }
 
+/**
+ * A blob body accepted by the write path. A `ReadableStream` or `Blob` is
+ * streamed to R2 and hashed without ever being fully buffered in the Durable
+ * Object; an in-memory `ArrayBuffer`/`Uint8Array` is written directly (used for
+ * the small RDF-offload case, where the bytes are already resident).
+ */
+export type BlobBodyInit = ReadableStream | Blob | ArrayBuffer | Uint8Array;
+
 /** A delete/insert pair applied atomically by {@link Store.patchQuads}. */
 export interface QuadPatch {
   readonly deletes: readonly StoredQuad[];
@@ -125,11 +133,16 @@ export interface Store {
    * Copy-on-write a blob body: write a new content-addressed R2 object, then
    * atomically flip the DO pointer to it and outbox any now-unreferenced
    * predecessor key. Returns the new ETag.
+   *
+   * A `ReadableStream`/`Blob` body is streamed to R2 and hashed with a
+   * `DigestStream` so the full body is never buffered in the DO — satisfying the
+   * "stream R2 bodies, never buffer a blob in the DO" mandate even for bodies up
+   * to the 128 MB memory limit.
    * @throws {PreconditionFailedError} if `ifMatch` does not hold.
    */
   putBlob(
     key: string,
-    body: ArrayBuffer | Uint8Array,
+    body: BlobBodyInit,
     options?: WriteOptions,
   ): Promise<string>;
 
@@ -185,12 +198,15 @@ function toBytes(body: ArrayBuffer | Uint8Array): Uint8Array {
   return body instanceof Uint8Array ? body : new Uint8Array(body);
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+function toHex(digest: ArrayBuffer): string {
   const view = new Uint8Array(digest);
   let hex = "";
   for (const b of view) hex += b.toString(16).padStart(2, "0");
   return hex;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return toHex(await crypto.subtle.digest("SHA-256", bytes));
 }
 
 function randomEtag(): string {
@@ -272,6 +288,66 @@ export function createStore(
         throw new PreconditionFailedError(key);
       }
     }
+  }
+
+  /**
+   * Stream a blob body to R2 without ever buffering it in the DO, returning its
+   * content hash. The body is `tee`'d: one branch uploads to a random staging
+   * key, the other is hashed by a `DigestStream` (a WritableStream that retains
+   * no data). Once the hash is known, the staged object is promoted to its
+   * content-addressed key — skipped when an identical body already exists, so
+   * writes still dedupe. R2 has no server-side copy, so the promotion re-streams
+   * through the Worker; that is still bounded and never fully buffered.
+   */
+  async function stageAndHash(
+    stream: ReadableStream,
+    contentType: string,
+  ): Promise<string> {
+    const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
+    const [toStore, toHash] = stream.tee();
+    const digest = new crypto.DigestStream("SHA-256");
+    // Hash concurrently with the upload; `put` drives the other tee branch. The
+    // pipe is settled via `digest.digest` below; guard it so a failed upload
+    // doesn't surface the same error as an unhandled rejection.
+    const hashed = toHash.pipeTo(digest).catch(() => {});
+    try {
+      await env.BLOBS.put(stagingKey, toStore, {
+        httpMetadata: { contentType },
+      });
+      await hashed;
+      const hash = toHex(await digest.digest);
+      const blobKey = `${blobPrefix}/sha256-${hash}`;
+      if ((await env.BLOBS.head(blobKey)) === null) {
+        const staged = await env.BLOBS.get(stagingKey);
+        if (staged) {
+          await env.BLOBS.put(blobKey, staged.body, {
+            httpMetadata: { contentType },
+          });
+        }
+      }
+      return hash;
+    } finally {
+      // The staged object is transient regardless of outcome.
+      await env.BLOBS.delete(stagingKey);
+    }
+  }
+
+  /** Write a blob body to its content-addressed R2 key, returning its hash. */
+  async function writeBlobObject(
+    body: BlobBodyInit,
+    contentType: string,
+  ): Promise<string> {
+    if (body instanceof ReadableStream || body instanceof Blob) {
+      const stream = body instanceof Blob ? body.stream() : body;
+      return stageAndHash(stream, contentType);
+    }
+    // Already-resident bytes (small RDF offload): hash and write directly.
+    const bytes = toBytes(body);
+    const hash = await sha256Hex(bytes);
+    await env.BLOBS.put(`${blobPrefix}/sha256-${hash}`, bytes, {
+      httpMetadata: { contentType },
+    });
+    return hash;
   }
 
   /** Outbox a blob key iff no surviving resource still points at it. */
@@ -417,17 +493,14 @@ export function createStore(
     },
 
     async putBlob(key, body, options = {}) {
-      const bytes = toBytes(body);
-      const hash = await sha256Hex(bytes);
-      const blobKey = `${blobPrefix}/sha256-${hash}`;
-      const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
       const contentType = options.contentType ?? "application/octet-stream";
 
       // 1. Write the new content-addressed object first, recording the content
-      //    type on the R2 object for direct/public bucket access.
-      await env.BLOBS.put(blobKey, bytes, {
-        httpMetadata: { contentType },
-      });
+      //    type on the R2 object for direct/public bucket access. Streamed
+      //    bodies are hashed without ever being buffered in the DO.
+      const hash = await writeBlobObject(body, contentType);
+      const blobKey = `${blobPrefix}/sha256-${hash}`;
+      const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
 
       // 2. Atomically flip the pointer and outbox the displaced key.
       state.storage.transactionSync(() => {
