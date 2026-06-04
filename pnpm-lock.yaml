@@ -103,6 +103,12 @@ importers:
         specifier: workspace:*
         version: link:../rdf
 
+  packages/webfinger:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/webmention:
     dependencies:
       '@dwk/log':

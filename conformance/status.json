@@ -43,6 +43,14 @@
         "cases": []
       }
     },
+    "@dwk/webfinger": {
+      "standard": "WebFinger",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/solid-pod": {
       "standard": "Solid",
       "suites": {

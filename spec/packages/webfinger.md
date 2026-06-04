@@ -5,7 +5,7 @@
 | **Type** | endpoint |
 | **Ships a DO?** | no |
 | **Standard** | [WebFinger (RFC 7033)](https://www.rfc-editor.org/rfc/rfc7033) |
-| **Status** | proposed — tracked in [#57](https://github.com/davidwkeith/workers/issues/57) |
+| **Status** | implemented (unreleased) — tracked in [#57](https://github.com/davidwkeith/workers/issues/57) |
 
 Account / resource discovery at `/.well-known/webfinger`. Maps a `resource`
 URI (`acct:`, `mailto:`, `https:`) to a JRD of links — avatar, profile page,
