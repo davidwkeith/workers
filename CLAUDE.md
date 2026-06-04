@@ -190,7 +190,8 @@ conformance + integration status, validated against `conformance/status.schema.j
 - **`scripts/release-gate.mjs`** (`pnpm release:gate`) reads every workspace
   package's version and cross-checks it against `status.json`. Any package at a
   stable version (`major >= 1`, no prerelease tag) whose suites or integration
-  status is not `"passing"` is a violation and the gate exits non-zero, so
+  status is neither `"passing"` nor `"not-applicable"` is a violation and the
+  gate exits non-zero, so
   `pnpm release` refuses to proceed. `evaluateReleaseGate` is pure/importable and
   unit-tested by `scripts/release-gate.test.mjs` (`pnpm test:gate`). Run
   `node scripts/release-gate.mjs --report` to print the status table only.
