@@ -84,7 +84,12 @@ export type AclScope = "accessTo" | "default";
  * The chain is ordered nearest-first: the requested resource's own ACL (with
  * {@link AclScope | scope} `"accessTo"`) comes first, followed by ancestor
  * container ACLs (scope `"default"`) from closest to farthest. Only ACL
- * documents that exist need be included.
+ * documents that exist need be included. The resource's own ACL (scope
+ * `"accessTo"`) is implicitly authoritative: it is in the chain only because it
+ * exists, so the walk stops there rather than falling through to an ancestor
+ * `acl:default`, even when it grants nothing. An existing ancestor `default`
+ * document that should likewise be authoritative can be marked
+ * {@link AclResource.present | present}.
  */
 export interface AclResource {
   /**
@@ -95,6 +100,26 @@ export interface AclResource {
   target: string;
   /** Which predicate links authorizations in this document to {@link target}. */
   scope: AclScope;
+  /**
+   * Marks an existing ACL *document* as authoritative for its {@link target}.
+   *
+   * @remarks
+   * When `true`, the effective-ACL walk stops at this document and returns its
+   * decision — granted or denied — without falling through to a farther
+   * ancestor, **even when no authorization in it applies to the request**.
+   *
+   * A resource's own `.acl` (scope `"accessTo"`) is **implicitly** authoritative
+   * and does not need this flag: it appears in the chain only because it exists,
+   * and under WAC an own ACL selects the effective ACL, so an ancestor's
+   * `acl:default` MUST NOT be inherited past it (which would fail open). Use this
+   * flag for an existing ancestor `default` document that should be authoritative
+   * even though it carries no applicable `acl:default` authorization.
+   *
+   * Defaults to `false`, in which case an ancestor `default` document stops the
+   * walk only if it carries an authorization applicable to {@link target};
+   * otherwise the walk climbs to the next ancestor.
+   */
+  present?: boolean;
   /** The ACL document's statements, consumed from `@dwk/rdf`. */
   quads: AclQuad[];
 }
@@ -214,7 +239,10 @@ function agentMatches(auth: Authorization, request: AccessRequest): boolean {
   if (auth.agentClasses.includes(FOAF_AGENT)) {
     return true;
   }
-  if (request.agent !== undefined) {
+  // A non-empty WebID means authenticated; an empty string is not a valid
+  // identity and MUST NOT satisfy `acl:AuthenticatedAgent` or match a
+  // (malformed) empty `acl:agent`.
+  if (request.agent) {
     if (auth.agentClasses.includes(ACL_AUTHENTICATED_AGENT)) {
       return true;
     }
@@ -232,16 +260,34 @@ function agentMatches(auth: Authorization, request: AccessRequest): boolean {
 }
 
 /**
+ * Normalizes an origin to its `scheme://host[:port]` form so that comparisons
+ * ignore case and trailing-slash differences. Falls back to the raw value when
+ * it is not a parseable absolute URL, keeping the match fail-closed.
+ */
+function normalizeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+}
+
+/**
  * Whether an authorization's origin restriction admits the request.
  *
  * An authorization with no `acl:origin` applies regardless of origin; one with
- * origins acts as an allow-list.
+ * origins acts as an allow-list. Both sides are normalized via {@link URL} so a
+ * correctly-configured allow-list is not defeated by case or a trailing slash.
  */
 function originMatches(auth: Authorization, request: AccessRequest): boolean {
   if (auth.origins.length === 0) {
     return true;
   }
-  return request.origin !== undefined && auth.origins.includes(request.origin);
+  if (request.origin === undefined) {
+    return false;
+  }
+  const requestOrigin = normalizeOrigin(request.origin);
+  return auth.origins.some((o) => normalizeOrigin(o) === requestOrigin);
 }
 
 /** Whether the granted mode IRIs satisfy the requested mode. */
@@ -267,12 +313,16 @@ function toAccessModes(granted: ReadonlySet<string>): AccessMode[] {
  * Evaluates a Web Access Control decision against an effective-ACL chain.
  *
  * @remarks
- * Walks `chain` nearest-first. The first ACL document with an authorization
- * applicable to its scoped target is the effective ACL: the decision is made
- * from that document alone (a resource's own `accessTo` ACL therefore takes
- * precedence over ancestor `acl:default` ACLs, even when it denies access).
- * ACL documents with no applicable authorization are skipped, so an ancestor's
- * `acl:default` is honored only when no nearer ACL applies.
+ * Walks `chain` nearest-first to select exactly one effective ACL. An entry is
+ * the effective ACL when it is the resource's own ACL (scope `"accessTo"`), is
+ * marked {@link AclResource.present | present}, **or** carries an authorization
+ * applicable to its scoped target; the decision is then made from that document
+ * alone, granted or denied, without climbing. A resource's own `.acl` is
+ * therefore authoritative once it exists: it MUST NOT fall through to (fail open
+ * into) an ancestor's `acl:default`, even when it grants nothing for the target.
+ * An ancestor `default` entry that is neither `present` nor carries an
+ * applicable `acl:default` authorization is skipped, so the walk climbs to the
+ * nearest ancestor default that does apply.
  *
  * @param request - The agent and request facts to authorize.
  * @param chain - The candidate ACL documents, ordered nearest container first.
@@ -287,7 +337,15 @@ export function evaluateAccess(
   }
   for (const acl of chain) {
     const authorizations = findApplicableAuthorizations(acl);
-    if (authorizations.length === 0) {
+    // The resource's own ACL (scope "accessTo") or an explicitly `present`
+    // document is authoritative for its target even when no authorization
+    // applies (fail closed); an entry that merely carries an applicable
+    // authorization also stops the walk. Otherwise keep climbing.
+    if (
+      authorizations.length === 0 &&
+      acl?.scope !== "accessTo" &&
+      !acl?.present
+    ) {
       continue;
     }
 

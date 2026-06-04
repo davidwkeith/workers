@@ -53,6 +53,9 @@ function authorization(
 }
 
 function accessToAcl(quads: AclQuad[], target = RESOURCE): AclResource {
+  // A resource's own ACL (scope "accessTo") is implicitly authoritative: it is
+  // in the chain only because it exists, so it stops the walk even when it
+  // grants nothing — no `present` flag required.
   return { target, scope: "accessTo", quads };
 }
 
@@ -131,6 +134,33 @@ describe("@dwk/wac evaluateAccess", () => {
       );
       expect(evaluateAccess({ mode: "read" }, [acl]).granted).toBe(false);
     });
+
+    it("treats an empty-string agent as unauthenticated", () => {
+      const authed = accessToAcl(
+        authorization("#authed", {
+          accessTo: RESOURCE,
+          agentClasses: [`${ACL}AuthenticatedAgent`],
+          modes: [`${ACL}Read`],
+        }),
+      );
+      // An empty WebID is not an identity: it must not satisfy
+      // acl:AuthenticatedAgent.
+      expect(
+        evaluateAccess({ mode: "read", agent: "" }, [authed]).granted,
+      ).toBe(false);
+
+      // Nor should it match a malformed empty acl:agent value.
+      const emptyAgent = accessToAcl(
+        authorization("#empty", {
+          accessTo: RESOURCE,
+          agents: [""],
+          modes: [`${ACL}Read`],
+        }),
+      );
+      expect(
+        evaluateAccess({ mode: "read", agent: "" }, [emptyAgent]).granted,
+      ).toBe(false);
+    });
   });
 
   describe("groups", () => {
@@ -203,6 +233,24 @@ describe("@dwk/wac evaluateAccess", () => {
       ).toBe(false);
     });
 
+    it("normalizes origin for case and trailing-slash differences", () => {
+      const acl = accessToAcl(
+        authorization("#app", {
+          accessTo: RESOURCE,
+          agents: [ALICE],
+          modes: [`${ACL}Read`],
+          origins: ["https://App.Example/"],
+        }),
+      );
+      // A trailing slash and differing host case must not defeat the allow-list.
+      expect(
+        evaluateAccess(
+          { mode: "read", agent: ALICE, origin: "https://app.example" },
+          [acl],
+        ).granted,
+      ).toBe(true);
+    });
+
     it("ignores origin when the authorization sets none", () => {
       const acl = accessToAcl(
         authorization("#any", {
@@ -236,10 +284,43 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
-    it("walks past an ACL with no applicable authorization to a farther default", () => {
-      // The resource's own ACL document only scopes a different resource, so it
-      // is not applicable and the walk falls through to the container default.
-      const unrelated = accessToAcl(
+    it("climbs past a non-present ancestor default that does not apply", () => {
+      // The nearer container ACL exists but its authorization scopes ROOT, not
+      // this CONTAINER, so it carries no applicable acl:default and is not the
+      // resource's own ACL; the walk climbs to the farther applicable default.
+      const innerDefault: AclResource = {
+        target: CONTAINER,
+        scope: "default",
+        quads: authorization("#wrong", {
+          default: ROOT,
+          agents: [ALICE],
+          modes: [`${ACL}Write`],
+        }),
+      };
+      const rootDefault: AclResource = {
+        target: ROOT,
+        scope: "default",
+        quads: authorization("#inherited", {
+          default: ROOT,
+          agents: [ALICE],
+          modes: [`${ACL}Read`],
+        }),
+      };
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
+        innerDefault,
+        rootDefault,
+      ]);
+      expect(decision.granted).toBe(true);
+      expect(decision.effectiveAcl).toBe(ROOT);
+    });
+
+    it("does not fall through an own-ACL that grants nothing (fail closed)", () => {
+      // The resource's own ACL document exists but its authorization scopes a
+      // different resource, so nothing applies to the target. An own ACL (scope
+      // "accessTo") is implicitly authoritative — no `present` flag set here —
+      // so the walk MUST deny rather than inherit the permissive container
+      // default (the issue #27 fail-open hazard).
+      const ownAcl = accessToAcl(
         authorization("#other", {
           accessTo: "https://alice.example/notes/other.ttl",
           agents: [ALICE],
@@ -254,10 +335,71 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
-        unrelated,
+        ownAcl,
         containerAcl,
       ]);
-      expect(decision.granted).toBe(true);
+      expect(decision.granted).toBe(false);
+      expect(decision.effectiveAcl).toBe(RESOURCE);
+      expect(decision.modes).toEqual([]);
+    });
+
+    it("denies via an own-ACL carrying only acl:default entries", () => {
+      // A malformed own-ACL that carries only acl:default (no acl:accessTo for
+      // the target) still exists, so as the resource's own ACL it is implicitly
+      // authoritative and must not fall through to the ancestor default.
+      const ownAcl: AclResource = {
+        target: RESOURCE,
+        scope: "accessTo",
+        quads: authorization("#mis-scoped", {
+          default: RESOURCE,
+          agents: [ALICE],
+          modes: [`${ACL}Write`],
+        }),
+      };
+      const containerAcl = defaultAcl(
+        authorization("#inherited", {
+          default: CONTAINER,
+          agents: [ALICE],
+          modes: [`${ACL}Write`],
+        }),
+      );
+      const decision = evaluateAccess({ mode: "write", agent: ALICE }, [
+        ownAcl,
+        containerAcl,
+      ]);
+      expect(decision.granted).toBe(false);
+      expect(decision.effectiveAcl).toBe(RESOURCE);
+    });
+
+    it("honors an explicit present flag on an existing ancestor default", () => {
+      // The resource has no own ACL. The nearest container ACL exists but its
+      // authorization scopes ROOT, so it carries no applicable acl:default;
+      // marking it `present` makes it authoritative, so the walk denies rather
+      // than climbing to the permissive root default.
+      const innerDefault: AclResource = {
+        target: CONTAINER,
+        scope: "default",
+        present: true,
+        quads: authorization("#wrong", {
+          default: ROOT,
+          agents: [ALICE],
+          modes: [`${ACL}Write`],
+        }),
+      };
+      const rootDefault: AclResource = {
+        target: ROOT,
+        scope: "default",
+        quads: authorization("#root", {
+          default: ROOT,
+          agents: [ALICE],
+          modes: [`${ACL}Read`],
+        }),
+      };
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
+        innerDefault,
+        rootDefault,
+      ]);
+      expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
