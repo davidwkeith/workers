@@ -42,10 +42,24 @@ export const SCHEMA: readonly string[] = [
   // primary key, so `WHERE resource = ?` already uses the PK index.
   // Index used by the unreferenced-blob check in copy-on-write / delete.
   `CREATE INDEX IF NOT EXISTS resources_by_blob ON resources (blob_key)`,
+  // The transactional outbox of unreferenced R2 keys. `forwarded_at` is NULL
+  // until a row is drained into the shared GC store; forwarded rows are *kept*
+  // locally for a retention window (rather than deleted) so a later
+  // resurrection of the same content-addressed key can cancel the already-
+  // forwarded GC row (see `orphan_cancels`).
   `CREATE TABLE IF NOT EXISTS orphan_outbox (
-     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-     blob_key    TEXT NOT NULL,
-     enqueued_at INTEGER NOT NULL
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     blob_key     TEXT NOT NULL,
+     enqueued_at  INTEGER NOT NULL,
+     forwarded_at INTEGER
+   )`,
+  // Pending "un-orphan" tombstones: when `putBlob` resurrects a key whose
+  // orphan row was already forwarded to the shared GC store, it records the key
+  // here so the forwarder can delete the forwarded GC row before the cron GC
+  // can reclaim a now-live object. UNIQUE so re-resurrection is idempotent.
+  `CREATE TABLE IF NOT EXISTS orphan_cancels (
+     id       INTEGER PRIMARY KEY AUTOINCREMENT,
+     blob_key TEXT NOT NULL UNIQUE
    )`,
 ];
 

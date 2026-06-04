@@ -258,6 +258,67 @@ describe("@dwk/store delete → GC ordering", () => {
   });
 });
 
+describe("@dwk/store resurrection cancels a forwarded GC row", () => {
+  it("un-orphans a key resurrected after its orphan row was forwarded", async () => {
+    const content = new TextEncoder().encode("resurrect-me");
+
+    const blobKey = await withStore(async ({ store, env }) => {
+      await store.putBlob("/a", content);
+      store.delete("/a");
+      const key = store.collectOrphans()[0]!.blobKey;
+
+      // Forward the orphan into the shared GC store. The local row is retained
+      // (marked forwarded) but no longer reported as pending.
+      await forwardOrphans(store, d1OrphanSink(env.GC_DB));
+      expect(store.collectOrphans()).toHaveLength(0);
+
+      // Resurrect the identical content under a new resource → same key.
+      await store.putBlob("/b", content);
+      // A cancel tombstone is now pending; draining propagates it to D1.
+      await forwardOrphans(store, d1OrphanSink(env.GC_DB));
+      return key;
+    });
+
+    // The forwarded GC row was cancelled, so the cron GC sees nothing to do.
+    const { results } = await harness.GC_DB.prepare(
+      "SELECT blob_key FROM orphan_blobs WHERE blob_key = ?",
+    )
+      .bind(blobKey)
+      .all<{ blob_key: string }>();
+    expect(results).toHaveLength(0);
+
+    // Even a past-window sweep leaves the now-live resurrected object intact.
+    const reclaimed = await collectGarbage(harness, {
+      now: Date.now() + 120_000,
+      safetyWindowMs: 60_000,
+    });
+    expect(reclaimed).not.toContain(blobKey);
+    expect(await harness.BLOBS.get(blobKey)).not.toBeNull();
+  });
+
+  it("drops a not-yet-forwarded orphan locally without a tombstone", async () => {
+    const content = new TextEncoder().encode("quick-resurrect");
+
+    const { pendingOrphans, pendingCancels } = await withStore(
+      async ({ store }) => {
+        await store.putBlob("/a", content);
+        store.delete("/a");
+        expect(store.collectOrphans()).toHaveLength(1);
+        // Resurrect before forwarding: the local outbox row is simply dropped,
+        // so there is nothing to cancel downstream.
+        await store.putBlob("/b", content);
+        return {
+          pendingOrphans: store.collectOrphans().length,
+          pendingCancels: store.collectCancels().length,
+        };
+      },
+    );
+
+    expect(pendingOrphans).toBe(0);
+    expect(pendingCancels).toBe(0);
+  });
+});
+
 describe("@dwk/store size-threshold routing", () => {
   it("routes small RDF to SQLite quads and oversized bodies to R2 blobs", async () => {
     const body = new TextEncoder().encode(BODY_TEXT);

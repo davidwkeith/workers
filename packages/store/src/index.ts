@@ -24,6 +24,7 @@ export {
   type WriteOptions,
   type DeleteOptions,
   type OrphanRecord,
+  type OrphanCancelRecord,
 } from "./store";
 
 export {
@@ -32,6 +33,8 @@ export {
   d1OrphanSink,
   ensureGcSchema,
   GC_SCHEMA,
+  DEFAULT_CLOCK_SKEW_MS,
+  DEFAULT_FORWARDED_RETENTION_MS,
   type OrphanSink,
   type GcEnv,
 } from "./gc";

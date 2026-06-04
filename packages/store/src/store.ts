@@ -91,6 +91,16 @@ export interface OrphanRecord {
   readonly enqueuedAt: number;
 }
 
+/**
+ * A pending "un-orphan" tombstone: a content-addressed key resurrected after
+ * its orphan row was already forwarded to the shared GC store. The forwarder
+ * propagates it as a delete against the forwarded GC row.
+ */
+export interface OrphanCancelRecord {
+  readonly id: number;
+  readonly blobKey: string;
+}
+
 /** Storage interface over the DO-SQLite quad store and R2 blob bodies. */
 export interface Store {
   /** The byte threshold above which bodies are routed to R2. */
@@ -160,11 +170,25 @@ export interface Store {
    */
   delete(key: string, options?: DeleteOptions): void;
 
-  /** Read pending orphan rows from the transactional outbox. */
+  /** Read not-yet-forwarded orphan rows from the transactional outbox. */
   collectOrphans(limit?: number): OrphanRecord[];
 
-  /** Remove outbox rows once their keys have been forwarded to the GC store. */
-  removeForwardedOrphans(ids: readonly number[]): void;
+  /**
+   * Mark outbox rows as forwarded to the shared GC store at `forwardedAt`. The
+   * rows are retained (not deleted) so a later resurrection of the same key can
+   * still cancel its forwarded GC row; {@link Store.pruneForwardedOrphans}
+   * reclaims them once they age out of the retention window.
+   */
+  markOrphansForwarded(ids: readonly number[], forwardedAt: number): void;
+
+  /** Delete forwarded outbox rows forwarded at or before `before`. */
+  pruneForwardedOrphans(before: number): void;
+
+  /** Read pending resurrection "un-orphan" tombstones. */
+  collectCancels(limit?: number): OrphanCancelRecord[];
+
+  /** Remove cancel tombstones once they have been propagated to the GC store. */
+  removeForwardedCancels(ids: readonly number[]): void;
 }
 
 /** Thrown when an `If-Match` / `If-None-Match` precondition fails (maps to HTTP 412). */
@@ -447,8 +471,25 @@ export function createStore(
           blobKey,
           Date.now(),
         );
-        // Resurrection guard: this key is referenced again, so cancel any
-        // not-yet-forwarded outbox entry for it.
+        // Resurrection guard: this content-addressed key is referenced again.
+        // Cancel its orphan record so GC cannot reclaim a now-live object.
+        // A not-yet-forwarded outbox row can simply be dropped; a row already
+        // forwarded to the shared GC store also needs an "un-orphan" tombstone
+        // so the forwarder deletes the forwarded GC row before the cron GC runs.
+        const orphanRows = sql
+          .exec<{
+            forwarded_at: number | null;
+          }>(
+            "SELECT forwarded_at FROM orphan_outbox WHERE blob_key = ?",
+            blobKey,
+          )
+          .toArray();
+        if (orphanRows.some((r) => r.forwarded_at !== null)) {
+          sql.exec(
+            "INSERT OR IGNORE INTO orphan_cancels (blob_key) VALUES (?)",
+            blobKey,
+          );
+        }
         sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
         if (
           current?.kind === "blob" &&
@@ -504,7 +545,8 @@ export function createStore(
     collectOrphans(limit = 100) {
       return sql
         .exec<{ id: number; blob_key: string; enqueued_at: number }>(
-          "SELECT id, blob_key, enqueued_at FROM orphan_outbox ORDER BY id LIMIT ?",
+          `SELECT id, blob_key, enqueued_at FROM orphan_outbox
+           WHERE forwarded_at IS NULL ORDER BY id LIMIT ?`,
           limit,
         )
         .toArray()
@@ -515,9 +557,36 @@ export function createStore(
         }));
     },
 
-    removeForwardedOrphans(ids) {
+    markOrphansForwarded(ids, forwardedAt) {
       for (const id of ids) {
-        sql.exec("DELETE FROM orphan_outbox WHERE id = ?", id);
+        sql.exec(
+          "UPDATE orphan_outbox SET forwarded_at = ? WHERE id = ?",
+          forwardedAt,
+          id,
+        );
+      }
+    },
+
+    pruneForwardedOrphans(before) {
+      sql.exec(
+        "DELETE FROM orphan_outbox WHERE forwarded_at IS NOT NULL AND forwarded_at <= ?",
+        before,
+      );
+    },
+
+    collectCancels(limit = 100) {
+      return sql
+        .exec<{ id: number; blob_key: string }>(
+          "SELECT id, blob_key FROM orphan_cancels ORDER BY id LIMIT ?",
+          limit,
+        )
+        .toArray()
+        .map((row) => ({ id: row.id, blobKey: row.blob_key }));
+    },
+
+    removeForwardedCancels(ids) {
+      for (const id of ids) {
+        sql.exec("DELETE FROM orphan_cancels WHERE id = ?", id);
       }
     },
   };
