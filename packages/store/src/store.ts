@@ -423,6 +423,13 @@ export function createStore(
       const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
       const contentType = options.contentType ?? "application/octet-stream";
 
+      // Pre-check the precondition against the current pointer *before* writing
+      // to R2: a deterministic precondition failure must reject without landing
+      // an object, since the full-sweep-free GC can only reclaim keys reported
+      // via the outbox at write/delete time. This read is non-authoritative; the
+      // in-transaction check below remains the TOCTOU-free authority.
+      assertPreconditions(key, readResourceRow(key), options);
+
       // 1. Write the new content-addressed object first, recording the content
       //    type on the R2 object for direct/public bucket access.
       await env.BLOBS.put(blobKey, bytes, {
@@ -430,34 +437,50 @@ export function createStore(
       });
 
       // 2. Atomically flip the pointer and outbox the displaced key.
-      state.storage.transactionSync(() => {
-        const current = readResourceRow(key);
-        assertPreconditions(key, current, options);
-        sql.exec("DELETE FROM quads WHERE resource = ?", key);
-        sql.exec(
-          `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
-           VALUES (?, 'blob', ?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             kind = 'blob', etag = excluded.etag,
-             content_type = excluded.content_type, blob_key = excluded.blob_key,
-             updated_at = excluded.updated_at`,
-          key,
-          etag,
-          contentType,
-          blobKey,
-          Date.now(),
-        );
-        // Resurrection guard: this key is referenced again, so cancel any
-        // not-yet-forwarded outbox entry for it.
-        sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
-        if (
-          current?.kind === "blob" &&
-          current.blobKey &&
-          current.blobKey !== blobKey
-        ) {
-          outboxIfUnreferenced(current.blobKey);
+      try {
+        state.storage.transactionSync(() => {
+          const current = readResourceRow(key);
+          assertPreconditions(key, current, options);
+          sql.exec("DELETE FROM quads WHERE resource = ?", key);
+          sql.exec(
+            `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
+             VALUES (?, 'blob', ?, ?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET
+               kind = 'blob', etag = excluded.etag,
+               content_type = excluded.content_type, blob_key = excluded.blob_key,
+               updated_at = excluded.updated_at`,
+            key,
+            etag,
+            contentType,
+            blobKey,
+            Date.now(),
+          );
+          // Resurrection guard: this key is referenced again, so cancel any
+          // not-yet-forwarded outbox entry for it.
+          sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
+          if (
+            current?.kind === "blob" &&
+            current.blobKey &&
+            current.blobKey !== blobKey
+          ) {
+            outboxIfUnreferenced(current.blobKey);
+          }
+        });
+      } catch (err) {
+        // The transaction rolled back after the object had already landed in
+        // R2 — a concurrent write moved the pointer and the authoritative check
+        // rejected, or any other failure aborted the write. Either way the
+        // pointer never flipped to blobKey, so (unless a live resource still
+        // references the same content) it is now an orphan the full-sweep-free
+        // GC cannot discover. Record it to the outbox so GC can reclaim it.
+        // Best-effort: suppress a secondary failure so it cannot mask `err`.
+        try {
+          state.storage.transactionSync(() => outboxIfUnreferenced(blobKey));
+        } catch {
+          // ignore — rethrow the original error below
         }
-      });
+        throw err;
+      }
       return etag;
     },
 
