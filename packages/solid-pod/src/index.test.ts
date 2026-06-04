@@ -177,7 +177,7 @@ interface Pod {
 
 function freshPod(
   owner: string = OWNER,
-  opts: { allowAnonymousWrites?: boolean } = {},
+  extra: Partial<Parameters<typeof createSolidPod>[0]> = {},
 ): Pod {
   const base = `https://${crypto.randomUUID()}.pod.example`;
   const handler = createSolidPod({
@@ -186,9 +186,7 @@ function freshPod(
     audience: "solid",
     jwks: [issuerJwk],
     owner,
-    ...(opts.allowAnonymousWrites !== undefined
-      ? { allowAnonymousWrites: opts.allowAnonymousWrites }
-      : {}),
+    ...extra,
   });
   return {
     base,
@@ -229,6 +227,221 @@ describe("@dwk/solid-pod auth", () => {
     const get = await pod.send("GET", "/doc", { webid: OWNER });
     expect(get.status).toBe(200);
     expect(get.headers.get("content-type")).toContain(TURTLE);
+  });
+});
+
+describe("@dwk/solid-pod blob bodies", () => {
+  it("streams a binary PUT to R2 and serves it back", async () => {
+    const pod = freshPod();
+    const payload = "binary body-not-rdf";
+    const put = await pod.send("PUT", "/blob", {
+      webid: OWNER,
+      body: payload,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    expect(put.status).toBe(201);
+    // A content-addressed blob carries a `sha256-` strong ETag.
+    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+
+    const get = await pod.send("GET", "/blob", { webid: OWNER });
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toContain(
+      "application/octet-stream",
+    );
+    const bytes = new Uint8Array(await get.arrayBuffer());
+    expect(new TextDecoder().decode(bytes)).toBe(payload);
+  });
+
+  it("offloads RDF over the inline ceiling to R2 as an opaque blob", async () => {
+    // Tiny ceiling so a perfectly ordinary Turtle body overflows it and is
+    // streamed to R2 instead of parsed into the quad store.
+    const pod = freshPod(OWNER, { maxInlineBytes: 16 });
+    const turtle = `<#a> <#b> <#c> .\n<#d> <#e> <#f> .\n<#g> <#h> <#i> .`;
+    const put = await pod.send("PUT", "/big.ttl", {
+      webid: OWNER,
+      body: turtle,
+      headers: { "content-type": TURTLE },
+    });
+    expect(put.status).toBe(201);
+    expect(put.headers.get("etag")).toMatch(/sha256-[0-9a-f]{64}/);
+
+    // It round-trips verbatim (opaque blob), not re-serialized from quads.
+    const get = await pod.send("GET", "/big.ttl", { webid: OWNER });
+    expect(get.status).toBe(200);
+    expect(await get.text()).toBe(turtle);
+  });
+
+  it("still parses small RDF into the quad store (PATCH applies)", async () => {
+    // A small body under the ceiling stays in the quad store, so N3 Patch works.
+    const pod = freshPod(OWNER, { maxInlineBytes: 1024 });
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const patch = await pod.send("PATCH", "/doc", {
+      webid: OWNER,
+      body: `_:p a <http://www.w3.org/ns/solid/terms#InsertDeletePatch> ;
+  <http://www.w3.org/ns/solid/terms#inserts> { <#x> <#y> <#z> . } .`,
+      headers: { "content-type": "text/n3" },
+    });
+    expect(patch.status).toBe(204);
+  });
+});
+
+describe("@dwk/solid-pod access-token validation (issue #35)", () => {
+  /**
+   * Build DPoP-bound auth headers for `webid` with a fully custom token header
+   * and extra claims, so individual JWT-validation gaps can be exercised
+   * (header `typ`, an unknown `kid`, a future `nbf`) against the real handler.
+   */
+  async function customAuth(
+    method: string,
+    url: string,
+    webid: string,
+    header: Record<string, unknown>,
+    payloadExtra: Record<string, unknown> = {},
+  ): Promise<Record<string, string>> {
+    const key = await agentKey(webid);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await signJwt(
+      header,
+      {
+        iss: ISSUER,
+        aud: "solid",
+        sub: webid,
+        webid,
+        iat: now,
+        exp: now + 600,
+        cnf: { jkt },
+        ...payloadExtra,
+      },
+      issuerKey.privateKey,
+    );
+    return {
+      authorization: `DPoP ${token}`,
+      dpop: await dpopProof(method, url, key, token),
+    };
+  }
+
+  it("rejects an access token whose typ is not at+jwt (token-type confusion)", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "id+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_type_invalid");
+  });
+
+  it("rejects an access token with no typ header", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_type_invalid");
+  });
+
+  it("accepts the application/at+jwt media-type form of typ", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "application/at+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
+  });
+
+  it("honors accessTokenType: null to skip the typ check", async () => {
+    const pod = freshPod(OWNER, { accessTokenType: null });
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "id+jwt",
+      kid: "issuer-1",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a token naming an unknown kid rather than trying other keys", async () => {
+    const pod = freshPod();
+    const headers = await customAuth("GET", `${pod.base}/doc`, OWNER, {
+      alg: "ES256",
+      typ: "at+jwt",
+      kid: "does-not-exist",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("signature_invalid");
+  });
+
+  it("rejects a token that is not yet valid (future nbf)", async () => {
+    const pod = freshPod();
+    const future = Math.floor(Date.now() / 1000) + 600;
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: future },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(
+      "token_not_yet_valid",
+    );
+  });
+
+  it("rejects a token whose nbf is present but not a number (RFC 7519 §4.1.5)", async () => {
+    const pod = freshPod();
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: "not-a-number" },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(
+      "token_not_yet_valid",
+    );
+  });
+
+  it("accepts a token whose nbf is already in the past", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const past = Math.floor(Date.now() / 1000) - 10;
+    const headers = await customAuth(
+      "GET",
+      `${pod.base}/doc`,
+      OWNER,
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      { nbf: past },
+    );
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
   });
 });
 

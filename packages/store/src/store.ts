@@ -49,6 +49,14 @@ export interface BlobBody {
   readonly size: number;
 }
 
+/**
+ * A blob body accepted by the write path. A `ReadableStream` or `Blob` is
+ * streamed to R2 and hashed without ever being fully buffered in the Durable
+ * Object; an in-memory `ArrayBuffer`/`Uint8Array` is written directly (used for
+ * the small RDF-offload case, where the bytes are already resident).
+ */
+export type BlobBodyInit = ReadableStream | Blob | ArrayBuffer | Uint8Array;
+
 /** A delete/insert pair applied atomically by {@link Store.patchQuads}. */
 export interface QuadPatch {
   readonly deletes: readonly StoredQuad[];
@@ -92,6 +100,16 @@ export interface OrphanRecord {
   readonly enqueuedAt: number;
 }
 
+/**
+ * A pending "un-orphan" tombstone: a content-addressed key resurrected after
+ * its orphan row was already forwarded to the shared GC store. The forwarder
+ * propagates it as a delete against the forwarded GC row.
+ */
+export interface OrphanCancelRecord {
+  readonly id: number;
+  readonly blobKey: string;
+}
+
 /** Storage interface over the DO-SQLite quad store and R2 blob bodies. */
 export interface Store {
   /** The byte threshold above which bodies are routed to R2. */
@@ -126,11 +144,16 @@ export interface Store {
    * Copy-on-write a blob body: write a new content-addressed R2 object, then
    * atomically flip the DO pointer to it and outbox any now-unreferenced
    * predecessor key. Returns the new ETag.
+   *
+   * A `ReadableStream`/`Blob` body is streamed to R2 and hashed with a
+   * `DigestStream` so the full body is never buffered in the DO — satisfying the
+   * "stream R2 bodies, never buffer a blob in the DO" mandate even for bodies up
+   * to the 128 MB memory limit.
    * @throws {PreconditionFailedError} if `ifMatch` does not hold.
    */
   putBlob(
     key: string,
-    body: ArrayBuffer | Uint8Array,
+    body: BlobBodyInit,
     options?: WriteOptions,
   ): Promise<string>;
 
@@ -161,11 +184,25 @@ export interface Store {
    */
   delete(key: string, options?: DeleteOptions): void;
 
-  /** Read pending orphan rows from the transactional outbox. */
+  /** Read not-yet-forwarded orphan rows from the transactional outbox. */
   collectOrphans(limit?: number): OrphanRecord[];
 
-  /** Remove outbox rows once their keys have been forwarded to the GC store. */
-  removeForwardedOrphans(ids: readonly number[]): void;
+  /**
+   * Mark outbox rows as forwarded to the shared GC store at `forwardedAt`. The
+   * rows are retained (not deleted) so a later resurrection of the same key can
+   * still cancel its forwarded GC row; {@link Store.pruneForwardedOrphans}
+   * reclaims them once they age out of the retention window.
+   */
+  markOrphansForwarded(ids: readonly number[], forwardedAt: number): void;
+
+  /** Delete forwarded outbox rows forwarded at or before `before`. */
+  pruneForwardedOrphans(before: number): void;
+
+  /** Read pending resurrection "un-orphan" tombstones. */
+  collectCancels(limit?: number): OrphanCancelRecord[];
+
+  /** Remove cancel tombstones once they have been propagated to the GC store. */
+  removeForwardedCancels(ids: readonly number[]): void;
 }
 
 /** Thrown when an `If-Match` / `If-None-Match` precondition fails (maps to HTTP 412). */
@@ -186,12 +223,15 @@ function toBytes(body: ArrayBuffer | Uint8Array): Uint8Array {
   return body instanceof Uint8Array ? body : new Uint8Array(body);
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+function toHex(digest: ArrayBuffer): string {
   const view = new Uint8Array(digest);
   let hex = "";
   for (const b of view) hex += b.toString(16).padStart(2, "0");
   return hex;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return toHex(await crypto.subtle.digest("SHA-256", bytes));
 }
 
 function randomEtag(): string {
@@ -273,6 +313,78 @@ export function createStore(
         throw new PreconditionFailedError(key);
       }
     }
+  }
+
+  /**
+   * Stream a blob body to R2 without ever buffering it in the DO, returning its
+   * content hash. Each step is a single-consumer stream so R2 backpressure
+   * governs the flow — no `tee`, whose faster branch could buffer the whole body
+   * in the DO:
+   *
+   *   1. stream the body straight to a random staging key (R2 throttles it);
+   *   2. read the staged object back through a `DigestStream` (a WritableStream
+   *      that retains no data) to compute its content hash;
+   *   3. promote the staged object to its content-addressed key — skipped when
+   *      an identical body already exists, so writes still dedupe.
+   *
+   * R2 has no server-side copy, so the promotion re-streams through the Worker;
+   * that is still bounded and never fully buffered.
+   */
+  async function stageAndHash(
+    stream: ReadableStream,
+    contentType: string,
+  ): Promise<string> {
+    const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
+    try {
+      // 1. Stream to staging. A single consumer (R2) means upload backpressure
+      //    propagates to the source, so the DO holds only chunks in flight.
+      await env.BLOBS.put(stagingKey, stream, {
+        httpMetadata: { contentType },
+      });
+      // 2. Hash by streaming the staged object back through a DigestStream.
+      const staged = await env.BLOBS.get(stagingKey);
+      if (!staged) {
+        throw new Error("@dwk/store: staged blob disappeared before hashing");
+      }
+      const digest = new crypto.DigestStream("SHA-256");
+      await staged.body.pipeTo(digest);
+      const hash = toHex(await digest.digest);
+      // 3. Promote to the content-addressed key, deduping on an existing body.
+      const blobKey = `${blobPrefix}/sha256-${hash}`;
+      if ((await env.BLOBS.head(blobKey)) === null) {
+        const toCopy = await env.BLOBS.get(stagingKey);
+        if (!toCopy) {
+          throw new Error(
+            "@dwk/store: staged blob disappeared before promotion",
+          );
+        }
+        await env.BLOBS.put(blobKey, toCopy.body, {
+          httpMetadata: { contentType },
+        });
+      }
+      return hash;
+    } finally {
+      // The staged object is transient regardless of outcome.
+      await env.BLOBS.delete(stagingKey);
+    }
+  }
+
+  /** Write a blob body to its content-addressed R2 key, returning its hash. */
+  async function writeBlobObject(
+    body: BlobBodyInit,
+    contentType: string,
+  ): Promise<string> {
+    if (body instanceof ReadableStream || body instanceof Blob) {
+      const stream = body instanceof Blob ? body.stream() : body;
+      return stageAndHash(stream, contentType);
+    }
+    // Already-resident bytes (small RDF offload): hash and write directly.
+    const bytes = toBytes(body);
+    const hash = await sha256Hex(bytes);
+    await env.BLOBS.put(`${blobPrefix}/sha256-${hash}`, bytes, {
+      httpMetadata: { contentType },
+    });
+    return hash;
   }
 
   /** Outbox a blob key iff no surviving resource still points at it. */
@@ -420,17 +532,21 @@ export function createStore(
     },
 
     async putBlob(key, body, options = {}) {
-      const bytes = toBytes(body);
-      const hash = await sha256Hex(bytes);
-      const blobKey = `${blobPrefix}/sha256-${hash}`;
-      const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
       const contentType = options.contentType ?? "application/octet-stream";
 
+      // Pre-check the precondition against the current pointer *before* writing
+      // to R2: a deterministic precondition failure must reject without landing
+      // an object, since the full-sweep-free GC can only reclaim keys reported
+      // via the outbox at write/delete time. This read is non-authoritative; the
+      // in-transaction check below remains the TOCTOU-free authority.
+      assertPreconditions(key, readResourceRow(key), options);
+
       // 1. Write the new content-addressed object first, recording the content
-      //    type on the R2 object for direct/public bucket access.
-      await env.BLOBS.put(blobKey, bytes, {
-        httpMetadata: { contentType },
-      });
+      //    type on the R2 object for direct/public bucket access. Streamed
+      //    bodies are hashed without ever being buffered in the DO.
+      const hash = await writeBlobObject(body, contentType);
+      const blobKey = `${blobPrefix}/sha256-${hash}`;
+      const etag = `${ETAG_QUOTE}sha256-${hash}${ETAG_QUOTE}`;
 
       // 2. Atomically flip the pointer and outbox the displaced key.
       try {
@@ -452,8 +568,25 @@ export function createStore(
             blobKey,
             Date.now(),
           );
-          // Resurrection guard: this key is referenced again, so cancel any
-          // not-yet-forwarded outbox entry for it.
+          // Resurrection guard: this content-addressed key is referenced again.
+          // Cancel its orphan record so GC cannot reclaim a now-live object.
+          // A not-yet-forwarded outbox row can simply be dropped; a row already
+          // forwarded to the shared GC store also needs an "un-orphan" tombstone
+          // so the forwarder deletes the forwarded GC row before the cron GC runs.
+          const orphanRows = sql
+            .exec<{
+              forwarded_at: number | null;
+            }>(
+              "SELECT forwarded_at FROM orphan_outbox WHERE blob_key = ?",
+              blobKey,
+            )
+            .toArray();
+          if (orphanRows.some((r) => r.forwarded_at !== null)) {
+            sql.exec(
+              "INSERT OR IGNORE INTO orphan_cancels (blob_key) VALUES (?)",
+              blobKey,
+            );
+          }
           sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
           if (
             current?.kind === "blob" &&
@@ -463,19 +596,20 @@ export function createStore(
             outboxIfUnreferenced(current.blobKey);
           }
         });
-      } catch (error) {
-        // The R2 object was uploaded in step 1, but the pointer flip rolled
-        // back (a failed precondition or a `guard` throwing). Nothing now
-        // references the new key, so outbox it for the GC cron — otherwise the
-        // object leaks past garbage collection. Best-effort: if even this fails
-        // we still surface the original error rather than mask it. The GC's
-        // resurrection check keeps the key if a later write re-references it.
+      } catch (err) {
+        // The transaction rolled back after the object had already landed in
+        // R2 — a concurrent write moved the pointer and the authoritative check
+        // rejected, or any other failure aborted the write. Either way the
+        // pointer never flipped to blobKey, so (unless a live resource still
+        // references the same content) it is now an orphan the full-sweep-free
+        // GC cannot discover. Record it to the outbox so GC can reclaim it.
+        // Best-effort: suppress a secondary failure so it cannot mask `err`.
         try {
           state.storage.transactionSync(() => outboxIfUnreferenced(blobKey));
         } catch {
-          // Swallow: the original `error` is the meaningful one to propagate.
+          // ignore — rethrow the original error below
         }
-        throw error;
+        throw err;
       }
       return etag;
     },
@@ -523,7 +657,8 @@ export function createStore(
     collectOrphans(limit = 100) {
       return sql
         .exec<{ id: number; blob_key: string; enqueued_at: number }>(
-          "SELECT id, blob_key, enqueued_at FROM orphan_outbox ORDER BY id LIMIT ?",
+          `SELECT id, blob_key, enqueued_at FROM orphan_outbox
+           WHERE forwarded_at IS NULL ORDER BY id LIMIT ?`,
           limit,
         )
         .toArray()
@@ -534,10 +669,41 @@ export function createStore(
         }));
     },
 
-    removeForwardedOrphans(ids) {
-      for (const id of ids) {
-        sql.exec("DELETE FROM orphan_outbox WHERE id = ?", id);
-      }
+    markOrphansForwarded(ids, forwardedAt) {
+      state.storage.transactionSync(() => {
+        for (const id of ids) {
+          sql.exec(
+            "UPDATE orphan_outbox SET forwarded_at = ? WHERE id = ?",
+            forwardedAt,
+            id,
+          );
+        }
+      });
+    },
+
+    pruneForwardedOrphans(before) {
+      sql.exec(
+        "DELETE FROM orphan_outbox WHERE forwarded_at IS NOT NULL AND forwarded_at <= ?",
+        before,
+      );
+    },
+
+    collectCancels(limit = 100) {
+      return sql
+        .exec<{ id: number; blob_key: string }>(
+          "SELECT id, blob_key FROM orphan_cancels ORDER BY id LIMIT ?",
+          limit,
+        )
+        .toArray()
+        .map((row) => ({ id: row.id, blobKey: row.blob_key }));
+    },
+
+    removeForwardedCancels(ids) {
+      state.storage.transactionSync(() => {
+        for (const id of ids) {
+          sql.exec("DELETE FROM orphan_cancels WHERE id = ?", id);
+        }
+      });
     },
   };
 

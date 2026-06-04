@@ -29,6 +29,7 @@ export type SolidPodHandler = (
 const FORWARDED_HEADERS = [
   "accept",
   "content-type",
+  "content-length",
   "if-match",
   "if-none-match",
   "slug",

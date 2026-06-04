@@ -18,9 +18,9 @@ Close three DPoP `jti` replay-enforcement gaps in `@dwk/solid-pod` writes
   (patch no-match) now rolls the replay row back with the write, leaving the
   proof reusable for a legitimate retry instead of burning it. `@dwk/store`
   gains a transactional `guard` hook on `WriteOptions` (generalizing the
-  existing delete guard) to support this, and `putBlob` now outboxes the
-  freshly uploaded R2 key when its pointer-flip transaction rolls back, so an
-  aborted blob write cannot leak an untracked object past the GC cron.
+  existing delete guard), run inside the write transaction after the
+  precondition check, so `writeQuads` / `patchQuads` / `putBlob` can commit the
+  replay row atomically with the write.
 - **Anonymous writes are gated by config.** A tokenless (proof-less) write
   carries no `jti` and therefore no replay / anti-abuse protection. Such a write
   is now refused `401` by default even where a public-write ACL

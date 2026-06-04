@@ -199,12 +199,46 @@ describe("@dwk/store blob copy-on-write", () => {
     expect(out.head).toMatchObject({ kind: "blob", etag: out.etagB });
   });
 
+  it("rejects a failed If-Match before writing R2, leaking no orphan", async () => {
+    const a = new TextEncoder().encode("version-A");
+    const c = new TextEncoder().encode("version-C");
+    const out = await withStore(async ({ store, env, state }) => {
+      const etagA = await store.putBlob("/blob", a);
+      // A write whose If-Match does not hold must reject ...
+      await expect(
+        store.putBlob("/blob", c, { ifMatch: '"wrong"' }),
+      ).rejects.toThrow(PreconditionFailedError);
+      // ... without ever landing the new content-addressed object (the GC has
+      // no way to discover an object that was never outboxed).
+      const rejectedKeyInR2 = await env.BLOBS.list({
+        prefix: `${state.id.toString()}/blobs/`,
+      });
+      const orphans = store.collectOrphans();
+      const body = await store.readBlob("/blob");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        etagA,
+        head: store.head("/blob"),
+        bytes: bytes ? new TextDecoder().decode(bytes) : null,
+        orphanCount: orphans.length,
+        r2KeyCount: rejectedKeyInR2.objects.length,
+      };
+    });
+    // The pointer is untouched, no orphan is recorded, and only the surviving
+    // version-A object exists in R2 — the version-C write left nothing behind.
+    expect(out.head).toMatchObject({ kind: "blob", etag: out.etagA });
+    expect(out.bytes).toBe("version-A");
+    expect(out.orphanCount).toBe(0);
+    expect(out.r2KeyCount).toBe(1);
+  });
+
   it("outboxes the freshly uploaded key when the write transaction rolls back", async () => {
     const body = new TextEncoder().encode("rolled-back");
     const out = await withStore(async ({ store, env }) => {
-      // A `guard` that throws stands in for any in-transaction abort (a failed
-      // precondition or a DPoP replay): the R2 object is already written when
-      // the pointer flip rolls back.
+      // A `guard` that throws stands in for an in-transaction abort that the
+      // pre-check cannot catch (a DPoP replay): unlike a deterministic
+      // precondition failure, the R2 object has already landed when the pointer
+      // flip rolls back, so it must be outboxed for GC instead of leaking.
       const boom = new Error("guard abort");
       await expect(
         store.putBlob("/blob", body, {
@@ -230,6 +264,70 @@ describe("@dwk/store blob copy-on-write", () => {
     expect(out.head).toBeNull();
     expect(out.orphanCount).toBe(1);
     expect(out.orphanInR2).toBe(true);
+  });
+});
+
+describe("@dwk/store streaming blob writes", () => {
+  it("hashes a ReadableStream body content-addressably without buffering it", async () => {
+    const payload = "streamed-body-contents";
+    const out = await withStore(async ({ store }) => {
+      // A streamed write and the equivalent in-memory write must agree on the
+      // content-addressed ETag (both are SHA-256 of the same bytes).
+      const streamed = await store.putBlob(
+        "/streamed",
+        new Response(payload).body!,
+        { contentType: "text/plain" },
+      );
+      const buffered = await store.putBlob(
+        "/buffered",
+        new TextEncoder().encode(payload),
+        { contentType: "text/plain" },
+      );
+      const body = await store.readBlob("/streamed");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        streamed,
+        buffered,
+        roundTrip: bytes ? new TextDecoder().decode(bytes) : null,
+        head: store.head("/streamed"),
+      };
+    });
+    expect(out.streamed).toMatch(/^"sha256-[0-9a-f]{64}"$/);
+    expect(out.streamed).toEqual(out.buffered);
+    expect(out.roundTrip).toBe(payload);
+    expect(out.head).toMatchObject({ kind: "blob", etag: out.streamed });
+  });
+
+  it("accepts a Blob body and dedupes identical streamed content", async () => {
+    const out = await withStore(async ({ store }) => {
+      const a = await store.putBlob("/a", new Blob(["same-bytes"]));
+      const b = await store.putBlob("/b", new Blob(["same-bytes"]));
+      // Two resources, one shared content-addressed object: removing one must
+      // not orphan a key the other still references.
+      store.delete("/a");
+      return { a, b, orphans: store.collectOrphans().length };
+    });
+    expect(out.a).toEqual(out.b);
+    expect(out.orphans).toBe(0);
+  });
+
+  it("streams an oversized body through to R2 intact", async () => {
+    // Larger than the default tee/chunk sizes so the streaming path is exercised
+    // across multiple reads.
+    const big = "x".repeat(500_000);
+    const out = await withStore(async ({ store }) => {
+      await store.putBlob("/big", new Response(big).body!, {
+        contentType: "application/octet-stream",
+      });
+      const body = await store.readBlob("/big");
+      const bytes = body ? await streamToBytes(body.stream) : null;
+      return {
+        size: body?.size,
+        matches: bytes ? new TextDecoder().decode(bytes) === big : false,
+      };
+    });
+    expect(out.size).toBe(big.length);
+    expect(out.matches).toBe(true);
   });
 });
 
@@ -288,6 +386,67 @@ describe("@dwk/store delete → GC ordering", () => {
       return store.head("/doc");
     });
     expect(stillThere).not.toBeNull();
+  });
+});
+
+describe("@dwk/store resurrection cancels a forwarded GC row", () => {
+  it("un-orphans a key resurrected after its orphan row was forwarded", async () => {
+    const content = new TextEncoder().encode("resurrect-me");
+
+    const blobKey = await withStore(async ({ store, env }) => {
+      await store.putBlob("/a", content);
+      store.delete("/a");
+      const key = store.collectOrphans()[0]!.blobKey;
+
+      // Forward the orphan into the shared GC store. The local row is retained
+      // (marked forwarded) but no longer reported as pending.
+      await forwardOrphans(store, d1OrphanSink(env.GC_DB));
+      expect(store.collectOrphans()).toHaveLength(0);
+
+      // Resurrect the identical content under a new resource → same key.
+      await store.putBlob("/b", content);
+      // A cancel tombstone is now pending; draining propagates it to D1.
+      await forwardOrphans(store, d1OrphanSink(env.GC_DB));
+      return key;
+    });
+
+    // The forwarded GC row was cancelled, so the cron GC sees nothing to do.
+    const { results } = await harness.GC_DB.prepare(
+      "SELECT blob_key FROM orphan_blobs WHERE blob_key = ?",
+    )
+      .bind(blobKey)
+      .all<{ blob_key: string }>();
+    expect(results).toHaveLength(0);
+
+    // Even a past-window sweep leaves the now-live resurrected object intact.
+    const reclaimed = await collectGarbage(harness, {
+      now: Date.now() + 120_000,
+      safetyWindowMs: 60_000,
+    });
+    expect(reclaimed).not.toContain(blobKey);
+    expect(await harness.BLOBS.get(blobKey)).not.toBeNull();
+  });
+
+  it("drops a not-yet-forwarded orphan locally without a tombstone", async () => {
+    const content = new TextEncoder().encode("quick-resurrect");
+
+    const { pendingOrphans, pendingCancels } = await withStore(
+      async ({ store }) => {
+        await store.putBlob("/a", content);
+        store.delete("/a");
+        expect(store.collectOrphans()).toHaveLength(1);
+        // Resurrect before forwarding: the local outbox row is simply dropped,
+        // so there is nothing to cancel downstream.
+        await store.putBlob("/b", content);
+        return {
+          pendingOrphans: store.collectOrphans().length,
+          pendingCancels: store.collectCancels().length,
+        };
+      },
+    );
+
+    expect(pendingOrphans).toBe(0);
+    expect(pendingCancels).toBe(0);
   });
 });
 
