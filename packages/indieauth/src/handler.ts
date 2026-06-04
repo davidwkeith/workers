@@ -502,15 +502,29 @@ async function readForm(request: Request): Promise<URLSearchParams> {
 
 /**
  * Whether `value` is an acceptable `client_id`/`redirect_uri`: an `https` URL,
- * or an `http` URL on a loopback host, with no fragment. IndieAuth requires
- * both to be URLs carrying no fragment component (guarding against
- * fragment-injection on the redirect) and permits plain `http` only for
+ * or an `http` URL on a loopback host, with no fragment, no embedded
+ * credentials, no dot path segments, and a non-IP (or loopback-IP) host.
+ * IndieAuth requires both to be URLs carrying no fragment component (guarding
+ * against fragment-injection on the redirect) and permits plain `http` only for
  * loopback clients (local development) — every other client must use `https`.
+ * The credential/dot-segment/IP rules mirror {@link canonicalizeProfileUrl}, so
+ * a `client_id` like `https://evil@good.example/` or an IP-literal host cannot
+ * slip through as a confusable or unverifiable client identifier.
  */
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.hash !== "") return false;
+    if (url.username !== "" || url.password !== "") return false;
+    // No single-dot/double-dot path segments (inspect the raw input — the URL
+    // parser silently resolves them away).
+    if (/\/\.\.?(\/|$)/.test(value)) return false;
+    // An IP-literal host (IPv4 or bracketed IPv6) is acceptable only when it is
+    // a loopback address; otherwise the host must be a domain name.
+    const isIpLiteral =
+      url.hostname.startsWith("[") ||
+      /^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname);
+    if (isIpLiteral && !isLoopbackHost(url.hostname)) return false;
     if (url.protocol === "https:") return true;
     if (url.protocol === "http:") return isLoopbackHost(url.hostname);
     return false;

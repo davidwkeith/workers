@@ -20,7 +20,10 @@ Close four authorization-endpoint hardening gaps in `@dwk/indieauth` (issue
   now verifies the proof against `config.tokenEndpoint` instead of
   `request.url`, so a path-rewriting proxy or differing public origin no longer
   mismatches the client's view of `token_endpoint` from the metadata document.
-- **`http:` `client_id`/`redirect_uri` are restricted to loopback hosts.**
-  `isHttpUrl` now accepts plain `http` only for the loopback IPs (`127.0.0.1`,
-  `[::1]`) for local development; every other client must use `https`, per the
-  IndieAuth/OAuth native-app guidance.
+- **`http:` `client_id`/`redirect_uri` are restricted to loopback hosts, and
+  URL validation is hardened.** `isHttpUrl` now accepts plain `http` only for
+  the loopback IPs (`127.0.0.1`, `[::1]`) for local development; every other
+  client must use `https`, per the IndieAuth/OAuth native-app guidance. It also
+  rejects embedded credentials, dot path segments, and non-loopback IP-literal
+  hosts — mirroring the `canonicalizeProfileUrl` rules — so a confusable or
+  unverifiable client identifier cannot slip through.

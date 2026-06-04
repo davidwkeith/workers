@@ -703,6 +703,54 @@ describe("@dwk/indieauth hardening (issue #41)", () => {
       new URL(res.headers.get("location")!).searchParams.get("code"),
     ).toBeTruthy();
   });
+
+  it("rejects a client_id / redirect_uri with embedded credentials", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", "https://evil@app.example.org/");
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a redirect_uri carrying dot path segments", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", "https://app.example.org/../evil");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a non-loopback IP-literal client_id", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", "https://203.0.113.5/");
+    url.searchParams.set("redirect_uri", "https://203.0.113.5/callback");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("@dwk/indieauth fails loudly on missing bindings", () => {
