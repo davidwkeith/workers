@@ -102,6 +102,19 @@ export async function authorize(
   }
   const claims = verified.claims;
 
+  // The token's subject (`sub`) is the canonical `me` it was minted for. A
+  // Micropub endpoint serves a single site, so reject any token whose subject is
+  // not this site's owner — otherwise any token from the same issuer (for any
+  // `me`) carrying the right scope could publish here. `config.me` and `sub` are
+  // both canonicalized (at resolve and at mint), so this is an exact compare.
+  if (claims.sub !== config.me) {
+    return failure(
+      "invalid_token",
+      "access token subject is not the owner of this site",
+      403,
+    );
+  }
+
   // Complete the DPoP proof-of-possession binding for this request.
   const proof = request.headers.get("DPoP");
   if (!proof) {

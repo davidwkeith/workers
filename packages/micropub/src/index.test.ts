@@ -100,12 +100,12 @@ interface MintedToken {
 }
 
 /** Mint a DPoP-bound access token and record it in the issued-token store. */
-async function mintToken(scope: string): Promise<MintedToken> {
+async function mintToken(scope: string, me: string = ME): Promise<MintedToken> {
   const key = await makeDpopKey();
   const now = Math.floor(Date.now() / 1000);
   const minted = await signAccessToken(harness.TOKEN_SIGNING_KEY, {
     issuer: BASE,
-    me: ME,
+    me,
     clientId: CLIENT_ID,
     scope,
     jkt: key.jkt,
@@ -115,7 +115,7 @@ async function mintToken(scope: string): Promise<MintedToken> {
   await createIndieAuthStore(harness).recordToken({
     jti: minted.claims.jti,
     clientId: CLIENT_ID,
-    me: ME,
+    me,
     scope,
     jkt: key.jkt,
     issuedAt: minted.claims.iat,
@@ -140,6 +140,7 @@ async function authHeaders(
 
 const handler = createMicropub({
   baseUrl: BASE,
+  me: ME,
   syndicateTo: [{ uid: "https://twitter.com/alice", name: "Alice on Twitter" }],
 });
 
@@ -588,7 +589,7 @@ describe("@dwk/micropub media endpoint", () => {
   });
 
   it("rejects a multipart upload over the media size limit", async () => {
-    const tiny = createMicropub({ baseUrl: BASE, maxMediaBytes: 2 });
+    const tiny = createMicropub({ baseUrl: BASE, me: ME, maxMediaBytes: 2 });
     const minted = await mintToken("create");
     const form = new FormData();
     form.set("h", "entry");
@@ -613,7 +614,11 @@ describe("@dwk/micropub media endpoint", () => {
 
 describe("@dwk/micropub post-URL policy", () => {
   it("places posts under a subdirectory baseUrl", async () => {
-    const blog = createMicropub({ baseUrl: `${BASE}/blog`, tokenIssuer: BASE });
+    const blog = createMicropub({
+      baseUrl: `${BASE}/blog`,
+      me: ME,
+      tokenIssuer: BASE,
+    });
     const minted = await mintToken("create");
     const res = await blog(
       new Request(MICROPUB, {
@@ -719,6 +724,31 @@ describe("@dwk/micropub authorization", () => {
       ctx,
     );
     expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_token",
+    );
+  });
+
+  it("rejects a valid token minted for a different `me`", async () => {
+    // A correctly signed, DPoP-bound, in-scope token from the same issuer — but
+    // its subject is another user's profile, so it must not publish here.
+    const minted = await mintToken("create", "https://mallory.example.com/");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: { content: ["intruder"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toBe(
       "invalid_token",
     );
