@@ -433,35 +433,50 @@ export function createStore(
       });
 
       // 2. Atomically flip the pointer and outbox the displaced key.
-      state.storage.transactionSync(() => {
-        const current = readResourceRow(key);
-        assertPreconditions(key, current, options);
-        options.guard?.();
-        sql.exec("DELETE FROM quads WHERE resource = ?", key);
-        sql.exec(
-          `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
-           VALUES (?, 'blob', ?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             kind = 'blob', etag = excluded.etag,
-             content_type = excluded.content_type, blob_key = excluded.blob_key,
-             updated_at = excluded.updated_at`,
-          key,
-          etag,
-          contentType,
-          blobKey,
-          Date.now(),
-        );
-        // Resurrection guard: this key is referenced again, so cancel any
-        // not-yet-forwarded outbox entry for it.
-        sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
-        if (
-          current?.kind === "blob" &&
-          current.blobKey &&
-          current.blobKey !== blobKey
-        ) {
-          outboxIfUnreferenced(current.blobKey);
+      try {
+        state.storage.transactionSync(() => {
+          const current = readResourceRow(key);
+          assertPreconditions(key, current, options);
+          options.guard?.();
+          sql.exec("DELETE FROM quads WHERE resource = ?", key);
+          sql.exec(
+            `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
+             VALUES (?, 'blob', ?, ?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET
+               kind = 'blob', etag = excluded.etag,
+               content_type = excluded.content_type, blob_key = excluded.blob_key,
+               updated_at = excluded.updated_at`,
+            key,
+            etag,
+            contentType,
+            blobKey,
+            Date.now(),
+          );
+          // Resurrection guard: this key is referenced again, so cancel any
+          // not-yet-forwarded outbox entry for it.
+          sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", blobKey);
+          if (
+            current?.kind === "blob" &&
+            current.blobKey &&
+            current.blobKey !== blobKey
+          ) {
+            outboxIfUnreferenced(current.blobKey);
+          }
+        });
+      } catch (error) {
+        // The R2 object was uploaded in step 1, but the pointer flip rolled
+        // back (a failed precondition or a `guard` throwing). Nothing now
+        // references the new key, so outbox it for the GC cron — otherwise the
+        // object leaks past garbage collection. Best-effort: if even this fails
+        // we still surface the original error rather than mask it. The GC's
+        // resurrection check keeps the key if a later write re-references it.
+        try {
+          state.storage.transactionSync(() => outboxIfUnreferenced(blobKey));
+        } catch {
+          // Swallow: the original `error` is the meaningful one to propagate.
         }
-      });
+        throw error;
+      }
       return etag;
     },
 
