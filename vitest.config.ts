@@ -20,14 +20,15 @@ export default defineConfig({
         "**/index.ts",
         "**/vitest.config.ts",
       ],
-      // Non-regression floor: set safely below the suite's current coverage so a
-      // meaningful drop fails CI without flaking on incidental churn. Ratchet up
-      // as the P1/P2 gaps close.
+      // Non-regression floor: set safely below the suite's current coverage
+      // (≈88% stmt / 80% branch / 96% func / 91% line) so a meaningful drop
+      // fails CI without flaking on incidental churn. Ratchet up as remaining
+      // gaps (activitypub `object.ts`, solid-pod `pod.ts`) close.
       thresholds: {
-        statements: 80,
-        branches: 70,
-        functions: 78,
-        lines: 80,
+        statements: 85,
+        branches: 76,
+        functions: 90,
+        lines: 88,
       },
     },
   },

@@ -9,6 +9,36 @@ untested branches are the authorization, token-validation, and SSRF-guard
 rejection paths, which is exactly where a regression is a security bug rather
 than a cosmetic one.
 
+## Implementation status (this PR)
+
+The recommendations below have been implemented. The suite went from ~610 to
+**710 tests**, and aggregate coverage rose to **88.5% stmt / 79.6% branch /
+95.5% func / 91.2% line**. Highlights:
+
+- **P1** — solid-pod edge-token rejection ladder (`token_malformed`, `no_jwks`,
+  `issuer/audience_mismatch`, `token_expired`, `webid/cnf/dpop_missing`,
+  `dpop_invalid`); SSRF redirect guards in websub/webmention (`fetch.ts` 70→100%
+  branch, redirect-to-private rebound, `too_many_redirects`, cross-origin
+  credential stripping); indieauth token/routing error paths (`handler.ts`
+  89→98%).
+- **P2** — micropub routing/query/action edge cases (`handler.ts` 70→76%
+  branch); activitypub `config.ts` **39→95% stmt** (the default key resolver's
+  rejection branches).
+- **P3** — fail-loud-on-missing-binding tests added for **solid-pod** and
+  **store** (previously zero); solid-pod `gc.ts` **0→96%**; http-signatures
+  derived components + structured-field parse errors; log `metrics.ts` →100%.
+- **I-1** — coverage now runs in CI (`@vitest/coverage-istanbul`, a `test:coverage`
+  script, and a non-regression threshold floor in `vitest.config.ts`).
+- **I-2** — a cross-package **composition-contract test** mounts
+  `@dwk/indieauth` and `@dwk/micropub` behind one router on one unioned `Env`
+  (`packages/micropub/src/composition.test.ts`).
+
+Still open (lower priority, left as the next ratchet): activitypub `object.ts`
+(58% branch), solid-pod `pod.ts` conflict/GC-internal paths (65% branch) and
+`auth.ts`'s custom-`authenticate` hook branch, and rdf `jsonld.ts` (78% branch).
+
+The original analysis follows.
+
 ## How these numbers were produced
 
 `@vitest/coverage-v8` cannot instrument the `workerd` pool
