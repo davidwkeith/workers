@@ -450,6 +450,221 @@ describe("@dwk/solid-pod access-token validation (issue #35)", () => {
   });
 });
 
+describe("@dwk/solid-pod access-token rejection ladder", () => {
+  /** Mint an issuer-signed token with arbitrary claims (good signature). */
+  async function mintCustom(payload: Record<string, unknown>): Promise<string> {
+    return signJwt(
+      { alg: "ES256", typ: "at+jwt", kid: "issuer-1" },
+      payload,
+      issuerKey.privateKey,
+    );
+  }
+
+  /** A valid token + DPoP proof pair for `webid`, with claim overrides. */
+  async function authHeaders(
+    method: string,
+    url: string,
+    webid: string,
+    payloadExtra: Record<string, unknown> = {},
+  ): Promise<{ token: string; headers: Record<string, string> }> {
+    const key = await agentKey(webid);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintCustom({
+      iss: ISSUER,
+      aud: "solid",
+      sub: webid,
+      webid,
+      iat: now,
+      exp: now + 600,
+      cnf: { jkt },
+      ...payloadExtra,
+    });
+    return {
+      token,
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: await dpopProof(method, url, key, token),
+      },
+    };
+  }
+
+  it("rejects a bearer value that is not a JWT (token_malformed)", async () => {
+    const pod = freshPod();
+    // A bearer value that does not decode to three JSON segments.
+    const res = await pod.send("GET", "/doc", {
+      headers: { authorization: "DPoP not-even-base64-dots" },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_malformed");
+  });
+
+  it("rejects when the pod has no verification keys (no_jwks)", async () => {
+    // A pod configured with an empty JWKS cannot verify any token; a presented
+    // token is rejected before signature checking.
+    const base = `https://${crypto.randomUUID()}.pod.example`;
+    const handler = createSolidPod({
+      baseUrl: base,
+      issuer: ISSUER,
+      audience: "solid",
+      jwks: [],
+      owner: OWNER,
+    });
+    const key = await agentKey(OWNER);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const token = await mintToken(OWNER, jkt);
+    const request = new Request(`${base}/doc`, {
+      method: "GET",
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: await dpopProof("GET", `${base}/doc`, key, token),
+      },
+    });
+    const res = await handler(request, testEnv, {} as ExecutionContext);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("no_jwks");
+  });
+
+  it("rejects a token with the wrong issuer (issuer_mismatch)", async () => {
+    const pod = freshPod();
+    const { headers } = await authHeaders("GET", `${pod.base}/doc`, OWNER, {
+      iss: "https://evil-issuer.example",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("issuer_mismatch");
+  });
+
+  it("rejects a token with the wrong audience (audience_mismatch)", async () => {
+    const pod = freshPod();
+    const { headers } = await authHeaders("GET", `${pod.base}/doc`, OWNER, {
+      aud: "https://some-other-rs.example",
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("audience_mismatch");
+  });
+
+  it("rejects an expired token (token_expired)", async () => {
+    const pod = freshPod();
+    const past = Math.floor(Date.now() / 1000) - 600;
+    const { headers } = await authHeaders("GET", `${pod.base}/doc`, OWNER, {
+      iat: past - 60,
+      exp: past,
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("token_expired");
+  });
+
+  it("rejects a token with neither webid nor sub (webid_missing)", async () => {
+    const pod = freshPod();
+    const key = await agentKey(OWNER);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintCustom({
+      iss: ISSUER,
+      aud: "solid",
+      iat: now,
+      exp: now + 600,
+      cnf: { jkt },
+    });
+    const res = await pod.send("GET", "/doc", {
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: await dpopProof("GET", `${pod.base}/doc`, key, token),
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("webid_missing");
+  });
+
+  it("rejects a token with no cnf.jkt confirmation (cnf_missing)", async () => {
+    const pod = freshPod();
+    const key = await agentKey(OWNER);
+    const now = Math.floor(Date.now() / 1000);
+    // No `cnf` claim at all: the token is not DPoP-bound.
+    const token = await mintCustom({
+      iss: ISSUER,
+      aud: "solid",
+      sub: OWNER,
+      webid: OWNER,
+      iat: now,
+      exp: now + 600,
+    });
+    const res = await pod.send("GET", "/doc", {
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: await dpopProof("GET", `${pod.base}/doc`, key, token),
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("cnf_missing");
+  });
+
+  it("rejects a valid token presented without a DPoP proof (dpop_missing)", async () => {
+    const pod = freshPod();
+    const { token } = await authHeaders("GET", `${pod.base}/doc`, OWNER);
+    // Present the token but omit the `dpop` proof header entirely.
+    const res = await pod.send("GET", "/doc", {
+      headers: { authorization: `DPoP ${token}` },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("dpop_missing");
+  });
+
+  it("rejects a token with a garbage DPoP proof (dpop_invalid)", async () => {
+    const pod = freshPod();
+    const { token } = await authHeaders("GET", `${pod.base}/doc`, OWNER);
+    const res = await pod.send("GET", "/doc", {
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: "not.a.valid.dpop.proof",
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("dpop_invalid");
+  });
+});
+
+describe("@dwk/solid-pod fail-loud on missing bindings", () => {
+  it("throws when the POD Durable Object binding is absent", async () => {
+    const pod = freshPod();
+    const request = await podRequest("GET", `${pod.base}/doc`, {
+      webid: OWNER,
+    });
+    const handler = createSolidPod({
+      baseUrl: pod.base,
+      issuer: ISSUER,
+      audience: "solid",
+      jwks: [issuerJwk],
+      owner: OWNER,
+    });
+    const brokenEnv = { BLOBS: testEnv.BLOBS } as unknown as SolidPodEnv;
+    await expect(
+      handler(request, brokenEnv, {} as ExecutionContext),
+    ).rejects.toThrow(/missing required Durable Object binding `POD`/);
+  });
+
+  it("throws when the BLOBS R2 binding is absent", async () => {
+    const pod = freshPod();
+    const request = await podRequest("GET", `${pod.base}/doc`, {
+      webid: OWNER,
+    });
+    const handler = createSolidPod({
+      baseUrl: pod.base,
+      issuer: ISSUER,
+      audience: "solid",
+      jwks: [issuerJwk],
+      owner: OWNER,
+    });
+    const brokenEnv = { POD: testEnv.POD } as unknown as SolidPodEnv;
+    await expect(
+      handler(request, brokenEnv, {} as ExecutionContext),
+    ).rejects.toThrow(/missing required R2 binding `BLOBS`/);
+  });
+});
+
 describe("@dwk/solid-pod WAC", () => {
   it("authenticated GET passes when the .acl grants the agent Read", async () => {
     const pod = freshPod();
