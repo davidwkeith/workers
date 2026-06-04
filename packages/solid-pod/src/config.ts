@@ -11,6 +11,8 @@
  * a missing one fails loudly at startup.
  */
 
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
+
 import type { SolidPodObject } from "./pod";
 
 /** Cloudflare bindings required by the Solid Pod handler and Durable Object. */
@@ -135,6 +137,20 @@ export interface SolidPodConfig {
   readonly authenticate?: (
     request: Request,
   ) => Promise<AuthContext | null> | AuthContext | null;
+
+  /**
+   * Logger for auth/authz events; defaults to a no-op. Wired once here at the
+   * composition boundary (see `@dwk/log`) to surface edge-authentication
+   * rejections and the Durable Object's WAC denials, anonymous-write refusals,
+   * and DPoP replay rejections instead of swallowing them.
+   */
+  readonly logger?: Logger;
+  /**
+   * Metrics sink for the same events; defaults to a no-op. Wire an adapter (e.g.
+   * `analyticsEngineMetrics` from `@dwk/log`) to chart what the logger names —
+   * auth rejections by reason, WAC denials/min, replay rejections.
+   */
+  readonly metrics?: Metrics;
 }
 
 /** The authenticated facts the front door hands to the Durable Object. */
@@ -164,6 +180,8 @@ export interface ResolvedConfig {
   readonly now: () => number;
   readonly fetch: typeof fetch;
   readonly authenticate?: SolidPodConfig["authenticate"];
+  readonly logger: Logger;
+  readonly metrics: Metrics;
 }
 
 /** Default GC safety window: five minutes, comfortably above any write. */
@@ -179,6 +197,12 @@ export const INTERNAL_HEADERS = {
   jkt: "x-solid-jkt",
   /** JSON-encoded subset of config the DO needs (offload threshold, etc.). */
   config: "x-solid-config",
+  /**
+   * DO→front-door: a machine-readable authorization outcome (see `PodOutcome`)
+   * the composition boundary logs via the injected seams, then strips before the
+   * response reaches the client.
+   */
+  outcome: "x-solid-outcome",
 } as const;
 
 /** Strip the trailing slash from a base URL so path joins are unambiguous. */
@@ -224,5 +248,7 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
     now: config.now ?? (() => Date.now()),
     fetch: config.fetch ?? fetch,
     authenticate: config.authenticate,
+    logger: config.logger ?? noopLogger,
+    metrics: config.metrics ?? noopMetrics,
   };
 }

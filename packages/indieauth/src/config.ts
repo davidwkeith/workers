@@ -6,6 +6,8 @@
  * times and tested in isolation.
  */
 
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
+
 /** DPoP proof signing algorithms advertised in the metadata document. */
 export const DPOP_SIGNING_ALG_VALUES_SUPPORTED = [
   "ES256",
@@ -105,6 +107,18 @@ export interface IndieAuthConfig {
   readonly redirectUriPolicy?: RedirectUriPolicy;
   /** Authentication + consent hook (see {@link ApproveAuthorization}). */
   readonly approveAuthorization: ApproveAuthorization;
+  /**
+   * Logger for authorization/token/revocation events; defaults to a no-op. Wire
+   * a real logger (see `@dwk/log`) to surface authorization rejections, token
+   * rejections, and revocations instead of swallowing them.
+   */
+  readonly logger?: Logger;
+  /**
+   * Metrics sink for the same events; defaults to a no-op. Wire an adapter (e.g.
+   * `analyticsEngineMetrics` from `@dwk/log`) to chart what the logger names —
+   * authorization rejections/min, token issuance rate, rejections by reason.
+   */
+  readonly metrics?: Metrics;
 }
 
 /** Fully resolved configuration with defaults applied and URLs parsed. */
@@ -123,6 +137,8 @@ export interface ResolvedConfig {
   readonly authorizationCodeLifetimeSeconds: number;
   readonly redirectUriPolicy: RedirectUriPolicy;
   readonly approveAuthorization: ApproveAuthorization;
+  readonly logger: Logger;
+  readonly metrics: Metrics;
 }
 
 /** Default policy: the redirect URI must share an origin with the client id. */
@@ -185,5 +201,7 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
       DEFAULT_AUTHORIZATION_CODE_LIFETIME_SECONDS,
     redirectUriPolicy: config.redirectUriPolicy ?? sameOriginRedirect,
     approveAuthorization: config.approveAuthorization,
+    logger: config.logger ?? noopLogger,
+    metrics: config.metrics ?? noopMetrics,
   };
 }

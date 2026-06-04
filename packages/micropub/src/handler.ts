@@ -6,11 +6,14 @@
  * endpoint paths, so the handler is mountable under any prefix.
  */
 
+import type { LogFields } from "@dwk/log";
+
 import {
   resolveConfig,
   type MicropubConfig,
   type ResolvedConfig,
 } from "./config";
+import { MicropubLogEvent } from "./log";
 import {
   applyUpdate,
   parseFormBody,
@@ -63,6 +66,22 @@ function error(code: string, description: string, status: number): Response {
 
 function noContent(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
+/**
+ * Emit a structured event on both the logger and the metrics seam, which share
+ * one event vocabulary (see `@dwk/log`): `warn` for handled-but-notable
+ * rejections, `info` for normal outcomes. Honors the redaction policy — callers
+ * pass only reason codes, the action verb, scopes, and counts.
+ */
+function emit(
+  config: ResolvedConfig,
+  level: "info" | "warn",
+  event: string,
+  fields?: LogFields,
+): void {
+  config.logger[level](event, fields);
+  config.metrics.count(event, fields);
 }
 
 /** Fail loudly when a required binding is absent (composition contract). */
@@ -223,10 +242,19 @@ async function handleMediaUpload(
     "media",
     "create",
   ]);
-  if (!auth.ok) return error(auth.error, auth.description, auth.status);
+  if (!auth.ok) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: auth.error,
+      status: auth.status,
+    });
+    return error(auth.error, auth.description, auth.status);
+  }
 
   // Reject oversized uploads before `formData()` buffers the whole body.
   if (contentLengthExceeds(request, config.maxMediaBytes)) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "media_too_large",
+    });
     return error(
       "invalid_request",
       `file exceeds the ${config.maxMediaBytes}-byte limit`,
@@ -245,6 +273,9 @@ async function handleMediaUpload(
   }
   const file = files[0];
   if (!file) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "media_missing",
+    });
     return error(
       "invalid_request",
       "a `file` part is required at the media endpoint",
@@ -252,6 +283,9 @@ async function handleMediaUpload(
     );
   }
   if (file.size > config.maxMediaBytes) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "media_too_large",
+    });
     return error(
       "invalid_request",
       `file exceeds the ${config.maxMediaBytes}-byte limit`,
@@ -259,6 +293,9 @@ async function handleMediaUpload(
     );
   }
   const url = await storeMedia(file, env, config);
+  emit(config, "info", MicropubLogEvent.MediaStored, {
+    contentType: file.type || "application/octet-stream",
+  });
   return new Response(null, {
     status: 201,
     headers: { location: url, ...CORS_HEADERS },
@@ -294,7 +331,13 @@ async function handleQuery(
     tokenFromHeader(request),
     [],
   );
-  if (!auth.ok) return error(auth.error, auth.description, auth.status);
+  if (!auth.ok) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: auth.error,
+      status: auth.status,
+    });
+    return error(auth.error, auth.description, auth.status);
+  }
 
   const params = new URL(request.url).searchParams;
   const q = params.get("q");
@@ -312,6 +355,9 @@ async function handleQuery(
   if (q === "source") {
     const url = params.get("url");
     if (!url) {
+      emit(config, "warn", MicropubLogEvent.RequestRejected, {
+        reason: "query_missing_url",
+      });
       return error("invalid_request", "`url` is required for `q=source`", 400);
     }
     const record = await store.getPost(url);
@@ -325,6 +371,9 @@ async function handleQuery(
     return json(sourceView(recordToMf2(record), filter));
   }
 
+  emit(config, "warn", MicropubLogEvent.RequestRejected, {
+    reason: "query_unsupported",
+  });
   return error("invalid_request", `unsupported query \`q=${q ?? ""}\``, 400);
 }
 
@@ -378,6 +427,9 @@ async function handleAction(
     }
   } catch (err) {
     if (err instanceof Mf2ParseError) {
+      emit(config, "warn", MicropubLogEvent.RequestRejected, {
+        reason: "invalid_body",
+      });
       return error("invalid_request", err.message, 400);
     }
     throw err;
@@ -392,18 +444,27 @@ async function handleAction(
     token,
     scopesForAction(action),
   );
-  if (!auth.ok) return error(auth.error, auth.description, auth.status);
+  if (!auth.ok) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: auth.error,
+      status: auth.status,
+    });
+    return error(auth.error, auth.description, auth.status);
+  }
 
   switch (action) {
     case "create":
       return doCreate(parsed.mf2, parsed.commands, config, store);
     case "update":
-      return doUpdate(parsed.url, rawJson, isJson, store);
+      return doUpdate(parsed.url, rawJson, isJson, config, store);
     case "delete":
-      return doDelete(parsed.url, store);
+      return doDelete(parsed.url, config, store);
     case "undelete":
-      return doUndelete(parsed.url, store);
+      return doUndelete(parsed.url, config, store);
     default:
+      emit(config, "warn", MicropubLogEvent.RequestRejected, {
+        reason: "unknown_action",
+      });
       return error("invalid_request", `unknown action \`${action}\``, 400);
   }
 }
@@ -417,6 +478,9 @@ async function doCreate(
 ): Promise<Response> {
   const type = mf2.type[0];
   if (!type) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "missing_type",
+    });
     return error(
       "invalid_request",
       "a create request must include a microformats type (e.g. `h-entry`)",
@@ -437,6 +501,9 @@ async function doCreate(
   for (let attempt = 0; attempt < 5; attempt++) {
     const inserted = await store.insertPost({ url, type, properties, now });
     if (inserted) {
+      emit(config, "info", MicropubLogEvent.ActionCompleted, {
+        action: "create",
+      });
       return new Response(null, {
         status: 201,
         headers: { location: url, ...CORS_HEADERS },
@@ -444,6 +511,9 @@ async function doCreate(
     }
     url = `${url}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`;
   }
+  emit(config, "warn", MicropubLogEvent.RequestRejected, {
+    reason: "url_conflict",
+  });
   return error("conflict", "could not allocate a unique URL for the post", 409);
 }
 
@@ -452,9 +522,13 @@ async function doUpdate(
   url: string | undefined,
   rawJson: unknown,
   isJson: boolean,
+  config: ResolvedConfig,
   store: MicropubStore,
 ): Promise<Response> {
   if (!isJson) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "update_not_json",
+    });
     return error(
       "invalid_request",
       "`update` requests must use `application/json`",
@@ -462,6 +536,9 @@ async function doUpdate(
     );
   }
   if (!url) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "missing_url",
+    });
     return error("invalid_request", "`url` is required for `update`", 400);
   }
   const record = await store.getPost(url);
@@ -473,6 +550,9 @@ async function doUpdate(
     ops = parseUpdateOperations(rawJson);
   } catch (err) {
     if (err instanceof Mf2ParseError) {
+      emit(config, "warn", MicropubLogEvent.RequestRejected, {
+        reason: "invalid_body",
+      });
       return error("invalid_request", err.message, 400);
     }
     throw err;
@@ -487,32 +567,45 @@ async function doUpdate(
   if (!updated) {
     return error("not_found", "no post exists at that URL", 404);
   }
+  emit(config, "info", MicropubLogEvent.ActionCompleted, { action: "update" });
   return noContent();
 }
 
 /** Soft-delete a post. */
 async function doDelete(
   url: string | undefined,
+  config: ResolvedConfig,
   store: MicropubStore,
 ): Promise<Response> {
   if (!url) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "missing_url",
+    });
     return error("invalid_request", "`url` is required for `delete`", 400);
   }
   const ok = await store.setDeleted(url, true, Math.floor(Date.now() / 1000));
   if (!ok) return error("not_found", "no post exists at that URL", 404);
+  emit(config, "info", MicropubLogEvent.ActionCompleted, { action: "delete" });
   return noContent();
 }
 
 /** Restore a soft-deleted post. */
 async function doUndelete(
   url: string | undefined,
+  config: ResolvedConfig,
   store: MicropubStore,
 ): Promise<Response> {
   if (!url) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "missing_url",
+    });
     return error("invalid_request", "`url` is required for `undelete`", 400);
   }
   const ok = await store.setDeleted(url, false, Math.floor(Date.now() / 1000));
   if (!ok) return error("not_found", "no post exists at that URL", 404);
+  emit(config, "info", MicropubLogEvent.ActionCompleted, {
+    action: "undelete",
+  });
   return noContent();
 }
 

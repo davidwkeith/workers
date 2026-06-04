@@ -27,3 +27,6 @@ export {
   type AuthContext,
   type Jwks,
 } from "./config";
+
+export { SolidPodLogEvent } from "./log";
+export type { Logger, Metrics } from "@dwk/log";

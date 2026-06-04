@@ -46,6 +46,9 @@ importers:
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
 
   packages/log: {}
 
@@ -57,6 +60,9 @@ importers:
       '@dwk/indieauth':
         specifier: workspace:*
         version: link:../indieauth
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
 
   packages/rdf:
     dependencies:
@@ -72,6 +78,9 @@ importers:
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
       '@dwk/rdf':
         specifier: workspace:*
         version: link:../rdf

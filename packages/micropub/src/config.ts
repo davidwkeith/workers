@@ -7,6 +7,7 @@
  */
 
 import { canonicalizeProfileUrl } from "@dwk/indieauth";
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
 import type { Mf2Object, MicropubCommands } from "./mf2";
 
@@ -62,6 +63,18 @@ export interface MicropubConfig {
   readonly checkRevocation?: boolean;
   /** Post-URL policy (see {@link GeneratePostUrl}). */
   readonly generatePostUrl?: GeneratePostUrl;
+  /**
+   * Logger for auth/validation/action events; defaults to a no-op. Wire a real
+   * logger (see `@dwk/log`) to surface authorization and validation rejections
+   * instead of swallowing them.
+   */
+  readonly logger?: Logger;
+  /**
+   * Metrics sink for the same events; defaults to a no-op. Wire an adapter (e.g.
+   * `analyticsEngineMetrics` from `@dwk/log`) to chart the same events the
+   * logger names — auth rejections by reason, actions/min.
+   */
+  readonly metrics?: Metrics;
 }
 
 /** Fully resolved configuration with defaults applied and URLs parsed. */
@@ -78,6 +91,8 @@ export interface ResolvedConfig {
   readonly maxMediaBytes: number;
   readonly checkRevocation: boolean;
   readonly generatePostUrl: GeneratePostUrl;
+  readonly logger: Logger;
+  readonly metrics: Metrics;
 }
 
 const DEFAULT_MAX_MEDIA_BYTES = 25 * 1024 * 1024;
@@ -166,5 +181,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     checkRevocation: config.checkRevocation ?? true,
     generatePostUrl:
       config.generatePostUrl ?? defaultGeneratePostUrl(config.baseUrl),
+    logger: config.logger ?? noopLogger,
+    metrics: config.metrics ?? noopMetrics,
   };
 }

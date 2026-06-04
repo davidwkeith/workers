@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@dwk/dpop": "workspace:*",
+    "@dwk/log": "workspace:*",
     "@dwk/rdf": "workspace:*",
     "@dwk/store": "workspace:*",
     "@dwk/wac": "workspace:*"
