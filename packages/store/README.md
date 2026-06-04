@@ -16,8 +16,10 @@ unit-testable. Authoritative state lives only in DO SQLite and R2 — never KV.
   `patchQuads`, `putBlob`, `readBlob`, `putResource`, and `delete` hang off a
   single `Store`.
 - **Transactional writes.** `writeQuads` / `patchQuads` apply an N3-Patch's
-  `deletes`+`inserts` in one `transactionSync`, and `If-Match` is checked and
-  applied inside the same transaction, so check-and-write is TOCTOU-free.
+  `deletes`+`inserts` in one `transactionSync`, and the `If-Match` /
+  `If-None-Match` preconditions are checked and applied inside the same
+  transaction, so check-and-write is TOCTOU-free. `delete` accepts an optional
+  in-transaction `guard` for the same reason (e.g. LDP container emptiness).
 - **Copy-on-write blobs.** `putBlob` writes a new content-addressed R2 object,
   then atomically flips the DO pointer and outboxes any now-unreferenced
   predecessor key. Reads are streamed straight from R2 — never buffered.

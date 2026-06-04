@@ -22,6 +22,7 @@ export {
   type BlobBody,
   type QuadPatch,
   type WriteOptions,
+  type DeleteOptions,
   type OrphanRecord,
 } from "./store";
 

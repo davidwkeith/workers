@@ -32,7 +32,9 @@ libraries [`@dwk/dpop`](../dpop) (edge DPoP validation), [`@dwk/rdf`](../rdf)
   single-use `jti` replay is enforced in the DO for **writes**, pruned by expiry;
   reads do not consume a `jti` (a documented tradeoff).
 - **Concurrency** — all writes funnel through the single-threaded DO; the
-  `If-Match` / ETag check and the write are TOCTOU-free.
+  `If-Match` / `If-None-Match` (create-only) check and the write are
+  TOCTOU-free, evaluated inside the store's write transaction. Deleting a
+  non-empty container is likewise rejected inside that transaction.
 - **Oversized / binary bodies** — content-addressed R2 copy-on-write with an
   atomic DO pointer flip; orphaned keys are reclaimed by an out-of-band GC cron
   (`createSolidPodGc`), never by waking a DO.
