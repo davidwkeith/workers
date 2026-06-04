@@ -5,7 +5,7 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** — the per-actor Durable Object class |
 | **Standard** | [ActivityPub](https://www.w3.org/TR/activitypub/) + [ActivityStreams 2.0](https://www.w3.org/TR/activitystreams-core/) |
-| **Status** | proposed — tracked in [#58](https://github.com/davidwkeith/workers/issues/58) |
+| **Status** | implemented (unreleased) — tracked in [#58](https://github.com/davidwkeith/workers/issues/58) |
 
 A native ActivityPub actor rooted at the user's own domain — making the
 self-owned presence a first-class fediverse citizen (followers, replies, boosts)

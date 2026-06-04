@@ -65,6 +65,25 @@
         "cases": []
       }
     },
+    "@dwk/activitypub": {
+      "standard": "ActivityPub",
+      "suites": {
+        "activitypub-federation": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "signed Follow accepted, follower recorded, deduped by id",
+          "auto-Accept delivered to the follower inbox (signed)",
+          "retryable delivery requeued with backoff",
+          "owner publish fans a Create to the outbox"
+        ]
+      }
+    },
     "@dwk/solid-pod": {
       "standard": "Solid",
       "suites": {
