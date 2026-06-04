@@ -28,7 +28,8 @@ libraries [`@dwk/dpop`](../dpop) (edge DPoP validation), [`@dwk/rdf`](../rdf)
   `Append` authorizes insert-only patches; any delete requires `Write`. The pod
   `owner` always has full access (bootstraps `.acl` management).
 - **Auth (Resource Server)** — DPoP-bound bearer tokens validated at the edge
-  (issuer JWKS, `aud`/`exp`/`webid`, proof `htu`/`htm`/`ath`/`cnf.jkt`). Strict
+  (issuer JWKS pinned by `kid`, header `typ: at+jwt`, `aud`/`exp`/`nbf`/`webid`,
+  proof `htu`/`htm`/`ath`/`cnf.jkt`). Strict
   single-use `jti` replay is enforced in the DO for **writes**, pruned by expiry;
   reads do not consume a `jti` (a documented tradeoff).
 - **Concurrency** — all writes funnel through the single-threaded DO; the

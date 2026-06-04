@@ -19,10 +19,12 @@ import { decodeJwt, verifyJwtSignature } from "./jwt";
 export type AuthFailureReason =
   | "no_jwks"
   | "token_malformed"
+  | "token_type_invalid"
   | "signature_invalid"
   | "issuer_mismatch"
   | "audience_mismatch"
   | "token_expired"
+  | "token_not_yet_valid"
   | "webid_missing"
   | "cnf_missing"
   | "dpop_missing"
@@ -77,6 +79,18 @@ function bearerToken(request: Request): string | null {
   return match ? (match[2] as string) : null;
 }
 
+/**
+ * Whether the token header's `typ` is the required access-token type. Compared
+ * case-insensitively and tolerant of the `application/at+jwt` media-type form,
+ * since RFC 9068 permits either the full media type or its `at+jwt` short form.
+ */
+function tokenTypeMatches(typ: unknown, required: string): boolean {
+  if (typeof typ !== "string") return false;
+  const normalize = (value: string): string =>
+    value.toLowerCase().replace(/^application\//, "");
+  return normalize(typ) === normalize(required);
+}
+
 /** Whether the token's `aud` claim intersects the accepted audience set. */
 function audienceMatches(aud: unknown, accepted: readonly string[]): boolean {
   const values = Array.isArray(aud)
@@ -118,7 +132,17 @@ export async function authenticate(
     return { kind: "rejected", reason: "signature_invalid" };
   }
 
-  const { iss, aud, exp, webid, sub, cnf } = decoded.payload;
+  // Enforce the access-token `typ` (`at+jwt`) so an ID token or other
+  // issuer-signed JWT sharing this `iss`/`aud`/`webid` cannot be replayed as an
+  // access token. Skipped when the deployer opts out via `accessTokenType: null`.
+  if (
+    config.accessTokenType !== null &&
+    !tokenTypeMatches(decoded.header.typ, config.accessTokenType)
+  ) {
+    return { kind: "rejected", reason: "token_type_invalid" };
+  }
+
+  const { iss, aud, exp, nbf, webid, sub, cnf } = decoded.payload;
   if (config.issuer !== undefined && iss !== config.issuer) {
     return { kind: "rejected", reason: "issuer_mismatch" };
   }
@@ -128,6 +152,12 @@ export async function authenticate(
   const now = Math.floor(config.now() / 1000);
   if (typeof exp !== "number" || now >= exp) {
     return { kind: "rejected", reason: "token_expired" };
+  }
+  // Honor `nbf` when present: a token is not valid before its not-before time.
+  // Per RFC 7519 §4.1.5 `nbf` MUST be a number; a present-but-malformed value is
+  // rejected rather than silently bypassed (mirrors the `exp` handling above).
+  if (nbf !== undefined && (typeof nbf !== "number" || now < nbf)) {
+    return { kind: "rejected", reason: "token_not_yet_valid" };
   }
 
   // Solid-OIDC carries the agent identity in `webid`; fall back to `sub`.
