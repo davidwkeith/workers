@@ -117,6 +117,48 @@ describe("WebFinger handler — success", () => {
   });
 });
 
+describe("WebFinger handler — case-insensitive matching (RFC 7033 §4.1)", () => {
+  it("matches a configured resource despite scheme/host case", async () => {
+    const res = await fixture()(
+      get("?resource=ACCT:alice@EXAMPLE.COM"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("echoes the client's literal resource spelling as the subject", async () => {
+    const res = await fixture()(
+      get("?resource=ACCT:alice@EXAMPLE.COM"),
+      env,
+      ctx,
+    );
+    const body = (await res.json()) as { subject: string };
+    expect(body.subject).toBe("ACCT:alice@EXAMPLE.COM");
+  });
+
+  it("keeps the acct: local part case-sensitive (different user → 404)", async () => {
+    const res = await fixture()(
+      get("?resource=acct:ALICE@example.com"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("matches when the configured key itself carries non-canonical case", async () => {
+    const handler = createWebfinger({
+      resources: { "acct:carol@EXAMPLE.com": { links: [{ rel: "self" }] } },
+    });
+    const res = await handler(
+      get("?resource=acct:carol@example.com"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("WebFinger handler — rel filtering", () => {
   it("returns only the matching link when a rel is supplied", async () => {
     const res = await fixture()(

@@ -60,6 +60,10 @@ return webfinger(request, env, ctx);
 
 - `resource` absent → **400**; `resource` not controlled → **404**; matched →
   **200** with `subject` (echoing the queried URI), `aliases`, and `links`.
+- Matching is **case-insensitive on the scheme and host** per RFC 7033 §4.1
+  (`ACCT:alice@EXAMPLE.COM` matches a configured `acct:alice@example.com`); the
+  `acct:` local part stays case-sensitive. The echoed `subject` keeps the
+  client's literal spelling.
 - A `rel` parameter (repeatable) filters `links` to the matching relations;
   `aliases` and `properties` are unaffected.
 - Every response — success or error — carries `Access-Control-Allow-Origin: *`

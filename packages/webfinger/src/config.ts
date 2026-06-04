@@ -9,14 +9,17 @@
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
 import type { ResourceRecord } from "./jrd";
+import { normalizeResource } from "./resource";
 
 /**
  * A dynamic resolver from a queried `resource` URI to its {@link ResourceRecord},
  * or `undefined` when this server does not control the resource (→ `404`). The
- * matched `rel` filters are passed through so a resolver backed by stored data
- * (e.g. a profile document via `@dwk/rdf`) can avoid materialising links it is
- * about to discard, but applying the filter is optional — the handler always
- * re-applies {@link filterLinksByRel} to whatever is returned.
+ * `resource` is passed **normalized** (lowercased scheme/host per RFC 7033 §4.1),
+ * so a resolver can compare it directly without re-normalizing. The matched
+ * `rel` filters are passed through so a resolver backed by stored data (e.g. a
+ * profile document via `@dwk/rdf`) can avoid materialising links it is about to
+ * discard, but applying the filter is optional — the handler always re-applies
+ * {@link filterLinksByRel} to whatever is returned.
  */
 export type ResourceResolver = (
   resource: string,
@@ -78,21 +81,33 @@ export function resolveConfig(config: WebfingerConfig): ResolvedConfig {
     );
   }
 
-  const resources = config.resources;
+  // Key the static map by the normalized resource URI so matching is
+  // case-insensitive on scheme/host (RFC 7033 §4.1). When two configured keys
+  // normalize to the same value, the later entry wins.
+  const normalizedMap =
+    config.resources === undefined
+      ? undefined
+      : new Map(
+          Object.entries(config.resources).map(([key, record]) => [
+            normalizeResource(key),
+            record,
+          ]),
+        );
   const dynamicResolve = config.resolve;
 
   const resolve = async (
     resource: string,
     rels: readonly string[],
   ): Promise<ResourceRecord | undefined> => {
-    if (
-      resources !== undefined &&
-      Object.prototype.hasOwnProperty.call(resources, resource)
-    ) {
-      return resources[resource];
+    const key = normalizeResource(resource);
+    if (normalizedMap !== undefined) {
+      const record = normalizedMap.get(key);
+      if (record !== undefined) {
+        return record;
+      }
     }
     if (dynamicResolve !== undefined) {
-      return await dynamicResolve(resource, rels);
+      return await dynamicResolve(key, rels);
     }
     return undefined;
   };

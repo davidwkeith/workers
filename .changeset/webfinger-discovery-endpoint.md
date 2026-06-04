@@ -17,6 +17,9 @@ Add `@dwk/webfinger` — a WebFinger (RFC 7033) discovery endpoint, mountable at
   `properties` are unaffected. Permissive CORS (`Access-Control-Allow-Origin: *`)
   on every response per §10.2; `OPTIONS` preflight and `HEAD` supported, other
   methods `405`.
+- **Case-insensitive matching** on the scheme and host per RFC 7033 §4.1 (the
+  `acct:` local part stays case-sensitive); the echoed `subject` keeps the
+  client's literal spelling.
 - Pure and **stateless**: no Durable Object, no D1, no required bindings; unit-
   tests under Node. Discovery events flow through the `@dwk/log`
   `Logger`/`Metrics` seams with the queried `resource` reduced to its host.
