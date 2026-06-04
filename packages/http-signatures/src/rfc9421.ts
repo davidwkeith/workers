@@ -1,0 +1,249 @@
+/**
+ * The RFC 9421 wire profile: the `Signature-Input` / `Signature`
+ * structured-field pair, the signature base of §2.5, and the `@signature-params`
+ * line.
+ */
+
+import {
+  isSupportedAlgorithm,
+  signBytes,
+  validateKey,
+  verifyBytes,
+} from "./algorithms";
+import { bytesToBase64, utf8 } from "./base64";
+import { deriveComponentValue, derivationContext } from "./components";
+import {
+  parseSignatureHeader,
+  parseSignatureInput,
+  serializeString,
+  type SfBareItem,
+} from "./sf";
+import type {
+  HttpMessage,
+  SignatureAlgorithm,
+  SignatureFailureReason,
+  VerifyResult,
+} from "./types";
+
+/** Resolved signing inputs for the RFC 9421 profile. */
+export interface Rfc9421SignParams {
+  key: CryptoKey;
+  keyId: string;
+  alg: SignatureAlgorithm;
+  components: string[];
+  created: number;
+  expires?: number;
+  nonce?: string;
+  tag?: string;
+  label: string;
+}
+
+/** Build the `@signature-params` value (inner list plus its parameters). */
+function signatureParamsValue(params: Rfc9421SignParams): string {
+  const items = params.components.map(serializeString).join(" ");
+  let out = `(${items});created=${params.created}`;
+  if (params.expires !== undefined) out += `;expires=${params.expires}`;
+  out += `;keyid=${serializeString(params.keyId)}`;
+  out += `;alg=${serializeString(params.alg)}`;
+  if (params.nonce !== undefined)
+    out += `;nonce=${serializeString(params.nonce)}`;
+  if (params.tag !== undefined) out += `;tag=${serializeString(params.tag)}`;
+  return out;
+}
+
+/** Build the signature base over `lines` and the `@signature-params` value. */
+function signatureBase(lines: string[], sigParams: string): string {
+  return [...lines, `"@signature-params": ${sigParams}`].join("\n");
+}
+
+/**
+ * Sign `message` under the RFC 9421 profile. Returns the `Signature-Input` and
+ * `Signature` headers to merge into the request. Throws if a covered component
+ * is absent from the message or the URL cannot be parsed — both signer bugs.
+ */
+export async function signRfc9421(
+  message: HttpMessage,
+  params: Rfc9421SignParams,
+): Promise<Record<string, string>> {
+  const ctx = derivationContext(message);
+  if (ctx === null)
+    throw new Error("http-signatures: message.url is not a valid URL");
+  const sigParams = signatureParamsValue(params);
+  const lines: string[] = [];
+  for (const name of params.components) {
+    const value = deriveComponentValue(ctx, name);
+    if (value === null) {
+      throw new Error(
+        `http-signatures: covered component "${name}" is missing from the message`,
+      );
+    }
+    lines.push(`${serializeString(name)}: ${value}`);
+  }
+  const signature = await signBytes(
+    params.key,
+    params.alg,
+    utf8(signatureBase(lines, sigParams)),
+  );
+  return {
+    "Signature-Input": `${params.label}=${sigParams}`,
+    Signature: `${params.label}=:${bytesToBase64(new Uint8Array(signature))}:`,
+  };
+}
+
+/** Resolves a public key (and optionally the algorithm it dictates) for verification. */
+export type KeyResolver = (params: {
+  keyId: string | null;
+  alg: SignatureAlgorithm | null;
+}) => Promise<CryptoKey | null> | (CryptoKey | null);
+
+/** Parameters for verifying an RFC 9421 signature. */
+export interface Rfc9421VerifyParams {
+  resolveKey: KeyResolver;
+  /** Which labelled signature to verify; required when the message carries more than one. */
+  label?: string;
+  /** Component identifiers that MUST be covered (e.g. `@method`, `date`). */
+  requiredComponents?: string[];
+  /** Require a `created` parameter to be present. */
+  requireCreated?: boolean;
+  /** Current time, epoch seconds. Defaults to `Date.now()`. */
+  now?: number;
+  /** Allowed clock skew, in seconds, for `created`/`expires`. Defaults to 300. */
+  toleranceSeconds?: number;
+}
+
+function paramMap(
+  params: Array<[string, SfBareItem]>,
+): Map<string, SfBareItem> {
+  const map = new Map<string, SfBareItem>();
+  for (const [k, v] of params) map.set(k, v);
+  return map;
+}
+
+function getHeader(message: HttpMessage, name: string): string | null {
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(message.headers)) {
+    if (k.toLowerCase() === lower) return Array.isArray(v) ? v.join(", ") : v;
+  }
+  return null;
+}
+
+function fail(reason: SignatureFailureReason): VerifyResult {
+  return { valid: false, profile: "rfc9421", reason };
+}
+
+const DEFAULT_TOLERANCE_SECONDS = 300;
+
+/**
+ * Verify an RFC 9421 signature on `message`. Never throws — every failure is a
+ * `{ valid: false, reason }` with a stable {@link SignatureFailureReason}.
+ */
+export async function verifyRfc9421(
+  message: HttpMessage,
+  params: Rfc9421VerifyParams,
+): Promise<VerifyResult> {
+  const inputHeader = getHeader(message, "signature-input");
+  const sigHeader = getHeader(message, "signature");
+  if (inputHeader === null || sigHeader === null)
+    return fail("signature_missing");
+
+  let inputs: ReturnType<typeof parseSignatureInput>;
+  let signatures: ReturnType<typeof parseSignatureHeader>;
+  try {
+    inputs = parseSignatureInput(inputHeader);
+  } catch {
+    return fail("signature_input_malformed");
+  }
+  try {
+    signatures = parseSignatureHeader(sigHeader);
+  } catch {
+    return fail("signature_malformed");
+  }
+
+  // Choose the label to verify.
+  let label = params.label;
+  if (label === undefined) {
+    if (inputs.size === 0) return fail("label_missing");
+    if (inputs.size > 1) return fail("label_ambiguous");
+    label = [...inputs.keys()][0]!;
+  }
+  const input = inputs.get(label);
+  if (input === undefined) return fail("label_missing");
+  const signature = signatures.get(label);
+  if (signature === undefined) return fail("signature_missing");
+
+  const sigParams = paramMap(input.params);
+  const algRaw = sigParams.get("alg");
+  if (typeof algRaw !== "string" || !isSupportedAlgorithm(algRaw)) {
+    return fail("alg_unsupported");
+  }
+  const alg = algRaw;
+  const keyIdRaw = sigParams.get("keyid");
+  const keyId = typeof keyIdRaw === "string" ? keyIdRaw : null;
+  if (keyId === null) return fail("keyid_missing");
+
+  // created / expires window.
+  const now = params.now ?? Math.floor(Date.now() / 1000);
+  const tolerance = params.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
+  let created: number | undefined;
+  if (sigParams.has("created")) {
+    const c = sigParams.get("created");
+    if (typeof c !== "number" || !Number.isInteger(c))
+      return fail("created_invalid");
+    created = c;
+    if (c > now + tolerance) return fail("signature_future");
+  } else if (params.requireCreated) {
+    return fail("created_required");
+  }
+  let expires: number | undefined;
+  if (sigParams.has("expires")) {
+    const e = sigParams.get("expires");
+    if (typeof e !== "number" || !Number.isInteger(e))
+      return fail("expires_invalid");
+    expires = e;
+    if (now > e + tolerance) return fail("signature_expired");
+  }
+
+  const coveredComponents = input.items.map((item) => String(item.value));
+
+  // Required-component policy.
+  if (params.requiredComponents) {
+    const covered = new Set(coveredComponents.map((c) => c.toLowerCase()));
+    for (const required of params.requiredComponents) {
+      if (!covered.has(required.toLowerCase()))
+        return fail("required_component_missing");
+    }
+  }
+
+  // Rebuild the signature base from the named components.
+  const ctx = derivationContext(message);
+  if (ctx === null) return fail("covered_component_missing");
+  const lines: string[] = [];
+  for (const item of input.items) {
+    if (item.params.length > 0 || typeof item.value !== "string") {
+      return fail("components_malformed");
+    }
+    const value = deriveComponentValue(ctx, item.value);
+    if (value === null) return fail("covered_component_missing");
+    lines.push(`${item.raw}: ${value}`);
+  }
+  const base = [...lines, `"@signature-params": ${input.raw}`].join("\n");
+
+  // Resolve and validate the key, then verify.
+  const key = await params.resolveKey({ keyId, alg });
+  if (key === null) return fail("key_unresolved");
+  const rejection = validateKey(key, alg);
+  if (rejection !== null) return fail(rejection);
+
+  const ok = await verifyBytes(key, alg, signature, utf8(base));
+  if (!ok) return fail("signature_invalid");
+
+  return {
+    valid: true,
+    profile: "rfc9421",
+    label,
+    keyId,
+    coveredComponents,
+    created,
+    expires,
+  };
+}
