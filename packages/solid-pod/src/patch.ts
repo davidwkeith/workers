@@ -56,7 +56,8 @@ export type PatchError =
   | "no_match"
   | "ambiguous_match"
   | "unbound_template_variable"
-  | "delete_not_found";
+  | "delete_not_found"
+  | "where_too_complex";
 
 export class PatchProblem extends Error {
   constructor(readonly code: PatchError) {
@@ -269,6 +270,21 @@ export function parsePatch(
 
 type Bindings = ReadonlyMap<string, StoredTerm>;
 
+/**
+ * DoS guards for the `where` solver. This is a minimal conjunctive matcher, not
+ * a SPARQL engine, and it runs inside the single-threaded per-pod Durable
+ * Object — so a crafted patch with several all-variable `where` triples against
+ * a large resource could otherwise build an N^k cartesian product and exhaust
+ * the CPU budget, stalling every request that serializes through that pod.
+ *
+ * `MAX_WHERE_TRIPLES` caps the pattern size, and `MAX_SOLVE_WORK` caps the
+ * total candidate-match attempts across all triples — together they bound the
+ * solver's cost regardless of resource size. Exceeding either is reported as
+ * {@link PatchProblem} `where_too_complex`.
+ */
+const MAX_WHERE_TRIPLES = 25;
+const MAX_SOLVE_WORK = 1_000_000;
+
 /** Normalize a literal's datatype: an untyped, non-language literal is xsd:string. */
 function effectiveDatatype(term: StoredTerm): string | undefined {
   if (term.termType !== "Literal") return undefined;
@@ -304,20 +320,36 @@ function matchTerm(
 }
 
 /**
- * Find every solution of the conjunctive `where` pattern against `current`, via
+ * Find solutions of the conjunctive `where` pattern against `current`, via
  * straightforward backtracking. Each solution is a complete variable binding.
+ *
+ * Bounded against pattern-driven CPU exhaustion (see {@link MAX_WHERE_TRIPLES}
+ * and {@link MAX_SOLVE_WORK}): an over-large pattern, or one whose intermediate
+ * cartesian product blows the work budget, throws `where_too_complex` rather
+ * than enumerating it. Resolution only needs to distinguish "no bind", "exactly
+ * one bind", and "more than one bind", so the result is capped at two solutions
+ * — that is enough to detect ambiguity without materializing every binding.
  */
 function solve(
   where: readonly PatchTriple[],
   current: readonly StoredQuad[],
 ): Bindings[] {
   if (where.length === 0) return [new Map()];
+  if (where.length > MAX_WHERE_TRIPLES) {
+    throw new PatchProblem("where_too_complex");
+  }
 
+  let work = 0;
   let solutions: Map<string, StoredTerm>[] = [new Map()];
-  for (const triple of where) {
+  for (let i = 0; i < where.length; i++) {
+    const triple = where[i] as PatchTriple;
+    const last = i === where.length - 1;
     const next: Map<string, StoredTerm>[] = [];
     for (const partial of solutions) {
       for (const quad of current) {
+        if (++work > MAX_SOLVE_WORK) {
+          throw new PatchProblem("where_too_complex");
+        }
         const candidate = new Map(partial);
         if (
           matchTerm(triple.subject, quad.subject, candidate) &&
@@ -325,6 +357,9 @@ function solve(
           matchTerm(triple.object, quad.object, candidate)
         ) {
           next.push(candidate);
+          // On the final triple, two complete solutions already prove the
+          // match is ambiguous; stop before enumerating the rest.
+          if (last && next.length > 1) return next;
         }
       }
     }
@@ -374,7 +409,8 @@ function contains(current: readonly StoredQuad[], target: StoredQuad): boolean {
  *  - `no_match` when `where` binds to no solution;
  *  - `ambiguous_match` when it binds to more than one;
  *  - `delete_not_found` when a resolved delete triple is absent;
- *  - `unbound_template_variable` when a template uses an unbound variable.
+ *  - `unbound_template_variable` when a template uses an unbound variable;
+ *  - `where_too_complex` when the `where` pattern exceeds the solver's bounds.
  */
 export function resolvePatch(
   patch: Patch,

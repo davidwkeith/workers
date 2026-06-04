@@ -31,6 +31,14 @@ Durable Object.
   1. Evaluate `solid:where` against the current graph. **No exact bind → 409.**
   2. Apply `deletes`, then `inserts`, **in one SQLite transaction.**
 - Minimal match semantics only — this is **not** a SPARQL engine.
+- **Bounded solver (DoS guard).** The conjunctive `where` matcher runs inside
+  the single-threaded per-pod DO, so its cost is capped: the pattern may have at
+  most a small number of triples, and the total candidate-match work across the
+  pattern is capped regardless of resource size. A pattern that exceeds either
+  bound (e.g. several all-variable `where` triples that build an `N^k`
+  cartesian product) is rejected with **`400`** rather than evaluated. The
+  solver only distinguishes "no bind", "exactly one bind", and "more than one
+  bind", so it short-circuits once a second solution appears.
 
 ### WAC (Web Access Control)
 

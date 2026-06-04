@@ -569,9 +569,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       resolved = resolvePatch(parsed, current);
     } catch (error) {
       if (error instanceof PatchProblem) {
-        // No binding / ambiguous / missing delete ⇒ the document does not
+        // A pattern we refuse to evaluate (DoS guard) is a bad request, not a
+        // state conflict: 400. Everything else means the document does not
         // satisfy the patch precondition: 409 Conflict per the Solid Protocol.
-        return text(409, `Patch does not apply: ${error.code}`);
+        return error.code === "where_too_complex"
+          ? text(400, `Patch where pattern too complex: ${error.code}`)
+          : text(409, `Patch does not apply: ${error.code}`);
       }
       throw error;
     }
