@@ -1,0 +1,166 @@
+import { describe, it, expect, vi } from "vitest";
+import {
+  contentSignature,
+  buildLinkHeader,
+  fetchTopicContent,
+  deliverToSubscriber,
+  type TopicContent,
+} from "./distribute";
+import type { Subscription } from "./store";
+import type { FetchLike } from "./fetch";
+
+const encoder = new TextEncoder();
+
+describe("contentSignature", () => {
+  it("computes sha256=<hex> HMAC matching a known vector", async () => {
+    // HMAC-SHA256(key="key", msg="The quick brown fox jumps over the lazy dog")
+    const sig = await contentSignature(
+      "key",
+      encoder.encode("The quick brown fox jumps over the lazy dog"),
+    );
+    expect(sig).toBe(
+      "sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
+    );
+  });
+
+  it("changes when the secret changes", async () => {
+    const body = encoder.encode("hello");
+    expect(await contentSignature("a", body)).not.toBe(
+      await contentSignature("b", body),
+    );
+  });
+});
+
+describe("buildLinkHeader", () => {
+  it("advertises hub and self", () => {
+    expect(
+      buildLinkHeader("https://hub.example", "https://example.com/feed"),
+    ).toBe(
+      '<https://hub.example>; rel="hub", <https://example.com/feed>; rel="self"',
+    );
+  });
+});
+
+const sub = (overrides: Partial<Subscription> = {}): Subscription => ({
+  callback: "https://sub.example/cb",
+  topic: "https://example.com/feed",
+  secret: null,
+  leaseSeconds: 600,
+  expiresAt: Date.now() + 600_000,
+  createdAt: Date.now(),
+  ...overrides,
+});
+
+const content: TopicContent = {
+  body: encoder.encode("<feed>updated</feed>"),
+  contentType: "application/atom+xml",
+};
+
+describe("fetchTopicContent", () => {
+  it("returns body and content-type on 2xx", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response("<feed/>", {
+          status: 200,
+          headers: { "content-type": "application/atom+xml" },
+        }),
+    );
+    const result = await fetchTopicContent("https://example.com/feed", {
+      fetch: fetchImpl,
+    });
+    expect(result?.contentType).toBe("application/atom+xml");
+    expect(new TextDecoder().decode(result?.body)).toBe("<feed/>");
+  });
+
+  it("returns null on a non-2xx topic", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () => new Response("", { status: 500 }),
+    );
+    expect(
+      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
+    ).toBeNull();
+  });
+
+  it("returns null when the topic fetch throws", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => {
+      throw new Error("network");
+    });
+    expect(
+      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
+    ).toBeNull();
+  });
+});
+
+describe("deliverToSubscriber", () => {
+  it("POSTs the body with content-type and Link, no signature without a secret", async () => {
+    let seen: { init?: RequestInit } = {};
+    const fetchImpl: FetchLike = vi.fn(async (_input, init) => {
+      seen = { init };
+      return new Response(null, { status: 204 });
+    });
+    const result = await deliverToSubscriber(
+      sub(),
+      content,
+      "https://hub.example",
+      { fetch: fetchImpl },
+    );
+    expect(result).toEqual({
+      callback: "https://sub.example/cb",
+      delivered: true,
+      status: 204,
+    });
+    const headers = new Headers(seen.init?.headers as HeadersInit);
+    expect(headers.get("content-type")).toBe("application/atom+xml");
+    expect(headers.get("link")).toContain('rel="hub"');
+    expect(headers.has("x-hub-signature")).toBe(false);
+  });
+
+  it("signs the body when the subscription has a secret", async () => {
+    let seen: { init?: RequestInit } = {};
+    const fetchImpl: FetchLike = vi.fn(async (_input, init) => {
+      seen = { init };
+      return new Response(null, { status: 200 });
+    });
+    await deliverToSubscriber(
+      sub({ secret: "topsecret" }),
+      content,
+      "https://hub.example",
+      { fetch: fetchImpl },
+    );
+    const headers = new Headers(seen.init?.headers as HeadersInit);
+    expect(headers.get("x-hub-signature")).toBe(
+      await contentSignature("topsecret", content.body),
+    );
+  });
+
+  it("reports delivered:false on a failed POST", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => {
+      throw new Error("refused");
+    });
+    const result = await deliverToSubscriber(
+      sub(),
+      content,
+      "https://hub.example",
+      { fetch: fetchImpl },
+    );
+    expect(result).toEqual({
+      callback: "https://sub.example/cb",
+      delivered: false,
+      status: 0,
+    });
+  });
+
+  it("does not POST to a private callback host (SSRF)", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () => new Response(null, { status: 200 }),
+    );
+    const result = await deliverToSubscriber(
+      sub({ callback: "http://169.254.169.254/cb" }),
+      content,
+      "https://hub.example",
+      { fetch: fetchImpl },
+    );
+    expect(result.delivered).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
