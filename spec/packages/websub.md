@@ -30,12 +30,13 @@ cannot provide:
 - Export `createWebSub(config)` returning the standard handler, mountable under
   a path prefix as the hub endpoint.
 - **Subscribe / unsubscribe:** accept `hub.callback`, `hub.topic`, `hub.mode`,
-  `hub.lease_seconds`; perform the verification-of-intent `GET` to the
-  callback with `hub.challenge`.
+  `hub.lease_seconds`, and the optional `hub.secret`; perform the
+  verification-of-intent `GET` to the callback with `hub.challenge`.
 - **Lease management:** renew and expire leases; prune dead subscribers.
 - **Content distribution:** on publish, `POST` the updated topic to each
-  verified callback with an `X-Hub-Signature` HMAC when the subscriber
-  registered a `hub.secret`.
+  verified callback. When the subscriber registered a `hub.secret`, sign the
+  body with **HMAC-SHA256** and send it in the `X-Hub-Signature` header
+  (`sha256=<hex>`).
 - **Publish ping:** an entry point (called by the build / Micropub write path)
   that marks a topic changed and enqueues distribution.
 
@@ -45,9 +46,10 @@ cannot provide:
   consistency), **never KV**: a stale or lost subscription is a correctness bug,
   not a safe-to-be-stale cache
   ([non-functional-requirements.md](../non-functional-requirements.md#consistency-rules-load-bearing)).
-- Delivery retries and fan-out run via a **queue** / DO alarms with backoff; the
-  hub advertises itself via `Link rel="hub"` (the feed `Link` headers/elements
-  are Anglesite's to emit).
+- Delivery retries and fan-out run via a **queue** / DO alarms with backoff. The
+  **feed advertises this hub** via `Link rel="hub"` (and `Link rel="self"` for
+  the topic) — those feed `Link` headers/elements are Anglesite's to emit, not
+  the hub's.
 
 ## Bindings (declared `Env` fragment)
 

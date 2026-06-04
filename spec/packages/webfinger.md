@@ -22,7 +22,8 @@ static host cannot do, which is why this package exists:
 - **MUST** dispatch on the `resource` query parameter and return **404** for a
   `resource` this server does not control (a static file returns `200` for any
   `resource=`).
-- **MUST** echo the matched `subject`.
+- **MUST** echo the matched `subject`, which **MUST** equal the queried
+  `resource` URI.
 - **SHOULD** filter the returned `links` by any `rel` query parameters.
 
 Document that the degenerate single-resource, no-`rel`-filter case **MAY** remain
@@ -61,5 +62,6 @@ case correctly.
 ## Conformance / testing
 
 - RFC 7033. Interop check against Mastodon / fediverse WebFinger expectations
-  (the `subject` must match the queried `acct:`). Unit-tests under Node with no
-  Workers runtime. See [conformance-and-testing.md](../conformance-and-testing.md).
+  (the `subject` must match the queried `resource` URI — any scheme, not only
+  `acct:`). Unit-tests under Node with no Workers runtime. See
+  [conformance-and-testing.md](../conformance-and-testing.md).

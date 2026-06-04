@@ -37,7 +37,8 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 ### Server-to-server (federation)
 
 - Inbound `POST /inbox`: verify the HTTP signature, dedup by activity `id`, and
-  handle `Follow` / `Undo` / `Create` / `Like` / `Announce` / `Delete`.
+  handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `Announce` /
+  `Delete`.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request.
 
