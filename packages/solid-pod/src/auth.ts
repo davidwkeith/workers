@@ -86,8 +86,12 @@ function bearerToken(request: Request): string | null {
  */
 function tokenTypeMatches(typ: unknown, required: string): boolean {
   if (typeof typ !== "string") return false;
-  const normalize = (value: string): string =>
-    value.toLowerCase().replace(/^application\//, "");
+  const normalize = (value: string): string => {
+    const lower = value.toLowerCase();
+    return lower.startsWith("application/")
+      ? lower.slice("application/".length)
+      : lower;
+  };
   return normalize(typ) === normalize(required);
 }
 

@@ -1011,5 +1011,31 @@ function ifNoneMatchOf(request: Request): string | undefined {
 /** Whether a `Link` header marks the POSTed resource as an LDP container. */
 function linkIndicatesContainer(link: string | null): boolean {
   if (!link) return false;
-  return /ldp#(Basic)?Container/.test(link) && /rel\s*=\s*"?type"?/.test(link);
+  // Split into individual link-values at each "," that introduces a new
+  // "<uri>", then require the container type URI and a `rel="type"` parameter
+  // to appear in the *same* entry. Checking the header as a whole would let a
+  // stray `rel="type"` on one link combine with an unrelated container URI on
+  // another to produce a false positive.
+  for (const entry of link.split(/,(?=\s*<)/)) {
+    const start = entry.indexOf("<");
+    const end = entry.indexOf(">", start + 1);
+    if (start === -1 || end === -1) continue;
+    const uri = entry.slice(start + 1, end).trim();
+    if (!uri.endsWith("ldp#Container") && !uri.endsWith("ldp#BasicContainer")) {
+      continue;
+    }
+    if (linkEntryRelIsType(entry.slice(end + 1))) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a link-value's parameter string declares `rel="type"`. `rel` is a
+ * space-separated token list, so `rel="type other"` also counts.
+ */
+function linkEntryRelIsType(params: string): boolean {
+  const match = /;\s*rel\s*=\s*("([^"]*)"|'([^']*)'|[^;,\s]+)/i.exec(params);
+  if (match === null) return false;
+  const value = match[2] ?? match[3] ?? match[1] ?? "";
+  return value.toLowerCase().split(/\s+/).includes("type");
 }

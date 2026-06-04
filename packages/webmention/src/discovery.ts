@@ -14,6 +14,7 @@
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import {
   getAttr,
+  isHtmlContentType,
   matchTags,
   parseLinkHeader,
   resolveDocumentBase,
@@ -124,7 +125,7 @@ export async function discoverEndpoint(
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+  if (!isHtmlContentType(contentType)) {
     return null;
   }
 

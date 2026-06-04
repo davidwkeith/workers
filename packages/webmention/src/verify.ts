@@ -20,6 +20,7 @@ import {
 } from "@dwk/log";
 import {
   getAttr,
+  isHtmlContentType,
   matchTags,
   resolveDocumentBase,
   resolveUrl,
@@ -61,10 +62,6 @@ export function extractLinks(html: string, baseUrl: string): string[] {
   return links;
 }
 
-function isHtml(contentType: string): boolean {
-  return /text\/html|application\/xhtml\+xml/i.test(contentType);
-}
-
 /**
  * Decide whether `body` (a fetched source document) links to `target`.
  *
@@ -81,7 +78,7 @@ export function sourceLinksTo(
   if (normalizedTarget === null) {
     return false;
   }
-  if (isHtml(contentType)) {
+  if (isHtmlContentType(contentType)) {
     return extractLinks(body, baseUrl).some(
       (link) => link === normalizedTarget,
     );

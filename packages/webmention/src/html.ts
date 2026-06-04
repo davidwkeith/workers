@@ -121,6 +121,18 @@ function extractRel(paramString: string): string | null {
   return null;
 }
 
+/**
+ * Whether a `Content-Type` value names an HTML document (`text/html` or
+ * `application/xhtml+xml`). Compares the media type's essence — the part before
+ * any `;` parameters — case-insensitively, so `text/html; charset=utf-8`
+ * matches but an unrelated type carrying `text/html` inside a parameter does
+ * not.
+ */
+export function isHtmlContentType(contentType: string): boolean {
+  const essence = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return essence === "text/html" || essence === "application/xhtml+xml";
+}
+
 /** Split a whitespace-separated token list (e.g. a `rel` value) into tokens. */
 export function splitTokens(value: string | null): string[] {
   if (value === null) {
