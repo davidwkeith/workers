@@ -456,19 +456,28 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     agent: string | undefined,
     requestOrigin: string | undefined,
   ): string {
-    const publicModes = grantedModes(
+    // The owner always holds the full set, so we never need to evaluate their
+    // modes — only the public's. Otherwise resolve the effective ACL once and
+    // evaluate the authenticated agent and the public against it together.
+    const empty = (): Set<AccessMode> => new Set<AccessMode>();
+    if (agent !== undefined && this.#owners.includes(agent)) {
+      const [publicModes = empty()] = grantedModes(
+        store,
+        origin,
+        path,
+        [undefined],
+        requestOrigin,
+      );
+      const full = new Set<AccessMode>(["read", "write", "append", "control"]);
+      return wacAllowHeader(full, publicModes);
+    }
+    const [userModes = empty(), publicModes = empty()] = grantedModes(
       store,
       origin,
       path,
-      undefined,
+      [agent, undefined],
       requestOrigin,
     );
-    const userModes =
-      agent !== undefined && this.#owners.includes(agent)
-        ? new Set<AccessMode>(["read", "write", "append", "control"])
-        : agent !== undefined
-          ? grantedModes(store, origin, path, agent, requestOrigin)
-          : publicModes;
     return wacAllowHeader(userModes, publicModes);
   }
 

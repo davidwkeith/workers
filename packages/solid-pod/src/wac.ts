@@ -83,8 +83,12 @@ export function authorize(
 }
 
 /**
- * The set of access modes the effective ACL grants `agent` (or the public, when
- * `agent` is `undefined`) over `path`. Used to populate the `WAC-Allow` header.
+ * For each agent context (a WebID, or `undefined` for the public), the set of
+ * access modes the effective ACL grants over `path`. Used to populate the
+ * `WAC-Allow` header, which needs both the authenticated agent's and the
+ * public's privileges — resolving the effective ACL once and evaluating every
+ * context against it avoids re-walking the container hierarchy and re-reading
+ * the store per agent.
  *
  * Mirrors the `.acl`-path remapping the handler applies before authorizing: a
  * request against an ACL document is decided by Control on the resource it
@@ -95,14 +99,21 @@ export function grantedModes(
   store: Store,
   origin: string,
   path: string,
-  agent: string | undefined,
+  agents: ReadonlyArray<string | undefined>,
   requestOrigin: string | undefined,
-): Set<AccessMode> {
+): Set<AccessMode>[] {
   const wacPath = isAclPath(path) ? resourceForAcl(path) : path;
-  const decision = authorize(store, origin, wacPath, {
-    mode: "read",
-    ...(agent ? { agent } : {}),
-    ...(requestOrigin ? { origin: requestOrigin } : {}),
+  const acl = effectiveAcl(store, origin, wacPath);
+  return agents.map((agent) => {
+    if (acl === null) return new Set<AccessMode>();
+    const decision = evaluateAccess(
+      {
+        mode: "read",
+        ...(agent ? { agent } : {}),
+        ...(requestOrigin ? { origin: requestOrigin } : {}),
+      },
+      [acl],
+    );
+    return new Set(decision.modes);
   });
-  return new Set(decision.modes);
 }

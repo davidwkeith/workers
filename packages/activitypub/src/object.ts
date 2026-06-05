@@ -811,11 +811,13 @@ function isLocalResource(iri: string, iris: ActorIris): boolean {
   }
   if (url.origin !== actor.origin) return false;
   // The actor IRI itself, or any path beneath it (e.g. `<actor>/outbox/<uuid>`,
-  // `<actor>/statuses/1`) is ours.
-  return (
-    url.pathname === actor.pathname ||
-    url.pathname.startsWith(`${actor.pathname}/`)
-  );
+  // `<actor>/statuses/1`) is ours. Normalize the trailing slash so a
+  // root-hosted actor (pathname `/`) doesn't produce a `//` prefix that never
+  // matches — every same-origin resource is then correctly under it.
+  const prefix = actor.pathname.endsWith("/")
+    ? actor.pathname
+    : `${actor.pathname}/`;
+  return url.pathname === actor.pathname || url.pathname.startsWith(prefix);
 }
 
 /**
