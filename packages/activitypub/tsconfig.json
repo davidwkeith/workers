@@ -6,6 +6,7 @@
     // typecheck ahead of build), which would otherwise trip the
     // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
     "paths": {
+      "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
       "@dwk/log": ["../log/src/index.ts"]
     },
     "types": [

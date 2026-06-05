@@ -1207,3 +1207,47 @@ describe("@dwk/solid-pod LDP", () => {
     expect(body).not.toContain("kid.acl");
   });
 });
+
+describe("@dwk/solid-pod LDN inbox discovery", () => {
+  const LDP_INBOX = "http://www.w3.org/ns/ldp#inbox";
+
+  it("advertises a resource's ldp:inbox as a Link header on GET", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/card", {
+      webid: OWNER,
+      body: `<> <${LDP_INBOX}> </inbox/> .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const get = await pod.send("GET", "/card", { webid: OWNER });
+    expect(get.status).toBe(200);
+    const link = get.headers.get("link") ?? "";
+    expect(link).toContain(`<${pod.base}/inbox/>; rel="${LDP_INBOX}"`);
+    // The LDP type links are still present alongside the inbox advertisement.
+    expect(link).toContain('rel="type"');
+  });
+
+  it("advertises the inbox on HEAD too", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/card", {
+      webid: OWNER,
+      body: `<> <${LDP_INBOX}> </inbox/> .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const head = await pod.send("HEAD", "/card", { webid: OWNER });
+    expect(head.headers.get("link")).toContain(`rel="${LDP_INBOX}"`);
+  });
+
+  it("emits no inbox Link for a resource that declares none", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/plain", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+
+    const get = await pod.send("GET", "/plain", { webid: OWNER });
+    expect(get.headers.get("link") ?? "").not.toContain(LDP_INBOX);
+  });
+});

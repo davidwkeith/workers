@@ -75,10 +75,14 @@ pushing.
 
 - **Endpoint packages** — named for the standard: `@dwk/indieauth`,
   `@dwk/micropub`, `@dwk/webmention`, `@dwk/solid-pod`.
-- **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`. These
-  MUST stay free of IndieWeb/Solid assumptions so future `@dwk` standards adopt
-  them unchanged. This is a hard constraint, not a preference. `@dwk/log` is the
-  injectable structured-logging seam (see `spec/observability.md`).
+- **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
+  `@dwk/ldn`. These MUST stay free of IndieWeb/Solid assumptions so future `@dwk`
+  standards adopt them unchanged. This is a hard constraint, not a preference.
+  `@dwk/log` is the injectable structured-logging seam (see
+  `spec/observability.md`). `@dwk/ldn` holds the RDF-only Linked Data
+  Notifications primitives (inbox discovery, notification validation, listing)
+  shared by `@dwk/solid-pod` and `@dwk/activitypub`; its discovery helpers are
+  reachable n3-free as `@dwk/ldn/discovery` for Workers-runtime consumers.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 
