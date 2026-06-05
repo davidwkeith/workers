@@ -105,16 +105,19 @@ class Reader {
       case 24:
         return this.#byte();
       case 25: {
+        this.#need(2);
         const v = this.#view.getUint16(this.offset);
         this.offset += 2;
         return v;
       }
       case 26: {
+        this.#need(4);
         const v = this.#view.getUint32(this.offset);
         this.offset += 4;
         return v;
       }
       case 27: {
+        this.#need(8);
         const v = this.#view.getBigUint64(this.offset);
         this.offset += 8;
         // Collapse to a number when it fits, so callers compare with `===`.
@@ -140,6 +143,17 @@ class Reader {
       throw new CborError("unexpected end of CBOR input");
     }
     return this.#bytes[this.offset++]!;
+  }
+
+  /**
+   * Assert `n` more bytes are available before a multi-byte read. Without this,
+   * a truncated argument would let `DataView` throw a native `RangeError` that
+   * escapes the `CborError` contract callers rely on.
+   */
+  #need(n: number): void {
+    if (this.offset + n > this.#bytes.length) {
+      throw new CborError("unexpected end of CBOR input");
+    }
   }
 
   #bytesOfLength(length: number): Uint8Array {

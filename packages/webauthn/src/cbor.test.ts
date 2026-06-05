@@ -60,4 +60,16 @@ describe("@dwk/webauthn cbor decoder", () => {
     // Major type 7 (simple/float) is unsupported.
     expect(() => decodeFirst(new Uint8Array([0xf6]))).toThrow(CborError);
   });
+
+  it("normalizes a truncated multi-byte integer to CborError", () => {
+    // Initial byte announces a 2/4/8-byte argument with too few bytes left; a
+    // raw DataView read would throw a native RangeError, so assert CborError.
+    expect(() => decodeFirst(new Uint8Array([0x19, 0x01]))).toThrow(CborError);
+    expect(() => decodeFirst(new Uint8Array([0x1a, 0x00, 0x00]))).toThrow(
+      CborError,
+    );
+    expect(() => decodeFirst(new Uint8Array([0x1b, 0x00]))).toThrow(CborError);
+    // Truncated argument inside a byte-string length prefix, too.
+    expect(() => decodeFirst(new Uint8Array([0x59, 0x01]))).toThrow(CborError);
+  });
 });
