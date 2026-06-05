@@ -87,7 +87,7 @@ function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,
     keyId: config.iris.keyId,
-    ...(config.sharedInbox ? { sharedInbox: config.sharedInbox } : {}),
+    sharedInbox: config.sharedInbox,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),
   };
 }
@@ -224,9 +224,7 @@ export function createActivityPub(
       // variant (§3.2), so the response Content-Type honors `Accept`.
       const body = JSON.stringify(
         buildActorDocument(iris, resolved.actor, resolved.publicKeyPem, {
-          ...(resolved.sharedInbox
-            ? { sharedInbox: resolved.sharedInbox }
-            : {}),
+          sharedInbox: resolved.sharedInbox,
         }),
       );
       return new Response(method === "HEAD" ? null : body, {

@@ -791,22 +791,34 @@ function pathOf(iri: string): string {
 }
 
 /**
- * Whether a `Create`/`Update`'s embedded object is attributed to the activity's
- * own actor. Liberal: a string-IRI object, an absent object, or an object with
- * no `attributedTo` all pass (nothing to contradict); only a present
- * `attributedTo` that names a *different* actor fails.
+ * Whether a `Create`/`Update`'s embedded object(s) are attributed to the
+ * activity's own actor. Liberal: an absent object, a string-IRI object, or an
+ * object with no `attributedTo` all pass (nothing to contradict). Both `object`
+ * and `attributedTo` may be arrays in ActivityStreams, so *every* embedded
+ * object and *every* named attribution is checked — a present `attributedTo`
+ * that names a different actor fails even when wrapped in an array (closing an
+ * impersonation bypass).
  */
 function attributionMatches(activity: ActivityObject): boolean {
   const author = actorIri(activity.actor);
   if (!author) return true;
-  const object = activity.object;
-  if (!object || typeof object !== "object" || Array.isArray(object)) {
-    return true;
+  for (const object of asArray(activity.object)) {
+    if (!object || typeof object !== "object" || Array.isArray(object)) {
+      continue;
+    }
+    const attributedTo = (object as Record<string, JsonValue>).attributedTo;
+    for (const attribution of asArray(attributedTo)) {
+      const iri = actorIri(attribution);
+      if (iri !== undefined && iri !== author) return false;
+    }
   }
-  const attributedTo = actorIri(
-    (object as Record<string, JsonValue>).attributedTo,
-  );
-  return attributedTo === undefined || attributedTo === author;
+  return true;
+}
+
+/** Wrap a value as an array: empty for nullish, itself when already an array. */
+function asArray(value: JsonValue | undefined): readonly JsonValue[] {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 /** Flatten an addressing field (`to`/`cc`/…) to the set of IRI strings it names. */

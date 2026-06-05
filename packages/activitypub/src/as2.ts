@@ -75,8 +75,8 @@ export function wantsActivityJson(accept: string | null): boolean {
  * {@link AS2_CONTENT_TYPE}.
  */
 export function as2ContentType(accept: string | null): string {
-  if (wantsActivityJson(accept)) {
-    const lower = (accept as string).toLowerCase();
+  if (accept && wantsActivityJson(accept)) {
+    const lower = accept.toLowerCase();
     if (
       lower.includes("application/ld+json") &&
       !lower.includes("application/activity+json")

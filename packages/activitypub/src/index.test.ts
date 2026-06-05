@@ -307,6 +307,35 @@ describe("inbox", () => {
     expect(res.status).toBe(403);
   });
 
+  it("refuses an attributedTo spoof wrapped in arrays (object/attributedTo)", async () => {
+    const config = makeConfig({ verifyInboxSignature: acceptAll });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/activities/spoof-array",
+          type: "Create",
+          actor: REMOTE,
+          // Both `object` and `attributedTo` are arrays: a naive check that
+          // bails on arrays would let the spoofed actor through.
+          object: [
+            {
+              id: "https://remote.example/notes/3",
+              type: "Note",
+              attributedTo: [REMOTE, "https://evil.example/users/mallory"],
+              content: "smuggled",
+            },
+          ],
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(403);
+  });
+
   it("accepts a Create whose embedded object is attributed to its actor", async () => {
     const config = makeConfig({ verifyInboxSignature: acceptAll });
     const handler = createActivityPub(config);
