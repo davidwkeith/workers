@@ -125,6 +125,22 @@ describe("parseInboxLinks", () => {
     expect(parseInboxLinks(header)).toEqual([]);
   });
 
+  it("does not extract an inbox from inside a quoted parameter value", () => {
+    // A comma followed by `<` inside a quoted `title` must not be mistaken for a
+    // link-value boundary, or a title string could inject a phantom inbox.
+    const header =
+      "<https://a.example/doc>; " +
+      'title="ignore, <https://evil.example/inbox/>; rel=inbox"';
+    expect(parseInboxLinks(header)).toEqual([]);
+  });
+
+  it("parses a real inbox alongside a comma+bracket inside a quoted value", () => {
+    const header =
+      '<https://a.example/doc>; title="x, <y>", ' +
+      `<https://a.example/inbox/>; rel="${LDP_INBOX}"`;
+    expect(parseInboxLinks(header)).toEqual(["https://a.example/inbox/"]);
+  });
+
   it("de-duplicates a repeated inbox URI", () => {
     const header =
       `<https://a.example/inbox/>; rel="${LDP_INBOX}", ` +

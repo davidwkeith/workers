@@ -71,9 +71,7 @@ export function discoverInboxIris(
 export function parseInboxLinks(linkHeader: string | null): string[] {
   if (!linkHeader) return [];
   const found = new Set<string>();
-  // Split into link-values at each "," that introduces a new "<uri>", so a comma
-  // inside a quoted parameter value never splits an entry.
-  for (const entry of linkHeader.split(/,(?=\s*<)/)) {
+  for (const entry of splitLinkValues(linkHeader)) {
     const start = entry.indexOf("<");
     const end = entry.indexOf(">", start + 1);
     if (start === -1 || end === -1) continue;
@@ -82,6 +80,37 @@ export function parseInboxLinks(linkHeader: string | null): string[] {
     if (linkEntryRelIsInbox(entry.slice(end + 1))) found.add(uri);
   }
   return [...found];
+}
+
+/**
+ * Split a `Link` header into its individual link-values on top-level commas,
+ * tracking both quoted parameter values and `<…>` URI-references so a comma
+ * inside either never splits an entry (RFC 8288). A simple `,`-followed-by-`<`
+ * regex would mis-split a quoted parameter such as `title="a, <b>"`.
+ */
+function splitLinkValues(header: string): string[] {
+  const values: string[] = [];
+  let inQuotes = false;
+  let inBrackets = false;
+  let current = "";
+  for (let i = 0; i < header.length; i++) {
+    const char = header[i] as string;
+    if (char === '"' && header[i - 1] !== "\\") {
+      inQuotes = !inQuotes;
+    } else if (char === "<" && !inQuotes) {
+      inBrackets = true;
+    } else if (char === ">" && !inQuotes) {
+      inBrackets = false;
+    }
+    if (char === "," && !inQuotes && !inBrackets) {
+      values.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim() !== "") values.push(current);
+  return values;
 }
 
 /**

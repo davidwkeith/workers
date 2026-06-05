@@ -62,7 +62,12 @@ export async function parseNotification(
   contentType: string | null,
   options: ParseNotificationOptions = {},
 ): Promise<ParsedNotification> {
-  const format = contentType ? formatForMediaType(contentType) : undefined;
+  // Resolve the clean media type once (no parameters/casing) and reuse it for
+  // both format lookup and parsing, consistent with the rest of the codebase.
+  const mediaType = contentType
+    ? (contentType.split(";")[0]?.trim().toLowerCase() ?? "")
+    : "";
+  const format = mediaType ? formatForMediaType(mediaType) : undefined;
   if (!format) {
     throw new NotificationProblem(
       "unsupported_media_type",
@@ -70,9 +75,6 @@ export async function parseNotification(
         `supported RDF serialization`,
     );
   }
-
-  const mediaType =
-    (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
 
   let quads;
   try {
