@@ -84,6 +84,18 @@ importers:
         specifier: workspace:*
         version: link:../log
 
+  packages/microsub:
+    dependencies:
+      '@dwk/dpop':
+        specifier: workspace:*
+        version: link:../dpop
+      '@dwk/indieauth':
+        specifier: workspace:*
+        version: link:../indieauth
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/oauth:
     dependencies:
       '@dwk/dpop':

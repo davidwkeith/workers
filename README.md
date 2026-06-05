@@ -30,6 +30,7 @@ serverless edge compute that scales to zero.
 | [`@dwk/indieauth`](spec/packages/indieauth.md) | endpoint | IndieAuth authorization + token + metadata endpoints; PKCE; profile-URL verification; scope issuance. |
 | [`@dwk/micropub`](spec/packages/micropub.md) | endpoint | Micropub create/update/delete; JSON + form-encoded; media endpoint (R2); `q=config` / `q=source`. Consumes IndieAuth tokens. |
 | [`@dwk/webmention`](spec/packages/webmention.md) | endpoint | Webmention receiver (async verification queue) + sender (on publish); inbox store. |
+| [`@dwk/microsub`](spec/packages/microsub.md) | endpoint | Microsub server (read side): channel/feed subscriptions, server-side polling (Atom/RSS/JSON Feed/`h-feed`), and a normalised JF2 timeline via a Cron-triggered queue (D1). Consumes IndieAuth tokens. |
 | [`@dwk/websub`](spec/packages/websub.md) | endpoint | WebSub (W3C) hub: D1 subscription store with lease expiry, intent-verification callbacks, HMAC-signed content distribution via queue. Publish-side complement to `webmention`. |
 | [`@dwk/webfinger`](spec/packages/webfinger.md) | endpoint | WebFinger (RFC 7033) discovery at `/.well-known/webfinger`; `resource` dispatch, `rel` filtering, JRD output. Stateless; config-supplied resource map. |
 | [`@dwk/vc`](spec/packages/vc.md) | endpoint | `did:web` identity + Verifiable Credential (VCDM 2.0) issuance/verification with JCS Data Integrity proofs; Bitstring Status List revocation (D1). DID document is static. |
