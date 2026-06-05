@@ -34,6 +34,7 @@ serverless edge compute that scales to zero.
 | [`@dwk/webfinger`](spec/packages/webfinger.md) | endpoint | WebFinger (RFC 7033) discovery at `/.well-known/webfinger`; `resource` dispatch, `rel` filtering, JRD output. Stateless; config-supplied resource map. |
 | [`@dwk/vc`](spec/packages/vc.md) | endpoint | `did:web` identity + Verifiable Credential (VCDM 2.0) issuance/verification with JCS Data Integrity proofs; Bitstring Status List revocation (D1). DID document is static. |
 | [`@dwk/solid-pod`](spec/packages/solid-pod.md) | endpoint + DO | Edge Solid Pod: LDP verbs, content negotiation, N3 Patch, WAC, notifications. Exports the per-pod **Durable Object** class. |
+| [`@dwk/webauthn`](spec/packages/webauthn.md) | endpoint + DO | WebAuthn / passkeys relying party: registration + authentication ceremonies; attestation (`none`/`packed` self) + assertion verification on Web Crypto. Per-RP **Durable Object** for challenge state + credential records. Exploratory. |
 | [`@dwk/wac`](spec/packages/wac.md) | lib | Web Access Control evaluation (effective-ACL walk, Append vs Write). Used by `solid-pod`. |
 | [`@dwk/dpop`](spec/packages/dpop.md) | lib | DPoP proof verification. Shared by `indieauth` token validation and `solid-pod` Resource Server. |
 | [`@dwk/http-signatures`](spec/packages/http-signatures.md) | lib | HTTP Message Signatures (RFC 9421) + legacy `draft-cavage` sign/verify. Cross-standard reusable; consumed by `activitypub` for server-to-server delivery. |

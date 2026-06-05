@@ -129,6 +129,12 @@ importers:
         specifier: workspace:*
         version: link:../rdf
 
+  packages/webauthn:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/webfinger:
     dependencies:
       '@dwk/log':
