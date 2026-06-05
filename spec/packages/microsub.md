@@ -93,5 +93,3 @@ host cannot do:
   reader clients** — Monocle, Together, Indigenous — plus colocated unit tests
   over the channel/timeline state machine and the feed → JF2 parsers. See
   [conformance-and-testing.md](../conformance-and-testing.md).
-</content>
-</invoke>
