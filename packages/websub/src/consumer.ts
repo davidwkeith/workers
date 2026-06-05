@@ -149,6 +149,7 @@ export function createWebSubQueueConsumer(
               fetch: resolved.fetch,
               logger: resolved.logger,
               metrics: resolved.metrics,
+              signatureAlgorithm: resolved.signatureAlgorithm,
             }),
           ),
         );

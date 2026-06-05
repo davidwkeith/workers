@@ -324,6 +324,36 @@ describe("RFC 9421 failure modes", () => {
     expect(result.reason).toBe("components_malformed");
   });
 
+  it("rejects a repeated covered component on verify (RFC 9421 §2)", async () => {
+    const k = keys["ecdsa-p256-sha256"]!;
+    const received: HttpMessage = {
+      ...baseMessage(),
+      headers: {
+        ...baseMessage().headers,
+        "signature-input": `sig1=("@method" "@method");created=${NOW};keyid="k";alg="ecdsa-p256-sha256"`,
+        signature: "sig1=:AAAA:",
+      },
+    };
+    const result = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW,
+    });
+    expect(result.reason).toBe("components_malformed");
+  });
+
+  it("rejects a repeated covered component on sign (RFC 9421 §2)", async () => {
+    const k = keys["ed25519"]!;
+    await expect(
+      signMessage(baseMessage(), {
+        key: k.privateKey,
+        keyId: "k",
+        alg: "ed25519",
+        components: ["@method", "@method"],
+        created: NOW,
+      }),
+    ).rejects.toThrow(/duplicate covered component/);
+  });
+
   it("reports a missing signature header", async () => {
     const result = await verifyMessage(baseMessage(), {
       resolveKey: () => null,

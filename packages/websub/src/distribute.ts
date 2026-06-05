@@ -3,9 +3,12 @@
  *
  * On publish, the hub fetches the topic's current content and `POST`s it to every
  * active subscriber's callback (WebSub §7). When a subscriber registered a
- * `hub.secret`, the body is authenticated with an **HMAC-SHA256** signature in
- * the `X-Hub-Signature: sha256=<hex>` header so the subscriber can verify the
- * delivery came from this hub (§8). Deliveries carry `Link` headers advertising
+ * `hub.secret`, the body is authenticated with an HMAC signature in the
+ * `X-Hub-Signature: <method>=<hex>` header so the subscriber can verify the
+ * delivery came from this hub (§8). The digest method is a hub-level config
+ * option (`sha256` by default; `sha1`/`sha384`/`sha512` are also permitted by
+ * §8 and selected via `signatureAlgorithm`). Deliveries carry `Link` headers
+ * advertising
  * the hub (`rel="hub"`) and the topic (`rel="self"`). Every POST goes through
  * {@link safeFetch}. See `spec/packages/websub.md`.
  *
@@ -36,6 +39,24 @@ export interface TopicContent {
 /** Default media type when the topic response declares no `Content-Type`. */
 const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
+/**
+ * The HMAC digest methods WebSub §8 permits for `X-Hub-Signature`. The method
+ * name is emitted verbatim as the header's `<method>=` prefix, so it must match
+ * the WebSub spelling (`sha1`, not `sha-1`).
+ */
+export type SignatureAlgorithm = "sha1" | "sha256" | "sha384" | "sha512";
+
+/** Map a WebSub signature method name to its WebCrypto SHA hash name. */
+const HASH_FOR_METHOD: Record<SignatureAlgorithm, string> = {
+  sha1: "SHA-1",
+  sha256: "SHA-256",
+  sha384: "SHA-384",
+  sha512: "SHA-512",
+};
+
+/** WebSub's secure default signature method; SHA-1 interop is opt-in only. */
+export const DEFAULT_SIGNATURE_ALGORITHM: SignatureAlgorithm = "sha256";
+
 /** Outcome of delivering content to one subscriber. */
 export interface DeliveryResult {
   readonly callback: string;
@@ -47,16 +68,19 @@ export interface DeliveryResult {
 
 /**
  * Compute the `X-Hub-Signature` value for `body` under `secret`:
- * `sha256=<lowercase hex HMAC-SHA256>` (WebSub §8).
+ * `<method>=<lowercase hex HMAC>` (WebSub §8). `method` defaults to the secure
+ * `sha256`; WebSub also permits `sha1`/`sha384`/`sha512`. The header prefix is
+ * the WebSub method name verbatim (e.g. `sha1=`, not `sha-1=`).
  */
 export async function contentSignature(
   secret: string,
   body: Uint8Array,
+  method: SignatureAlgorithm = DEFAULT_SIGNATURE_ALGORITHM,
 ): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+    { name: "HMAC", hash: HASH_FOR_METHOD[method] },
     false,
     ["sign"],
   );
@@ -64,7 +88,7 @@ export async function contentSignature(
   const hex = [...new Uint8Array(mac)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `sha256=${hex}`;
+  return `${method}=${hex}`;
 }
 
 /** Build the `Link` header advertising this hub and the topic (WebSub §5.1). */
@@ -77,6 +101,13 @@ export interface DistributeOptions {
   readonly fetch?: FetchLike;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
+  /**
+   * HMAC method used for the `X-Hub-Signature` header. WebSub §8 has no
+   * per-request method parameter, so this is a hub-level choice; it defaults to
+   * the secure {@link DEFAULT_SIGNATURE_ALGORITHM} (`sha256`). Set it to `sha1`
+   * only for interop with subscribers that require the legacy method.
+   */
+  readonly signatureAlgorithm?: SignatureAlgorithm;
 }
 
 /**
@@ -154,6 +185,7 @@ export async function deliverToSubscriber(
     headers["x-hub-signature"] = await contentSignature(
       subscription.secret,
       content.body,
+      options?.signatureAlgorithm ?? DEFAULT_SIGNATURE_ALGORITHM,
     );
   }
 

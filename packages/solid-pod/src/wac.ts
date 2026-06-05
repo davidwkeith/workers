@@ -14,12 +14,19 @@ import type { Store } from "@dwk/store";
 import {
   evaluateAccess,
   type AccessDecision,
+  type AccessMode,
   type AccessRequest,
   type AclQuad,
   type AclResource,
 } from "@dwk/wac";
 
-import { aclPath, ancestorContainers, toIri } from "./ldp";
+import {
+  aclPath,
+  ancestorContainers,
+  isAclPath,
+  resourceForAcl,
+  toIri,
+} from "./ldp";
 
 /** Map the store's quads for an ACL document into `@dwk/wac` input. */
 function toAclQuads(store: Store, aclKey: string): AclQuad[] {
@@ -73,4 +80,40 @@ export function authorize(
   const acl = effectiveAcl(store, origin, path);
   if (acl === null) return { granted: false, modes: [] };
   return evaluateAccess(request, [acl]);
+}
+
+/**
+ * For each agent context (a WebID, or `undefined` for the public), the set of
+ * access modes the effective ACL grants over `path`. Used to populate the
+ * `WAC-Allow` header, which needs both the authenticated agent's and the
+ * public's privileges — resolving the effective ACL once and evaluating every
+ * context against it avoids re-walking the container hierarchy and re-reading
+ * the store per agent.
+ *
+ * Mirrors the `.acl`-path remapping the handler applies before authorizing: a
+ * request against an ACL document is decided by Control on the resource it
+ * governs. `@dwk/wac` reports the full granted mode set on any decision, so the
+ * requested `mode` here only seeds the evaluation — `read` is a safe probe.
+ */
+export function grantedModes(
+  store: Store,
+  origin: string,
+  path: string,
+  agents: ReadonlyArray<string | undefined>,
+  requestOrigin: string | undefined,
+): Set<AccessMode>[] {
+  const wacPath = isAclPath(path) ? resourceForAcl(path) : path;
+  const acl = effectiveAcl(store, origin, wacPath);
+  return agents.map((agent) => {
+    if (acl === null) return new Set<AccessMode>();
+    const decision = evaluateAccess(
+      {
+        mode: "read",
+        ...(agent ? { agent } : {}),
+        ...(requestOrigin ? { origin: requestOrigin } : {}),
+      },
+      [acl],
+    );
+    return new Set(decision.modes);
+  });
 }

@@ -13,6 +13,10 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { D1Database, Queue } from "@cloudflare/workers-types";
+import {
+  DEFAULT_SIGNATURE_ALGORITHM,
+  type SignatureAlgorithm,
+} from "./distribute";
 import type { FetchLike } from "./fetch";
 import type { WebSubJob } from "./queue";
 
@@ -61,6 +65,14 @@ export interface WebSubConfig {
    * (10 days). Clamped into `[minLeaseSeconds, maxLeaseSeconds]`.
    */
   readonly defaultLeaseSeconds?: number;
+  /**
+   * HMAC digest method for the `X-Hub-Signature` on signed deliveries (WebSub
+   * §8 permits `sha1`/`sha256`/`sha384`/`sha512`). WebSub has no per-request
+   * method parameter, so this is a hub-level choice; it defaults to the secure
+   * `sha256`. Set it to `sha1` **only** when a subscriber requires the legacy
+   * method for interop — SHA-1 is weaker and not the default for that reason.
+   */
+  readonly signatureAlgorithm?: SignatureAlgorithm;
   /** `fetch` implementation for verification/distribution; defaults to global `fetch`. */
   readonly fetch?: FetchLike;
   /** Logger; defaults to a no-op (see `@dwk/log`). */
@@ -82,6 +94,7 @@ export interface ResolvedConfig {
   readonly minLeaseSeconds: number;
   readonly maxLeaseSeconds: number;
   readonly defaultLeaseSeconds: number;
+  readonly signatureAlgorithm: SignatureAlgorithm;
   readonly fetch: FetchLike;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -155,6 +168,8 @@ export function resolveConfig(config: WebSubConfig): ResolvedConfig {
     minLeaseSeconds: min,
     maxLeaseSeconds: max,
     defaultLeaseSeconds,
+    signatureAlgorithm:
+      config.signatureAlgorithm ?? DEFAULT_SIGNATURE_ALGORITHM,
     fetch: config.fetch ?? ((input, init) => fetch(input, init)),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,

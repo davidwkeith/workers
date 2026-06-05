@@ -328,6 +328,73 @@ describe("@dwk/micropub create", () => {
   });
 });
 
+describe("@dwk/micropub token transmission method", () => {
+  it("rejects a token sent in both the header and the body (RFC 6750 §2)", async () => {
+    const minted = await mintToken("create");
+    const proof = await makeProof(minted.key, "POST", MICROPUB, {
+      ath: await sha256Base64url(minted.token),
+    });
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          Authorization: `DPoP ${minted.token}`,
+          DPoP: proof,
+        },
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "dup token"],
+          ["access_token", minted.token],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("accepts a token in the Authorization header only", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "header only"],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("accepts a token in the request body only", async () => {
+    const minted = await mintToken("create");
+    const proof = await makeProof(minted.key, "POST", MICROPUB, {
+      ath: await sha256Base64url(minted.token),
+    });
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: { DPoP: proof },
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "body only"],
+          ["access_token", minted.token],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+  });
+});
+
 describe("@dwk/micropub update", () => {
   async function createPost(minted: MintedToken): Promise<string> {
     const res = await handler(

@@ -107,7 +107,7 @@ function redirectError(
   const url = new URL(redirectUri);
   url.searchParams.set("error", error);
   url.searchParams.set("error_description", description);
-  if (state) url.searchParams.set("state", state);
+  url.searchParams.set("state", state);
   url.searchParams.set("iss", issuer);
   return Response.redirect(url.toString(), 302);
 }
@@ -169,6 +169,23 @@ async function handleAuthorizationGet(
   }
 
   // From here, protocol errors are reported by redirecting back to the client.
+  // `state` is a REQUIRED authorization-request parameter per the IndieAuth
+  // spec; the authorization response MUST echo back the exact value the client
+  // sent, so a missing/empty `state` is rejected as `invalid_request`.
+  if (!state) {
+    emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+      reason: "state_required",
+      clientHost: hostFromUrl(clientId),
+    });
+    return redirectError(
+      redirectUri,
+      "invalid_request",
+      "`state` is required",
+      state,
+      config.issuer,
+    );
+  }
+
   const responseType = params.get("response_type") ?? "code";
   if (responseType !== "code") {
     emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
@@ -286,7 +303,7 @@ async function issueCode(
   });
   const url = new URL(authRequest.redirectUri);
   url.searchParams.set("code", code);
-  if (authRequest.state) url.searchParams.set("state", authRequest.state);
+  url.searchParams.set("state", authRequest.state);
   url.searchParams.set("iss", config.issuer);
   return Response.redirect(url.toString(), 302);
 }

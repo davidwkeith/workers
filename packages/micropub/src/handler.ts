@@ -439,7 +439,23 @@ async function handleAction(
   }
 
   const action = parsed.action ?? "create";
-  const token = tokenFromHeader(request) ?? parsed.token ?? null;
+
+  // RFC 6750 §2: a client MUST NOT use more than one method to transmit the
+  // token. Reject — before authorizing — when the token is present in BOTH the
+  // `Authorization` header and the request body.
+  const headerToken = tokenFromHeader(request);
+  if (headerToken !== null && parsed.token) {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "multiple_token_methods",
+    });
+    return error(
+      "invalid_request",
+      "the access token must be supplied via exactly one method, not both the `Authorization` header and the request body",
+      400,
+    );
+  }
+
+  const token = headerToken ?? parsed.token ?? null;
   const auth = await authorize(
     request,
     env,
