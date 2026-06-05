@@ -5,13 +5,14 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** (challenge state) |
 | **Standard** | [WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) |
-| **Status** | proposed — **exploratory, lowest priority** — tracked in [#64](https://github.com/davidwkeith/workers/issues/64) |
+| **Status** | implemented, unreleased — **exploratory, lowest priority** — tracked in [#64](https://github.com/davidwkeith/workers/issues/64) |
 
 A WebAuthn / passkeys relying party. Filed for completeness, **not** as a
 near-term recommendation: it is a technically clean Workers fit but a step *away*
 from the "implement open *web-presence* standards" thesis and *toward* generic
-authentication. Do not build before confirming it belongs in this scope at all
-(see open question below).
+authentication. The open question below (does an auth method belong in this scope
+at all?) remains open; prefer [`@dwk/indieauth`](indieauth.md) as a site's
+primary identity mechanism.
 
 ## Worker vs. Anglesite (the static split)
 
@@ -29,6 +30,17 @@ Anglesite.
   assertion (authentication) via WebCrypto.
 - Persist credential records: credential id, public key, signature counter, and
   transports.
+
+**As implemented:** the relying party requests `attestation: "none"`, so
+attestation verification covers the `none` and `packed` *self*-attestation
+formats (no `x5c`); full attestation-certificate-chain verification is out of
+scope (it proves authenticator provenance, which a personal-site RP does not
+need). Challenge state **and** credential records live together in the per-RP
+Durable Object's SQLite. Accepted signature algorithms mirror `@dwk/dpop`
+(ES256/ES384, RS256/PS256), offered as `pubKeyCredParams` `[-7, -257]` by
+default. A non-increasing signature counter is rejected (cloned-authenticator
+detection), tolerating the all-zero counter authenticators that do not implement
+one.
 
 ## Design constraints
 

@@ -122,6 +122,25 @@
         ]
       }
     },
+    "@dwk/webauthn": {
+      "standard": "WebAuthn",
+      "suites": {
+        "webauthn-l3": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "registration ceremony stores a credential",
+          "authentication ceremony verifies an assertion",
+          "challenge is single-use (no replay)",
+          "counter regression is rejected (clone detection)"
+        ]
+      }
+    },
     "@dwk/ldn": {
       "standard": "Linked Data Notifications",
       "suites": {
