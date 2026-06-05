@@ -29,6 +29,24 @@ describe("contentSignature", () => {
       await contentSignature("b", body),
     );
   });
+
+  it("emits sha1=<hex> with a correct HMAC-SHA1 (WebSub §8 legacy interop)", async () => {
+    // HMAC-SHA1(key="key", msg="The quick brown fox jumps over the lazy dog")
+    const sig = await contentSignature(
+      "key",
+      encoder.encode("The quick brown fox jumps over the lazy dog"),
+      "sha1",
+    );
+    expect(sig).toBe("sha1=de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9");
+  });
+
+  it("prefixes the header with the configured method name verbatim", async () => {
+    const body = encoder.encode("hi");
+    expect(await contentSignature("k", body, "sha384")).toMatch(/^sha384=/);
+    expect(await contentSignature("k", body, "sha512")).toMatch(/^sha512=/);
+    // The default method stays sha256.
+    expect(await contentSignature("k", body)).toMatch(/^sha256=/);
+  });
 });
 
 describe("buildLinkHeader", () => {
@@ -131,6 +149,25 @@ describe("deliverToSubscriber", () => {
     expect(headers.get("x-hub-signature")).toBe(
       await contentSignature("topsecret", content.body),
     );
+  });
+
+  it("signs with the configured signatureAlgorithm when set", async () => {
+    let seen: { init?: RequestInit } = {};
+    const fetchImpl: FetchLike = vi.fn(async (_input, init) => {
+      seen = { init };
+      return new Response(null, { status: 200 });
+    });
+    await deliverToSubscriber(
+      sub({ secret: "topsecret" }),
+      content,
+      "https://hub.example",
+      { fetch: fetchImpl, signatureAlgorithm: "sha1" },
+    );
+    const headers = new Headers(seen.init?.headers as HeadersInit);
+    expect(headers.get("x-hub-signature")).toBe(
+      await contentSignature("topsecret", content.body, "sha1"),
+    );
+    expect(headers.get("x-hub-signature")).toMatch(/^sha1=/);
   });
 
   it("reports delivered:false on a failed POST", async () => {

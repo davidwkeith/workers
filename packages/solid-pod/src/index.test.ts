@@ -924,6 +924,72 @@ describe("@dwk/solid-pod WAC", () => {
     const anon = await pod.send("GET", "/secret");
     expect(anon.status).toBe(401);
   });
+
+  it("emits WAC-Allow advertising the agent's and the public's privileges on an authenticated GET", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    // Bob holds Read+Write; the public (foaf:Agent) holds only Read.
+    await pod.send("PUT", "/doc.acl", {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+<#bob> a acl:Authorization ; acl:accessTo <${pod.base}/doc> ;
+  acl:agent <${BOB}> ; acl:mode acl:Read, acl:Write .
+<#pub> a acl:Authorization ; acl:accessTo <${pod.base}/doc> ;
+  acl:agentClass foaf:Agent ; acl:mode acl:Read .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const bobGet = await pod.send("GET", "/doc", { webid: BOB });
+    expect(bobGet.status).toBe(200);
+    // `write` implies `append`, so the user group lists both.
+    expect(bobGet.headers.get("wac-allow")).toBe(
+      'user="read write append",public="read"',
+    );
+  });
+
+  it("emits WAC-Allow with the public privileges for an anonymous GET", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/pub", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    await pod.send("PUT", "/pub.acl", {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+<#r> a acl:Authorization ; acl:accessTo <${pod.base}/pub> ;
+  acl:agentClass foaf:Agent ; acl:mode acl:Read .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const anon = await pod.send("GET", "/pub");
+    expect(anon.status).toBe(200);
+    // An anonymous request is its own public; user and public coincide.
+    expect(anon.headers.get("wac-allow")).toBe('user="read",public="read"');
+  });
+});
+
+describe("@dwk/solid-pod Allow header", () => {
+  it("advertises the supported methods on a successful GET", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const get = await pod.send("GET", "/doc", { webid: OWNER });
+    expect(get.status).toBe(200);
+    const allow = get.headers.get("allow") ?? "";
+    expect(allow).toContain("GET");
+    expect(allow).toContain("PUT");
+    expect(allow).toContain("DELETE");
+  });
 });
 
 describe("@dwk/solid-pod N3 Patch", () => {
@@ -1009,6 +1075,83 @@ _:p a solid:InsertDeletePatch ;
       headers: { "content-type": PATCH_CT },
     });
     expect(denied.status).toBe(403);
+  });
+
+  it("returns 422 for a patch missing the InsertDeletePatch type triple", async () => {
+    const pod = freshPod();
+    await seed(pod);
+    const patch = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p solid:inserts { <https://x/me> ex:note "hi" . } .`;
+    const res = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: patch,
+      headers: { "content-type": PATCH_CT },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("returns 422 for a blank node in the inserts formula", async () => {
+    const pod = freshPod();
+    await seed(pod);
+    const patch = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:inserts { <https://x/me> ex:knows _:someone . } .`;
+    const res = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: patch,
+      headers: { "content-type": PATCH_CT },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("returns 422 for more than one solid:where statement", async () => {
+    const pod = freshPod();
+    await seed(pod);
+    const patch = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:where { ?s ex:name "Old" . } ;
+  solid:where { ?s ex:other "x" . } ;
+  solid:inserts { ?s ex:note "hi" . } .`;
+    const res = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: patch,
+      headers: { "content-type": PATCH_CT },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("returns 422 for a template variable absent from where", async () => {
+    const pod = freshPod();
+    await seed(pod);
+    const patch = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:where   { <https://x/me> ex:name "Old" . } ;
+  solid:inserts { <https://x/me> ex:friend ?unbound . } .`;
+    const res = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: patch,
+      headers: { "content-type": PATCH_CT },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("returns 409 when a resolved delete triple is absent (delete_not_found)", async () => {
+    const pod = freshPod();
+    await seed(pod);
+    const patch = `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <http://example.org/> .
+_:p a solid:InsertDeletePatch ;
+  solid:deletes { <https://x/me> ex:name "Gone" . } .`;
+    const res = await pod.send("PATCH", "/card", {
+      webid: OWNER,
+      body: patch,
+      headers: { "content-type": PATCH_CT },
+    });
+    expect(res.status).toBe(409);
   });
 });
 

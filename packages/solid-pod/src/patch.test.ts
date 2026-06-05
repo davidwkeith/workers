@@ -1,7 +1,12 @@
 import type { StoredQuad, StoredTerm } from "@dwk/rdf";
 import { describe, expect, it } from "vitest";
 
-import { parsePatch, PatchProblem, resolvePatch } from "./patch";
+import {
+  parsePatch,
+  PatchConstraintError,
+  PatchProblem,
+  resolvePatch,
+} from "./patch";
 
 const EX = "http://example.org/";
 const BASE = "https://pod.example/card";
@@ -43,7 +48,8 @@ _:p a solid:InsertDeletePatch ;
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where   { ?s ex:name "Old" . } ;
+_:p a solid:InsertDeletePatch ;
+   solid:where   { ?s ex:name "Old" . } ;
    solid:deletes { ?s ex:name "Old" . } ;
    solid:inserts { ?s ex:name "New" . } .`,
       "text/n3",
@@ -60,7 +66,8 @@ _:p solid:where   { ?s ex:name "Old" . } ;
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where { ?s ex:name "Missing" . } ;
+_:p a solid:InsertDeletePatch ;
+   solid:where { ?s ex:name "Missing" . } ;
    solid:inserts { ?s ex:name "New" . } .`,
       "text/n3",
       BASE,
@@ -77,7 +84,8 @@ _:p solid:where { ?s ex:name "Missing" . } ;
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where { ?s ex:kind "person" . } ;
+_:p a solid:InsertDeletePatch ;
+   solid:where { ?s ex:kind "person" . } ;
    solid:inserts { ?s ex:seen "yes" . } .`,
       "text/n3",
       BASE,
@@ -97,7 +105,8 @@ _:p solid:where { ?s ex:kind "person" . } ;
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where {
+_:p a solid:InsertDeletePatch ;
+   solid:where {
 ${lines}
 } ;
    solid:inserts { ?s ex:seen "yes" . } .`,
@@ -118,7 +127,8 @@ ${lines}
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where {
+_:p a solid:InsertDeletePatch ;
+   solid:where {
    ?a ?b ?c .
    ?d ?e ?f .
    ?g ?h ?i .
@@ -145,7 +155,8 @@ _:p solid:where {
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:where {
+_:p a solid:InsertDeletePatch ;
+   solid:where {
    ?s ex:kind "person" .
    ?s ex:name "Ada" .
 } ;
@@ -167,7 +178,8 @@ _:p solid:where {
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:deletes { <${EX}me> ex:name "Old" . } .`,
+_:p a solid:InsertDeletePatch ;
+   solid:deletes { <${EX}me> ex:name "Old" . } .`,
       "text/n3",
       BASE,
     );
@@ -178,11 +190,96 @@ _:p solid:deletes { <${EX}me> ex:name "Old" . } .`,
     const patch = parsePatch(
       `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
 @prefix ex: <${EX}> .
-_:p solid:inserts { <${EX}me> ex:note "hi" . } .`,
+_:p a solid:InsertDeletePatch ;
+   solid:inserts { <${EX}me> ex:note "hi" . } .`,
       "text/n3",
       BASE,
     );
     expect(resolvePatch(patch, []).insertOnly).toBe(true);
+  });
+});
+
+describe("@dwk/solid-pod N3 Patch document constraints", () => {
+  it("rejects a patch missing the InsertDeletePatch type triple", () => {
+    try {
+      parsePatch(
+        `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p solid:inserts { <${EX}me> ex:note "hi" . } .`,
+        "text/n3",
+        BASE,
+      );
+      expect.unreachable("expected missing_type");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchConstraintError);
+      expect((e as PatchConstraintError).code).toBe("missing_type");
+    }
+  });
+
+  it("rejects a blank node in the inserts formula", () => {
+    try {
+      parsePatch(
+        `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p a solid:InsertDeletePatch ;
+   solid:inserts { <${EX}me> ex:knows _:someone . } .`,
+        "text/n3",
+        BASE,
+      );
+      expect.unreachable("expected blank_node_in_template");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchConstraintError);
+      expect((e as PatchConstraintError).code).toBe("blank_node_in_template");
+    }
+  });
+
+  it("rejects more than one solid:where statement", () => {
+    try {
+      parsePatch(
+        `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p a solid:InsertDeletePatch ;
+   solid:where { ?s ex:name "A" . } ;
+   solid:where { ?s ex:name "B" . } ;
+   solid:inserts { ?s ex:seen "yes" . } .`,
+        "text/n3",
+        BASE,
+      );
+      expect.unreachable("expected duplicate_predicate");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchConstraintError);
+      expect((e as PatchConstraintError).code).toBe("duplicate_predicate");
+    }
+  });
+
+  it("rejects a template variable that does not occur in where", () => {
+    try {
+      parsePatch(
+        `@prefix solid: <http://www.w3.org/ns/solid/terms#> .
+@prefix ex: <${EX}> .
+_:p a solid:InsertDeletePatch ;
+   solid:where { ?s ex:name "Old" . } ;
+   solid:inserts { ?s ex:friend ?unbound . } .`,
+        "text/n3",
+        BASE,
+      );
+      expect.unreachable("expected unbound_template_variable");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchConstraintError);
+      expect((e as PatchConstraintError).code).toBe(
+        "unbound_template_variable",
+      );
+    }
+  });
+
+  it("rejects malformed N3 as a document constraint violation", () => {
+    try {
+      parsePatch("@prefix solid: <broken", "text/n3", BASE);
+      expect.unreachable("expected parse_error");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PatchConstraintError);
+      expect((e as PatchConstraintError).code).toBe("parse_error");
+    }
   });
 });
 

@@ -315,6 +315,131 @@ describe("inbox handling", () => {
     });
   });
 
+  it("removes the following row on a Reject of our Follow", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'pending', ?)`,
+        REMOTE,
+        1,
+      );
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/r/1",
+            type: "Reject",
+            actor: REMOTE,
+            object: {
+              type: "Follow",
+              actor: `${BASE}/users/${username}`,
+              object: REMOTE,
+            },
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const remaining = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
+        .one().n;
+      expect(remaining).toBe(0);
+    });
+  });
+
+  it("ignores a Reject whose object is not a Follow", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'accepted', ?)`,
+        REMOTE,
+        1,
+      );
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/r/2",
+            type: "Reject",
+            actor: REMOTE,
+            object: { type: "Like", object: "x" },
+          }),
+        ),
+      );
+      const remaining = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
+        .one().n;
+      expect(remaining).toBe(1);
+    });
+  });
+
+  it("forwards a reply to a local post to followers (§7.1.2)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/c/reply-1",
+            type: "Create",
+            actor: REMOTE,
+            to: [iris.followers],
+            object: {
+              id: "https://remote.example/notes/reply-1",
+              type: "Note",
+              content: "nice post",
+              inReplyTo: `${iris.outbox}/local-post-1`,
+            },
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(1);
+    });
+  });
+
+  it("does not forward a reply that references no local object (§7.1.2)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/c/reply-2",
+            type: "Create",
+            actor: REMOTE,
+            to: [iris.followers],
+            object: {
+              id: "https://remote.example/notes/reply-2",
+              type: "Note",
+              content: "elsewhere",
+              inReplyTo: "https://other.example/notes/999",
+            },
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(0);
+    });
+  });
+
   it("ignores a Follow that targets a different actor", async () => {
     const { username, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
@@ -498,13 +623,12 @@ describe("publish endpoint", () => {
   });
 
   it("publishes a pre-wrapped activity unchanged at the top level", async () => {
-    const { username, stub } = freshUser();
+    const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance) => {
       const res = await instance.fetch(
         outboxRequest(
           username,
           JSON.stringify({
-            id: "https://social.example/act/keep-me",
             type: "Announce",
             object: "https://remote.example/notes/1",
           }),
@@ -514,8 +638,32 @@ describe("publish endpoint", () => {
       expect(res.status).toBe(201);
       const activity = (await res.json()) as Record<string, unknown>;
       expect(activity.type).toBe("Announce");
-      // A supplied activity id is preserved.
-      expect(activity.id).toBe("https://social.example/act/keep-me");
+      // The server mints the activity id under our outbox IRI space.
+      expect(String(activity.id).startsWith(iris.outbox)).toBe(true);
+    });
+  });
+
+  it("mints a server id for an owner activity, ignoring a client-supplied id", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://attacker.example/act/forged",
+            type: "Announce",
+            object: "https://remote.example/notes/1",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      // §6/§3.1: the server overwrites the client id, and the Location header
+      // reflects the minted id.
+      expect(activity.id).not.toBe("https://attacker.example/act/forged");
+      expect(String(activity.id).startsWith(iris.outbox)).toBe(true);
+      expect(res.headers.get("location")).toBe(activity.id);
     });
   });
 

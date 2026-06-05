@@ -317,6 +317,45 @@ describe("@dwk/indieauth authorization endpoint validation", () => {
     expect(loc.searchParams.get("error")).toBe("invalid_request");
   });
 
+  it("rejects a missing state with invalid_request (redirected)", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("error")).toBe("invalid_request");
+  });
+
+  it("round-trips the exact state on a successful authorization", async () => {
+    const handler = autoApproveHandler();
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("state", "round-trip-state");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("me", ME);
+    const res = await handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.searchParams.get("state")).toBe("round-trip-state");
+    expect(loc.searchParams.get("code")).toBeTruthy();
+  });
+
   it("rejects a redirect_uri carrying a fragment", async () => {
     const handler = autoApproveHandler();
     const url = new URL(`${BASE}/authorize`);

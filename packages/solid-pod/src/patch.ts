@@ -19,6 +19,8 @@ import {
 } from "@dwk/rdf";
 
 const SOLID = "http://www.w3.org/ns/solid/terms#";
+const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const INSERT_DELETE_PATCH = `${SOLID}InsertDeletePatch`;
 const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
 const DEFAULT_GRAPH: StoredTerm = { termType: "DefaultGraph", value: "" };
 
@@ -55,7 +57,6 @@ export type PatchError =
   | "unsupported_media_type"
   | "no_match"
   | "ambiguous_match"
-  | "unbound_template_variable"
   | "delete_not_found"
   | "where_too_complex";
 
@@ -63,6 +64,31 @@ export class PatchProblem extends Error {
   constructor(readonly code: PatchError) {
     super(`@dwk/solid-pod: patch ${code}`);
     this.name = "PatchProblem";
+  }
+}
+
+/**
+ * A stable failure code for a violation of the N3 Patch *document constraints*
+ * (Solid Protocol §5.3.1) — as distinct from a binding/state outcome. These all
+ * mean the patch document is itself malformed or ill-formed per the spec, and
+ * MUST be answered with `422 Unprocessable Entity` (`#server-patch-n3-invalid`).
+ */
+export type PatchConstraint =
+  | "parse_error"
+  | "missing_type"
+  | "duplicate_predicate"
+  | "blank_node_in_template"
+  | "unbound_template_variable";
+
+/**
+ * Thrown when a patch document does not satisfy the N3 Patch document
+ * constraints. Kept distinct from {@link PatchProblem} so the handler can map it
+ * to `422` while binding/state failures stay `409`.
+ */
+export class PatchConstraintError extends Error {
+  constructor(readonly code: PatchConstraint) {
+    super(`@dwk/solid-pod: patch constraint ${code}`);
+    this.name = "PatchConstraintError";
   }
 }
 
@@ -127,18 +153,30 @@ function tripleFromQuad(quad: Quad): PatchTriple {
 // N3 Patch parsing
 // ---------------------------------------------------------------------------
 
-/** Collect the inner triples of the formula referenced by `(subject, predicate)`. */
+/**
+ * Collect the inner triples of the formula referenced by `(subject, predicate)`.
+ *
+ * Each of `solid:where` / `solid:inserts` / `solid:deletes` MUST appear at most
+ * once (Solid Protocol §5.3.1); more than one such statement is a document
+ * constraint violation (`#server-patch-n3-invalid`), reported as
+ * {@link PatchConstraintError} `duplicate_predicate`.
+ */
 function formulaTriples(quads: Quad[], predicateIri: string): PatchTriple[] {
   // The statement `_:patch solid:<predicate> { … }` references the formula as a
   // blank-node graph; N3.js emits the formula's triples with that graph term.
   const graphValues = new Set<string>();
+  let statementCount = 0;
   for (const q of quads) {
     if (
       q.predicate.value === predicateIri &&
       q.graph.termType === "DefaultGraph"
     ) {
+      statementCount++;
       if (q.object.termType === "BlankNode") graphValues.add(q.object.value);
     }
+  }
+  if (statementCount > 1) {
+    throw new PatchConstraintError("duplicate_predicate");
   }
   const triples: PatchTriple[] = [];
   for (const q of quads) {
@@ -149,19 +187,72 @@ function formulaTriples(quads: Quad[], predicateIri: string): PatchTriple[] {
   return triples;
 }
 
-/** Parse an N3 Patch document (`text/n3`). */
+/** Whether any term of a triple is a blank node. */
+function tripleHasBlankNode(triple: PatchTriple): boolean {
+  return [triple.subject, triple.predicate, triple.object].some(
+    (t) => t.kind === "term" && t.term.termType === "BlankNode",
+  );
+}
+
+/** Collect the variable names a triple references. */
+function collectVars(triple: PatchTriple, into: Set<string>): void {
+  for (const term of [triple.subject, triple.predicate, triple.object]) {
+    if (term.kind === "var") into.add(term.name);
+  }
+}
+
+/** Parse an N3 Patch document (`text/n3`) and enforce its document constraints. */
 function parseN3Patch(body: string, baseIRI: string): Patch {
   let quads: Quad[];
   try {
     quads = parseTurtle(body, { format: "text/n3", baseIRI });
   } catch {
-    throw new PatchProblem("parse_error");
+    throw new PatchConstraintError("parse_error");
   }
-  return {
+
+  // `#server-patch-n3-simple-type`: the patch document MUST contain exactly one
+  // `?patch rdf:type solid:InsertDeletePatch` statement in the default graph.
+  const hasType = quads.some(
+    (q) =>
+      q.graph.termType === "DefaultGraph" &&
+      q.predicate.value === RDF_TYPE &&
+      q.object.termType === "NamedNode" &&
+      q.object.value === INSERT_DELETE_PATCH,
+  );
+  if (!hasType) {
+    throw new PatchConstraintError("missing_type");
+  }
+
+  const patch: Patch = {
     where: formulaTriples(quads, `${SOLID}where`),
     deletes: formulaTriples(quads, `${SOLID}deletes`),
     inserts: formulaTriples(quads, `${SOLID}inserts`),
   };
+
+  // `#server-patch-n3-blank-nodes`: the inserts/deletes formulae MUST NOT
+  // contain blank nodes.
+  if (
+    patch.inserts.some(tripleHasBlankNode) ||
+    patch.deletes.some(tripleHasBlankNode)
+  ) {
+    throw new PatchConstraintError("blank_node_in_template");
+  }
+
+  // `#server-patch-n3-variables`: every variable used in inserts/deletes MUST
+  // occur in `where`. Detect this statically so a template using an unbound
+  // variable is a document constraint violation (422), not a runtime miss.
+  const whereVars = new Set<string>();
+  for (const t of patch.where) collectVars(t, whereVars);
+  const templateVars = new Set<string>();
+  for (const t of patch.inserts) collectVars(t, templateVars);
+  for (const t of patch.deletes) collectVars(t, templateVars);
+  for (const name of templateVars) {
+    if (!whereVars.has(name)) {
+      throw new PatchConstraintError("unbound_template_variable");
+    }
+  }
+
+  return patch;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +475,10 @@ function solve(
 function instantiate(term: PatchTerm, bindings: Bindings): StoredTerm {
   if (term.kind === "var") {
     const bound = bindings.get(term.name);
-    if (!bound) throw new PatchProblem("unbound_template_variable");
+    // N3 patches are checked statically in `parseN3Patch`; this backstops the
+    // SPARQL path, where an unbound template variable is also a document
+    // constraint violation (422).
+    if (!bound) throw new PatchConstraintError("unbound_template_variable");
     return bound;
   }
   return term.term;
@@ -420,8 +514,10 @@ function contains(current: readonly StoredQuad[], target: StoredQuad): boolean {
  *  - `no_match` when `where` binds to no solution;
  *  - `ambiguous_match` when it binds to more than one;
  *  - `delete_not_found` when a resolved delete triple is absent;
- *  - `unbound_template_variable` when a template uses an unbound variable;
  *  - `where_too_complex` when the `where` pattern exceeds the solver's bounds.
+ * @throws {PatchConstraintError}
+ *  - `unbound_template_variable` when a template uses an unbound variable
+ *    (backstop for the SPARQL path; N3 patches are checked at parse time).
  */
 export function resolvePatch(
   patch: Patch,

@@ -71,7 +71,17 @@ export async function signRfc9421(
     throw new Error("http-signatures: message.url is not a valid URL");
   const sigParams = signatureParamsValue(params);
   const lines: string[] = [];
+  // RFC 9421 §2: each component identifier MUST occur only once in the covered
+  // component list. A repeated identifier is a signer bug — reject it loudly.
+  const seen = new Set<string>();
   for (const name of params.components) {
+    const id = name.toLowerCase();
+    if (seen.has(id)) {
+      throw new Error(
+        `http-signatures: duplicate covered component "${name}" (RFC 9421 §2)`,
+      );
+    }
+    seen.add(id);
     const value = deriveComponentValue(ctx, name);
     if (value === null) {
       throw new Error(
@@ -228,10 +238,16 @@ export async function verifyRfc9421(
   const ctx = derivationContext(message);
   if (ctx === null) return fail("covered_component_missing");
   const lines: string[] = [];
+  // RFC 9421 §2 / §2.5: each component identifier (name plus its serialized
+  // parameters) MUST occur only once; a repeated identifier is malformed.
+  const seen = new Set<string>();
   for (const item of input.items) {
     if (item.params.length > 0 || typeof item.value !== "string") {
       return fail("components_malformed");
     }
+    const id = item.value.toLowerCase();
+    if (seen.has(id)) return fail("components_malformed");
+    seen.add(id);
     const value = deriveComponentValue(ctx, item.value);
     if (value === null) return fail("covered_component_missing");
     lines.push(`${item.raw}: ${value}`);

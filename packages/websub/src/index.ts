@@ -70,6 +70,8 @@ export {
   buildLinkHeader,
   fetchTopicContent,
   deliverToSubscriber,
+  DEFAULT_SIGNATURE_ALGORITHM,
+  type SignatureAlgorithm,
   type TopicContent,
   type DeliveryResult,
   type DistributeOptions,

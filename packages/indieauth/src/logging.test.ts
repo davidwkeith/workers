@@ -178,6 +178,7 @@ describe("@dwk/indieauth authorization logging", () => {
     url.searchParams.set("response_type", "code");
     url.searchParams.set("client_id", CLIENT_ID);
     url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("state", "s");
     await handler(
       new Request(url.toString(), { redirect: "manual" }),
       harness,

@@ -169,6 +169,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       this.#recordSeen(id);
     }
 
+    // Reaching here means the activity id was not already seen (the dedup check
+    // above returns 202 early for a duplicate). A truthy `firstSeen` is what
+    // §7.1.2 requires before considering inbox forwarding.
+    const firstSeen = typeof id === "string" && id.length > 0;
+
     const type = typeof activity.type === "string" ? activity.type : "";
     switch (type) {
       case "Follow":
@@ -180,6 +185,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       case "Accept":
         this.#onAccept(activity);
         break;
+      case "Reject":
+        this.#onReject(activity);
+        break;
       case "Delete":
         this.#onDelete(activity);
         break;
@@ -188,6 +196,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       case "Like":
       case "Announce":
         this.#storeInbox(activity);
+        await this.#maybeForward(activity, firstSeen, config);
         break;
       default:
         // Be liberal: an unknown activity is accepted (and ignored) so we do not
@@ -274,6 +283,21 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
   }
 
+  /**
+   * Handle a remote `Reject` of our `Follow`: drop the pending `following` row
+   * for the rejecting actor. A `Reject` of a `Follow` we sent leaves the row
+   * stuck `pending` forever otherwise, so the request never retries or clears.
+   */
+  #onReject(activity: ActivityObject): void {
+    // Only a `Reject` whose object is the `Follow` we sent concerns us; any
+    // other rejected object is for an activity we never tracked here.
+    if (objectType(activity.object) !== "Follow") return;
+    const remote = actorIri(activity.actor);
+    if (remote) {
+      this.#sql.exec(`DELETE FROM following WHERE actor = ?`, remote);
+    }
+  }
+
   /** Handle `Delete` of an actor: drop it from followers if present. */
   #onDelete(activity: ActivityObject): void {
     const gone = objectId(activity.object);
@@ -289,6 +313,91 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       JSON.stringify(activity),
       Date.now(),
     );
+  }
+
+  /**
+   * ActivityPub §7.1.2 inbox forwarding ("ghost replies"). When a remote
+   * activity (a) is freshly seen, (b) addresses a collection this actor owns —
+   * in practice our `followers` collection (directly or via the Public
+   * collection) — and (c) references via `object` / `target` / `inReplyTo` /
+   * `tag` an object WE own (i.e. an IRI under this actor's resources), we
+   * re-deliver the VERBATIM activity to our followers. Without this, a reply to
+   * one of our posts never reaches the followers who only saw the original
+   * through us ("ghost replies").
+   *
+   * Conservative by design: we forward only when we actually own the referenced
+   * local object, so a peer cannot use us to amplify arbitrary traffic. The
+   * §7.1.2 depth limit is satisfied implicitly — we forward only when we are the
+   * ORIGIN of the addressed local object (the referenced IRI is ours), never
+   * because some upstream server forwarded the activity to us.
+   */
+  async #maybeForward(
+    activity: ActivityObject,
+    firstSeen: boolean,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    if (!firstSeen) return;
+    if (!this.#addressesFollowers(activity, config.iris)) return;
+    if (!this.#referencesLocalObject(activity, config.iris)) return;
+
+    // Re-deliver the activity exactly as received (verbatim) to our followers.
+    const body = JSON.stringify(activity);
+    let forwarded = false;
+    for (const row of this.#sql
+      .exec<{
+        inbox: string | null;
+      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+      .toArray()) {
+      if (row.inbox) {
+        this.#enqueueDelivery(row.inbox, body);
+        forwarded = true;
+      }
+    }
+    if (forwarded) await this.#armAlarm();
+  }
+
+  /**
+   * Whether the activity's addressing (`to` / `cc` / `audience`) names a
+   * collection we own — our `followers` collection, either directly or via the
+   * special Public collection that fans out to followers.
+   */
+  #addressesFollowers(activity: ActivityObject, iris: ActorIris): boolean {
+    const recipients = new Set<string>();
+    for (const field of ["to", "cc", "audience", "bto", "bcc"] as const) {
+      for (const value of audienceValues(activity[field])) {
+        recipients.add(value);
+      }
+    }
+    return recipients.has(iris.followers) || recipients.has(PUBLIC_AUDIENCE);
+  }
+
+  /**
+   * Whether the activity references — via `object`, `target`, `inReplyTo`, or
+   * `tag` — an object WE own, i.e. an IRI under this actor's resources. The
+   * `inReplyTo` may sit on the wrapped object (e.g. a `Create`'s `Note`), so we
+   * inspect both the activity and its embedded object.
+   */
+  #referencesLocalObject(activity: ActivityObject, iris: ActorIris): boolean {
+    const refs: (JsonValue | undefined)[] = [
+      activity.object,
+      activity.target,
+      activity.inReplyTo,
+      activity.tag,
+    ];
+    const inner = activity.object;
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      const obj = inner as Record<string, JsonValue>;
+      // The §7.1.2 reference fields, as they appear on the WRAPPED object (a
+      // `Create`'s `Note` carries the `inReplyTo`). The object's own `id` is not
+      // a reference to something we own, so it is intentionally excluded.
+      refs.push(obj.inReplyTo, obj.target, obj.tag);
+    }
+    for (const ref of refs) {
+      for (const iri of referenceIris(ref)) {
+        if (isLocalResource(iri, iris)) return true;
+      }
+    }
+    return false;
   }
 
   // -- publish (owner C2S seam) ----------------------------------------------
@@ -348,10 +457,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const activityId = `${iris.outbox}/${crypto.randomUUID()}`;
 
     if (isActivity) {
+      // Per ActivityPub §6 / §3.1 the SERVER assigns the activity `id`; a
+      // client-supplied `id` is ignored/overwritten so a peer cannot dictate
+      // our IRI space (matching the bare-object wrap path below).
       return {
         "@context": "https://www.w3.org/ns/activitystreams",
         ...(input as Record<string, JsonValue>),
-        id: typeof input.id === "string" ? input.id : activityId,
+        id: activityId,
         actor: iris.id,
         published,
       };
@@ -658,6 +770,52 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 /** The path portion (with query) of an IRI, for routing comparisons. */
 function pathOf(iri: string): string {
   return new URL(iri).pathname;
+}
+
+/** Flatten an addressing field (`to`/`cc`/…) to the set of IRI strings it names. */
+function audienceValues(value: JsonValue | undefined): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  return [];
+}
+
+/**
+ * Flatten a reference field (`object`/`target`/`inReplyTo`/`tag`) to the IRI
+ * strings it points at, whether it is a string, an embedded object (its `id`),
+ * or an array of either.
+ */
+function referenceIris(value: JsonValue | undefined): string[] {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((v) => referenceIris(v));
+  }
+  const id = objectId(value);
+  return id ? [id] : [];
+}
+
+/**
+ * Whether an IRI names a resource this actor owns: same origin as the actor IRI
+ * and a path under the actor's path prefix. Conservative on purpose — only an
+ * IRI clearly within our resource space counts as ours.
+ */
+function isLocalResource(iri: string, iris: ActorIris): boolean {
+  let url: URL;
+  let actor: URL;
+  try {
+    url = new URL(iri);
+    actor = new URL(iris.id);
+  } catch {
+    return false;
+  }
+  if (url.origin !== actor.origin) return false;
+  // The actor IRI itself, or any path beneath it (e.g. `<actor>/outbox/<uuid>`,
+  // `<actor>/statuses/1`) is ours.
+  return (
+    url.pathname === actor.pathname ||
+    url.pathname.startsWith(`${actor.pathname}/`)
+  );
 }
 
 /**

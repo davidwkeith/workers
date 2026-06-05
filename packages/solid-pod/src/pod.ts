@@ -47,8 +47,13 @@ import {
   toIri,
 } from "./ldp";
 import { negotiateMediaType, type Negotiated } from "./negotiation";
-import { parsePatch, PatchProblem, resolvePatch } from "./patch";
-import { authorize } from "./wac";
+import {
+  parsePatch,
+  PatchConstraintError,
+  PatchProblem,
+  resolvePatch,
+} from "./patch";
+import { authorize, grantedModes } from "./wac";
 
 const LDP = "http://www.w3.org/ns/ldp#";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -193,7 +198,16 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             "read",
             agent,
             requestOrigin,
-            () => this.#read(store, origin, path, request, method === "HEAD"),
+            () =>
+              this.#read(
+                store,
+                origin,
+                path,
+                request,
+                method === "HEAD",
+                agent,
+                requestOrigin,
+              ),
           );
         case "PUT":
           return await this.#authorizeThenAsync(
@@ -378,6 +392,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     path: string,
     request: Request,
     headOnly: boolean,
+    agent: string | undefined,
+    requestOrigin: string | undefined,
   ): Promise<Response> {
     const meta = store.head(path);
     if (!meta) return text(404, "Not Found");
@@ -387,6 +403,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       return new Response(null, { status: 304, headers: { etag: meta.etag } });
     }
 
+    // WAC §5.3.5: GET/HEAD MUST advertise the client's privileges (and the
+    // public's) via `WAC-Allow`. Computed once and threaded into the header
+    // builder for both the blob and RDF responses.
+    const wacAllow = this.#wacAllow(store, origin, path, agent, requestOrigin);
+
     if (meta.kind === "blob") {
       // Streamed straight from R2 — never buffered in the DO.
       return this.#readBlobResponse(
@@ -395,6 +416,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         meta.etag,
         meta.contentType,
         headOnly,
+        wacAllow,
       );
     }
 
@@ -417,7 +439,37 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       meta.etag,
       headOnly,
       inboxIris,
+      wacAllow,
     );
+  }
+
+  /**
+   * Compute the `WAC-Allow` header value for a read (WAC §5.3.5). The format is
+   * `user="…",public="…"`: the privileges the authenticated agent holds and the
+   * privileges any unauthenticated agent holds, each a space-separated list of
+   * lowercase mode tokens. The pod owner always holds the full set.
+   */
+  #wacAllow(
+    store: Store,
+    origin: string,
+    path: string,
+    agent: string | undefined,
+    requestOrigin: string | undefined,
+  ): string {
+    const publicModes = grantedModes(
+      store,
+      origin,
+      path,
+      undefined,
+      requestOrigin,
+    );
+    const userModes =
+      agent !== undefined && this.#owners.includes(agent)
+        ? new Set<AccessMode>(["read", "write", "append", "control"])
+        : agent !== undefined
+          ? grantedModes(store, origin, path, agent, requestOrigin)
+          : publicModes;
+    return wacAllowHeader(userModes, publicModes);
   }
 
   async #readBlobResponse(
@@ -426,11 +478,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     etag: string,
     contentType: string,
     headOnly: boolean,
+    wacAllow: string,
   ): Promise<Response> {
     const blob = await store.readBlob(path);
     if (!blob) return text(404, "Not Found");
     const headers = baseHeaders(path, etag, blob.contentType || contentType);
     headers.set("content-length", String(blob.size));
+    headers.set("wac-allow", wacAllow);
     if (headOnly) {
       await blob.stream.cancel();
       return new Response(null, { status: 200, headers });
@@ -446,12 +500,14 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     etag: string,
     headOnly: boolean,
     inboxIris: readonly string[],
+    wacAllow: string,
   ): Promise<Response> {
     const body = await serializeRdf(quads, negotiated.mediaType, {
       baseIRI: toIri(origin, path),
       prefixes: SERIALIZE_PREFIXES,
     });
     const headers = baseHeaders(path, etag, negotiated.mediaType, inboxIris);
+    headers.set("wac-allow", wacAllow);
     return new Response(headOnly ? null : body, { status: 200, headers });
   }
 
@@ -486,8 +542,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return new Response(null, {
       status: existed ? 204 : 201,
       headers: meta
-        ? { etag: meta.etag, location: toIri(origin, path) }
-        : { location: toIri(origin, path) },
+        ? { etag: meta.etag, location: toIri(origin, path), allow: ALLOW }
+        : { location: toIri(origin, path), allow: ALLOW },
     });
   }
 
@@ -529,8 +585,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return new Response(null, {
       status: 201,
       headers: meta
-        ? { location: childIri, etag: meta.etag }
-        : { location: childIri },
+        ? { location: childIri, etag: meta.etag, allow: ALLOW }
+        : { location: childIri, allow: ALLOW },
     });
   }
 
@@ -552,6 +608,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     try {
       parsed = parsePatch(body, contentType, toIri(origin, path));
     } catch (error) {
+      // A document-constraint violation (malformed N3, missing type triple,
+      // duplicate predicate, blank node or unbound variable in a template) means
+      // the patch does not satisfy the N3 Patch document constraints → 422
+      // (Solid Protocol §5.3.1, `#server-patch-n3-invalid`).
+      if (error instanceof PatchConstraintError) {
+        return text(422, `Invalid patch document: ${error.code}`);
+      }
       if (error instanceof PatchProblem) {
         return error.code === "unsupported_media_type"
           ? text(415, "Unsupported patch media type")
@@ -581,10 +644,18 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     try {
       resolved = resolvePatch(parsed, current);
     } catch (error) {
+      // An unbound template variable surfaced here (the SPARQL path, which has
+      // no static check) is a document constraint violation → 422.
+      if (error instanceof PatchConstraintError) {
+        return text(422, `Invalid patch document: ${error.code}`);
+      }
       if (error instanceof PatchProblem) {
-        // A pattern we refuse to evaluate (DoS guard) is a bad request, not a
-        // state conflict: 400. Everything else means the document does not
-        // satisfy the patch precondition: 409 Conflict per the Solid Protocol.
+        // `where_too_complex` is our own DoS guard, not a Solid-defined
+        // condition (a richer-than-supported `where` pattern); we keep it a
+        // 400 Bad Request as a non-spec extension. The remaining outcomes —
+        // `no_match`, `ambiguous_match`, `delete_not_found` — are binding/state
+        // results that mean the patch's precondition does not hold against the
+        // current document: 409 Conflict (`#server-patch-n3-semantics`).
         return error.code === "where_too_complex"
           ? text(400, `Patch where pattern too complex: ${error.code}`)
           : text(409, `Patch does not apply: ${error.code}`);
@@ -614,7 +685,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const meta = store.head(path);
     return new Response(null, {
       status: existed ? 204 : 201,
-      headers: meta ? { etag: meta.etag } : {},
+      headers: meta ? { etag: meta.etag, allow: ALLOW } : { allow: ALLOW },
     });
   }
 
@@ -663,7 +734,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     this.#removeContainment(store, origin, path);
     await this.#drainOrphans(store);
     this.#broadcast(toIri(origin, path), "Delete");
-    return new Response(null, { status: 204 });
+    return new Response(null, { status: 204, headers: { allow: ALLOW } });
   }
 
   // -- options ---------------------------------------------------------------
@@ -890,6 +961,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
 const ALLOW = "GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE";
 
+// TODO(`#server-delete-protect-root-container`): the root storage/container
+// MUST NOT be deletable, so its advertised `Allow` should omit DELETE. We do
+// not yet model "is the storage root" here (paths reach the DO already
+// stripped of any mount prefix), so the method list is uniform for now.
+
 /**
  * Concrete RDF media types a container `POST` accepts, advertised on `OPTIONS`.
  * A bare catch-all wildcard is uninformative; listing the guaranteed
@@ -986,6 +1062,27 @@ class LengthRequiredError extends Error {}
  */
 class DpopReplayError extends Error {}
 
+/**
+ * Render a `WAC-Allow` value from the granted-mode sets (WAC §5.3.5):
+ * `user="read write …",public="…"`. `write` implies `append`, so an `append`
+ * token is emitted whenever `write` is granted. Each group is always quoted,
+ * empty or not, in a stable mode order.
+ */
+function wacAllowHeader(
+  userModes: ReadonlySet<AccessMode>,
+  publicModes: ReadonlySet<AccessMode>,
+): string {
+  return `user="${formatModes(userModes)}",public="${formatModes(publicModes)}"`;
+}
+
+/** Order and stringify a mode set, expanding the `write ⇒ append` implication. */
+function formatModes(modes: ReadonlySet<AccessMode>): string {
+  const effective = new Set<AccessMode>(modes);
+  if (effective.has("write")) effective.add("append");
+  const order: AccessMode[] = ["read", "write", "append", "control"];
+  return order.filter((m) => effective.has(m)).join(" ");
+}
+
 function baseHeaders(
   path: string,
   etag: string,
@@ -996,6 +1093,9 @@ function baseHeaders(
     etag,
     "content-type": contentType,
     "accept-patch": "text/n3, application/sparql-update",
+    // Solid `#server-allow-methods`: successful responses advertise the methods
+    // the resource supports, the same list used by OPTIONS and the 405 path.
+    allow: ALLOW,
   });
   const links = [
     isContainer(path)
