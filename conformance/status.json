@@ -162,6 +162,14 @@
         "cases": []
       }
     },
+    "@dwk/oauth": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/store": {
       "standard": null,
       "suites": {},

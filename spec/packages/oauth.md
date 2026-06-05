@@ -6,7 +6,7 @@
 | **Ships a DO?** | no |
 | **Used by** | [`@dwk/indieauth`](indieauth.md); the eventual Solid-OIDC OP |
 | **Standard** | [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) · [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) · [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009) · [RFC 9126](https://www.rfc-editor.org/rfc/rfc9126) · [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591) |
-| **Status** | proposed — tracked in [#62](https://github.com/davidwkeith/workers/issues/62) |
+| **Status** | implemented, unreleased — tracked in [#62](https://github.com/davidwkeith/workers/issues/62) |
 
 The shared OAuth 2.0 server building blocks the **Solid-OIDC OP** open question
 ([open-questions.md](../open-questions.md) §1) will need, and that
@@ -55,6 +55,9 @@ and IndieAuth from diverging.
 
 ## Open questions
 
-- Is this its own package, part of `@dwk/indieauth`, or the substrate for a
-  future `@dwk/solid-oidc` OP? Ties directly to
+- ~~Is this its own package, part of `@dwk/indieauth`, or the substrate for a
+  future `@dwk/solid-oidc` OP?~~ **Resolved:** its own cross-standard reusable
+  lib (`@dwk/oauth`), alongside `@dwk/dpop`/`@dwk/log`. `@dwk/indieauth` and the
+  future OP compose it rather than re-implementing the primitives. The OP
+  ownership question itself stays open in
   [open-questions.md](../open-questions.md) §1.
