@@ -1,15 +1,15 @@
 {
-  "name": "@dwk/activitypub",
+  "name": "@dwk/ldn",
   "version": "0.0.0",
-  "description": "Edge-native ActivityPub actor: inbox/outbox, follower collections, signed S2S federation. Ships the per-actor Durable Object.",
+  "description": "Linked Data Notifications (W3C LDN) primitives: inbox discovery, notification validation, and listing. RDF-only, protocol-agnostic.",
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
-  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/activitypub#readme",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/ldn#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/davidwkeith/workers.git",
-    "directory": "packages/activitypub"
+    "directory": "packages/ldn"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -18,13 +18,16 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery.d.ts",
+      "import": "./dist/discovery.js"
     }
   },
   "files": [
     "dist",
     "src",
-    "!src/**/*.test.ts",
-    "!src/test-harness.ts"
+    "!src/**/*.test.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -35,7 +38,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@dwk/ldn": "workspace:*",
-    "@dwk/log": "workspace:*"
+    "@dwk/rdf": "workspace:*"
   }
 }

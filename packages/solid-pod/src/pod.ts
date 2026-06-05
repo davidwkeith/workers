@@ -31,6 +31,7 @@ import {
   type Store,
   type WriteOptions,
 } from "@dwk/store";
+import { discoverInboxIris, inboxLinkHeader } from "@dwk/ldn/discovery";
 import type { AccessMode } from "@dwk/wac";
 
 import { INTERNAL_HEADERS, type SolidPodEnv } from "./config";
@@ -402,7 +403,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       return text(406, "Not Acceptable");
     }
 
-    const quads = store.readQuads(path).map(storedToQuad);
+    const stored = store.readQuads(path);
+    const quads = stored.map(storedToQuad);
+    // LDN discovery: surface any `ldp:inbox` this resource declares as a
+    // `Link rel="…ldp#inbox"` so notification senders can find the inbox without
+    // parsing the body. RDF-only — the body must point at its own inbox.
+    const inboxIris = discoverInboxIris(stored, toIri(origin, path));
     return this.#serializeResponse(
       quads,
       negotiated,
@@ -410,6 +416,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       path,
       meta.etag,
       headOnly,
+      inboxIris,
     );
   }
 
@@ -438,12 +445,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     path: string,
     etag: string,
     headOnly: boolean,
+    inboxIris: readonly string[],
   ): Promise<Response> {
     const body = await serializeRdf(quads, negotiated.mediaType, {
       baseIRI: toIri(origin, path),
       prefixes: SERIALIZE_PREFIXES,
     });
-    const headers = baseHeaders(path, etag, negotiated.mediaType);
+    const headers = baseHeaders(path, etag, negotiated.mediaType, inboxIris);
     return new Response(headOnly ? null : body, { status: 200, headers });
   }
 
@@ -978,16 +986,24 @@ class LengthRequiredError extends Error {}
  */
 class DpopReplayError extends Error {}
 
-function baseHeaders(path: string, etag: string, contentType: string): Headers {
+function baseHeaders(
+  path: string,
+  etag: string,
+  contentType: string,
+  inboxIris: readonly string[] = [],
+): Headers {
   const headers = new Headers({
     etag,
     "content-type": contentType,
     "accept-patch": "text/n3, application/sparql-update",
   });
-  const types = isContainer(path)
-    ? `<${LDP}BasicContainer>; rel="type", <${LDP}Resource>; rel="type"`
-    : `<${LDP}Resource>; rel="type"`;
-  headers.set("link", types);
+  const links = [
+    isContainer(path)
+      ? `<${LDP}BasicContainer>; rel="type", <${LDP}Resource>; rel="type"`
+      : `<${LDP}Resource>; rel="type"`,
+    ...inboxIris.map(inboxLinkHeader),
+  ];
+  headers.set("link", links.join(", "));
   return headers;
 }
 

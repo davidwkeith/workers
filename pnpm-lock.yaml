@@ -44,6 +44,9 @@ importers:
 
   packages/activitypub:
     dependencies:
+      '@dwk/ldn':
+        specifier: workspace:*
+        version: link:../ldn
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
@@ -60,6 +63,12 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+
+  packages/ldn:
+    dependencies:
+      '@dwk/rdf':
+        specifier: workspace:*
+        version: link:../rdf
 
   packages/log: {}
 
@@ -98,6 +107,9 @@ importers:
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop
+      '@dwk/ldn':
+        specifier: workspace:*
+        version: link:../ldn
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
