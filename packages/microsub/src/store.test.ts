@@ -143,6 +143,17 @@ describe("items", () => {
       limit: 10,
     });
     expect(newer.items.map((i) => i.entryId)).toEqual(["5", "4"]);
+    // A partial newer-page still offers `before` so the client can page back
+    // down to the entries it came from.
+    expect(newer.before).toBe(String(newer.items.at(-1)!.seq));
+  });
+
+  it("materialises the reserved channel via ensureSchema (no list needed)", async () => {
+    // A fresh store that never lists channels still sees `notifications`, so a
+    // direct timeline/unread request for it does not 404.
+    const fresh = createMicrosubStore(harness);
+    expect(await fresh.channelExists(NOTIFICATIONS_CHANNEL)).toBe(true);
+    expect(await fresh.unreadCount(NOTIFICATIONS_CHANNEL)).toBe(0);
   });
 
   it("marks read through a cursor and removes items", async () => {

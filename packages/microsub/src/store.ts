@@ -271,30 +271,37 @@ export function createMicrosubStore(env: MicrosubStoreEnv): MicrosubStore {
   }
   const db = env.MICROSUB_DB;
 
+  // The init promise is cached per store instance (not module-globally): the
+  // vitest-pool-workers test model resets D1 between tests while keeping one
+  // `env` singleton, so a global cache would skip re-creating the wiped tables.
+  // This matches `@dwk/websub`'s store. The reserved `notifications` channel is
+  // materialised as part of the same batch, so it always exists after any store
+  // operation — a client may hit `timeline`/`unread` for it on a fresh DB
+  // without first listing channels.
   let ready: Promise<void> | null = null;
   const ensureSchema = (): Promise<void> => {
     // Clear the cached promise on failure so a transient D1 error during the
     // first call doesn't permanently wedge the store.
     ready ??= db
-      .batch(SCHEMA.map((ddl) => db.prepare(ddl)))
+      .batch([
+        ...SCHEMA.map((ddl) => db.prepare(ddl)),
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO microsub_channels (uid, name, position, created_at)
+             VALUES (?1, ?2, -1, ?3)`,
+          )
+          .bind(
+            NOTIFICATIONS_CHANNEL,
+            "Notifications",
+            Math.floor(Date.now() / 1000),
+          ),
+      ])
       .then(() => undefined)
       .catch((err: unknown) => {
         ready = null;
         throw err;
       });
     return ready;
-  };
-
-  // The reserved notifications channel is materialised on first read/write so
-  // every client sees it without an explicit migration step.
-  const ensureReserved = async (now: number): Promise<void> => {
-    await db
-      .prepare(
-        `INSERT OR IGNORE INTO microsub_channels (uid, name, position, created_at)
-         VALUES (?1, ?2, -1, ?3)`,
-      )
-      .bind(NOTIFICATIONS_CHANNEL, "Notifications", now)
-      .run();
   };
 
   const seqOf = async (
@@ -313,13 +320,11 @@ export function createMicrosubStore(env: MicrosubStoreEnv): MicrosubStore {
   return {
     async init() {
       await ensureSchema();
-      await ensureReserved(Math.floor(Date.now() / 1000));
     },
 
     // Channels ------------------------------------------------------------
     async listChannels() {
       await ensureSchema();
-      await ensureReserved(Math.floor(Date.now() / 1000));
       const { results } = await db
         .prepare(
           `SELECT uid, name, position, created_at FROM microsub_channels
@@ -532,9 +537,14 @@ export function createMicrosubStore(env: MicrosubStoreEnv): MicrosubStore {
       if (items.length > 0) {
         const last = items[items.length - 1];
         const first = items[0];
-        // `before` advances to older entries; only offer it when the page filled
-        // (there may be more). `after` always points past the newest seen.
-        if (items.length === limit && last) page.before = String(last.seq);
+        // `before` advances to older entries. Offer it when the page filled
+        // (there may be more below), and always when paginating with `after`:
+        // even a partial newer-page sits above the entries we paged up from, so
+        // the client must be able to navigate back down. `after` always points
+        // past the newest seen.
+        if ((items.length === limit || options.after !== undefined) && last) {
+          page.before = String(last.seq);
+        }
         if (first) page.after = String(first.seq);
       }
       return page;
