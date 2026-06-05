@@ -2,48 +2,60 @@
 
 | | |
 |---|---|
-| **Type** | endpoint (extraction candidate) |
-| **Ships a DO?** | no (would reuse the `@dwk/solid-pod` DO when composed) |
+| **Type** | cross-standard reusable lib (RDF-only, protocol-agnostic) |
+| **Ships a DO?** | no — pure plain-data functions, no Cloudflare bindings |
 | **Standard** | [Linked Data Notifications](https://www.w3.org/TR/ldn/) |
-| **Status** | proposed — **decision needed** — tracked in [#63](https://github.com/davidwkeith/workers/issues/63) |
+| **Status** | implemented — extracted per [#63](https://github.com/davidwkeith/workers/issues/63) |
 
 LDN defines a standard inbox: discovery via `ldp:inbox`, `POST` of an RDF
-notification, and `GET` to list. The project **largely already implements this
-inside [`@dwk/solid-pod`](solid-pod.md)** (LDP container + inbox semantics), so
-this is primarily an **"extract, don't add"** evaluation rather than net-new
-behaviour.
+notification, and `GET` to list. The shared, protocol-agnostic pieces of that
+contract are factored out here as plain-data functions over
+[`@dwk/rdf`](rdf.md)'s flat `StoredQuad` representation, so the same primitives
+back both the [`@dwk/solid-pod`](solid-pod.md) inbox and the
+[`@dwk/activitypub`](activitypub.md) inbox without either standard leaking into
+the other.
 
-## Decision needed
+## Decision (resolved)
 
-Choose one:
+The three options in #63 were **extract** / **leave** / **close**. Resolved to
+**extract**: the LDN-specific vocabulary, discovery, notification validation,
+and listing are small, genuinely shared between Solid and ActivityPub, and were
+not previously implemented as a distinct, reusable unit. Keeping them in
+`@dwk/solid-pod` would have made them unreachable to `@dwk/activitypub` and would
+have coupled them to WAC; a standalone lib keeps them RDF-only and reusable.
 
-1. **Extract** a reusable `@dwk/ldn` that both `@dwk/solid-pod` and
-   [`@dwk/activitypub`](activitypub.md) (whose inbox is conceptually similar)
-   consume.
-2. **Leave** it inside `@dwk/solid-pod` — no separate package.
-3. **Close** as already covered by Solid.
+## What ships
 
-This is low priority relative to the federation and feed work; the package
-should not be built until the direction is chosen.
+- **Vocabulary** — the LDP/RDF term IRIs (`LDP_INBOX`, `LDP_CONTAINS`, …).
+- **Discovery** — `inboxLinkHeader(inbox)` / `inboxTriple(subject, inbox)` to
+  advertise an inbox, and `parseInboxLinks(header)` / `discoverInboxIris(quads,
+  subject?)` to find one. The discovery module depends on `@dwk/rdf` for **types
+  only** (erased at build), so it is reachable as the n3-free entry point
+  `@dwk/ldn/discovery` that a Workers-runtime consumer imports without pulling in
+  the RDF parser.
+- **Receiver** — `parseNotification(body, contentType, { baseIRI })` validates a
+  posted RDF notification, throwing a `NotificationProblem` carrying the HTTP
+  status to answer (`415` non-RDF media type, `400` unparseable / no triples).
+- **Consumer** — `inboxListingQuads(inbox, members)` and
+  `listInboxMembers(quads, inbox?)` for the `ldp:Container` + `ldp:contains`
+  listing.
 
-## Functional requirements (if pursued)
+## Consumers
 
-- **Receiver:** accept a `POST` of an RDF notification to an inbox container,
-  content-negotiated via [`@dwk/rdf`](rdf.md).
-- **Discovery:** advertise the inbox with
-  `Link rel="http://www.w3.org/ns/ldp#inbox"`.
-- **Consumer:** `GET` the inbox listing.
+- **`@dwk/solid-pod`** — on a resource read, surfaces any `ldp:inbox` the
+  resource's graph declares as a `Link rel="http://www.w3.org/ns/ldp#inbox"`
+  header (via `discoverInboxIris` + `inboxLinkHeader`), implementing LDN
+  discovery on top of its existing LDP container receiver.
+- **`@dwk/activitypub`** — advertises the actor's inbox via the same LDN `Link`
+  header on the actor document, so a plain LDN sender can discover it without
+  parsing the ActivityStreams body.
 
 ## Design constraints
 
-- **RDF-only and protocol-agnostic** — it MUST NOT pull in Solid-specific WAC
-  assumptions, so it can back both the Solid inbox and the ActivityPub inbox
-  (composition-contract confinement). Authorization stays the caller's concern.
-
-## Bindings (declared `Env` fragment)
-
-- Inbox storage: the `@dwk/solid-pod` DO namespace when composed, or D1 for a
-  standalone deployment.
+- **RDF-only and protocol-agnostic** — it carries no Solid-specific WAC
+  assumptions and no transport, so it backs both the Solid inbox and the
+  ActivityPub inbox (composition-contract confinement). Authorization, dedup, and
+  storage stay the caller's concern.
 
 ## Conformance / testing
 

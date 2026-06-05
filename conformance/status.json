@@ -122,6 +122,20 @@
         ]
       }
     },
+    "@dwk/ldn": {
+      "standard": "Linked Data Notifications",
+      "suites": {
+        "ldn-test-suite": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/wac": {
       "standard": null,
       "suites": {},

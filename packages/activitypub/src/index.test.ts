@@ -90,6 +90,11 @@ describe("actor document", () => {
     const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("activity+json");
+    // The actor's inbox is also advertised via LDN discovery so a plain Linked
+    // Data Notifications sender can find it from the Link header.
+    expect(res.headers.get("link")).toBe(
+      `<${actorUrl(config)}/inbox>; rel="http://www.w3.org/ns/ldp#inbox"`,
+    );
     const doc = (await res.json()) as Record<string, unknown>;
     expect(doc.type).toBe("Person");
     expect(doc.id).toBe(actorUrl(config));

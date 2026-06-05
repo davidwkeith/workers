@@ -10,6 +10,7 @@
  * path prefix (include the prefix in `baseUrl`).
  */
 
+import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
 import { AS2_CONTENT_TYPE, buildActorDocument, type JsonValue } from "./as2";
@@ -218,7 +219,13 @@ export function createActivityPub(
       );
       return new Response(method === "HEAD" ? null : body, {
         status: 200,
-        headers: { "content-type": AS2_CONTENT_TYPE },
+        headers: {
+          "content-type": AS2_CONTENT_TYPE,
+          // Advertise the actor's inbox via LDN discovery too, so a plain
+          // Linked Data Notifications sender (not just an ActivityPub peer) can
+          // find it from the `Link` header without parsing the AS2 body.
+          link: inboxLinkHeader(iris.inbox),
+        },
       });
     }
 
