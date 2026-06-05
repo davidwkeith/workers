@@ -32,7 +32,14 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 ### Actor & collections
 
 - Serve the **actor** document and the `inbox`, `outbox`, `followers`,
-  `following` collections as paged `OrderedCollection`s.
+  `following` collections as paged `OrderedCollection`s. The actor document is
+  served as `application/activity+json`, content-negotiating to the
+  `application/ld+json; profile="…activitystreams"` variant when a strict client
+  asks for it (§3.2).
+- Optionally serve and advertise an instance-level **shared inbox** at
+  `${baseUrl}/inbox` (§4.1 / §7.1.3) via `endpoints.sharedInbox`, so large peers
+  can batch-deliver. Enabled by default; the single actor is the only recipient,
+  so a batched delivery is processed for it.
 
 ### Server-to-server (federation)
 
@@ -44,8 +51,9 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 
 ### NodeInfo
 
-- The `/.well-known/nodeinfo` discovery document and a largely-static
-  `nodeinfo/2.1` document are **static enough for Anglesite to serve**. Only the
+- The `/.well-known/nodeinfo` discovery document advertises both the
+  `schema/2.0` and `schema/2.1` documents (many consumers still request 2.0),
+  each largely-static and **static enough for Anglesite to serve**. Only the
   live `usage` counts are dynamic — decide per deployment whether those counts
   justify a Worker route or are omitted.
 

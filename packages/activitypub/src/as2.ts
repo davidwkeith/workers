@@ -40,6 +40,15 @@ export const ACTOR_CONTEXT: readonly unknown[] = [
 export const AS2_CONTENT_TYPE = "application/activity+json; charset=utf-8";
 
 /**
+ * The JSON-LD profile variant of AS2. A strict client may content-negotiate for
+ * `application/ld+json` carrying the ActivityStreams profile rather than the
+ * `application/activity+json` alias the fediverse speaks; both name the same
+ * document (§3.2).
+ */
+export const AS2_LD_CONTENT_TYPE =
+  'application/ld+json; profile="https://www.w3.org/ns/activitystreams"; charset=utf-8';
+
+/**
  * The media types a federation peer uses to request AS2. A `GET` whose `Accept`
  * names any of these (or the matching `profile`) wants the activity JSON rather
  * than an HTML profile page.
@@ -55,6 +64,27 @@ export function wantsActivityJson(accept: string | null): boolean {
   if (!accept) return false;
   const lower = accept.toLowerCase();
   return AS2_ACCEPT_TOKENS.some((token) => lower.includes(token));
+}
+
+/**
+ * Pick the AS2 media type to serve for a given `Accept` (§3.2 content
+ * negotiation). A peer that asks specifically for the JSON-LD profile variant
+ * (`application/ld+json`, without also naming `application/activity+json`) gets
+ * {@link AS2_LD_CONTENT_TYPE}; everyone else — plain browsers, and the
+ * `application/activity+json` alias the fediverse speaks — gets
+ * {@link AS2_CONTENT_TYPE}.
+ */
+export function as2ContentType(accept: string | null): string {
+  if (wantsActivityJson(accept)) {
+    const lower = (accept as string).toLowerCase();
+    if (
+      lower.includes("application/ld+json") &&
+      !lower.includes("application/activity+json")
+    ) {
+      return AS2_LD_CONTENT_TYPE;
+    }
+  }
+  return AS2_CONTENT_TYPE;
 }
 
 /** A minimal JSON value type for AS2 documents. */
@@ -104,6 +134,16 @@ export interface ActorProfile {
   readonly discoverable?: boolean;
 }
 
+/** Optional extras woven into the actor document. */
+export interface ActorDocumentOptions {
+  /**
+   * The instance-level shared inbox IRI, advertised under `endpoints` (§4.1 /
+   * §7.1.3) so large peers can batch-deliver to this actor. Omitted entirely
+   * when the deployment does not serve one.
+   */
+  readonly sharedInbox?: string;
+}
+
 /**
  * Build the `Person` actor document served at the actor IRI. The public key is
  * embedded inline (PEM) under the security vocabulary so verifiers can resolve
@@ -113,6 +153,7 @@ export function buildActorDocument(
   iris: ActorIris,
   profile: ActorProfile,
   publicKeyPem: string,
+  options: ActorDocumentOptions = {},
 ): Record<string, JsonValue> {
   const doc: Record<string, JsonValue> = {
     "@context": ACTOR_CONTEXT as JsonValue,
@@ -135,6 +176,9 @@ export function buildActorDocument(
   if (profile.summary !== undefined) doc.summary = profile.summary;
   if (profile.icon !== undefined) {
     doc.icon = { type: "Image", url: profile.icon };
+  }
+  if (options.sharedInbox !== undefined) {
+    doc.endpoints = { sharedInbox: options.sharedInbox };
   }
   return doc;
 }

@@ -130,6 +130,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       // The inbox is write-only to peers; reads are not part of S2S.
       return text(405, "Method Not Allowed");
     }
+    // The instance-level shared inbox (§7.1.3), when served, routes here too:
+    // the single actor is the only recipient, so it is handled like the inbox.
+    if (config.sharedInbox && path === pathOf(config.sharedInbox)) {
+      if (method === "POST") return this.#handleInbox(request);
+      return text(405, "Method Not Allowed");
+    }
     return text(404, "Not Found");
   }
 
@@ -193,6 +199,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         break;
       case "Create":
       case "Update":
+        // Light content validation (§3 SHOULD): a peer signs as itself, so an
+        // embedded object it authors must be attributed to that same actor.
+        // Reject a `Create`/`Update` whose object names a *different*
+        // `attributedTo` — that is an impersonated object slipped past the
+        // top-level actor===signer check. `Announce`/`Like` legitimately wrap
+        // another account's object and are exempt (handled below).
+        if (!attributionMatches(activity)) {
+          return text(403, "Embedded object attributedTo does not match actor");
+        }
+        this.#storeInbox(activity);
+        await this.#maybeForward(activity, firstSeen, config);
+        break;
       case "Like":
       case "Announce":
         this.#storeInbox(activity);
@@ -770,6 +788,25 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 /** The path portion (with query) of an IRI, for routing comparisons. */
 function pathOf(iri: string): string {
   return new URL(iri).pathname;
+}
+
+/**
+ * Whether a `Create`/`Update`'s embedded object is attributed to the activity's
+ * own actor. Liberal: a string-IRI object, an absent object, or an object with
+ * no `attributedTo` all pass (nothing to contradict); only a present
+ * `attributedTo` that names a *different* actor fails.
+ */
+function attributionMatches(activity: ActivityObject): boolean {
+  const author = actorIri(activity.actor);
+  if (!author) return true;
+  const object = activity.object;
+  if (!object || typeof object !== "object" || Array.isArray(object)) {
+    return true;
+  }
+  const attributedTo = actorIri(
+    (object as Record<string, JsonValue>).attributedTo,
+  );
+  return attributedTo === undefined || attributedTo === author;
 }
 
 /** Flatten an addressing field (`to`/`cc`/…) to the set of IRI strings it names. */
