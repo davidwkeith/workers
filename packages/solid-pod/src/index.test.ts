@@ -625,6 +625,193 @@ describe("@dwk/solid-pod access-token rejection ladder", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toContain("dpop_invalid");
   });
+
+  it("accepts a token whose aud is an array containing an accepted value", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    const { headers } = await authHeaders("GET", `${pod.base}/doc`, OWNER, {
+      aud: ["https://other-rs.example", "solid"],
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a token whose aud is neither string nor array (audience_mismatch)", async () => {
+    const pod = freshPod();
+    const { headers } = await authHeaders("GET", `${pod.base}/doc`, OWNER, {
+      aud: 123,
+    });
+    const res = await pod.send("GET", "/doc", { headers });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("audience_mismatch");
+  });
+
+  it("falls back to sub for the agent identity when webid is absent", async () => {
+    const pod = freshPod();
+    await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    // A token identifying the owner only by `sub` (no `webid` claim) still
+    // resolves to the owner agent, so the owner override grants the read.
+    const key = await agentKey(OWNER);
+    const jkt = await ecThumbprint(key.publicJwk);
+    const now = Math.floor(Date.now() / 1000);
+    const token = await mintCustom({
+      iss: ISSUER,
+      aud: "solid",
+      sub: OWNER,
+      iat: now,
+      exp: now + 600,
+      cnf: { jkt },
+    });
+    const res = await pod.send("GET", "/doc", {
+      headers: {
+        authorization: `DPoP ${token}`,
+        dpop: await dpopProof("GET", `${pod.base}/doc`, key, token),
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("treats a non-DPoP/Bearer Authorization scheme as no credentials", async () => {
+    const pod = freshPod();
+    // A scheme the edge does not recognize is not a presented credential: the
+    // request proceeds anonymous, and WAC challenges the protected resource.
+    const res = await pod.send("GET", "/doc", {
+      headers: { authorization: "Basic dXNlcjpwYXNz" },
+    });
+    expect(res.status).toBe(401);
+    // The WAC challenge, not a token-rejection (which would carry `error=`).
+    expect(res.headers.get("www-authenticate")).not.toContain("error=");
+  });
+});
+
+describe("@dwk/solid-pod jwksUri resolution", () => {
+  /**
+   * A pod that resolves its issuer keys from a (mocked) JWKS endpoint instead
+   * of a static `jwks`, so the fetch/cache branch of `resolveJwks` runs. The
+   * injected `fetch` counts calls so cache hits are observable; `jwksUri` is
+   * unique per pod to keep the module-level JWKS cache isolated across tests.
+   */
+  function jwksPod(jwksResponse?: () => Response | Promise<Response>): {
+    base: string;
+    calls: () => number;
+    send: (method: string, path: string, init?: ReqInit) => Promise<Response>;
+  } {
+    const base = `https://${crypto.randomUUID()}.pod.example`;
+    const jwksUri = `https://issuer.example/jwks/${crypto.randomUUID()}`;
+    let calls = 0;
+    const stubFetch = (async () => {
+      calls += 1;
+      return jwksResponse
+        ? await jwksResponse()
+        : Response.json({ keys: [issuerJwk] });
+    }) as unknown as typeof fetch;
+    const handler = createSolidPod({
+      baseUrl: base,
+      issuer: ISSUER,
+      audience: "solid",
+      jwksUri,
+      fetch: stubFetch,
+      owner: OWNER,
+    });
+    return {
+      base,
+      calls: () => calls,
+      async send(method, path, init) {
+        const request = await podRequest(method, `${base}${path}`, init);
+        return handler(request, testEnv, {} as ExecutionContext);
+      },
+    };
+  }
+
+  it("fetches the issuer JWKS and caches it across requests", async () => {
+    const pod = jwksPod();
+    const first = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    expect(first.status).toBe(201);
+
+    const second = await pod.send("PUT", "/doc", {
+      webid: OWNER,
+      body: "<#a> <#b> <#d> .",
+      headers: { "content-type": TURTLE },
+    });
+    expect(second.status).toBe(204);
+    // The second request verified against the cached keys: one fetch total.
+    expect(pod.calls()).toBe(1);
+  });
+
+  it("rejects (no_jwks) when the JWKS endpoint is unreachable", async () => {
+    const pod = jwksPod(() => new Response("upstream down", { status: 503 }));
+    const res = await pod.send("GET", "/doc", { webid: OWNER });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("no_jwks");
+  });
+
+  it("rejects (no_jwks) when the JWKS body has no keys array", async () => {
+    const pod = jwksPod(() => Response.json({ not: "a keyset" }));
+    const res = await pod.send("GET", "/doc", { webid: OWNER });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("no_jwks");
+  });
+
+  it("rejects (no_jwks) when the JWKS fetch throws", async () => {
+    const pod = jwksPod(() => {
+      throw new Error("network error");
+    });
+    const res = await pod.send("GET", "/doc", { webid: OWNER });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain("no_jwks");
+  });
+});
+
+describe("@dwk/solid-pod custom authenticate hook", () => {
+  it("uses the hook's authenticated context, bypassing the built-in JWT path", async () => {
+    const base = `https://${crypto.randomUUID()}.pod.example`;
+    // No issuer/jwks: the hook fully replaces the built-in verifier. It mints a
+    // fresh jti per call so successive writes are not flagged as replays.
+    const handler = createSolidPod({
+      baseUrl: base,
+      owner: OWNER,
+      authenticate: () => ({
+        webid: OWNER,
+        jti: crypto.randomUUID(),
+        jkt: "hook-jkt",
+      }),
+    });
+    const put = new Request(`${base}/hooked`, {
+      method: "PUT",
+      headers: { "content-type": TURTLE },
+      body: "<#a> <#b> <#c> .",
+    });
+    const res = await handler(put, testEnv, {} as ExecutionContext);
+    expect(res.status).toBe(201);
+  });
+
+  it("treats a null hook result as anonymous", async () => {
+    const base = `https://${crypto.randomUUID()}.pod.example`;
+    const handler = createSolidPod({
+      baseUrl: base,
+      owner: OWNER,
+      authenticate: () => null,
+    });
+    // Anonymous and unmatched by any ACL: WAC challenges the read.
+    const res = await handler(
+      new Request(`${base}/secret`, { method: "GET" }),
+      testEnv,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(401);
+  });
 });
 
 describe("@dwk/solid-pod fail-loud on missing bindings", () => {
