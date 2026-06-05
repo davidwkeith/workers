@@ -5,7 +5,7 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** — a per-account Durable Object (reuses [`@dwk/store`](store.md)) |
 | **Standard** | [remoteStorage](https://datatracker.ietf.org/doc/html/draft-dejong-remotestorage-22) (draft-dejong-remotestorage) |
-| **Status** | proposed (honorable mention) |
+| **Status** | proposed (honorable mention) — tracked in [#105](https://github.com/davidwkeith/workers/issues/105) |
 
 An [Unhosted](https://unhosted.org/)-style **remoteStorage** server: a
 per-user document vault that "no-backend" web apps read and write over a simple

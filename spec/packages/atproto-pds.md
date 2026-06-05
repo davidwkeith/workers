@@ -5,7 +5,7 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** — a per-account repository Durable Object |
 | **Standard** | [AT Protocol](https://atproto.com/specs/atp) (Bluesky) — Personal Data Server |
-| **Status** | proposed (honorable mention) — **exploratory / strategic, not a clean fit** |
+| **Status** | proposed (honorable mention) — **exploratory / strategic, not a clean fit** — tracked in [#106](https://github.com/davidwkeith/workers/issues/106) |
 
 An AT Protocol **Personal Data Server (PDS)**: the self-hosted home of a user's
 repository in the Bluesky network, rooted at the user's own domain. It belongs
