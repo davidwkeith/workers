@@ -574,12 +574,11 @@ describe("publish endpoint", () => {
 // Delivery queue: drop, block, reschedule
 // ---------------------------------------------------------------------------
 
-/** Seed one due delivery row pointing at `inbox`. */
+/** Seed one delivery row pointing at `inbox`. `next_at` 0 ⇒ always due. */
 function seedDelivery(state: DurableObjectState, inbox: string): void {
   state.storage.sql.exec(
-    `INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, '{}', 0, ?)`,
+    `INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, '{}', 0, 0)`,
     inbox,
-    Date.now(),
   );
 }
 
