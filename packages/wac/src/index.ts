@@ -83,13 +83,18 @@ export type AclScope = "accessTo" | "default";
  * @remarks
  * The chain is ordered nearest-first: the requested resource's own ACL (with
  * {@link AclScope | scope} `"accessTo"`) comes first, followed by ancestor
- * container ACLs (scope `"default"`) from closest to farthest. Only ACL
- * documents that exist need be included. The resource's own ACL (scope
- * `"accessTo"`) is implicitly authoritative: it is in the chain only because it
- * exists, so the walk stops there rather than falling through to an ancestor
- * `acl:default`, even when it grants nothing. An existing ancestor `default`
- * document that should likewise be authoritative can be marked
- * {@link AclResource.present | present}.
+ * container ACLs (scope `"default"`) from closest to farthest. **Only ACL
+ * documents that exist (have a representation) are included.**
+ *
+ * Per WAC §5.1 the effective ACL is the *first* ancestor whose ACL resource
+ * exists, "regardless of whether it contains matching authorizations". Because
+ * every chain entry represents an existing ACL document, the **first entry is
+ * the effective ACL and is authoritative**: {@link evaluateAccess} decides from
+ * it alone — granted or denied — and never falls through (fail open) to a
+ * farther ancestor's `acl:default`. Selecting *which* ancestor's ACL exists is
+ * the caller's job; this library does not climb the hierarchy by inspecting
+ * authorization content. Entries after the first are not consulted, so callers
+ * SHOULD pass exactly the single effective ACL.
  */
 export interface AclResource {
   /**
@@ -100,26 +105,6 @@ export interface AclResource {
   target: string;
   /** Which predicate links authorizations in this document to {@link target}. */
   scope: AclScope;
-  /**
-   * Marks an existing ACL *document* as authoritative for its {@link target}.
-   *
-   * @remarks
-   * When `true`, the effective-ACL walk stops at this document and returns its
-   * decision — granted or denied — without falling through to a farther
-   * ancestor, **even when no authorization in it applies to the request**.
-   *
-   * A resource's own `.acl` (scope `"accessTo"`) is **implicitly** authoritative
-   * and does not need this flag: it appears in the chain only because it exists,
-   * and under WAC an own ACL selects the effective ACL, so an ancestor's
-   * `acl:default` MUST NOT be inherited past it (which would fail open). Use this
-   * flag for an existing ancestor `default` document that should be authoritative
-   * even though it carries no applicable `acl:default` authorization.
-   *
-   * Defaults to `false`, in which case an ancestor `default` document stops the
-   * walk only if it carries an authorization applicable to {@link target};
-   * otherwise the walk climbs to the next ancestor.
-   */
-  present?: boolean;
   /** The ACL document's statements, consumed from `@dwk/rdf`. */
   quads: AclQuad[];
 }
@@ -313,19 +298,22 @@ function toAccessModes(granted: ReadonlySet<string>): AccessMode[] {
  * Evaluates a Web Access Control decision against an effective-ACL chain.
  *
  * @remarks
- * Walks `chain` nearest-first to select exactly one effective ACL. An entry is
- * the effective ACL when it is the resource's own ACL (scope `"accessTo"`), is
- * marked {@link AclResource.present | present}, **or** carries an authorization
- * applicable to its scoped target; the decision is then made from that document
- * alone, granted or denied, without climbing. A resource's own `.acl` is
- * therefore authoritative once it exists: it MUST NOT fall through to (fail open
- * into) an ancestor's `acl:default`, even when it grants nothing for the target.
- * An ancestor `default` entry that is neither `present` nor carries an
- * applicable `acl:default` authorization is skipped, so the walk climbs to the
- * nearest ancestor default that does apply.
+ * Per WAC §5.1 the effective ACL is the *first* ancestor whose ACL resource
+ * exists, "regardless of whether it contains matching authorizations". The
+ * {@link AclResource | chain} lists existing ACL documents nearest-first, so its
+ * **first entry is the effective ACL and is authoritative**: the decision is
+ * made from that document alone — granted or denied — and never falls through
+ * (fail open) to a farther ancestor's `acl:default`, even when the document
+ * grants nothing for the target. This holds equally for a resource's own `.acl`
+ * (scope `"accessTo"`) and for an ancestor container's `acl:default`.
+ *
+ * Selecting *which* ancestor's ACL exists is the caller's responsibility (it is
+ * a function of resource existence, not authorization content); this library
+ * does not climb the hierarchy by inspecting authorizations, which would invert
+ * §5.1's stop condition. Entries after the first are not consulted.
  *
  * @param request - The agent and request facts to authorize.
- * @param chain - The candidate ACL documents, ordered nearest container first.
+ * @param chain - The effective ACL as a one-element chain (nearest first).
  * @returns The decision, including the granted modes and the effective ACL.
  */
 export function evaluateAccess(
@@ -335,35 +323,26 @@ export function evaluateAccess(
   if (!request || !chain || !Array.isArray(chain)) {
     return { granted: false, modes: [] };
   }
-  for (const acl of chain) {
-    const authorizations = findApplicableAuthorizations(acl);
-    // The resource's own ACL (scope "accessTo") or an explicitly `present`
-    // document is authoritative for its target even when no authorization
-    // applies (fail closed); an entry that merely carries an applicable
-    // authorization also stops the walk. Otherwise keep climbing.
-    if (
-      authorizations.length === 0 &&
-      acl?.scope !== "accessTo" &&
-      !acl?.present
-    ) {
-      continue;
-    }
-
-    const granted = new Set<string>();
-    for (const auth of authorizations) {
-      if (agentMatches(auth, request) && originMatches(auth, request)) {
-        for (const mode of auth.modes) {
-          granted.add(mode);
-        }
-      }
-    }
-
-    return {
-      granted: isModeSatisfied(request.mode, granted),
-      modes: toAccessModes(granted),
-      effectiveAcl: acl.target,
-    };
+  // The first chain entry is an existing ACL document, hence the effective ACL
+  // per §5.1; it is authoritative whether or not it carries a matching
+  // authorization, so the decision is taken from it alone (fail closed).
+  const acl = chain[0];
+  if (!acl) {
+    return { granted: false, modes: [] };
   }
 
-  return { granted: false, modes: [] };
+  const granted = new Set<string>();
+  for (const auth of findApplicableAuthorizations(acl)) {
+    if (agentMatches(auth, request) && originMatches(auth, request)) {
+      for (const mode of auth.modes) {
+        granted.add(mode);
+      }
+    }
+  }
+
+  return {
+    granted: isModeSatisfied(request.mode, granted),
+    modes: toAccessModes(granted),
+    effectiveAcl: acl.target,
+  };
 }

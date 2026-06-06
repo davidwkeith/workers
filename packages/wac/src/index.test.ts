@@ -53,9 +53,8 @@ function authorization(
 }
 
 function accessToAcl(quads: AclQuad[], target = RESOURCE): AclResource {
-  // A resource's own ACL (scope "accessTo") is implicitly authoritative: it is
-  // in the chain only because it exists, so it stops the walk even when it
-  // grants nothing — no `present` flag required.
+  // A resource's own ACL (scope "accessTo") is the effective ACL once it exists,
+  // so it decides the request even when it grants nothing for the target.
   return { target, scope: "accessTo", quads };
 }
 
@@ -284,10 +283,13 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
-    it("climbs past a non-present ancestor default that does not apply", () => {
-      // The nearer container ACL exists but its authorization scopes ROOT, not
-      // this CONTAINER, so it carries no applicable acl:default and is not the
-      // resource's own ACL; the walk climbs to the farther applicable default.
+    it("treats the first existing ancestor default as authoritative, ignoring farther entries", () => {
+      // The chain's first entry is the nearest existing container ACL. Its
+      // authorization scopes ROOT, not this CONTAINER, so nothing applies — but
+      // per WAC §5.1 a present-but-non-matching ACL is still the effective ACL
+      // and is authoritative: the decision is a fail-closed deny, never climbing
+      // to the farther, permissive root default (the inverted stop condition of
+      // issue #101).
       const innerDefault: AclResource = {
         target: CONTAINER,
         scope: "default",
@@ -310,16 +312,16 @@ describe("@dwk/wac evaluateAccess", () => {
         innerDefault,
         rootDefault,
       ]);
-      expect(decision.granted).toBe(true);
-      expect(decision.effectiveAcl).toBe(ROOT);
+      expect(decision.granted).toBe(false);
+      expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
     it("does not fall through an own-ACL that grants nothing (fail closed)", () => {
       // The resource's own ACL document exists but its authorization scopes a
-      // different resource, so nothing applies to the target. An own ACL (scope
-      // "accessTo") is implicitly authoritative — no `present` flag set here —
-      // so the walk MUST deny rather than inherit the permissive container
-      // default (the issue #27 fail-open hazard).
+      // different resource, so nothing applies to the target. As the first
+      // existing entry it is the effective ACL, so the decision MUST deny rather
+      // than inherit the permissive container default (the issue #27 fail-open
+      // hazard).
       const ownAcl = accessToAcl(
         authorization("#other", {
           accessTo: "https://alice.example/notes/other.ttl",
@@ -371,38 +373,6 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(decision.effectiveAcl).toBe(RESOURCE);
     });
 
-    it("honors an explicit present flag on an existing ancestor default", () => {
-      // The resource has no own ACL. The nearest container ACL exists but its
-      // authorization scopes ROOT, so it carries no applicable acl:default;
-      // marking it `present` makes it authoritative, so the walk denies rather
-      // than climbing to the permissive root default.
-      const innerDefault: AclResource = {
-        target: CONTAINER,
-        scope: "default",
-        present: true,
-        quads: authorization("#wrong", {
-          default: ROOT,
-          agents: [ALICE],
-          modes: [`${ACL}Write`],
-        }),
-      };
-      const rootDefault: AclResource = {
-        target: ROOT,
-        scope: "default",
-        quads: authorization("#root", {
-          default: ROOT,
-          agents: [ALICE],
-          modes: [`${ACL}Read`],
-        }),
-      };
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
-        innerDefault,
-        rootDefault,
-      ]);
-      expect(decision.granted).toBe(false);
-      expect(decision.effectiveAcl).toBe(CONTAINER);
-    });
-
     it("lets a resource's own ACL take precedence over an ancestor default", () => {
       // accessTo grants only Read; the container default would grant Write, but
       // the nearer applicable ACL is authoritative and stops the walk.
@@ -441,7 +411,7 @@ describe("@dwk/wac evaluateAccess", () => {
       ).toBe(true);
     });
 
-    it("denies when no ACL in the chain applies", () => {
+    it("denies via the effective ACL when its authorizations do not apply", () => {
       const root = defaultAcl(
         authorization("#root", {
           default: ROOT,
@@ -451,8 +421,16 @@ describe("@dwk/wac evaluateAccess", () => {
         CONTAINER,
       );
       // The chain entry targets CONTAINER but the authorization defaults ROOT,
-      // so nothing applies.
+      // so nothing applies. The entry still exists, so per §5.1 it is the
+      // effective ACL: the result is a fail-closed deny attributed to it.
       const decision = evaluateAccess({ mode: "read", agent: ALICE }, [root]);
+      expect(decision.granted).toBe(false);
+      expect(decision.effectiveAcl).toBe(CONTAINER);
+      expect(decision.modes).toEqual([]);
+    });
+
+    it("denies with no effective ACL for an empty chain", () => {
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, []);
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBeUndefined();
       expect(decision.modes).toEqual([]);
