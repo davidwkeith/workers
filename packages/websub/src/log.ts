@@ -39,7 +39,7 @@ export const WebSubLogEvent = {
   SubscriptionActivated: "websub.subscription.activated",
   /** A subscription was removed (verified unsubscribe or pruned). Fields: `callbackHost`, `topicHost`, `reason`. */
   SubscriptionRemoved: "websub.subscription.removed",
-  /** A subscription was denied and the subscriber notified (`hub.mode=denied`). Fields: `callbackHost`, `topicHost`, `reason`. */
+  /** A subscription was denied (`hub.mode=denied`). Emitted whether or not the callback was reachable; `notified` records whether it accepted the GET. Fields: `callbackHost`, `topicHost`, `notified`, `reason`. */
   SubscriptionDenied: "websub.subscription.denied",
   /** A content-distribution delivery to one subscriber finished. Fields: `callbackHost`, `delivered`, `status`. */
   DeliveryCompleted: "websub.delivery.completed",

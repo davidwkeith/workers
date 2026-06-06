@@ -329,6 +329,39 @@ describe("createWebSubQueueConsumer — distribute jobs", () => {
     expect(retries).toEqual([0]);
   });
 
+  it("acks (does not retry) when the topic is unlabelable and no fallback is set", async () => {
+    const store = new MemoryStore();
+    await store.upsert({
+      callback: "https://sub.example/cb",
+      topic: "https://example.com/feed",
+      leaseSeconds: 1000,
+      now: 0,
+    });
+    const posted: string[] = [];
+    const fetchImpl: FetchLike = vi.fn(async (input, init) => {
+      if ((init?.method ?? "GET") === "GET") {
+        // Byte-array body so no Content-Type is auto-set: an unlabelable topic.
+        return new Response(new TextEncoder().encode("<feed/>"), {
+          status: 200,
+        });
+      }
+      posted.push(input);
+      return new Response(null, { status: 204 });
+    });
+    const consumer = createWebSubQueueConsumer(
+      { ...config, fetch: fetchImpl },
+      { store, now: () => 500 },
+    );
+    const { batch, acks, retries } = batchOf([
+      { kind: "distribute", topic: "https://example.com/feed" },
+    ]);
+    await consumer(batch, {} as WebSubEnv, ctx);
+    // Permanent refusal: drop the job and deliver nothing, rather than retry.
+    expect(posted).toEqual([]);
+    expect(acks).toEqual([0]);
+    expect(retries).toEqual([]);
+  });
+
   it("fails loudly when no store is configured", async () => {
     const consumer = createWebSubQueueConsumer(config);
     const { batch } = batchOf([

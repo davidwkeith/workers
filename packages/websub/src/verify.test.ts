@@ -80,15 +80,48 @@ describe("notifyDenial", () => {
     expect(url.searchParams.get("hub.reason")).toBe("verification_failed");
   });
 
-  it("never throws when the callback is unreachable", async () => {
+  it("never throws when the callback is unreachable, and logs notified:false", async () => {
     const fetchImpl: FetchLike = vi.fn(async () => {
       throw new Error("refused");
     });
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     await expect(
       notifyDenial("https://sub.example/cb", "https://example.com/feed", {
         fetch: fetchImpl,
+        logger,
       }),
     ).resolves.toBeUndefined();
+    // The denial event is still emitted — silence would hide the denial — but
+    // `notified` reflects that the callback never accepted the GET.
+    expect(logger.info).toHaveBeenCalledWith(
+      "websub.subscription.denied",
+      expect.objectContaining({ notified: false }),
+    );
+  });
+
+  it("logs notified:true when the callback accepts the denial GET", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () => new Response(null, { status: 200 }),
+    );
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    await notifyDenial("https://sub.example/cb", "https://example.com/feed", {
+      fetch: fetchImpl,
+      logger,
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "websub.subscription.denied",
+      expect.objectContaining({ notified: true }),
+    );
   });
 
   it("does not GET a private callback host (SSRF)", async () => {

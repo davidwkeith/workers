@@ -116,16 +116,34 @@ export interface DistributeOptions {
 }
 
 /**
- * Fetch the topic's current content through {@link safeFetch}. Returns `null`
- * when the topic is unreachable, returns a non-2xx, its body exceeds the cap, or
- * it declares no `Content-Type` and no {@link DistributeOptions.defaultContentType}
- * fallback is configured (WebSub §7 forbids mislabeling); the caller logs and
- * (typically) retries.
+ * Outcome of {@link fetchTopicContent}, telling the caller what to do with the
+ * queue message:
+ *
+ * - **`ok`** — the topic's current content, ready to fan out.
+ * - **`retry`** — a transient failure (topic unreachable, non-2xx, or an
+ *   over-cap body that may be a truncated response): re-enqueue and try later.
+ * - **`drop`** — a deterministic refusal that re-fetching cannot fix, so the
+ *   caller acks rather than burning retries and re-hammering the topic. Today
+ *   this is a topic that declares no `Content-Type` and for which no
+ *   {@link DistributeOptions.defaultContentType} fallback is configured, since
+ *   forwarding it would mislabel the feed (WebSub §7).
+ */
+export type TopicFetchResult =
+  | { readonly kind: "ok"; readonly content: TopicContent }
+  | { readonly kind: "retry" }
+  | { readonly kind: "drop" };
+
+/**
+ * Fetch the topic's current content through {@link safeFetch}, classifying the
+ * outcome as `ok` / `retry` / `drop` (see {@link TopicFetchResult}). A missing,
+ * unlabelable `Content-Type` is a `drop` — a permanent format/config error that
+ * retrying would only turn into a self-inflicted hammering of the topic — while
+ * unreachable/non-2xx/over-cap responses are transient `retry`s.
  */
 export async function fetchTopicContent(
   topic: string,
   options?: DistributeOptions,
-): Promise<TopicContent | null> {
+): Promise<TopicFetchResult> {
   const doFetch: FetchLike =
     options?.fetch ?? ((input, init) => fetch(input, init));
   const logger = options?.logger ?? noopLogger;
@@ -144,7 +162,7 @@ export async function fetchTopicContent(
     const fields = { topicHost: hostFromUrl(topic), status: 0 };
     logger.warn(WebSubLogEvent.TopicFetchFailed, fields);
     metrics.count(WebSubLogEvent.TopicFetchFailed, fields);
-    return null;
+    return { kind: "retry" };
   }
 
   if (!response.ok) {
@@ -152,7 +170,7 @@ export async function fetchTopicContent(
     const fields = { topicHost: hostFromUrl(topic), status: response.status };
     logger.warn(WebSubLogEvent.TopicFetchFailed, fields);
     metrics.count(WebSubLogEvent.TopicFetchFailed, fields);
-    return null;
+    return { kind: "retry" };
   }
 
   const contentType =
@@ -160,21 +178,23 @@ export async function fetchTopicContent(
   if (contentType === undefined || contentType === "") {
     // WebSub §7: the distribution Content-Type MUST correspond to the topic's.
     // With neither a topic header nor a configured fallback, forwarding would
-    // mislabel the feed, so refuse to distribute instead.
+    // mislabel the feed. Re-fetching can't conjure a Content-Type, so drop the
+    // job (the caller acks) rather than retry — retrying would only clog the
+    // queue and re-hammer the topic for a permanent configuration error.
     await response.body?.cancel().catch(() => undefined);
     const fields = { topicHost: hostFromUrl(topic), status: response.status };
     logger.warn(WebSubLogEvent.TopicContentTypeMissing, fields);
     metrics.count(WebSubLogEvent.TopicContentTypeMissing, fields);
-    return null;
+    return { kind: "drop" };
   }
   const body = await readBytesCapped(response);
   if (body === null) {
     const fields = { topicHost: hostFromUrl(topic), status: response.status };
     logger.warn(WebSubLogEvent.TopicFetchFailed, fields);
     metrics.count(WebSubLogEvent.TopicFetchFailed, fields);
-    return null;
+    return { kind: "retry" };
   }
-  return { body, contentType };
+  return { kind: "ok", content: { body, contentType } };
 }
 
 /**

@@ -137,18 +137,26 @@ export function createWebSubQueueConsumer(
         // kind === "distribute"
         const now = clock();
         await store.pruneExpired(now);
-        const content = await fetchTopicContent(job.topic, {
+        const fetched = await fetchTopicContent(job.topic, {
           fetch: resolved.fetch,
           logger: resolved.logger,
           metrics: resolved.metrics,
           defaultContentType: resolved.defaultContentType,
         });
-        if (content === null) {
+        if (fetched.kind === "retry") {
           // The topic was unreachable / non-2xx — retry the whole job later
           // rather than dropping the push.
           message.retry();
           continue;
         }
+        if (fetched.kind === "drop") {
+          // A permanent, deterministic refusal (e.g. an unlabelable topic):
+          // retrying can't fix it, so ack and move on rather than clog the
+          // queue and re-hammer the topic. fetchTopicContent already logged why.
+          message.ack();
+          continue;
+        }
+        const content = fetched.content;
         const subscribers = await store.listActive(job.topic, now);
         // Fan out in parallel: deliverToSubscriber never throws (it reports a
         // failed/blocked POST as delivered:false), so one slow or dead callback

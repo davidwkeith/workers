@@ -75,7 +75,7 @@ const content: TopicContent = {
 };
 
 describe("fetchTopicContent", () => {
-  it("returns body and content-type on 2xx", async () => {
+  it("returns kind:ok with body and content-type on 2xx", async () => {
     const fetchImpl: FetchLike = vi.fn(
       async () =>
         new Response("<feed/>", {
@@ -86,26 +86,36 @@ describe("fetchTopicContent", () => {
     const result = await fetchTopicContent("https://example.com/feed", {
       fetch: fetchImpl,
     });
-    expect(result?.contentType).toBe("application/atom+xml");
-    expect(new TextDecoder().decode(result?.body)).toBe("<feed/>");
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.content.contentType).toBe("application/atom+xml");
+    expect(new TextDecoder().decode(result.content.body)).toBe("<feed/>");
   });
 
-  it("returns null on a non-2xx topic", async () => {
+  it("returns kind:retry on a non-2xx topic", async () => {
     const fetchImpl: FetchLike = vi.fn(
       async () => new Response("", { status: 500 }),
     );
     expect(
-      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
-    ).toBeNull();
+      (
+        await fetchTopicContent("https://example.com/feed", {
+          fetch: fetchImpl,
+        })
+      ).kind,
+    ).toBe("retry");
   });
 
-  it("returns null when the topic fetch throws", async () => {
+  it("returns kind:retry when the topic fetch throws", async () => {
     const fetchImpl: FetchLike = vi.fn(async () => {
       throw new Error("network");
     });
     expect(
-      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
-    ).toBeNull();
+      (
+        await fetchTopicContent("https://example.com/feed", {
+          fetch: fetchImpl,
+        })
+      ).kind,
+    ).toBe("retry");
   });
 
   // A byte-array body keeps the Response from auto-setting a `text/plain`
@@ -113,11 +123,15 @@ describe("fetchTopicContent", () => {
   const noContentType = () =>
     new Response(encoder.encode("<feed/>"), { status: 200 });
 
-  it("refuses (null) when the topic omits Content-Type and no fallback is set", async () => {
+  it("returns kind:drop (permanent refusal) when Content-Type is absent and no fallback is set", async () => {
     const fetchImpl: FetchLike = vi.fn(async () => noContentType());
     expect(
-      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
-    ).toBeNull();
+      (
+        await fetchTopicContent("https://example.com/feed", {
+          fetch: fetchImpl,
+        })
+      ).kind,
+    ).toBe("drop");
   });
 
   it("uses defaultContentType when the topic omits Content-Type", async () => {
@@ -126,8 +140,10 @@ describe("fetchTopicContent", () => {
       fetch: fetchImpl,
       defaultContentType: "application/atom+xml",
     });
-    expect(result?.contentType).toBe("application/atom+xml");
-    expect(new TextDecoder().decode(result?.body)).toBe("<feed/>");
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.content.contentType).toBe("application/atom+xml");
+    expect(new TextDecoder().decode(result.content.body)).toBe("<feed/>");
   });
 
   it("prefers the topic's Content-Type over the configured fallback", async () => {
@@ -142,7 +158,9 @@ describe("fetchTopicContent", () => {
       fetch: fetchImpl,
       defaultContentType: "application/atom+xml",
     });
-    expect(result?.contentType).toBe("application/feed+json");
+    expect(result.kind === "ok" && result.content.contentType).toBe(
+      "application/feed+json",
+    );
   });
 });
 

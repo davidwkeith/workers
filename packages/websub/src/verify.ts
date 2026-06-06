@@ -198,12 +198,13 @@ export async function notifyDenial(
   const metrics = options?.metrics ?? noopMetrics;
 
   const url = buildDenialUrl(callback, { topic, reason: options?.reason });
-  const fields = {
-    callbackHost: hostFromUrl(callback),
-    topicHost: hostFromUrl(topic),
-    ...(options?.reason !== undefined ? { reason: options.reason } : {}),
-  };
 
+  // The denial *decision* stands regardless of whether the subscriber's callback
+  // can be reached, so the event is always emitted — silently swallowing it when
+  // the GET is blocked (e.g. an SSRF-blocked callback) would hide exactly the
+  // probing we want a signal for. `notified` records whether the callback
+  // actually accepted the GET, so a failed delivery is visible, not faked.
+  let notified = false;
   try {
     const result = await safeFetch(
       doFetch,
@@ -211,11 +212,18 @@ export async function notifyDenial(
       { method: "GET" },
       { logger, metrics },
     );
+    notified = result.response.ok;
     await result.response.body?.cancel().catch(() => undefined);
   } catch {
     // Best-effort: the subscription row was never created, so a failed denial
     // notification leaves no inconsistent state to repair.
   }
+  const fields = {
+    callbackHost: hostFromUrl(callback),
+    topicHost: hostFromUrl(topic),
+    notified,
+    ...(options?.reason !== undefined ? { reason: options.reason } : {}),
+  };
   logger.info(WebSubLogEvent.SubscriptionDenied, fields);
   metrics.count(WebSubLogEvent.SubscriptionDenied, fields);
 }

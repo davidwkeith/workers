@@ -76,6 +76,7 @@ export {
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
   type TopicContent,
+  type TopicFetchResult,
   type DeliveryResult,
   type DistributeOptions,
 } from "./distribute";
