@@ -68,14 +68,21 @@ rejected with `jkt_required` rather than validating an unbound proof
   `jti` is a present, non-empty string.
 - **Bindings** (optional) — `ath` matches `base64url(SHA-256(accessToken))`; the
   computed `jkt` (RFC 7638 thumbprint) equals `expectedJkt`.
+- **Server nonce** (optional, RFC 9449 §8/§9) — when `expectedNonce` is supplied,
+  the proof's `nonce` claim must equal it (else `nonce_mismatch`). The proof's
+  `nonce` is surfaced on the result either way so a caller can answer a mismatch
+  with a `use_dpop_nonce` error and a fresh `DPoP-Nonce`.
 
 `verifyDpopProof` never throws — failures return `{ valid: false, reason }` with
-a stable `DpopFailureReason` code. On success it returns `{ valid: true, jti, jkt }`.
+a stable `DpopFailureReason` code (the proof's `nonce` is also surfaced on a
+`nonce_mismatch`). On success it returns `{ valid: true, jti, jkt, nonce? }`.
 
 ## Out of scope
 
 - Replay detection storage (the caller owns the `jti` cache).
-- `DPoP-Nonce` issuance and the `use_dpop_nonce` error flow.
+- `DPoP-Nonce` issuance and rotation, and emitting the `use_dpop_nonce` error
+  (the caller owns the nonce lifecycle; this lib only checks the proof's `nonce`
+  against the `expectedNonce` it is given).
 - Access-token validation beyond the DPoP binding checks.
 
 ## License
