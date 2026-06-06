@@ -7,88 +7,89 @@
 | **Standard** | [Microsub](https://indieweb.org/Microsub-spec) |
 | **Status** | proposed — tracked in [#91](https://github.com/davidwkeith/workers/issues/91) |
 
-A [Microsub](https://indieweb.org/Microsub-spec) server: the IndieWeb's
-**read side**. It completes the loop alongside the write side
-([`@dwk/micropub`](micropub.md)), the interaction side
-([`@dwk/webmention`](webmention.md)), the identity layer
-([`@dwk/indieauth`](indieauth.md)), and the publish/push side
-([`@dwk/websub`](websub.md)).
-
-A Microsub server is the social-reader's back end: it manages feed
-**subscriptions** organised into **channels**, polls and parses sources
-server-side, and serves a normalised **JF2** timeline to reader clients
-(Monocle, Together, Indigenous). The user's reading state lives on
-infrastructure they own rather than in a hosted aggregator.
+A Microsub server: the **read side** of the IndieWeb, completing the loop the
+other endpoint packages leave open. [`@dwk/micropub`](micropub.md) is the write
+side, [`@dwk/webmention`](webmention.md) the interaction side,
+[`@dwk/websub`](websub.md) the publish/push side — Microsub is the
+**subscription + timeline** side: it manages a user's feed subscriptions
+(organised into channels), polls and parses those sources server-side, and
+serves a normalised timeline to reader clients (Monocle, Together, Indigenous)
+so the reading state lives on infrastructure the user owns rather than in a
+hosted aggregator.
 
 ## Worker vs. Anglesite (the static split)
 
-As with WebSub, feed *generation* stays in Anglesite — nothing here emits a
-feed. Microsub is the dynamic layer that consumes *other people's* feeds:
-discovery, polling, parsing to JF2, dedupe, and the channel/timeline state
-machine. Discovery of the endpoint itself (`<link rel="microsub">`) is
-Anglesite's to emit on the user's home page.
+Microsub is **fully dynamic** — there is nothing for the static site generator
+to emit. Anglesite's role is limited to advertising the endpoint: the identity
+page carries `<link rel="microsub" href="…">` so reader clients can discover it
+(the same discovery pattern Anglesite already emits for `authorization_endpoint`
+/ `token_endpoint` / `micropub`). Everything below is request logic a static
+host cannot do:
+
+- channel CRUD and ordering;
+- per-source polling, fetch, and microformats2 parsing into JF2 timeline items;
+- read/unread tracking and timeline pagination.
 
 ## Functional requirements
 
 - Export `createMicrosub(config)` returning the standard handler, mountable
-  under a path prefix as the single Microsub endpoint. The `action` query/form
-  parameter selects the operation; `method` sub-selects (e.g. `method=delete`,
-  `method=order`, `method=mark_read`).
-- **Auth:** every request carries a DPoP-bound IndieAuth access token (issued by
-  [`@dwk/indieauth`](indieauth.md)); the token's subject (`me`) **MUST** match
-  the configured server identity, exactly as Micropub gates its writes.
-- **Channels:** `list` / `create` / `update` (rename) / `delete` / **reorder**
-  (`method=order`). A reserved `notifications` channel always exists and cannot
-  be deleted, renamed, or reordered away.
-- **Following:** `follow` / `unfollow` with feed discovery (Atom / RSS / JSON
-  Feed / `h-feed`). A follow kicks an immediate poll so the timeline populates
-  without waiting for the next scheduled run.
-- **Timeline:** JF2 entries with `before` / `after` opaque-cursor pagination,
-  `mark_read` / `mark_unread` (`entry`, `entry[]`, or `last_read_entry`),
-  `remove`, and per-channel unread counts.
-- **Search / preview:** discover or preview a feed's entries without
-  subscribing.
-- **Polling:** a scheduled (Cron Trigger) poller enqueues a job per distinct
-  followed feed; a queue consumer fetches (conditional `ETag` /
-  `Last-Modified`), parses to JF2, dedupes, and appends to every channel
-  following that feed. The read path serves stored entries only — never an
-  inline fetch.
+  under a path prefix as the single Microsub endpoint (all actions are
+  `action=`/`method=` parameters on one URL).
+- **Auth:** every request is authenticated with an IndieAuth bearer token
+  (reuse the validation path that [`@dwk/indieauth`](indieauth.md) issues and
+  [`@dwk/micropub`](micropub.md) consumes); requests require an appropriate
+  scope and the token's `me` must match the server's identity.
+- **Channels** (`action=channels`): list, create, update (rename), delete, and
+  **reorder** channels. Reserve the built-in `notifications` channel.
+- **Following** (`action=follow` / `unfollow` / `action=follow` list): manage
+  the set of feeds within a channel; on follow, **discover** the feed (Atom /
+  RSS / JSON Feed / `h-feed`) for the given URL.
+- **Timeline** (`action=timeline`): return JF2 entries for a channel with
+  `before` / `after` cursor pagination; support `action=timeline` `method=mark_read`
+  / `mark_unread` and per-channel **unread counts**.
+- **Search / preview** (`action=search`, `action=preview`): resolve a query or a
+  URL to candidate feeds / a preview timeline without subscribing.
+- **Polling:** fetch each followed source on a schedule, parse to JF2, dedupe
+  against already-stored entries, and append new items to the owning channel's
+  timeline.
 
 ## Design constraints
 
 - The subscription + timeline store **MUST** be strongly consistent — D1
-  (session consistency), **never KV**: a lost subscription or a dropped/stale
-  read-state flag is a correctness bug, not a safe-to-be-stale cache
+  (session consistency), **never KV**: a lost subscription or a read/unread flag
+  that silently rolls back is a correctness bug, not a safe-to-be-stale cache
   ([non-functional-requirements.md](../non-functional-requirements.md#consistency-rules-load-bearing)).
-- Polling runs on a **queue** / Cron Trigger with backoff; the read path never
-  fetches a source inline.
-- Outbound fetches (discovery, polling, preview, search) hit attacker-influenced
-  URLs, so every one goes through an **SSRF-safe** wrapper that blocks
-  private / loopback / link-local hosts and re-validates each redirect hop, and
-  caps the fetched body so a hostile source cannot OOM the Worker.
+- **Polling runs on a schedule via a queue / Cron Trigger with backoff**, never
+  inline on the `action=timeline` read path — the read path serves stored
+  entries only, so a slow or dead source never blocks a client.
+- **Reuse, don't re-implement, microformats2 parsing:** the mf2 → JF2 path
+  already exists in [`@dwk/micropub`](micropub.md)'s `mf2.ts`; factor the shared
+  parsing out rather than forking it. RSS / Atom / JSON Feed normalisation to
+  JF2 is the new surface this package adds.
+- **Complements, does not duplicate, [`@dwk/websub`](websub.md):** where a
+  followed source advertises a `rel="hub"`, the poller MAY subscribe via WebSub
+  for push instead of polling that source — WebSub is the user as *subscriber*
+  here, the mirror of the hub role `@dwk/websub` plays for the user's own feed.
 
 ## Bindings (declared `Env` fragment)
 
-The handler fails loudly at startup if any of these are missing:
-
-- **`MICROSUB_DB`** — D1 database for channels, follows, timeline items, and the
-  feed poll cache.
-- **`MICROSUB_QUEUE`** — Queue for feed-poll fan-out and retries.
-- **`AUTH_DB`** — the [`@dwk/indieauth`](indieauth.md) issued-token store,
-  consulted for revocation.
-- **`TOKEN_SIGNING_KEY`** — the secret the IndieAuth token endpoint signs tokens
-  with.
+- **D1** for channels, follows, and timeline entries (with read state).
+- A **queue** (and/or Cron Trigger) for scheduled polling and parse fan-out.
+- Optional **R2** for cached source bodies / media if entries grow past the
+  practical D1 row ceiling.
 
 ## Config
 
-- `baseUrl` / domain and the owner's IndieAuth `me`.
-- Optional `microsubEndpoint` (defaults to `${origin}/microsub`).
-- Page size, item-retention ceiling, poll interval, and the SSRF-safe `fetch`.
+- `baseUrl` / domain and the identity (`me`) the server authenticates against.
+- IndieAuth token-validation settings (issuer / introspection), shared with
+  `@dwk/micropub`.
+- Polling cadence bounds and per-channel source caps.
+- Default channels to seed.
 
 ## Conformance / testing
 
-No hosted suite exists (unlike micropub.rocks / webmention.rocks). Validate
-against the spec, interop-test with Monocle / Together / Indigenous, and cover
-the channel/timeline state machine and the feed → JF2 parsers (Atom, RSS, JSON
-Feed, `h-feed`) with colocated unit tests. See
-[conformance-and-testing.md](../conformance-and-testing.md).
+- There is no hosted conformance suite for Microsub (unlike micropub.rocks /
+  webmention.rocks). Validate against the published spec and **interop with real
+  reader clients** — Monocle, Together, Indigenous — plus colocated unit tests
+  over the channel/timeline state machine and the feed → JF2 parsers. See
+  [conformance-and-testing.md](../conformance-and-testing.md).
