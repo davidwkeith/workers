@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { NotificationProblem, parseNotification } from "./notification";
+import {
+  NotificationProblem,
+  acceptPostHeader,
+  acceptedContentTypes,
+  parseNotification,
+} from "./notification";
 
 const TURTLE =
   "<https://sender.example/a> " +
@@ -66,10 +71,23 @@ describe("parseNotification", () => {
     ).rejects.toMatchObject({ code: "malformed", status: 400 });
   });
 
-  it("rejects an RDF body with no triples as 400", async () => {
-    await expect(
-      parseNotification("@prefix ex: <https://ex.example/> .", "text/turtle"),
-    ).rejects.toMatchObject({ code: "malformed", status: 400 });
+  it("accepts a well-formed Turtle body that yields zero triples", async () => {
+    // LDN §3.2 does not require a notification to carry at least one triple.
+    const result = await parseNotification(
+      "@prefix ex: <https://ex.example/> .",
+      "text/turtle",
+    );
+    expect(result.format).toBe("Turtle");
+    expect(result.quads).toEqual([]);
+  });
+
+  it("accepts a JSON-LD body with an empty @graph", async () => {
+    const result = await parseNotification(
+      JSON.stringify({ "@context": {}, "@graph": [] }),
+      "application/ld+json",
+    );
+    expect(result.format).toBe("JSON-LD");
+    expect(result.quads).toEqual([]);
   });
 
   it("exposes NotificationProblem as a named Error subclass", () => {
@@ -77,5 +95,29 @@ describe("parseNotification", () => {
     expect(problem).toBeInstanceOf(Error);
     expect(problem.name).toBe("NotificationProblem");
     expect(problem.message).toBe("boom");
+  });
+});
+
+describe("acceptedContentTypes / acceptPostHeader", () => {
+  it("lists the RDF media types parseNotification accepts", () => {
+    const types = acceptedContentTypes();
+    expect(types).toContain("application/ld+json");
+    expect(types).toContain("text/turtle");
+  });
+
+  it("derives from the same table parseNotification validates against", async () => {
+    // Each advertised type must round-trip through parseNotification, so the
+    // advertisement and the validator cannot drift. An empty Turtle-family body
+    // is a valid zero-triple document; JSON-LD needs a parseable JSON literal.
+    for (const type of acceptedContentTypes()) {
+      const body = type === "application/ld+json" ? "[]" : "";
+      const result = await parseNotification(body, type);
+      expect(result.mediaType).toBe(type);
+    }
+  });
+
+  it("builds a comma-separated Accept-Post header from those types", () => {
+    expect(acceptPostHeader()).toBe(acceptedContentTypes().join(", "));
+    expect(acceptPostHeader()).toContain("application/ld+json");
   });
 });

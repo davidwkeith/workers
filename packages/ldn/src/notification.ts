@@ -8,12 +8,18 @@
  * `unsupported_media_type` (415) and `malformed` (400) — and otherwise returns
  * the parsed triples in the flat, storage-friendly `StoredQuad` shape. It stays
  * protocol-agnostic: authorization, dedup, and storage are the caller's concern.
+ *
+ * Per LDN §3.3.1, a receiver SHOULD advertise the content types it accepts via
+ * an `Accept-Post` header on `OPTIONS`. {@link acceptedContentTypes} and
+ * {@link acceptPostHeader} build that advertisement from the same media-type
+ * table {@link parseNotification} validates against, so the two cannot drift.
  */
 
 import {
   parse as parseRdf,
   formatForMediaType,
   quadToStored,
+  MEDIA_TYPE_FORMATS,
   type RdfFormat,
   type StoredQuad,
 } from "@dwk/rdf";
@@ -24,7 +30,7 @@ export type NotificationProblemCode = "unsupported_media_type" | "malformed";
 /**
  * A rejected notification body, carrying the HTTP status an LDN receiver should
  * answer: `415` for a non-RDF / unknown media type, `400` for an RDF media type
- * whose body does not parse (or carries no triples).
+ * whose body does not parse.
  */
 export class NotificationProblem extends Error {
   readonly code: NotificationProblemCode;
@@ -54,8 +60,13 @@ export interface ParseNotificationOptions {
 /**
  * Validate and parse an LDN notification body. Throws a {@link NotificationProblem}
  * when the `Content-Type` is missing / not a supported RDF serialization (415),
- * or when the body fails to parse or contains no triples (400). On success the
- * triples are returned as {@link StoredQuad}s ready to persist.
+ * or when the body fails to parse (400). On success the triples are returned as
+ * {@link StoredQuad}s ready to persist.
+ *
+ * A well-formed body that yields zero triples (an empty JSON-LD `@graph`, a bare
+ * `@context`, a Turtle document of only prefix declarations) is **accepted**:
+ * LDN §3.2 does not require a notification to carry at least one triple, so this
+ * returns an empty `quads` array rather than rejecting it as malformed.
  */
 export async function parseNotification(
   body: string,
@@ -91,12 +102,24 @@ export async function parseNotification(
     );
   }
 
-  if (quads.length === 0) {
-    throw new NotificationProblem(
-      "malformed",
-      "@dwk/ldn: notification body contains no triples",
-    );
-  }
-
   return { quads: quads.map(quadToStored), mediaType, format };
+}
+
+/**
+ * The RDF media types {@link parseNotification} accepts, in registry order — the
+ * value set an LDN receiver should advertise so senders pick a supported
+ * serialization. Derived from `@dwk/rdf`'s `MEDIA_TYPE_FORMATS`, the same table
+ * parsing validates against, so the advertisement and the validator never drift.
+ */
+export function acceptedContentTypes(): string[] {
+  return Object.keys(MEDIA_TYPE_FORMATS);
+}
+
+/**
+ * Build the `Accept-Post` header value (LDN §3.3.1) an LDN receiver should
+ * answer on `OPTIONS`, advertising every content type {@link parseNotification}
+ * accepts as a comma-separated list.
+ */
+export function acceptPostHeader(): string {
+  return acceptedContentTypes().join(", ");
 }
