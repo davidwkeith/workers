@@ -15,7 +15,7 @@
 
 import type { StoredQuad } from "@dwk/rdf";
 
-import { LDP_INBOX } from "./vocab";
+import { LDP_INBOX, LDP_CONSTRAINED_BY } from "./vocab";
 
 const DEFAULT_GRAPH = { termType: "DefaultGraph", value: "" } as const;
 
@@ -26,6 +26,17 @@ const DEFAULT_GRAPH = { termType: "DefaultGraph", value: "" } as const;
  */
 export function inboxLinkHeader(inboxIri: string): string {
   return `<${inboxIri}>; rel="${LDP_INBOX}"`;
+}
+
+/**
+ * Build the `Link` header value advertising `constraintsIri` as the constraints
+ * a resource imposes: `<constraintsIri>; rel="http://www.w3.org/ns/ldp#constrainedBy"`.
+ * LDN §5.1 (and LDP) lets a receiver point senders at a document describing the
+ * constraints it enforces — the media types it accepts, whether it requires a
+ * non-empty graph, and so on. Join it with any other link-values using `, `.
+ */
+export function constrainedByLinkHeader(constraintsIri: string): string {
+  return `<${constraintsIri}>; rel="${LDP_CONSTRAINED_BY}"`;
 }
 
 /**

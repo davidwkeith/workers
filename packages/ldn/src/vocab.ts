@@ -15,6 +15,9 @@ export const LDP_INBOX = `${LDP_NAMESPACE}inbox`;
 /** `ldp:contains` — links a container to each of its members. */
 export const LDP_CONTAINS = `${LDP_NAMESPACE}contains`;
 
+/** `ldp:constrainedBy` — points at the constraints a resource imposes (LDN §5.1). */
+export const LDP_CONSTRAINED_BY = `${LDP_NAMESPACE}constrainedBy`;
+
 /** `ldp:Container` — the type of an inbox (a container of notifications). */
 export const LDP_CONTAINER = `${LDP_NAMESPACE}Container`;
 

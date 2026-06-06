@@ -20,6 +20,7 @@ export {
   LDP_NAMESPACE,
   LDP_INBOX,
   LDP_CONTAINS,
+  LDP_CONSTRAINED_BY,
   LDP_CONTAINER,
   LDP_RESOURCE,
   RDF_TYPE,
@@ -28,12 +29,15 @@ export {
 export {
   inboxLinkHeader,
   inboxTriple,
+  constrainedByLinkHeader,
   discoverInboxIris,
   parseInboxLinks,
 } from "./discovery";
 
 export {
   parseNotification,
+  acceptedContentTypes,
+  acceptPostHeader,
   NotificationProblem,
   type NotificationProblemCode,
   type ParsedNotification,

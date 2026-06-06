@@ -28,14 +28,19 @@ have coupled them to WAC; a standalone lib keeps them RDF-only and reusable.
 
 - **Vocabulary** — the LDP/RDF term IRIs (`LDP_INBOX`, `LDP_CONTAINS`, …).
 - **Discovery** — `inboxLinkHeader(inbox)` / `inboxTriple(subject, inbox)` to
-  advertise an inbox, and `parseInboxLinks(header)` / `discoverInboxIris(quads,
-  subject?)` to find one. The discovery module depends on `@dwk/rdf` for **types
-  only** (erased at build), so it is reachable as the n3-free entry point
-  `@dwk/ldn/discovery` that a Workers-runtime consumer imports without pulling in
-  the RDF parser.
+  advertise an inbox, `constrainedByLinkHeader(constraints)` to advertise the
+  constraints the inbox imposes (`ldp:constrainedBy`, LDN §5.1), and
+  `parseInboxLinks(header)` / `discoverInboxIris(quads, subject?)` to find an
+  inbox. The discovery module depends on `@dwk/rdf` for **types only** (erased at
+  build), so it is reachable as the n3-free entry point `@dwk/ldn/discovery` that
+  a Workers-runtime consumer imports without pulling in the RDF parser.
 - **Receiver** — `parseNotification(body, contentType, { baseIRI })` validates a
   posted RDF notification, throwing a `NotificationProblem` carrying the HTTP
-  status to answer (`415` non-RDF media type, `400` unparseable / no triples).
+  status to answer (`415` non-RDF media type, `400` unparseable). A well-formed
+  body yielding zero triples is accepted (LDN §3.2 does not mandate ≥1 triple).
+  `acceptedContentTypes()` / `acceptPostHeader()` build the `Accept-Post`
+  advertisement (LDN §3.3.1) from the same media-type table parsing validates
+  against, so the receiver's `OPTIONS` response and its validator cannot drift.
 - **Consumer** — `inboxListingQuads(inbox, members)` and
   `listInboxMembers(quads, inbox?)` for the `ldp:Container` + `ldp:contains`
   listing.

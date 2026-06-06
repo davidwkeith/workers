@@ -3,12 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { StoredQuad } from "@dwk/rdf";
 
 import {
+  constrainedByLinkHeader,
   discoverInboxIris,
   inboxLinkHeader,
   inboxTriple,
   parseInboxLinks,
 } from "./discovery";
-import { LDP_INBOX } from "./vocab";
+import { LDP_CONSTRAINED_BY, LDP_INBOX } from "./vocab";
 
 const named = (value: string) => ({ termType: "NamedNode" as const, value });
 const graph = { termType: "DefaultGraph" as const, value: "" };
@@ -21,6 +22,14 @@ describe("inboxLinkHeader", () => {
   it("builds an ldp:inbox Link value", () => {
     expect(inboxLinkHeader("https://alice.example/inbox/")).toBe(
       `<https://alice.example/inbox/>; rel="${LDP_INBOX}"`,
+    );
+  });
+});
+
+describe("constrainedByLinkHeader", () => {
+  it("builds an ldp:constrainedBy Link value", () => {
+    expect(constrainedByLinkHeader("https://alice.example/constraints")).toBe(
+      `<https://alice.example/constraints>; rel="${LDP_CONSTRAINED_BY}"`,
     );
   });
 });
