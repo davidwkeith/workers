@@ -7,7 +7,11 @@ import {
   type JsonObject,
   type VerificationMethod,
 } from "./data-integrity";
-import { encodeEd25519Multikey } from "./multibase";
+import {
+  base58btcDecode,
+  encodeEd25519Multikey,
+  encodeMultibaseBase64url,
+} from "./multibase";
 import type { JcsValue } from "./jcs";
 
 const VM_ID = "did:web:example.com#key-0";
@@ -98,6 +102,53 @@ describe("eddsa-jcs-2022", () => {
     });
     expect(result.verified).toBe(false);
     expect(result.errors).toContain("signature verification failed");
+  });
+
+  it("fails when the document @context does not start with the proof's", async () => {
+    const { privateJwk, multikeyVm } = await ed25519Material();
+    const signer = await importSigner(privateJwk);
+    const secured = await addProof(sampleDoc(), signer, {
+      verificationMethod: VM_ID,
+    });
+    // The proof copied the document's @context at signing; diverge it.
+    secured["@context"] = ["https://example.com/other"];
+
+    const result = await verifyProof(secured, {
+      resolveVerificationMethod: () => multikeyVm,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.errors[0]).toMatch(/@context/);
+  });
+
+  it("rejects a proofValue that is not base58-btc multibase", async () => {
+    const { privateJwk, multikeyVm } = await ed25519Material();
+    const signer = await importSigner(privateJwk);
+    const secured = await addProof(sampleDoc(), signer, {
+      verificationMethod: VM_ID,
+    });
+    // Re-encode the same signature bytes as base64url (`u`) — a valid multibase
+    // the JCS suites nonetheless forbid for proofValue.
+    const sigBytes = base58btcDecode(
+      (secured.proof.proofValue as string).slice(1),
+    );
+    secured.proof.proofValue = encodeMultibaseBase64url(sigBytes);
+
+    const result = await verifyProof(secured, {
+      resolveVerificationMethod: () => multikeyVm,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.errors[0]).toMatch(/base58-btc/);
+  });
+
+  it("rejects an invalid created datetime at signing", async () => {
+    const { privateJwk } = await ed25519Material();
+    const signer = await importSigner(privateJwk);
+    await expect(
+      addProof(sampleDoc(), signer, {
+        verificationMethod: VM_ID,
+        created: "not-a-date",
+      }),
+    ).rejects.toThrow(/dateTimeStamp/);
   });
 
   it("rejects a mismatched proof purpose", async () => {

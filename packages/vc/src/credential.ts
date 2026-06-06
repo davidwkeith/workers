@@ -8,6 +8,7 @@
  * @see https://www.w3.org/TR/vc-data-model-2.0/
  */
 
+import { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime";
 import type { JcsValue } from "./jcs";
 import type { JsonObject } from "./data-integrity";
 
@@ -44,11 +45,6 @@ export interface BuildCredentialOptions {
   readonly validUntil?: Date | string;
   /** A `credentialStatus` entry (e.g. a Bitstring Status List reference). */
   readonly credentialStatus?: JsonObject | readonly JsonObject[];
-}
-
-function toXsdDateTime(value: Date | string): string {
-  if (typeof value === "string") return value;
-  return value.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function dedupePrepend(
@@ -161,20 +157,32 @@ export function issuerId(credential: JsonObject): string | undefined {
 /**
  * Evaluate a credential's validity window against `now` (epoch ms). Returns a
  * reason when the credential is not yet valid or has expired, else `null`.
+ *
+ * A present-but-malformed bound fails **closed**: an unparseable `validFrom` is
+ * treated as not-yet-valid and an unparseable `validUntil` as expired, rather
+ * than silently dropping the bound (which would let a credential with a garbled
+ * expiry verify as if it never expires).
  */
 export function checkValidityPeriod(
   credential: JsonObject,
   now: number = Date.now(),
 ): "not_yet_valid" | "expired" | null {
   const validFrom = credential.validFrom;
-  if (typeof validFrom === "string") {
-    const from = Date.parse(validFrom);
-    if (!Number.isNaN(from) && now < from) return "not_yet_valid";
+  if (validFrom !== undefined) {
+    if (typeof validFrom !== "string" || !isValidXsdDateTimeStamp(validFrom)) {
+      return "not_yet_valid";
+    }
+    if (now < Date.parse(validFrom)) return "not_yet_valid";
   }
   const validUntil = credential.validUntil;
-  if (typeof validUntil === "string") {
-    const until = Date.parse(validUntil);
-    if (!Number.isNaN(until) && now > until) return "expired";
+  if (validUntil !== undefined) {
+    if (
+      typeof validUntil !== "string" ||
+      !isValidXsdDateTimeStamp(validUntil)
+    ) {
+      return "expired";
+    }
+    if (now > Date.parse(validUntil)) return "expired";
   }
   return null;
 }

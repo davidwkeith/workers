@@ -105,10 +105,14 @@ export {
   BITSTRING_STATUS_LIST_ENTRY_TYPE,
   BITSTRING_STATUS_LIST_SUBJECT_TYPE,
   type StatusPurpose,
+  type StatusPurposeValue,
   type StatusListCredentialOptions,
   type VcStatusStore,
   type VcStatusStoreEnv,
 } from "./status-list";
+
+// XSD dateTimeStamp validation for VC temporal fields
+export { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime";
 
 // JCS canonicalization and multibase/Multikey codecs
 export { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs";

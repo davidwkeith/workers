@@ -86,6 +86,43 @@ describe("status credential and entry builders", () => {
     expect(subject.statusPurpose).toBe("revocation");
   });
 
+  it("emits validUntil and ttl on the credential and subject", () => {
+    const cred = buildStatusListCredential({
+      id: "https://example.com/status/revocation",
+      statusPurpose: "revocation",
+      encodedList: "uH4sIAAAA",
+      issuer: "did:web:example.com",
+      validUntil: "2030-01-01T00:00:00Z",
+      ttl: 300000,
+    });
+    expect(cred.validUntil).toBe("2030-01-01T00:00:00Z");
+    expect(cred.ttl).toBe(300000);
+    expect((cred.credentialSubject as JsonObject).ttl).toBe(300000);
+  });
+
+  it("supports one-or-more status purposes", () => {
+    const cred = buildStatusListCredential({
+      id: "https://example.com/status/combo",
+      statusPurpose: ["revocation", "suspension"],
+      encodedList: "uH4sIAAAA",
+      issuer: "did:web:example.com",
+    });
+    expect((cred.credentialSubject as JsonObject).statusPurpose).toEqual([
+      "revocation",
+      "suspension",
+    ]);
+
+    const entry = buildStatusEntry({
+      statusListCredential: "https://example.com/status/combo",
+      statusListIndex: 7,
+      statusPurpose: ["revocation", "suspension"],
+    });
+    const credential: JsonObject = { credentialStatus: entry };
+    expect(findStatusEntry(credential, "revocation")).toEqual(entry);
+    expect(findStatusEntry(credential, "suspension")).toEqual(entry);
+    expect(findStatusEntry(credential, "other")).toBeUndefined();
+  });
+
   it("builds and reads a status entry", () => {
     const entry = buildStatusEntry({
       statusListCredential: "https://example.com/status/revocation",
