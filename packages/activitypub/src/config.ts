@@ -71,6 +71,14 @@ export interface ActivityPubConfig {
    */
   readonly publishToken?: string;
 
+  /**
+   * Whether to serve and advertise an instance-level **shared inbox** at
+   * `${baseUrl}/inbox` (ActivityPub §4.1 / §7.1.3), letting large peers
+   * batch-deliver to this actor. Defaults to `true`; set `false` to publish no
+   * `endpoints.sharedInbox` and serve no shared-inbox route.
+   */
+  readonly sharedInbox?: boolean;
+
   /** Members served per `OrderedCollection` page. Defaults to 50. */
   readonly pageSize?: number;
 
@@ -117,6 +125,8 @@ export interface ResolvedConfig {
   readonly baseUrl: string;
   readonly actor: ActorProfile;
   readonly iris: ActorIris;
+  /** Instance-level shared inbox IRI, or `undefined` when not served. */
+  readonly sharedInbox?: string;
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -151,6 +161,8 @@ export const INTERNAL_HEADERS = {
 export interface ForwardedConfig {
   readonly iris: ActorIris;
   readonly actorName: string;
+  /** Shared inbox IRI the DO should also accept inbound `POST`s on, if served. */
+  readonly sharedInbox?: string;
   readonly manuallyApprovesFollowers: boolean;
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
@@ -239,11 +251,14 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   }
   const baseUrl = normalizeBaseUrl(config.baseUrl);
   const fetchImpl = config.fetch ?? fetch;
+  const sharedInbox =
+    (config.sharedInbox ?? true) ? `${baseUrl}/inbox` : undefined;
 
   return {
     baseUrl,
     actor: config.actor,
     iris: deriveIris(baseUrl, config.actor.username),
+    sharedInbox,
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
     publishToken: config.publishToken,

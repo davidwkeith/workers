@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AS2_CONTENT_TYPE,
+  AS2_LD_CONTENT_TYPE,
   actorIri,
+  as2ContentType,
   buildActorDocument,
   buildCollection,
   buildCollectionPage,
@@ -52,6 +55,16 @@ describe("buildActorDocument", () => {
     expect(doc.summary).toBeUndefined();
     expect(doc.icon).toBeUndefined();
     expect(doc.manuallyApprovesFollowers).toBe(false);
+    expect(doc.endpoints).toBeUndefined();
+  });
+
+  it("advertises endpoints.sharedInbox when one is supplied", () => {
+    const doc = buildActorDocument(IRIS, { username: "bob" }, "PEM", {
+      sharedInbox: "https://example.com/inbox",
+    });
+    expect(doc.endpoints).toEqual({
+      sharedInbox: "https://example.com/inbox",
+    });
   });
 });
 
@@ -111,5 +124,25 @@ describe("wantsActivityJson", () => {
     ).toBe(true);
     expect(wantsActivityJson("text/html")).toBe(false);
     expect(wantsActivityJson(null)).toBe(false);
+  });
+});
+
+describe("as2ContentType", () => {
+  it("serves the ld+json profile variant only when negotiated for it", () => {
+    expect(
+      as2ContentType(
+        'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
+      ),
+    ).toBe(AS2_LD_CONTENT_TYPE);
+  });
+
+  it("falls back to activity+json for everyone else", () => {
+    expect(as2ContentType("application/activity+json")).toBe(AS2_CONTENT_TYPE);
+    expect(as2ContentType("text/html")).toBe(AS2_CONTENT_TYPE);
+    expect(as2ContentType(null)).toBe(AS2_CONTENT_TYPE);
+    // A client naming both prefers the fediverse activity+json alias.
+    expect(
+      as2ContentType("application/activity+json, application/ld+json"),
+    ).toBe(AS2_CONTENT_TYPE);
   });
 });

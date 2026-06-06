@@ -44,18 +44,22 @@ export {
 export {
   AS2_NS,
   AS2_CONTENT_TYPE,
+  AS2_LD_CONTENT_TYPE,
   PUBLIC_AUDIENCE,
   buildActorDocument,
   buildCollection,
   buildCollectionPage,
   wantsActivityJson,
+  as2ContentType,
   type ActorProfile,
   type ActorIris,
+  type ActorDocumentOptions,
   type ActivityObject,
 } from "./as2";
 
 export {
   buildNodeInfoDiscovery,
+  buildNodeInfo20,
   buildNodeInfo21,
   type SoftwareInfo,
   type UsageCounts,

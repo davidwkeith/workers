@@ -114,6 +114,39 @@ describe("actor document", () => {
     );
     expect(res.status).toBe(405);
   });
+
+  it("advertises a shared inbox endpoint by default", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    expect(doc.endpoints).toEqual({ sharedInbox: `${BASE}/inbox` });
+  });
+
+  it("omits the shared inbox when disabled", async () => {
+    const config = makeConfig({ sharedInbox: false });
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    expect(doc.endpoints).toBeUndefined();
+  });
+
+  it("content-negotiates the JSON-LD profile variant", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(actorUrl(config), {
+        headers: {
+          accept:
+            'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
+        },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.headers.get("content-type")).toContain("application/ld+json");
+    expect(res.headers.get("content-type")).toContain("activitystreams");
+  });
 });
 
 describe("NodeInfo", () => {
@@ -128,7 +161,7 @@ describe("NodeInfo", () => {
     );
     expect(discovery.status).toBe(200);
     const links = ((await discovery.json()) as { links: unknown[] }).links;
-    expect(links).toHaveLength(1);
+    expect(links).toHaveLength(2);
 
     const doc = await handler(
       new Request(`${BASE}/nodeinfo/2.1`),
@@ -138,6 +171,20 @@ describe("NodeInfo", () => {
     const body = (await doc.json()) as Record<string, unknown>;
     expect(body.protocols).toEqual(["activitypub"]);
     expect((body.usage as Record<string, unknown>).localPosts).toBe(0);
+  });
+
+  it("also serves the 2.0 document for consumers that request it", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${BASE}/nodeinfo/2.0`),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.version).toBe("2.0");
+    expect(body.protocols).toEqual(["activitypub"]);
   });
 });
 
@@ -192,6 +239,126 @@ describe("inbox", () => {
       ctx,
     );
     expect(res.status).toBe(403);
+  });
+
+  it("accepts a signed Follow on the shared inbox for the single actor", async () => {
+    const config = makeConfig({
+      verifyInboxSignature: acceptAll,
+      actor: {
+        username: `bob-${crypto.randomUUID().slice(0, 8)}`,
+        manuallyApprovesFollowers: true,
+      },
+    });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${BASE}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: "https://remote.example/activities/shared-1",
+          type: "Follow",
+          actor: REMOTE,
+          object: actorUrl(config),
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(202);
+
+    // The shared inbox routes to the single actor's DO, so the follower lands
+    // in that actor's followers collection.
+    const followers = (await (
+      await handler(new Request(`${actorUrl(config)}/followers`), testEnv, ctx)
+    ).json()) as Record<string, unknown>;
+    expect(followers.totalItems).toBe(1);
+  });
+
+  it("rejects a GET on the shared inbox with 405", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(`${BASE}/inbox`), testEnv, ctx);
+    expect(res.status).toBe(405);
+  });
+
+  it("refuses a Create whose embedded object is attributed to another actor", async () => {
+    const config = makeConfig({ verifyInboxSignature: acceptAll });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/activities/spoof",
+          type: "Create",
+          actor: REMOTE,
+          object: {
+            id: "https://remote.example/notes/1",
+            type: "Note",
+            attributedTo: "https://evil.example/users/mallory",
+            content: "not mine",
+          },
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses an attributedTo spoof wrapped in arrays (object/attributedTo)", async () => {
+    const config = makeConfig({ verifyInboxSignature: acceptAll });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/activities/spoof-array",
+          type: "Create",
+          actor: REMOTE,
+          // Both `object` and `attributedTo` are arrays: a naive check that
+          // bails on arrays would let the spoofed actor through.
+          object: [
+            {
+              id: "https://remote.example/notes/3",
+              type: "Note",
+              attributedTo: [REMOTE, "https://evil.example/users/mallory"],
+              content: "smuggled",
+            },
+          ],
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a Create whose embedded object is attributed to its actor", async () => {
+    const config = makeConfig({ verifyInboxSignature: acceptAll });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/activities/ok",
+          type: "Create",
+          actor: REMOTE,
+          object: {
+            id: "https://remote.example/notes/2",
+            type: "Note",
+            attributedTo: REMOTE,
+            content: "mine",
+          },
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(202);
   });
 
   it("accepts a signed Follow, records the follower, and dedups by id", async () => {

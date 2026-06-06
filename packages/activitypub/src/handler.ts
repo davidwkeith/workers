@@ -13,8 +13,9 @@
 import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
-import { AS2_CONTENT_TYPE, buildActorDocument, type JsonValue } from "./as2";
+import { as2ContentType, buildActorDocument, type JsonValue } from "./as2";
 import {
+  buildNodeInfo20,
   buildNodeInfo21,
   buildNodeInfoDiscovery,
   type UsageCounts,
@@ -86,6 +87,7 @@ function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,
     keyId: config.iris.keyId,
+    sharedInbox: config.sharedInbox,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),
   };
 }
@@ -184,7 +186,11 @@ export function createActivityPub(
   const outboxPath = pathOf(iris.outbox);
   const followersPath = pathOf(iris.followers);
   const followingPath = pathOf(iris.following);
-  const nodeInfoDocPath = new URL(`${resolved.baseUrl}/nodeinfo/2.1`).pathname;
+  const sharedInboxPath = resolved.sharedInbox
+    ? pathOf(resolved.sharedInbox)
+    : undefined;
+  const nodeInfo20Path = new URL(`${resolved.baseUrl}/nodeinfo/2.0`).pathname;
+  const nodeInfo21Path = new URL(`${resolved.baseUrl}/nodeinfo/2.1`).pathname;
 
   return async (request, env, _ctx) => {
     assertBindings(env);
@@ -199,12 +205,13 @@ export function createActivityPub(
         JSON_CONTENT_TYPE,
       );
     }
-    if (path === nodeInfoDocPath && method === "GET") {
+    if (
+      (path === nodeInfo20Path || path === nodeInfo21Path) &&
+      method === "GET"
+    ) {
       const usage = await nodeInfoUsage(resolved, env);
-      return jsonResponse(
-        buildNodeInfo21(resolved.software, usage),
-        JSON_CONTENT_TYPE,
-      );
+      const build = path === nodeInfo20Path ? buildNodeInfo20 : buildNodeInfo21;
+      return jsonResponse(build(resolved.software, usage), JSON_CONTENT_TYPE);
     }
 
     // --- Actor document (static, served at the edge) ------------------------
@@ -212,15 +219,18 @@ export function createActivityPub(
       if (method !== "GET" && method !== "HEAD") {
         return text(405, "Method Not Allowed");
       }
-      // Serve AS2 to federation peers; an HTML profile page is out of scope, so
-      // the response does not vary on `Accept`.
+      // Serve AS2 to federation peers; an HTML profile page is out of scope.
+      // A strict client may still content-negotiate for the JSON-LD profile
+      // variant (§3.2), so the response Content-Type honors `Accept`.
       const body = JSON.stringify(
-        buildActorDocument(iris, resolved.actor, resolved.publicKeyPem),
+        buildActorDocument(iris, resolved.actor, resolved.publicKeyPem, {
+          sharedInbox: resolved.sharedInbox,
+        }),
       );
       return new Response(method === "HEAD" ? null : body, {
         status: 200,
         headers: {
-          "content-type": AS2_CONTENT_TYPE,
+          "content-type": as2ContentType(request.headers.get("accept")),
           // Advertise the actor's inbox via LDN discovery too, so a plain
           // Linked Data Notifications sender (not just an ActivityPub peer) can
           // find it from the `Link` header without parsing the AS2 body.
@@ -229,9 +239,18 @@ export function createActivityPub(
       });
     }
 
-    // --- Inbox: verify signature at the edge, then route to the DO ----------
-    if (path === inboxPath) {
+    // --- Inbox(es): verify signature at the edge, then route to the DO ------
+    // Both the actor's personal inbox and the optional instance-level shared
+    // inbox (§7.1.3) are handled identically: the single actor is the only
+    // recipient, so a batched delivery to the shared inbox is processed for it.
+    const isPersonalInbox = path === inboxPath;
+    const isSharedInbox =
+      sharedInboxPath !== undefined && path === sharedInboxPath;
+    if (isPersonalInbox || isSharedInbox) {
       if (method !== "POST") {
+        // The personal inbox lets the DO answer 405; the shared inbox is
+        // write-only with no DO collection behind it, so answer here.
+        if (isSharedInbox) return text(405, "Method Not Allowed");
         return forwardToDo(resolved, env, request.url, { method });
       }
       const bodyBytes = new Uint8Array(await request.arrayBuffer());
