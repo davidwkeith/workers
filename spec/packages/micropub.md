@@ -51,8 +51,9 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
 
 ## Error responses
 
-Error bodies use the Micropub/OAuth shape `{ "error", "error_description" }`
-with the error codes from the [Micropub error table][mp-errors]
+Error bodies use the Micropub/OAuth shape
+`{ "error": string, "error_description": string }` with the error codes from
+the [Micropub error table][mp-errors]
 (`invalid_request`, `unauthorized`, `insufficient_scope`, `forbidden`, …) and
 their mapped HTTP statuses (`invalid_request` → 400, `unauthorized` → 401, and
 so on).
