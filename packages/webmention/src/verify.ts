@@ -78,27 +78,47 @@ export async function extractLinks(
 }
 
 /**
- * Characters that may appear within a URL token (RFC 3986 unreserved + reserved
- * + `%`). Used to enforce a token boundary around a plain-text target match so a
- * shorter URL never matches inside a longer one.
+ * Characters that unambiguously continue a URL token: an alphanumeric, or a
+ * structural delimiter (path / query / fragment / userinfo). One of these
+ * abutting the target means the target is part of a longer URL.
+ */
+const URL_CORE_CHAR = /[A-Za-z0-9_/\-~%+=&?#@]/;
+
+/**
+ * The full RFC 3986 URL character set (unreserved + reserved + `%`). Punctuation
+ * such as `.` `,` `;` `)` `]` is valid inside a URL but also routinely trails or
+ * wraps one in prose, so on its own it does not prove continuation — only when
+ * it is itself followed by a {@link URL_CORE_CHAR} (e.g. the `.` in `…/post.html`).
  */
 const URL_CHAR = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/;
 
 /**
- * Whether `body` contains `target` as a standalone URL token — present, and with
- * neither the preceding nor the following character continuing a URL. This
- * rejects the over-matches a bare substring check admits: `…/post` no longer
- * matches inside `…/posting`, nor `…/target` inside `…/target/extra`, while the
- * target standing alone (or delimited by whitespace/quotes/brackets) still does.
+ * Whether `body` contains `target` as a standalone URL token — present, with
+ * neither neighbour continuing a URL. This rejects the over-matches a bare
+ * substring admits (`…/post` inside `…/posting`, `…/target` inside
+ * `…/target/extra`, or the target as a suffix of a longer URL) while still
+ * accepting a target trailed by sentence punctuation or wrapped in brackets.
  */
 function textHasUrlToken(body: string, target: string): boolean {
-  for (let from = body.indexOf(target); from !== -1; ) {
+  for (
+    let from = body.indexOf(target);
+    from !== -1;
+    from = body.indexOf(target, from + 1)
+  ) {
     const before = from === 0 ? "" : (body[from - 1] ?? "");
     const after = body[from + target.length] ?? "";
-    if (!URL_CHAR.test(before) && !URL_CHAR.test(after)) {
+    const afterNext = body[from + target.length + 1] ?? "";
+    // A preceding core URL char makes the target a suffix of a longer URL.
+    const beforeContinues = URL_CORE_CHAR.test(before);
+    // A following core URL char continues the URL; a punctuation URL char only
+    // continues it when itself followed by a core char (so `.html` continues,
+    // but a sentence-ending `.` or a wrapping `)` is a boundary).
+    const afterContinues =
+      URL_CORE_CHAR.test(after) ||
+      (URL_CHAR.test(after) && URL_CORE_CHAR.test(afterNext));
+    if (!beforeContinues && !afterContinues) {
       return true;
     }
-    from = body.indexOf(target, from + 1);
   }
   return false;
 }

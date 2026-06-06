@@ -71,8 +71,32 @@ describe("sourceLinksTo", () => {
     expect(
       await sourceLinksTo(`re: ${target} thanks`, target, source, "text/plain"),
     ).toBe(true);
+    // Trailing sentence punctuation and surrounding brackets are boundaries too.
+    expect(
+      await sourceLinksTo(`Check out ${target}.`, target, source, "text/plain"),
+    ).toBe(true);
+    expect(
+      await sourceLinksTo(
+        `See (${target}), or [${target}]`,
+        target,
+        source,
+        "text/plain",
+      ),
+    ).toBe(true);
     expect(
       await sourceLinksTo("nothing here", target, source, "text/plain"),
+    ).toBe(false);
+  });
+
+  it("still rejects a longer URL whose path continues past the target", async () => {
+    // A `.`-then-core continuation (a file extension) is not a boundary.
+    expect(
+      await sourceLinksTo(
+        "https://example.com/article.html",
+        target,
+        source,
+        "text/plain",
+      ),
     ).toBe(false);
   });
 
