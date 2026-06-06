@@ -365,6 +365,10 @@ async function handleQuery(
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {
+      // No `not_found` code exists in the Micropub/OAuth registry, so the body
+      // reuses `invalid_request` while keeping the semantically correct 404.
+      // This deliberate body-code/status divergence is documented in
+      // spec/packages/micropub.md "Error responses".
       return error("invalid_request", "no post exists at that URL", 404);
     }
     const filter = [

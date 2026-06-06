@@ -117,7 +117,12 @@ export async function authorize(
     );
   }
 
-  // Complete the DPoP proof-of-possession binding for this request.
+  // Complete the DPoP proof-of-possession binding for this request. DPoP is
+  // mandatory here even though Micropub §5.2 would allow a plain Bearer token:
+  // this is the deliberate "DPoP everywhere" posture (see
+  // spec/packages/micropub.md "Auth / security" and
+  // spec/non-functional-requirements.md), so a token with no matching proof is
+  // always rejected.
   const proof = request.headers.get("DPoP");
   if (!proof) {
     return failure(
