@@ -934,6 +934,55 @@ describe("@dwk/indieauth resource indicators / audience (RFC 8707)", () => {
   });
 });
 
+describe("@dwk/indieauth store migration (resource column)", () => {
+  it("adds the resource column to a legacy authorization_codes table", async () => {
+    const db = harness.AUTH_DB;
+    // Recreate the pre-RFC-8707 schema (no `resource` column), as a database
+    // provisioned before this change would have.
+    await db.prepare("DROP TABLE IF EXISTS authorization_codes").run();
+    await db
+      .prepare(
+        `CREATE TABLE authorization_codes (
+           code TEXT PRIMARY KEY,
+           client_id TEXT NOT NULL,
+           redirect_uri TEXT NOT NULL,
+           scope TEXT NOT NULL,
+           me TEXT NOT NULL,
+           code_challenge TEXT NOT NULL,
+           code_challenge_method TEXT NOT NULL,
+           profile TEXT,
+           expires_at INTEGER NOT NULL,
+           used INTEGER NOT NULL DEFAULT 0
+         )`,
+      )
+      .run();
+
+    const store = createIndieAuthStore(harness);
+    await store.init(); // migrates: ALTER TABLE ... ADD COLUMN resource
+
+    // Saving and redeeming a code that carries resources now works rather than
+    // crashing with `no such column: resource`.
+    const now = Math.floor(Date.now() / 1000);
+    await store.saveAuthorizationCode({
+      code: "migration-code",
+      clientId: CLIENT_ID,
+      redirectUri: REDIRECT_URI,
+      scope: "create",
+      me: ME,
+      codeChallenge: "challenge",
+      codeChallengeMethod: "S256",
+      profile: null,
+      resources: ["https://media.example.com/"],
+      expiresAt: now + 600,
+    });
+    const redeemed = await store.redeemAuthorizationCode("migration-code", now);
+    expect(redeemed?.resources).toEqual(["https://media.example.com/"]);
+
+    // init() is idempotent: re-running it with the column present is a no-op.
+    await store.init();
+  });
+});
+
 describe("@dwk/indieauth routing and method handling", () => {
   it("returns 405 for a non-GET on the metadata endpoint", async () => {
     const handler = autoApproveHandler();

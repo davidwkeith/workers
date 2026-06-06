@@ -134,6 +134,26 @@ function rowToRecord(row: AuthCodeRow): AuthorizationCodeRecord {
   };
 }
 
+/**
+ * Add `column` to `table` when it is not already present, for backward-compatible
+ * schema evolution on durable D1 databases. The table/column/type are internal
+ * constants (never user input), so interpolating them into the DDL is safe; a
+ * `PRAGMA table_info` check keeps this idempotent rather than relying on
+ * swallowing a duplicate-column error.
+ */
+async function addColumnIfMissing(
+  db: D1Database,
+  table: string,
+  column: string,
+  type: string,
+): Promise<void> {
+  const info = await db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all<{ name: string }>();
+  if (info.results.some((row) => row.name === column)) return;
+  await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+}
+
 /** Parse the JSON-encoded `resource` column into a non-empty list, or `undefined`. */
 function parseResources(raw: string | null): readonly string[] | undefined {
   if (!raw) return undefined;
@@ -165,6 +185,12 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
   return {
     async init() {
       for (const ddl of SCHEMA) await db.prepare(ddl).run();
+      // Migration: a database created before the RFC 8707 `resource` column
+      // existed still has the old `authorization_codes` shape, and
+      // `CREATE TABLE IF NOT EXISTS` above will not add the column. Patch it in
+      // when absent so saving/redeeming a code never hits `no such column`.
+      // Idempotent — a no-op once the column is present.
+      await addColumnIfMissing(db, "authorization_codes", "resource", "TEXT");
     },
 
     async saveAuthorizationCode(record) {

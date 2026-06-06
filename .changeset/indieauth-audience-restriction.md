@@ -17,6 +17,11 @@ carry an `aud` including that resource-server identifier, otherwise verification
 fails with the new `audience_mismatch` reason. Tokens with no `aud` and callers
 that pass no expected `audience` are unaffected, so this is backward compatible.
 
+The store's `init()` now performs an idempotent column migration (`ALTER TABLE
+... ADD COLUMN resource`, guarded by `PRAGMA table_info`) so a durable D1
+database created before this change gains the new column instead of crashing
+with `no such column: resource`.
+
 Also clarifies (in docs only) that the IndieAuth "MUST contain a path component"
 rule for `client_id`/profile URLs is satisfied by construction — WHATWG URL
 parsing always yields at least a `/` path, which the spec accepts — so no
