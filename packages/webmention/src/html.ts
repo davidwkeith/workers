@@ -136,6 +136,16 @@ export function isHtmlContentType(contentType: string): boolean {
   return essence === "text/html" || essence === "application/xhtml+xml";
 }
 
+/**
+ * Whether a `Content-Type` value names a JSON document (`application/json` or a
+ * `+json`-suffixed type such as `application/activity+json`). Compares the media
+ * type's essence — the part before any `;` parameters — case-insensitively.
+ */
+export function isJsonContentType(contentType: string): boolean {
+  const essence = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return essence === "application/json" || essence.endsWith("+json");
+}
+
 /** Split a whitespace-separated token list (e.g. a `rel` value) into tokens. */
 export function splitTokens(value: string | null): string[] {
   if (value === null) {

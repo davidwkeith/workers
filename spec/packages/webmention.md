@@ -49,3 +49,12 @@ Receives and sends Webmentions for the user's domain.
 
 - [webmention.rocks](https://webmention.rocks/) for both sender and receiver.
   See [conformance-and-testing.md](../conformance-and-testing.md).
+
+### Known gaps
+
+- **Deleted-source re-send (§3.1.5, a SHOULD).** When a previously sent source
+  is later deleted, the sender does not re-send a Webmention so the receiver can
+  drop the mention. This is an intentional scope limit: the receiver already
+  removes a mention when asynchronous re-verification finds the link gone
+  (including a `410 Gone` source), so the inbox stays correct on the receiving
+  side. Re-sending on delete from the publishing side is deferred.

@@ -71,6 +71,23 @@ describe("createWebmention", () => {
     expect(sent).toEqual([]);
   });
 
+  it("rejects a non-form-urlencoded Content-Type with 400", async () => {
+    const handler = createWebmention(config);
+    const { env, sent } = envWithQueue();
+    const body = new FormData();
+    body.set("source", "https://other.example/p");
+    body.set("target", "https://example.com/article");
+    const response = await handler(
+      // A FormData body makes the runtime set a multipart Content-Type.
+      new Request("https://example.com/webmention", { method: "POST", body }),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("Content-Type");
+    expect(sent).toEqual([]);
+  });
+
   it("rejects non-POST methods with 405", async () => {
     const handler = createWebmention(config);
     const { env } = envWithQueue();

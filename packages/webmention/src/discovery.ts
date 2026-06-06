@@ -22,11 +22,17 @@ import {
 import { readBodyCapped, type FetchLike } from "./fetch";
 import { safeFetch } from "./safe-fetch";
 
-const LEGACY_REL_PREFIX = "http://webmention.org";
+// The exact legacy rel values predating the standardized `webmention` token. A
+// prefix test would also match look-alike hosts like
+// `http://webmention.org.evil.example/`, so require an exact string.
+const LEGACY_RELS = new Set([
+  "http://webmention.org/",
+  "http://webmention.org/webmention",
+]);
 
 function isWebmentionRel(rel: string): boolean {
   const lower = rel.toLowerCase();
-  return lower === "webmention" || lower.startsWith(LEGACY_REL_PREFIX);
+  return lower === "webmention" || LEGACY_RELS.has(lower);
 }
 
 /**

@@ -18,7 +18,12 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import { isHtmlContentType, resolveUrl, scanElements } from "./html";
+import {
+  isHtmlContentType,
+  isJsonContentType,
+  resolveUrl,
+  scanElements,
+} from "./html";
 import { readBodyCapped, type FetchLike } from "./fetch";
 import { WebmentionLogEvent } from "./log";
 import { safeFetch } from "./safe-fetch";
@@ -73,10 +78,60 @@ export async function extractLinks(
 }
 
 /**
+ * Characters that may appear within a URL token (RFC 3986 unreserved + reserved
+ * + `%`). Used to enforce a token boundary around a plain-text target match so a
+ * shorter URL never matches inside a longer one.
+ */
+const URL_CHAR = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/;
+
+/**
+ * Whether `body` contains `target` as a standalone URL token — present, and with
+ * neither the preceding nor the following character continuing a URL. This
+ * rejects the over-matches a bare substring check admits: `…/post` no longer
+ * matches inside `…/posting`, nor `…/target` inside `…/target/extra`, while the
+ * target standing alone (or delimited by whitespace/quotes/brackets) still does.
+ */
+function textHasUrlToken(body: string, target: string): boolean {
+  for (let from = body.indexOf(target); from !== -1; ) {
+    const before = from === 0 ? "" : (body[from - 1] ?? "");
+    const after = body[from + target.length] ?? "";
+    if (!URL_CHAR.test(before) && !URL_CHAR.test(after)) {
+      return true;
+    }
+    from = body.indexOf(target, from + 1);
+  }
+  return false;
+}
+
+/**
+ * Whether any string value within a parsed JSON value equals `target` exactly.
+ * Webmention §3.2.2 requires an exact match of the target URL in a non-HTML
+ * source, so a JSON body is walked for a string property value identical to the
+ * target rather than substring-scanned.
+ */
+function jsonHasTargetValue(value: unknown, target: string): boolean {
+  if (typeof value === "string") {
+    return value === target;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => jsonHasTargetValue(item, target));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).some((item) =>
+      jsonHasTargetValue(item, target),
+    );
+  }
+  return false;
+}
+
+/**
  * Decide whether `body` (a fetched source document) links to `target`.
  *
- * HTML bodies are scanned for an `href`/`src` resolving to the target; other
- * content types fall back to a substring match on the target URL.
+ * HTML bodies are scanned for an `href`/`src` resolving to the target. Other
+ * content types require an **exact** match of the target URL (Webmention
+ * §3.2.2), not a loose substring: a JSON body must carry a string value equal to
+ * the target, and any other (e.g. plain text) body must contain the target as a
+ * standalone URL token.
  */
 export async function sourceLinksTo(
   body: string,
@@ -93,7 +148,24 @@ export async function sourceLinksTo(
       (link) => link === normalizedTarget,
     );
   }
-  return body.includes(target);
+  if (isJsonContentType(contentType)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      // A body that claims to be JSON but does not parse cannot exact-match.
+      return false;
+    }
+    return (
+      jsonHasTargetValue(parsed, target) ||
+      (normalizedTarget !== target &&
+        jsonHasTargetValue(parsed, normalizedTarget))
+    );
+  }
+  return (
+    textHasUrlToken(body, target) ||
+    (normalizedTarget !== target && textHasUrlToken(body, normalizedTarget))
+  );
 }
 
 /** Options for {@link verifySource}. */
