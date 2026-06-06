@@ -57,6 +57,19 @@
         "cases": []
       }
     },
+    "@dwk/microsub": {
+      "standard": "Microsub",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "follow discovers a feed and populates the channel timeline",
+          "timeline paginates with before/after cursors",
+          "mark_read clears the per-channel unread count",
+          "scheduled poll appends new entries deduped across runs"
+        ]
+      }
+    },
     "@dwk/webfinger": {
       "standard": "WebFinger",
       "suites": {},

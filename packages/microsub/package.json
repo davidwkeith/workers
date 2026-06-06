@@ -1,0 +1,48 @@
+{
+  "name": "@dwk/microsub",
+  "version": "0.0.0",
+  "description": "Microsub server: channel/feed subscriptions, server-side polling, and a normalised JF2 timeline. Consumes IndieAuth tokens.",
+  "keywords": [
+    "microsub",
+    "indieweb",
+    "jf2",
+    "feed-reader",
+    "cloudflare-workers"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/microsub#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/microsub"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/dpop": "workspace:*",
+    "@dwk/indieauth": "workspace:*",
+    "@dwk/log": "workspace:*"
+  }
+}
