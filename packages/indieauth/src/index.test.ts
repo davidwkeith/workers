@@ -792,6 +792,148 @@ describe("@dwk/indieauth hardening (issue #41)", () => {
   });
 });
 
+describe("@dwk/indieauth resource indicators / audience (RFC 8707)", () => {
+  const RS = "https://media.example.com/";
+  const RS2 = "https://pod.example.com/";
+
+  async function authorizeWith(
+    handler: ReturnType<typeof createIndieAuth>,
+    resources: readonly string[],
+  ): Promise<Response> {
+    const url = new URL(`${BASE}/authorize`);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", CLIENT_ID);
+    url.searchParams.set("redirect_uri", REDIRECT_URI);
+    url.searchParams.set("state", "xyz123");
+    url.searchParams.set("code_challenge", await s256(CODE_VERIFIER));
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("scope", "create");
+    url.searchParams.set("me", ME);
+    for (const resource of resources)
+      url.searchParams.append("resource", resource);
+    return handler(
+      new Request(url.toString(), { redirect: "manual" }),
+      harness,
+      ctx,
+    );
+  }
+
+  async function exchange(
+    handler: ReturnType<typeof createIndieAuth>,
+    code: string,
+    resources: readonly string[] = [],
+  ): Promise<Response> {
+    const key = await makeDpopKey();
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
+      code_verifier: CODE_VERIFIER,
+    });
+    for (const resource of resources) body.append("resource", resource);
+    return handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: await makeProof(key, "POST", `${BASE}/token`),
+        },
+        body,
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("audience-restricts the issued token to the requested resource", async () => {
+    const handler = autoApproveHandler();
+    const authRes = await authorizeWith(handler, [RS]);
+    expect(authRes.status).toBe(302);
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(handler, code);
+    expect(tokenRes.status).toBe(200);
+    const { access_token } = (await tokenRes.json()) as {
+      access_token: string;
+    };
+
+    // The RS it was minted for accepts it; a different RS is rejected.
+    const forRs = await verifyAccessToken(
+      access_token,
+      harness.TOKEN_SIGNING_KEY,
+      {
+        issuer: BASE,
+        audience: RS,
+      },
+    );
+    expect(forRs.valid).toBe(true);
+    if (forRs.valid) expect(forRs.claims.aud).toEqual([RS]);
+    const forOther = await verifyAccessToken(
+      access_token,
+      harness.TOKEN_SIGNING_KEY,
+      { issuer: BASE, audience: RS2 },
+    );
+    expect(forOther.valid).toBe(false);
+    if (!forOther.valid) expect(forOther.reason).toBe("audience_mismatch");
+  });
+
+  it("rejects a malformed resource at authorization with invalid_target", async () => {
+    const handler = autoApproveHandler();
+    const authRes = await authorizeWith(handler, [`${RS}#frag`]);
+    expect(authRes.status).toBe(302);
+    const loc = new URL(authRes.headers.get("location")!);
+    expect(loc.searchParams.get("error")).toBe("invalid_target");
+    expect(loc.searchParams.get("code")).toBeNull();
+  });
+
+  it("lets the token request narrow to a subset of authorized resources", async () => {
+    const handler = autoApproveHandler();
+    const authRes = await authorizeWith(handler, [RS, RS2]);
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(handler, code, [RS2]);
+    expect(tokenRes.status).toBe(200);
+    const { access_token } = (await tokenRes.json()) as {
+      access_token: string;
+    };
+    const verified = await verifyAccessToken(
+      access_token,
+      harness.TOKEN_SIGNING_KEY,
+      { issuer: BASE, audience: RS2 },
+    );
+    expect(verified.valid).toBe(true);
+    if (verified.valid) expect(verified.claims.aud).toEqual([RS2]);
+  });
+
+  it("rejects a token-request resource not granted at authorization", async () => {
+    const handler = autoApproveHandler();
+    const authRes = await authorizeWith(handler, [RS]);
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const tokenRes = await exchange(handler, code, [RS2]);
+    expect(tokenRes.status).toBe(400);
+    expect(((await tokenRes.json()) as { error: string }).error).toBe(
+      "invalid_target",
+    );
+  });
+
+  it("honours a resource-indicator policy that rejects a resource", async () => {
+    const handler = createIndieAuth({
+      ...baseConfig(() => ({ me: ME })),
+      resourceIndicatorPolicy: (resource) => resource === RS,
+    });
+    const authRes = await authorizeWith(handler, [RS2]);
+    expect(authRes.status).toBe(302);
+    expect(
+      new URL(authRes.headers.get("location")!).searchParams.get("error"),
+    ).toBe("invalid_target");
+  });
+});
+
 describe("@dwk/indieauth routing and method handling", () => {
   it("returns 405 for a non-GET on the metadata endpoint", async () => {
     const handler = autoApproveHandler();

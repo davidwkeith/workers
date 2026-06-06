@@ -217,6 +217,31 @@ async function handleAuthorizationGet(
     );
   }
 
+  // RFC 8707 resource indicators: optional and repeatable. When supplied, each
+  // must be a well-formed absolute URI and pass the configured policy; the token
+  // minted from this grant is then audience-restricted (`aud`) to them so a
+  // leaked token cannot be replayed at another resource server (RFC 9700 §2.3).
+  // A bad resource is reported as `invalid_target` (RFC 8707 §2).
+  const resources = dedupe(params.getAll("resource"));
+  for (const resource of resources) {
+    if (
+      !isWellFormedResource(resource) ||
+      !(await config.resourceIndicatorPolicy(resource, clientId))
+    ) {
+      emit(config, "warn", IndieAuthLogEvent.AuthorizeRejected, {
+        reason: "resource_invalid",
+        clientHost: hostFromUrl(clientId),
+      });
+      return redirectError(
+        redirectUri,
+        "invalid_target",
+        "`resource` is not an acceptable resource indicator",
+        state,
+        config.issuer,
+      );
+    }
+  }
+
   const scope = params.get("scope") ?? "";
   const scopes = scope.split(/\s+/).filter(Boolean);
   const authRequest: AuthorizationRequest = {
@@ -227,6 +252,7 @@ async function handleAuthorizationGet(
     codeChallengeMethod,
     scope,
     scopes,
+    ...(resources.length > 0 ? { resources } : {}),
     ...(params.get("me") ? { me: params.get("me") as string } : {}),
   };
 
@@ -294,6 +320,7 @@ async function issueCode(
     codeChallenge: authRequest.codeChallenge,
     codeChallengeMethod: authRequest.codeChallengeMethod as "S256",
     profile: approval.profile ? JSON.stringify(approval.profile) : null,
+    ...(authRequest.resources ? { resources: authRequest.resources } : {}),
     expiresAt:
       Math.floor(Date.now() / 1000) + config.authorizationCodeLifetimeSeconds,
   });
@@ -314,11 +341,10 @@ async function issueCode(
  * redeemed record, or an error `Response`.
  */
 async function redeemCode(
-  request: Request,
+  form: URLSearchParams,
   store: ReturnType<typeof createIndieAuthStore>,
   config: ResolvedConfig,
 ): Promise<AuthorizationCodeRecord | Response> {
-  const form = await readForm(request);
   if (form.get("grant_type") !== "authorization_code") {
     emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
       reason: "unsupported_grant_type",
@@ -392,8 +418,31 @@ async function handleToken(
   store: ReturnType<typeof createIndieAuthStore>,
   signingKey: string,
 ): Promise<Response> {
-  const redeemed = await redeemCode(request, store, config);
+  const form = await readForm(request);
+  const redeemed = await redeemCode(form, store, config);
   if (redeemed instanceof Response) return redeemed;
+
+  // RFC 8707 audience selection. The token request MAY narrow the audience to a
+  // subset of the resources authorized at the code; any resource not authorized
+  // there is rejected with `invalid_target`. With no token-request `resource`,
+  // the full set bound at authorization is carried into the token's `aud`.
+  const authorizedResources = redeemed.resources ?? [];
+  const requestedResources = dedupe(form.getAll("resource"));
+  let audience: readonly string[] = authorizedResources;
+  if (requestedResources.length > 0) {
+    const authorized = new Set(authorizedResources);
+    if (!requestedResources.every((resource) => authorized.has(resource))) {
+      emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+        reason: "resource_invalid",
+        clientHost: hostFromUrl(redeemed.clientId),
+      });
+      return oauthError(
+        "invalid_target",
+        "`resource` was not granted for this authorization",
+      );
+    }
+    audience = requestedResources;
+  }
 
   // Tokens issued here are DPoP-bound: require a valid proof for this request.
   const proof = request.headers.get("DPoP");
@@ -433,6 +482,7 @@ async function handleToken(
     clientId: redeemed.clientId,
     scope: redeemed.scope,
     jkt: dpop.jkt,
+    audience,
     lifetimeSeconds: config.accessTokenLifetimeSeconds,
     now,
   });
@@ -471,7 +521,7 @@ async function handleProfileExchange(
   store: ReturnType<typeof createIndieAuthStore>,
   config: ResolvedConfig,
 ): Promise<Response> {
-  const redeemed = await redeemCode(request, store, config);
+  const redeemed = await redeemCode(await readForm(request), store, config);
   if (redeemed instanceof Response) return redeemed;
   const profile = parseProfile(redeemed.profile);
   return json({ me: redeemed.me, ...(profile ? { profile } : {}) });
@@ -508,13 +558,40 @@ async function readForm(request: Request): Promise<URLSearchParams> {
   try {
     const form = await request.formData();
     for (const [key, value] of form) {
-      if (typeof value === "string") params.set(key, value);
+      // Append (not set) so repeatable parameters like RFC 8707 `resource`
+      // survive; single-valued reads still use `.get`, which returns the first.
+      if (typeof value === "string") params.append(key, value);
     }
   } catch {
     // A malformed/empty body or wrong content-type yields empty params, so the
     // caller's validation fails gracefully with a 400 rather than throwing.
   }
   return params;
+}
+
+/** De-duplicate a list of strings, preserving first-seen order. */
+function dedupe(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+/**
+ * Whether `resource` is a well-formed RFC 8707 resource indicator: an absolute
+ * URI with an `https` scheme (or `http` on a loopback host for local dev) and
+ * **no fragment** (RFC 8707 §2). A path and/or query are permitted — a resource
+ * server may live at a sub-path — so, unlike {@link canonicalizeProfileUrl}, no
+ * dot-segment/credential/port constraints apply here. Acceptability beyond
+ * well-formedness is decided by the configured resource-indicator policy.
+ */
+function isWellFormedResource(resource: string): boolean {
+  try {
+    const url = new URL(resource);
+    if (url.hash !== "") return false;
+    if (url.protocol === "https:") return true;
+    if (url.protocol === "http:") return isLoopbackHost(url.hostname);
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -527,6 +604,11 @@ async function readForm(request: Request): Promise<URLSearchParams> {
  * The credential/dot-segment/IP rules mirror {@link canonicalizeProfileUrl}, so
  * a `client_id` like `https://evil@good.example/` or an IP-literal host cannot
  * slip through as a confusable or unverifiable client identifier.
+ *
+ * The IndieAuth spec's "MUST contain a path component" rule needs no explicit
+ * check here: WHATWG URL parsing always yields at least a `/` path for an
+ * `http(s)` URL, and the spec treats `/` as a valid path, so the constraint is
+ * satisfied by construction.
  */
 function isHttpUrl(value: string): boolean {
   try {

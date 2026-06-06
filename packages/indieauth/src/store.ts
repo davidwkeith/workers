@@ -29,6 +29,12 @@ export interface AuthorizationCodeRecord {
   readonly codeChallengeMethod: CodeChallengeMethod;
   /** JSON-encoded profile information returned at redemption, or `null`. */
   readonly profile: string | null;
+  /**
+   * RFC 8707 resource indicators the grant is bound to, if any. The token minted
+   * at redemption is audience-restricted (`aud`) to these. Absent/empty means an
+   * unrestricted token.
+   */
+  readonly resources?: readonly string[];
   /** Expiry (seconds since the epoch). */
   readonly expiresAt: number;
 }
@@ -83,6 +89,7 @@ const SCHEMA = [
      code_challenge TEXT NOT NULL,
      code_challenge_method TEXT NOT NULL,
      profile TEXT,
+     resource TEXT,
      expires_at INTEGER NOT NULL,
      used INTEGER NOT NULL DEFAULT 0
    )`,
@@ -107,10 +114,12 @@ interface AuthCodeRow {
   readonly code_challenge: string;
   readonly code_challenge_method: string;
   readonly profile: string | null;
+  readonly resource: string | null;
   readonly expires_at: number;
 }
 
 function rowToRecord(row: AuthCodeRow): AuthorizationCodeRecord {
+  const resources = parseResources(row.resource);
   return {
     code: row.code,
     clientId: row.client_id,
@@ -120,8 +129,27 @@ function rowToRecord(row: AuthCodeRow): AuthorizationCodeRecord {
     codeChallenge: row.code_challenge,
     codeChallengeMethod: row.code_challenge_method as CodeChallengeMethod,
     profile: row.profile,
+    ...(resources ? { resources } : {}),
     expiresAt: row.expires_at,
   };
+}
+
+/** Parse the JSON-encoded `resource` column into a non-empty list, or `undefined`. */
+function parseResources(raw: string | null): readonly string[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((value) => typeof value === "string")
+    ) {
+      return parsed as string[];
+    }
+  } catch {
+    // Fall through to undefined on a malformed column value.
+  }
+  return undefined;
 }
 
 /**
@@ -144,8 +172,9 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
         .prepare(
           `INSERT INTO authorization_codes
              (code, client_id, redirect_uri, scope, me,
-              code_challenge, code_challenge_method, profile, expires_at, used)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+              code_challenge, code_challenge_method, profile, resource,
+              expires_at, used)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         )
         .bind(
           record.code,
@@ -156,6 +185,9 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
           record.codeChallenge,
           record.codeChallengeMethod,
           record.profile,
+          record.resources && record.resources.length > 0
+            ? JSON.stringify(record.resources)
+            : null,
           record.expiresAt,
         )
         .run();
@@ -170,7 +202,8 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
              SET used = 1
            WHERE code = ? AND used = 0 AND expires_at > ?
            RETURNING code, client_id, redirect_uri, scope, me,
-                     code_challenge, code_challenge_method, profile, expires_at`,
+                     code_challenge, code_challenge_method, profile, resource,
+                     expires_at`,
         )
         .bind(code, now)
         .first<AuthCodeRow>();

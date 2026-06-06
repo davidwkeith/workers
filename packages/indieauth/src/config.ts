@@ -37,6 +37,13 @@ export interface AuthorizationRequest {
   readonly scopes: readonly string[];
   /** The profile URL hint supplied by the client (`me`), if any. */
   readonly me?: string;
+  /**
+   * Validated RFC 8707 resource indicators requested by the client, if any. The
+   * minted access token is audience-restricted (`aud`) to these, so a token
+   * leaked to one resource server cannot be replayed at another. Present only
+   * when the client supplied one or more acceptable `resource` parameters.
+   */
+  readonly resources?: readonly string[];
 }
 
 /** Optional profile information returned to the client on redemption. */
@@ -77,6 +84,18 @@ export type RedirectUriPolicy = (
   redirectUri: string,
 ) => boolean | Promise<boolean>;
 
+/**
+ * Decides whether the server will issue access tokens audience-restricted to a
+ * given RFC 8707 `resource` indicator (already checked to be a well-formed
+ * absolute URI). Return `false` to reject the request with `invalid_target`.
+ * The default accepts any well-formed resource; deployers SHOULD narrow this to
+ * the resource servers they actually front (e.g. same-origin as `baseUrl`).
+ */
+export type ResourceIndicatorPolicy = (
+  resource: string,
+  clientId: string,
+) => boolean | Promise<boolean>;
+
 /** Configuration passed to {@link createIndieAuth}. */
 export interface IndieAuthConfig {
   /** The identity root / base URL (e.g. `https://example.com`). */
@@ -105,6 +124,13 @@ export interface IndieAuthConfig {
    * baseline when no client metadata is registered.
    */
   readonly redirectUriPolicy?: RedirectUriPolicy;
+  /**
+   * Policy gating which RFC 8707 `resource` indicators may audience-restrict an
+   * issued token. Defaults to accepting any well-formed resource URI; deployers
+   * fronting specific resource servers SHOULD narrow it (see
+   * {@link ResourceIndicatorPolicy}).
+   */
+  readonly resourceIndicatorPolicy?: ResourceIndicatorPolicy;
   /** Authentication + consent hook (see {@link ApproveAuthorization}). */
   readonly approveAuthorization: ApproveAuthorization;
   /**
@@ -136,6 +162,7 @@ export interface ResolvedConfig {
   readonly accessTokenLifetimeSeconds: number;
   readonly authorizationCodeLifetimeSeconds: number;
   readonly redirectUriPolicy: RedirectUriPolicy;
+  readonly resourceIndicatorPolicy: ResourceIndicatorPolicy;
   readonly approveAuthorization: ApproveAuthorization;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -148,6 +175,16 @@ function sameOriginRedirect(clientId: string, redirectUri: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Default resource-indicator policy: accept any well-formed resource URI. The
+ * handler has already enforced RFC 8707 well-formedness (absolute https — or
+ * http-loopback — URI, no fragment) before this runs, so the default is simply
+ * to allow it. Deployers fronting specific resource servers should override.
+ */
+function acceptAnyResource(): boolean {
+  return true;
 }
 
 function pathOf(absoluteUrl: string, label: string): string {
@@ -200,6 +237,8 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
       config.authorizationCodeLifetimeSeconds ??
       DEFAULT_AUTHORIZATION_CODE_LIFETIME_SECONDS,
     redirectUriPolicy: config.redirectUriPolicy ?? sameOriginRedirect,
+    resourceIndicatorPolicy:
+      config.resourceIndicatorPolicy ?? acceptAnyResource,
     approveAuthorization: config.approveAuthorization,
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
