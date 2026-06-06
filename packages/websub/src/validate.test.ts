@@ -136,13 +136,36 @@ describe("validateSubscribe", () => {
     expect(result).toEqual({ ok: false, error: "secret_too_long" });
   });
 
-  it("rejects a non-positive lease", () => {
-    const result = validateSubscribe(
+  it("clamps a non-positive lease up to the hub minimum (§5.1 request, not constraint)", () => {
+    const zero = validateSubscribe(
       params({
         "hub.mode": "subscribe",
         "hub.callback": "https://sub.example/cb",
         "hub.topic": "https://example.com/feed",
         "hub.lease_seconds": "0",
+      }),
+      config,
+    );
+    expect(zero.ok && zero.leaseSeconds).toBe(100);
+    const negative = validateSubscribe(
+      params({
+        "hub.mode": "subscribe",
+        "hub.callback": "https://sub.example/cb",
+        "hub.topic": "https://example.com/feed",
+        "hub.lease_seconds": "-5",
+      }),
+      config,
+    );
+    expect(negative.ok && negative.leaseSeconds).toBe(100);
+  });
+
+  it("rejects a non-numeric lease", () => {
+    const result = validateSubscribe(
+      params({
+        "hub.mode": "subscribe",
+        "hub.callback": "https://sub.example/cb",
+        "hub.topic": "https://example.com/feed",
+        "hub.lease_seconds": "soon",
       }),
       config,
     );

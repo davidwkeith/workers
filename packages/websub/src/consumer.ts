@@ -30,7 +30,7 @@ import { deliverToSubscriber, fetchTopicContent } from "./distribute";
 import { WebSubLogEvent } from "./log";
 import type { WebSubJob } from "./queue";
 import { createD1SubscriptionStore, type SubscriptionStore } from "./store";
-import { verifyIntent } from "./verify";
+import { notifyDenial, verifyIntent } from "./verify";
 
 /** A Queue consumer for WebSub verification and distribution jobs. */
 export type WebSubQueueConsumer = (
@@ -119,6 +119,16 @@ export function createWebSubQueueConsumer(
                 reason: "unsubscribed",
               });
             }
+          } else if (job.mode === "subscribe") {
+            // Intent unconfirmed: signal denial to the subscriber (WebSub §5.2)
+            // instead of silently dropping the request. (An unconfirmed
+            // unsubscribe simply leaves the existing subscription in place.)
+            await notifyDenial(job.callback, job.topic, {
+              reason: "verification_failed",
+              fetch: resolved.fetch,
+              logger: resolved.logger,
+              metrics: resolved.metrics,
+            });
           }
           message.ack();
           continue;
@@ -131,6 +141,7 @@ export function createWebSubQueueConsumer(
           fetch: resolved.fetch,
           logger: resolved.logger,
           metrics: resolved.metrics,
+          defaultContentType: resolved.defaultContentType,
         });
         if (content === null) {
           // The topic was unreachable / non-2xx — retry the whole job later

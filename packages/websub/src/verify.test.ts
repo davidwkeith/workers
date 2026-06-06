@@ -3,6 +3,8 @@ import {
   verifyIntent,
   buildVerificationUrl,
   generateChallenge,
+  buildDenialUrl,
+  notifyDenial,
 } from "./verify";
 import type { FetchLike } from "./fetch";
 
@@ -33,6 +35,70 @@ describe("buildVerificationUrl", () => {
       }),
     );
     expect(url.searchParams.has("hub.lease_seconds")).toBe(false);
+  });
+});
+
+describe("buildDenialUrl", () => {
+  it("appends hub.mode=denied, hub.topic and hub.reason, preserving query", () => {
+    const url = new URL(
+      buildDenialUrl("https://sub.example/cb?token=abc", {
+        topic: "https://example.com/feed",
+        reason: "verification_failed",
+      }),
+    );
+    expect(url.searchParams.get("token")).toBe("abc");
+    expect(url.searchParams.get("hub.mode")).toBe("denied");
+    expect(url.searchParams.get("hub.topic")).toBe("https://example.com/feed");
+    expect(url.searchParams.get("hub.reason")).toBe("verification_failed");
+  });
+
+  it("omits hub.reason when none is given", () => {
+    const url = new URL(
+      buildDenialUrl("https://sub.example/cb", {
+        topic: "https://example.com/feed",
+      }),
+    );
+    expect(url.searchParams.has("hub.reason")).toBe(false);
+  });
+});
+
+describe("notifyDenial", () => {
+  it("issues a GET to the callback with the denial params", async () => {
+    let seen = "";
+    const fetchImpl: FetchLike = vi.fn(async (input, init) => {
+      seen = input;
+      expect(init?.method ?? "GET").toBe("GET");
+      return new Response(null, { status: 200 });
+    });
+    await notifyDenial("https://sub.example/cb", "https://example.com/feed", {
+      reason: "verification_failed",
+      fetch: fetchImpl,
+    });
+    const url = new URL(seen);
+    expect(url.searchParams.get("hub.mode")).toBe("denied");
+    expect(url.searchParams.get("hub.topic")).toBe("https://example.com/feed");
+    expect(url.searchParams.get("hub.reason")).toBe("verification_failed");
+  });
+
+  it("never throws when the callback is unreachable", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => {
+      throw new Error("refused");
+    });
+    await expect(
+      notifyDenial("https://sub.example/cb", "https://example.com/feed", {
+        fetch: fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not GET a private callback host (SSRF)", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () => new Response(null, { status: 200 }),
+    );
+    await notifyDenial("http://127.0.0.1/cb", "https://example.com/feed", {
+      fetch: fetchImpl,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

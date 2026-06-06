@@ -62,8 +62,11 @@ export {
   verifyIntent,
   buildVerificationUrl,
   generateChallenge,
+  notifyDenial,
+  buildDenialUrl,
   type VerifyIntentOptions,
   type VerifyIntentResult,
+  type NotifyDenialOptions,
 } from "./verify";
 export {
   contentSignature,

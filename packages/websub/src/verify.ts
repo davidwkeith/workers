@@ -150,3 +150,72 @@ export async function verifyIntent(
   const echoed = new TextDecoder().decode(bytes).trim();
   return finish(echoed === challenge, response.status);
 }
+
+/** Inputs to {@link notifyDenial}. */
+export interface NotifyDenialOptions {
+  /** Machine-readable cause echoed to the subscriber as `hub.reason` (optional). */
+  readonly reason?: string;
+  /** `fetch` implementation; defaults to global `fetch`. */
+  readonly fetch?: FetchLike;
+  readonly logger?: Logger;
+  readonly metrics?: Metrics;
+}
+
+/**
+ * Build the subscription-denial notification URL (WebSub §5.2): the subscriber's
+ * callback with `hub.mode=denied` and `hub.topic` appended, plus an optional
+ * `hub.reason`, preserving any query string the callback already carries.
+ */
+export function buildDenialUrl(
+  callback: string,
+  params: { topic: string; reason?: string },
+): string {
+  const url = new URL(callback);
+  url.searchParams.append("hub.mode", "denied");
+  url.searchParams.append("hub.topic", params.topic);
+  if (params.reason !== undefined && params.reason !== "") {
+    url.searchParams.append("hub.reason", params.reason);
+  }
+  return url.toString();
+}
+
+/**
+ * Tell a subscriber its subscription was denied (WebSub §5.2): issue a
+ * best-effort `GET` to the callback with `hub.mode=denied`. Never throws — a
+ * denial that cannot be delivered (unreachable callback, SSRF block) is logged,
+ * not retried, since the subscription was never created either way. The GET goes
+ * through {@link safeFetch} so a hostile callback can't point the hub at its own
+ * network.
+ */
+export async function notifyDenial(
+  callback: string,
+  topic: string,
+  options?: NotifyDenialOptions,
+): Promise<void> {
+  const doFetch: FetchLike =
+    options?.fetch ?? ((input, init) => fetch(input, init));
+  const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
+
+  const url = buildDenialUrl(callback, { topic, reason: options?.reason });
+  const fields = {
+    callbackHost: hostFromUrl(callback),
+    topicHost: hostFromUrl(topic),
+    ...(options?.reason !== undefined ? { reason: options.reason } : {}),
+  };
+
+  try {
+    const result = await safeFetch(
+      doFetch,
+      url,
+      { method: "GET" },
+      { logger, metrics },
+    );
+    await result.response.body?.cancel().catch(() => undefined);
+  } catch {
+    // Best-effort: the subscription row was never created, so a failed denial
+    // notification leaves no inconsistent state to repair.
+  }
+  logger.info(WebSubLogEvent.SubscriptionDenied, fields);
+  metrics.count(WebSubLogEvent.SubscriptionDenied, fields);
+}

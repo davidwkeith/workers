@@ -107,6 +107,43 @@ describe("fetchTopicContent", () => {
       await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
     ).toBeNull();
   });
+
+  // A byte-array body keeps the Response from auto-setting a `text/plain`
+  // Content-Type, simulating a topic server that declares none.
+  const noContentType = () =>
+    new Response(encoder.encode("<feed/>"), { status: 200 });
+
+  it("refuses (null) when the topic omits Content-Type and no fallback is set", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => noContentType());
+    expect(
+      await fetchTopicContent("https://example.com/feed", { fetch: fetchImpl }),
+    ).toBeNull();
+  });
+
+  it("uses defaultContentType when the topic omits Content-Type", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => noContentType());
+    const result = await fetchTopicContent("https://example.com/feed", {
+      fetch: fetchImpl,
+      defaultContentType: "application/atom+xml",
+    });
+    expect(result?.contentType).toBe("application/atom+xml");
+    expect(new TextDecoder().decode(result?.body)).toBe("<feed/>");
+  });
+
+  it("prefers the topic's Content-Type over the configured fallback", async () => {
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/feed+json" },
+        }),
+    );
+    const result = await fetchTopicContent("https://example.com/feed", {
+      fetch: fetchImpl,
+      defaultContentType: "application/atom+xml",
+    });
+    expect(result?.contentType).toBe("application/feed+json");
+  });
 });
 
 describe("deliverToSubscriber", () => {
