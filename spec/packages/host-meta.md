@@ -5,7 +5,7 @@
 | **Type** | endpoint |
 | **Ships a DO?** | no |
 | **Standard** | [Web Host Metadata (RFC 6415)](https://www.rfc-editor.org/rfc/rfc6415) (+ [RFC 7033 §10.1](https://www.rfc-editor.org/rfc/rfc7033) JRD) |
-| **Status** | proposed (honorable mention) — tracked in [#107](https://github.com/davidwkeith/workers/issues/107) |
+| **Status** | implemented (unreleased) — tracked in [#107](https://github.com/davidwkeith/workers/issues/107) |
 
 `/.well-known/host-meta` (XRD) and `/.well-known/host-meta.json` (JRD):
 host-wide resource-discovery metadata. Largely **superseded by**

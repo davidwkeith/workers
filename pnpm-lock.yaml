@@ -53,6 +53,15 @@ importers:
 
   packages/dpop: {}
 
+  packages/host-meta:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dwk/webfinger':
+        specifier: workspace:*
+        version: link:../webfinger
+
   packages/http-signatures: {}
 
   packages/indieauth:
