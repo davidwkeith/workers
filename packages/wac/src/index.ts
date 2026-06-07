@@ -16,6 +16,7 @@
  * is cheap and is meant to run against strongly-consistent ACL state.
  *
  * @see {@link https://solidproject.org/TR/wac | Solid WAC specification}
+ * @see spec/packages/wac.md
  * @packageDocumentation
  */
 

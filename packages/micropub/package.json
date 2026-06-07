@@ -2,6 +2,13 @@
   "name": "@dwk/micropub",
   "version": "0.0.0",
   "description": "Micropub create/update/delete endpoint with R2 media endpoint. Consumes IndieAuth tokens.",
+  "keywords": [
+    "micropub",
+    "indieweb",
+    "indieauth",
+    "media-endpoint",
+    "cloudflare-workers"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

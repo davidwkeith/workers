@@ -8,8 +8,9 @@
  * discovers a target's Webmention endpoint and notifies it on publish. Cloud
  * specifics (Queue, D1) are confined here; HTML scanning uses the runtime's
  * streaming `HTMLRewriter`, so the parsing/verification helpers are async and
- * exercised under the Workers test pool. See `spec/packages/webmention.md`.
+ * exercised under the Workers test pool.
  *
+ * @see spec/packages/webmention.md
  * @packageDocumentation
  */
 

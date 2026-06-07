@@ -2,6 +2,14 @@
   "name": "@dwk/ldn",
   "version": "0.0.0",
   "description": "Linked Data Notifications (W3C LDN) primitives: inbox discovery, notification validation, and listing. RDF-only, protocol-agnostic.",
+  "keywords": [
+    "linked-data-notifications",
+    "ldn",
+    "inbox",
+    "rdf",
+    "solid",
+    "activitypub"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

@@ -12,8 +12,9 @@
  * `Link rel="hub"`/`rel="self"` advertisement); this package is only the dynamic
  * layer. Cloudflare specifics (D1, Queue) are confined here; validation, lease
  * math, verification, and signing are pure and unit-test without a Workers
- * runtime. See `spec/packages/websub.md`.
+ * runtime.
  *
+ * @see spec/packages/websub.md
  * @packageDocumentation
  */
 

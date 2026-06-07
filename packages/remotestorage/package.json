@@ -2,6 +2,14 @@
   "name": "@dwk/remotestorage",
   "version": "0.0.0",
   "description": "remoteStorage (draft-dejong-remotestorage) personal data vault: OAuth-bearer GET/PUT/DELETE documents and folder listings over @dwk/store. Ships the per-account Durable Object.",
+  "keywords": [
+    "remotestorage",
+    "personal-data",
+    "data-vault",
+    "oauth2",
+    "cloudflare-workers",
+    "durable-objects"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

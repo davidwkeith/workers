@@ -29,6 +29,7 @@
  * same events. See {@link ./metrics}.
  *
  * @see spec/observability.md
+ * @see spec/packages/log.md
  * @packageDocumentation
  */
 

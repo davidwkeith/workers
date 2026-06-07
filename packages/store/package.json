@@ -2,6 +2,14 @@
   "name": "@dwk/store",
   "version": "0.0.0",
   "description": "DO-SQLite quad store + R2 copy-on-write blob bodies behind one storage interface.",
+  "keywords": [
+    "storage",
+    "durable-objects",
+    "sqlite",
+    "r2",
+    "quad-store",
+    "cloudflare-workers"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

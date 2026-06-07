@@ -2,6 +2,15 @@
   "name": "@dwk/activitypub",
   "version": "0.0.0",
   "description": "Edge-native ActivityPub actor: inbox/outbox, follower collections, signed S2S federation. Ships the per-actor Durable Object.",
+  "keywords": [
+    "activitypub",
+    "fediverse",
+    "federation",
+    "actor",
+    "indieweb",
+    "cloudflare-workers",
+    "durable-objects"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

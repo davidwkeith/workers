@@ -7,7 +7,9 @@ import type { Quad } from "n3";
  * `@dwk/rdf` — thin Turtle/JSON-LD parse and serialize layer over N3.js.
  *
  * Cross-standard reusable: plain-data inputs only, no Workers runtime
- * dependency. See `spec/packages/rdf.md`.
+ * dependency.
+ *
+ * @see spec/packages/rdf.md
  */
 
 export {

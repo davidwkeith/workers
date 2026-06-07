@@ -2,6 +2,12 @@
   "name": "@dwk/webmention",
   "version": "0.0.0",
   "description": "Webmention receiver (async verification queue) and sender.",
+  "keywords": [
+    "webmention",
+    "indieweb",
+    "w3c",
+    "cloudflare-workers"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

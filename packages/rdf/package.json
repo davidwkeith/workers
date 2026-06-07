@@ -2,6 +2,14 @@
   "name": "@dwk/rdf",
   "version": "0.0.0",
   "description": "Thin Turtle/JSON-LD parse and serialize layer over N3.js. Cross-standard reusable.",
+  "keywords": [
+    "rdf",
+    "turtle",
+    "json-ld",
+    "n3",
+    "linked-data",
+    "solid"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
