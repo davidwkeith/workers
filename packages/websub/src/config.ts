@@ -73,6 +73,15 @@ export interface WebSubConfig {
    * method for interop — SHA-1 is weaker and not the default for that reason.
    */
   readonly signatureAlgorithm?: SignatureAlgorithm;
+  /**
+   * Media type to forward on distribution when the topic response declares no
+   * `Content-Type`. WebSub §7 requires the distribution `Content-Type` to
+   * correspond to the topic's, so the hub never fabricates a generic
+   * `application/octet-stream`. Set this to the type the hub's feeds are served
+   * as (e.g. `application/atom+xml`) so a topic that omits the header is still
+   * distributable; left unset, such a topic is refused rather than mislabeled.
+   */
+  readonly defaultContentType?: string;
   /** `fetch` implementation for verification/distribution; defaults to global `fetch`. */
   readonly fetch?: FetchLike;
   /** Logger; defaults to a no-op (see `@dwk/log`). */
@@ -95,6 +104,8 @@ export interface ResolvedConfig {
   readonly maxLeaseSeconds: number;
   readonly defaultLeaseSeconds: number;
   readonly signatureAlgorithm: SignatureAlgorithm;
+  /** Fallback distribution `Content-Type`; `undefined` refuses to mislabel. */
+  readonly defaultContentType?: string;
   readonly fetch: FetchLike;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -170,6 +181,9 @@ export function resolveConfig(config: WebSubConfig): ResolvedConfig {
     defaultLeaseSeconds,
     signatureAlgorithm:
       config.signatureAlgorithm ?? DEFAULT_SIGNATURE_ALGORITHM,
+    ...(config.defaultContentType !== undefined
+      ? { defaultContentType: config.defaultContentType }
+      : {}),
     fetch: config.fetch ?? ((input, init) => fetch(input, init)),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,

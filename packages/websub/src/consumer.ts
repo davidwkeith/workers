@@ -30,7 +30,7 @@ import { deliverToSubscriber, fetchTopicContent } from "./distribute";
 import { WebSubLogEvent } from "./log";
 import type { WebSubJob } from "./queue";
 import { createD1SubscriptionStore, type SubscriptionStore } from "./store";
-import { verifyIntent } from "./verify";
+import { notifyDenial, verifyIntent } from "./verify";
 
 /** A Queue consumer for WebSub verification and distribution jobs. */
 export type WebSubQueueConsumer = (
@@ -119,6 +119,16 @@ export function createWebSubQueueConsumer(
                 reason: "unsubscribed",
               });
             }
+          } else if (job.mode === "subscribe") {
+            // Intent unconfirmed: signal denial to the subscriber (WebSub §5.2)
+            // instead of silently dropping the request. (An unconfirmed
+            // unsubscribe simply leaves the existing subscription in place.)
+            await notifyDenial(job.callback, job.topic, {
+              reason: "verification_failed",
+              fetch: resolved.fetch,
+              logger: resolved.logger,
+              metrics: resolved.metrics,
+            });
           }
           message.ack();
           continue;
@@ -127,17 +137,26 @@ export function createWebSubQueueConsumer(
         // kind === "distribute"
         const now = clock();
         await store.pruneExpired(now);
-        const content = await fetchTopicContent(job.topic, {
+        const fetched = await fetchTopicContent(job.topic, {
           fetch: resolved.fetch,
           logger: resolved.logger,
           metrics: resolved.metrics,
+          defaultContentType: resolved.defaultContentType,
         });
-        if (content === null) {
+        if (fetched.kind === "retry") {
           // The topic was unreachable / non-2xx — retry the whole job later
           // rather than dropping the push.
           message.retry();
           continue;
         }
+        if (fetched.kind === "drop") {
+          // A permanent, deterministic refusal (e.g. an unlabelable topic):
+          // retrying can't fix it, so ack and move on rather than clog the
+          // queue and re-hammer the topic. fetchTopicContent already logged why.
+          message.ack();
+          continue;
+        }
+        const content = fetched.content;
         const subscribers = await store.listActive(job.topic, now);
         // Fan out in parallel: deliverToSubscriber never throws (it reports a
         // failed/blocked POST as delivered:false), so one slow or dead callback

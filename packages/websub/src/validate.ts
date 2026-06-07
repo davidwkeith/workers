@@ -135,9 +135,12 @@ export function validateSubscribe(
   let leaseSeconds = config.defaultLeaseSeconds;
   if (params.leaseSeconds !== null && params.leaseSeconds !== "") {
     const parsed = Number.parseInt(params.leaseSeconds, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
+    if (!Number.isFinite(parsed)) {
       return { ok: false, error: "invalid_lease_seconds" };
     }
+    // WebSub §5.1 treats `hub.lease_seconds` as a *request* the hub may clamp,
+    // not a hard constraint, so a `0` (or negative) request is clamped up to the
+    // hub minimum rather than rejected — the hub controls the granted lease.
     leaseSeconds = Math.min(
       Math.max(parsed, config.minLeaseSeconds),
       config.maxLeaseSeconds,

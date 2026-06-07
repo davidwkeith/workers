@@ -62,8 +62,11 @@ export {
   verifyIntent,
   buildVerificationUrl,
   generateChallenge,
+  notifyDenial,
+  buildDenialUrl,
   type VerifyIntentOptions,
   type VerifyIntentResult,
+  type NotifyDenialOptions,
 } from "./verify";
 export {
   contentSignature,
@@ -73,6 +76,7 @@ export {
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
   type TopicContent,
+  type TopicFetchResult,
   type DeliveryResult,
   type DistributeOptions,
 } from "./distribute";

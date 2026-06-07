@@ -39,10 +39,14 @@ export const WebSubLogEvent = {
   SubscriptionActivated: "websub.subscription.activated",
   /** A subscription was removed (verified unsubscribe or pruned). Fields: `callbackHost`, `topicHost`, `reason`. */
   SubscriptionRemoved: "websub.subscription.removed",
+  /** A subscription was denied (`hub.mode=denied`). Emitted whether or not the callback was reachable; `notified` records whether it accepted the GET. Fields: `callbackHost`, `topicHost`, `notified`, `reason`. */
+  SubscriptionDenied: "websub.subscription.denied",
   /** A content-distribution delivery to one subscriber finished. Fields: `callbackHost`, `delivered`, `status`. */
   DeliveryCompleted: "websub.delivery.completed",
   /** A distribution job could not fetch the topic content. Fields: `topicHost`, `status`. */
   TopicFetchFailed: "websub.topic.fetch_failed",
+  /** The topic declared no `Content-Type` and no fallback was configured, so distribution was refused rather than mislabeled (WebSub §7). Fields: `topicHost`, `status`. */
+  TopicContentTypeMissing: "websub.topic.content_type_missing",
   /** A queue message threw and is being retried. Fields: `kind`, `error`. */
   QueueRetry: "websub.queue.retry",
 } as const;
