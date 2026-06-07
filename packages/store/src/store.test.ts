@@ -162,6 +162,43 @@ describe("@dwk/store quad store", () => {
       ).not.toThrow();
     });
   });
+
+  it("lists resources under a key prefix, ordered, without widening on LIKE metacharacters", async () => {
+    const result = await withStore(async ({ store }) => {
+      const bytes = (s: string) => new TextEncoder().encode(s);
+      await store.putBlob("/documents/a.txt", bytes("a"), {
+        contentType: "text/plain",
+      });
+      await store.putBlob("/documents/sub/b.txt", bytes("b"), {
+        contentType: "text/plain",
+      });
+      store.writeQuads("/documents/meta", QUADS, {
+        contentType: "text/turtle",
+      });
+      // Outside the prefix — must not appear.
+      await store.putBlob("/photos/c.jpg", bytes("c"));
+      // A key whose name embeds a `%` (a LIKE wildcard) sits outside the
+      // `/documents/` prefix and must not be pulled in by a naive pattern.
+      await store.putBlob("/d%cuments", bytes("x"));
+
+      return {
+        all: store.list("/documents/").map((m) => m.key),
+        kindOfMeta: store.head("/documents/meta")?.kind,
+        docMeta: store.head("/documents/a.txt"),
+      };
+    });
+
+    expect(result.all).toEqual([
+      "/documents/a.txt",
+      "/documents/meta",
+      "/documents/sub/b.txt",
+    ]);
+    expect(result.kindOfMeta).toBe("rdf");
+    expect(result.docMeta).toMatchObject({
+      kind: "blob",
+      contentType: "text/plain",
+    });
+  });
 });
 
 describe("@dwk/store blob copy-on-write", () => {

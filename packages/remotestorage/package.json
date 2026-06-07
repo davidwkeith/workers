@@ -1,0 +1,42 @@
+{
+  "name": "@dwk/remotestorage",
+  "version": "0.0.0",
+  "description": "remoteStorage (draft-dejong-remotestorage) personal data vault: OAuth-bearer GET/PUT/DELETE documents and folder listings over @dwk/store. Ships the per-account Durable Object.",
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/remotestorage#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/remotestorage"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/test-harness.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/log": "workspace:*",
+    "@dwk/store": "workspace:*",
+    "@dwk/webfinger": "workspace:*"
+  }
+}

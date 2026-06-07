@@ -5,7 +5,7 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** — a per-account Durable Object (reuses [`@dwk/store`](store.md)) |
 | **Standard** | [remoteStorage](https://datatracker.ietf.org/doc/html/draft-dejong-remotestorage-22) (draft-dejong-remotestorage) |
-| **Status** | proposed (honorable mention) — tracked in [#105](https://github.com/davidwkeith/workers/issues/105) |
+| **Status** | implemented (honorable mention) — tracked in [#105](https://github.com/davidwkeith/workers/issues/105) |
 
 An [Unhosted](https://unhosted.org/)-style **remoteStorage** server: a
 per-user document vault that "no-backend" web apps read and write over a simple
@@ -35,27 +35,33 @@ So Solid resources (RDF, `kind='rdf'`) and remoteStorage documents
 the **same R2 bucket**, under the **same GC**. Two protocol facades, one storage
 authority.
 
-### What the store does *not* yet give us (the real work)
+### What the store did *not* give us (the real work — now done)
 
 Two things remoteStorage needs that are **endpoint-layer**, not Solid-specific —
-and one of them implies a single, protocol-agnostic addition to the `Store`
-interface:
+and one of them implied a single, protocol-agnostic addition to the `Store`
+interface, now implemented:
 
 1. **Folder listings + folder ETags.** `GET <folder>/` MUST return a JSON listing
    of immediate children with their ETags, and a folder's ETag MUST change when
    **any descendant** changes (draft §A). The store keys are opaque strings with
-   no native prefix-enumeration and no ancestor-ETag propagation. This needs a
-   small `list(prefix)` projection on the `Store` interface
-   (`SELECT … WHERE key LIKE prefix || '%'`, scoped to immediate children) plus
-   folder-ETag derivation in the handler. Crucially this is **generic** —
-   `@dwk/solid-pod` can use the same `list(prefix)` to enumerate LDP container
+   no native prefix-enumeration and no ancestor-ETag propagation. This added a
+   small, **generic** `list(prefix)` projection on the `Store` interface
+   (`SELECT … WHERE key LIKE prefix || '%' ESCAPE '\'`, returning every
+   descendant's pointer metadata) plus folder-ETag derivation in the handler
+   (`src/folder.ts`): immediate children are grouped from the descendants, and a
+   folder/subfolder ETag is the SHA-256 over a canonical signature of every
+   descendant `(key, etag)` pair, so any change anywhere in the subtree perturbs
+   it. Because `list(prefix)` ascribes no meaning to `/` or "folders",
+   `@dwk/solid-pod` can use the same projection to enumerate LDP container
    membership instead of maintaining `ldp:contains` triples — so it does **not**
    taint the store with remoteStorage assumptions.
 2. **Auth model divergence.** remoteStorage uses **plain OAuth 2.0 bearer tokens
    with per-top-level-folder scopes** (`<module>:r` / `<module>:rw`) and a public
    `/public/` tree — **not** DPoP + WAC. That difference lives entirely in this
-   endpoint package (reusing [`@dwk/oauth`](oauth.md) for the implicit-grant /
-   token surface), never in the store.
+   endpoint package (`src/auth.ts` + `src/scope.ts`): the front door verifies a
+   bearer token (built-in JWKS verifier, or an injectable hook for opaque tokens
+   resolved via [`@dwk/oauth`](oauth.md) introspection), maps the path to its
+   module, and enforces read-vs-write scope — never the store.
 
 ### One DO or two?
 
