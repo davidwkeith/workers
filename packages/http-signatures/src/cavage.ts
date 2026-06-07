@@ -208,12 +208,19 @@ export async function verifyCavage(
   if (keyId === null) return fail("keyid_missing");
 
   const token = fields.get("algorithm");
-  // The headers list defaults per the draft: `(created)` when present, else `date`.
   const createdRaw = parseIntegerParam(fields.get("created"));
   if (createdRaw === null) return fail("created_invalid");
   const expiresRaw = parseIntegerParam(fields.get("expires"));
   if (expiresRaw === null) return fail("expires_invalid");
 
+  // Default covered-component list when no explicit `headers` is sent.
+  // draft-cavage-12 §2.1.6 specifies the default is `(created)` unconditionally.
+  // We deliberately diverge: when `created` is absent we fall back to `date`,
+  // matching the older "Signing HTTP Messages" rule that essentially every
+  // fediverse peer implements. In practice senders always send an explicit
+  // `headers`, so this branch is rarely reached; the divergence only affects
+  // the (non-conforming) case of a signature with neither `headers` nor
+  // `created`, where interop with real-world peers beats spec-literalism.
   const headersList = fields.get("headers");
   const components = headersList
     ? headersList.split(/\s+/).filter(Boolean)

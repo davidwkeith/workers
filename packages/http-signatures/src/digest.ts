@@ -12,6 +12,7 @@
  */
 
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import { parseByteSequenceDictionary, SfParseError } from "./sf";
 
 /** Hash algorithms supported for digests. */
 export type DigestAlgorithm = "sha-256" | "sha-512";
@@ -25,12 +26,19 @@ function toBytes(body: Uint8Array | string): Uint8Array {
   return typeof body === "string" ? new TextEncoder().encode(body) : body;
 }
 
+async function hashBytes(
+  body: Uint8Array | string,
+  alg: DigestAlgorithm,
+): Promise<Uint8Array> {
+  const digest = await crypto.subtle.digest(SUBTLE_HASH[alg], toBytes(body));
+  return new Uint8Array(digest);
+}
+
 async function hash(
   body: Uint8Array | string,
   alg: DigestAlgorithm,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(SUBTLE_HASH[alg], toBytes(body));
-  return bytesToBase64(new Uint8Array(digest));
+  return bytesToBase64(await hashBytes(body, alg));
 }
 
 /**
@@ -64,31 +72,32 @@ export type DigestRejection =
   | "digest_mismatch";
 
 /**
- * Verify a received `Content-Digest` field value against `body`. Per RFC 9530
- * §3, entries whose algorithm the verifier does not support are ignored; every
- * supported entry must match, and at least one supported entry must be present
- * (otherwise the value is rejected as `digest_unsupported`).
+ * Verify a received `Content-Digest` field value against `body`. The field is
+ * an RFC 8941 Dictionary of Byte Sequences (RFC 9530 §2), so it is parsed with
+ * the strict structured-fields parser rather than split by hand: a malformed
+ * value — including a lone uppercase algorithm key, which is not a valid sf-key
+ * — fails closed as `digest_mismatch`. Per RFC 9530 §3, entries whose algorithm
+ * the verifier does not support are ignored; every supported entry must match,
+ * and at least one supported entry must be present (otherwise the value is
+ * rejected as `digest_unsupported`).
  */
 export async function verifyContentDigest(
   headerValue: string | null | undefined,
   body: Uint8Array | string,
 ): Promise<DigestRejection | null> {
   if (!headerValue) return "digest_missing";
+  let dict: Map<string, Uint8Array>;
+  try {
+    dict = parseByteSequenceDictionary(headerValue);
+  } catch (err) {
+    if (err instanceof SfParseError) return "digest_mismatch";
+    throw err;
+  }
   let sawSupported = false;
-  for (const entry of headerValue.split(",")) {
-    const eq = entry.indexOf("=");
-    if (eq < 0) continue;
-    const alg = entry.slice(0, eq).trim().toLowerCase() as DigestAlgorithm;
-    if (!(alg in SUBTLE_HASH)) continue;
-    const wrapped = entry.slice(eq + 1).trim();
-    if (
-      !wrapped.startsWith(":") ||
-      !wrapped.endsWith(":") ||
-      wrapped.length < 2
-    ) {
-      return "digest_mismatch";
-    }
-    if (!constantTimeEqualBase64(wrapped.slice(1, -1), await hash(body, alg))) {
+  for (const [key, received] of dict) {
+    if (!(key in SUBTLE_HASH)) continue;
+    const alg = key as DigestAlgorithm;
+    if (!constantTimeEqualBytes(received, await hashBytes(body, alg))) {
       return "digest_mismatch";
     }
     sawSupported = true;
@@ -120,6 +129,16 @@ export async function verifyDigest(
   return sawSupported ? null : "digest_unsupported";
 }
 
+/** Compare two byte arrays in length-constant time. */
+function constantTimeEqualBytes(x: Uint8Array, y: Uint8Array): boolean {
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) {
+    diff |= x[i]! ^ y[i]!;
+  }
+  return diff === 0;
+}
+
 /**
  * Compare two base64 strings by their decoded bytes in length-constant time.
  * A malformed encoding compares unequal rather than throwing.
@@ -133,10 +152,5 @@ function constantTimeEqualBase64(a: string, b: string): boolean {
   } catch {
     return false;
   }
-  if (x.length !== y.length) return false;
-  let diff = 0;
-  for (let i = 0; i < x.length; i++) {
-    diff |= x[i]! ^ y[i]!;
-  }
-  return diff === 0;
+  return constantTimeEqualBytes(x, y);
 }

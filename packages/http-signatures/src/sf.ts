@@ -205,8 +205,16 @@ export function parseSignatureInput(
   return out;
 }
 
-/** Parse a `Signature` header into its labelled byte sequences. */
-export function parseSignatureHeader(input: string): Map<string, Uint8Array> {
+/**
+ * Parse an RFC 8941 Dictionary whose member values are Byte Sequences — the
+ * shape shared by the `Signature` header and the RFC 9530 `Content-Digest` /
+ * `Want-Content-Digest` fields. Member parameters are accepted and discarded.
+ * Keys follow sf-key rules (lowercase only), so an uppercase key is a parse
+ * error rather than something silently lowercased.
+ */
+export function parseByteSequenceDictionary(
+  input: string,
+): Map<string, Uint8Array> {
   const r = new Reader(input);
   const out = new Map<string, Uint8Array>();
   r.skipOWS();
@@ -225,6 +233,11 @@ export function parseSignatureHeader(input: string): Map<string, Uint8Array> {
     r.skipOWS();
   }
   return out;
+}
+
+/** Parse a `Signature` header into its labelled byte sequences. */
+export function parseSignatureHeader(input: string): Map<string, Uint8Array> {
+  return parseByteSequenceDictionary(input);
 }
 
 /** Serialize an sf-string: double-quoted with `"` and `\` escaped. */
