@@ -60,9 +60,27 @@ describe("findWebmentionEndpoint", () => {
     expect(endpoint).toBe("https://target.example/legacy");
   });
 
+  it("accepts the legacy rel without a trailing slash (URL-normalized)", async () => {
+    const endpoint = await findWebmentionEndpoint(
+      '<https://target.example/legacy>; rel="http://webmention.org"',
+      "",
+      doc,
+    );
+    expect(endpoint).toBe("https://target.example/legacy");
+  });
+
   it("rejects a legacy-rel look-alike host", async () => {
     const endpoint = await findWebmentionEndpoint(
       '<https://target.example/spoof>; rel="http://webmention.org.evil.example/"',
+      "",
+      doc,
+    );
+    expect(endpoint).toBeNull();
+  });
+
+  it("rejects the legacy rel under the wrong scheme", async () => {
+    const endpoint = await findWebmentionEndpoint(
+      '<https://target.example/spoof>; rel="https://webmention.org/"',
       "",
       doc,
     );

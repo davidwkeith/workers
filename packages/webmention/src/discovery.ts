@@ -22,17 +22,29 @@ import {
 import { readBodyCapped, type FetchLike } from "./fetch";
 import { safeFetch } from "./safe-fetch";
 
-// The exact legacy rel values predating the standardized `webmention` token. A
-// prefix test would also match look-alike hosts like
-// `http://webmention.org.evil.example/`, so require an exact string.
-const LEGACY_RELS = new Set([
+// The legacy rel values predating the standardized `webmention` token. They are
+// absolute URLs, so a candidate rel is normalized through `URL` before being
+// compared: `http://webmention.org` and `http://webmention.org/` then coincide
+// (tolerating the trailing slash developers commonly omit), while a look-alike
+// host like `http://webmention.org.evil.example/` parses to a different href and
+// is rejected — which a bare `startsWith` prefix test would not catch.
+const LEGACY_REL_HREFS = new Set([
   "http://webmention.org/",
   "http://webmention.org/webmention",
 ]);
 
 function isWebmentionRel(rel: string): boolean {
-  const lower = rel.toLowerCase();
-  return lower === "webmention" || LEGACY_RELS.has(lower);
+  if (rel.toLowerCase() === "webmention") {
+    return true;
+  }
+  let href: string;
+  try {
+    href = new URL(rel).href;
+  } catch {
+    // Not the standard token and not an absolute URL — not a webmention rel.
+    return false;
+  }
+  return LEGACY_REL_HREFS.has(href);
 }
 
 /**
