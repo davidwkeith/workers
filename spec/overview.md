@@ -24,8 +24,9 @@ stand alone for any third-party developer.
   server holds data or keys.
 - Packages **compose** into a single Worker behind one domain (the user's
   IndieWeb / WebID identity root).
-- Provide a Workers-native edge implementation of the Solid data plane (no
-  long-running Node server).
+- Provide a Workers-native edge implementation of the Solid data plane as the
+  primary target (the self-host Docker image emulates the same primitives on a
+  long-running Node process; see [self-hosting.md](self-hosting.md)).
 - Pass the relevant conformance suites (see
   [conformance-and-testing.md](conformance-and-testing.md)).
 - TypeScript-first: the type definitions are the integration contract.
@@ -38,9 +39,13 @@ stand alone for any third-party developer.
 - A SPARQL **query** endpoint — Solid requires only PATCH semantics.
 - Sharding a single pod across Durable Objects (see
   [open-questions.md](open-questions.md)).
-- **Runtimes other than Cloudflare Workers.** Cloudflare is the sole deployment
-  target; packages MAY freely assume Workers, Durable Objects, R2, D1, and KV
-  primitives.
+- **Runtime-agnostic packages.** Cloudflare Workers is the **primary** deployment
+  target, and packages MAY freely assume Workers, Durable Objects, R2, D1, and KV
+  primitives. Self-hosting is supported **not** by making the packages
+  runtime-neutral, but by a separate Node/Express host (`@dwk/server`, shipped as
+  a **Docker image**) that *emulates* those Cloudflare primitive interfaces on
+  SQLite + the local filesystem — see [self-hosting.md](self-hosting.md).
+  Other first-class runtimes remain out of scope.
 - The provisioning UI / `wrangler` config generation — that lives in Anglesite,
   not these packages.
 

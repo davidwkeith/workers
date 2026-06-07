@@ -2,7 +2,9 @@
 
 > Composable npm packages that each implement an open web standard, run as
 > [Cloudflare Workers](https://developers.cloudflare.com/workers/), and deploy
-> onto an end user's **own** Cloudflare account.
+> onto an end user's **own** Cloudflare account — or, for those who'd rather run
+> their own box, a self-hostable **Docker image** (planned; see
+> [Self-hosting](#self-hosting)).
 
 `@dwk` is an npm scope under which standards-implementing packages live. This
 repository contains the **IndieWeb + Solid cohort**: building blocks that give
@@ -84,6 +86,25 @@ for the full rules.
 > Identity is rooted at the user's domain: the same domain serves the IndieWeb
 > identity (IndieAuth) and the WebID the Pod authenticates against.
 
+## Self-hosting
+
+**Cloudflare first.** Cloudflare Workers is the primary, recommended deployment
+target, and the packages freely assume Workers, Durable Objects, R2, D1, and KV
+primitives.
+
+For users who'd rather run their own server, the same packages are **planned** to
+ship as a self-hostable **Docker image**: a single long-running Node.js process
+(behind [Express](https://expressjs.com/)) that serves the standards endpoints
+**and** static files from one domain. It reuses the protocol logic byte-for-byte
+— no second implementation — and emulates the Cloudflare primitive interfaces on
+**SQLite + the local filesystem** (zero extra services), so the same handlers run
+unchanged. This is a **supported secondary** path, not a separate product.
+
+> **Status: proposed, not yet built.** The design is captured in
+> [`spec/self-hosting.md`](spec/self-hosting.md); the `@dwk/server` host package
+> and its Docker image do not exist yet. Tracking:
+> [issue #125](https://github.com/davidwkeith/workers/issues/125).
+
 ## Status
 
 **Implemented, unreleased.** The authoritative requirements live in
@@ -106,6 +127,8 @@ The [`spec/`](spec/) directory holds the technical requirements:
 - [Non-functional requirements](spec/non-functional-requirements.md) —
   consistency, runtime budget, security, distribution.
 - [Conformance & testing](spec/conformance-and-testing.md) — the test bars.
+- [Self-hosting](spec/self-hosting.md) — the Cloudflare-first stance and the
+  planned Node/Express + Docker self-host host (design only).
 - [Open questions](spec/open-questions.md) — deferred decisions.
 - [`spec/packages/`](spec/packages/) — one detailed spec per package.
 
