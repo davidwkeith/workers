@@ -135,6 +135,27 @@
         ]
       }
     },
+    "@dwk/remotestorage": {
+      "standard": "remoteStorage",
+      "suites": {
+        "remotestorage-api-test-suite": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "OAuth-scoped document PUT/GET/DELETE round-trips with ETags",
+          "conditional write (If-Match / If-None-Match: *) is TOCTOU-free",
+          "folder listing reports children and a descendant-sensitive ETag",
+          "public /public/ document read needs no token; folders never public",
+          "read-only scope is refused a write (403)",
+          "document/folder name collision is rejected (409)"
+        ]
+      }
+    },
     "@dwk/webauthn": {
       "standard": "WebAuthn",
       "suites": {

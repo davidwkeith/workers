@@ -120,6 +120,19 @@ export interface Store {
   /** Read a resource's pointer metadata, or `null` if it does not exist. */
   head(key: string): ResourceMeta | null;
 
+  /**
+   * List every resource whose key begins with `prefix`, returning its pointer
+   * metadata (no bodies) ordered by key. A protocol-agnostic prefix scan over
+   * the opaque key space — the store ascribes no meaning to `/` or to "folders".
+   * Callers layer their own hierarchy on top: a remoteStorage handler derives
+   * folder listings and aggregate folder ETags from the returned descendants, and
+   * an LDP container could enumerate its members the same way instead of
+   * maintaining `ldp:contains` triples. `%` and `_` in `prefix` are matched
+   * literally (escaped), so a key containing a SQL `LIKE` metacharacter cannot
+   * widen the scan.
+   */
+  list(prefix: string): ResourceMeta[];
+
   /** Read all quads of an RDF resource (empty if absent or a blob). */
   readQuads(key: string): StoredQuad[];
 
@@ -470,6 +483,30 @@ export function createStore(
         etag: row.etag,
         contentType: row.contentType,
       };
+    },
+
+    list(prefix) {
+      // Escape `LIKE` metacharacters (`\`, `%`, `_`) so a key containing one is
+      // matched literally rather than as a wildcard; pair with `ESCAPE '\'`.
+      const escaped = prefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+      return sql
+        .exec<{
+          key: string;
+          kind: string;
+          etag: string;
+          content_type: string;
+        }>(
+          `SELECT key, kind, etag, content_type FROM resources
+           WHERE key LIKE ? ESCAPE '\\' ORDER BY key`,
+          `${escaped}%`,
+        )
+        .toArray()
+        .map((row) => ({
+          key: row.key,
+          kind: row.kind as ResourceKind,
+          etag: row.etag,
+          contentType: row.content_type,
+        }));
     },
 
     readQuads(key) {
