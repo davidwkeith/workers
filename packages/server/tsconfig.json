@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No `rootDir`: the `paths` mapping resolves the `@dwk/log` import to its
+    // source so `typecheck` works before the workspace is built (CI runs
+    // typecheck ahead of build). This config is `noEmit`, so rootDir is moot.
+    "paths": {
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/webfinger": ["../webfinger/src/index.ts"]
+    },
+    "types": ["node", "@cloudflare/workers-types"],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

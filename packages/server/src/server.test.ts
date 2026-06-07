@@ -1,0 +1,169 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createWebfinger } from "@dwk/webfinger";
+import { createServer, type DwkServer } from "./server";
+import { WaitUntilTracker } from "./context";
+import { MissingBindingError } from "./config";
+import type { FetchHandler, Mount } from "./config";
+
+function dataDir(): string {
+  return mkdtempSync(join(tmpdir(), "dwk-srv-"));
+}
+
+const webfingerMount: Mount = {
+  name: "@dwk/webfinger",
+  handler: createWebfinger({
+    resources: {
+      "acct:alice@example.com": {
+        subject: "acct:alice@example.com",
+        links: [
+          {
+            rel: "http://webfinger.net/rel/profile-page",
+            href: "https://example.com/alice",
+          },
+        ],
+      },
+    },
+  }) as unknown as FetchHandler,
+  reservedPaths: ["/.well-known/webfinger"],
+};
+
+let server: DwkServer | null = null;
+let base = "";
+
+async function start(
+  config: Parameters<typeof createServer>[0],
+): Promise<void> {
+  server = createServer(config);
+  const { port } = await server.listen(0, "127.0.0.1");
+  base = `http://127.0.0.1:${port}`;
+}
+
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+describe("createServer (end-to-end)", () => {
+  it("mounts a real endpoint package and serves it through the host", async () => {
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [webfingerMount],
+      env: {},
+    });
+    const res = await fetch(
+      `${base}/.well-known/webfinger?resource=acct:alice@example.com`,
+    );
+    expect(res.status).toBe(200);
+    const jrd = (await res.json()) as { subject: string };
+    expect(jrd.subject).toBe("acct:alice@example.com");
+
+    const miss = await fetch(
+      `${base}/.well-known/webfinger?resource=acct:nobody@example.com`,
+    );
+    expect(miss.status).toBe(404);
+  });
+
+  it("gives reserved protocol paths precedence over static files", async () => {
+    const publicDir = dataDir();
+    mkdirSync(join(publicDir, ".well-known"), { recursive: true });
+    // A static file that must NOT shadow the WebFinger endpoint.
+    writeFileSync(join(publicDir, ".well-known", "webfinger"), "STATIC");
+    writeFileSync(join(publicDir, "index.html"), "<h1>home</h1>");
+
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      publicDir,
+      mounts: [webfingerMount],
+      env: {},
+    });
+
+    const endpoint = await fetch(
+      `${base}/.well-known/webfinger?resource=acct:alice@example.com`,
+    );
+    expect(endpoint.headers.get("content-type")).toContain("jrd");
+    expect(await endpoint.text()).not.toBe("STATIC");
+
+    const staticFile = await fetch(`${base}/index.html`);
+    expect(await staticFile.text()).toContain("home");
+  });
+
+  it("runs the configurable fallback for unmatched routes (default 404)", async () => {
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [webfingerMount],
+      env: {},
+    });
+    const res = await fetch(`${base}/nothing-here`);
+    expect(res.status).toBe(404);
+  });
+
+  it("passes the assembled env and tracks waitUntil work", async () => {
+    let resolved = false;
+    const tracker = new WaitUntilTracker();
+    const mount: Mount = {
+      name: "synthetic",
+      reservedPaths: ["/echo"],
+      requires: ["SECRET"],
+      handler: (async (_request, env, ctx) => {
+        const e = env as unknown as { SECRET: string };
+        ctx.waitUntil(
+          new Promise<void>((r) =>
+            setTimeout(() => {
+              resolved = true;
+              r();
+            }, 10),
+          ),
+        );
+        return new Response(e.SECRET);
+      }) as FetchHandler,
+    };
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [mount],
+      env: { SECRET: "shh" },
+    });
+    const res = await fetch(`${base}/echo`);
+    expect(await res.text()).toBe("shh");
+    // close() drains waitUntil work.
+    await server?.close();
+    server = null;
+    expect(resolved).toBe(true);
+    void tracker;
+  });
+
+  it("fails loud at startup when a required binding is missing", () => {
+    expect(() =>
+      createServer({
+        baseUrl: "http://localhost",
+        dataDir: dataDir(),
+        mounts: [
+          {
+            name: "needs-db",
+            handler: webfingerMount.handler,
+            reservedPaths: ["/x"],
+            requires: ["AUTH_DB"],
+          },
+        ],
+        env: {},
+      }),
+    ).toThrow(MissingBindingError);
+  });
+
+  it("refuses an insecure non-localhost base URL outside dev mode", () => {
+    expect(() =>
+      createServer({
+        baseUrl: "http://example.com",
+        dataDir: dataDir(),
+        mounts: [webfingerMount],
+        env: {},
+      }),
+    ).toThrow();
+  });
+});

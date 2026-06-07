@@ -1,0 +1,211 @@
+/**
+ * The host: an Express app that composes the endpoint packages, bridges Express
+ * ⇄ Web fetch, serves static files, and drives the lifecycle.
+ *
+ * Routing precedence (§6.3) is load-bearing and mounted in this order:
+ *   1. reserved protocol paths (`/.well-known/*` + each mount's configured
+ *      paths) → dispatched to the fetch adapter, winning over any static file;
+ *   2. `express.static(publicDir)` — the user's website;
+ *   3. a configurable fallback (default 404, or an SPA `index.html` rewrite).
+ *
+ * @see spec/self-hosting.md §5, §6
+ */
+
+import { createServer as createHttpServer, type Server } from "node:http";
+import { resolve } from "node:path";
+import express, {
+  type Express,
+  type Request as ExpressRequest,
+  type Response as ExpressResponse,
+  type NextFunction,
+  type RequestHandler,
+} from "express";
+import { noopLogger, type Logger } from "@dwk/log";
+import { sendWebResponse, toWebRequest } from "./adapter";
+import { HostExecutionContext, WaitUntilTracker } from "./context";
+import { acquireWriterLock, type ReleaseLock } from "./lock";
+import {
+  assertBindings,
+  isReservedPath,
+  resolveOrigin,
+  type HostConfig,
+  type Mount,
+} from "./config";
+import type { QueueBroker } from "./shims/queue";
+import type { CronScheduler } from "./shims/cron";
+
+/** Internal wiring handed to {@link DwkServer}. */
+interface ServerParts {
+  readonly app: Express;
+  readonly origin: string;
+  readonly release: ReleaseLock | null;
+  readonly tracker: WaitUntilTracker;
+  readonly queue?: QueueBroker;
+  readonly cron?: CronScheduler;
+  readonly logger: Logger;
+}
+
+/** A composed, runnable host. */
+export class DwkServer {
+  /** The underlying Express app — mount it elsewhere if you need to. */
+  readonly app: Express;
+  /** The validated public origin requests are reconstructed against. */
+  readonly origin: string;
+
+  readonly #release: ReleaseLock | null;
+  readonly #tracker: WaitUntilTracker;
+  readonly #queue?: QueueBroker;
+  readonly #cron?: CronScheduler;
+  readonly #logger: Logger;
+  #httpServer: Server | null = null;
+
+  constructor(parts: ServerParts) {
+    this.app = parts.app;
+    this.origin = parts.origin;
+    this.#release = parts.release;
+    this.#tracker = parts.tracker;
+    this.#queue = parts.queue;
+    this.#cron = parts.cron;
+    this.#logger = parts.logger;
+  }
+
+  /** Start listening and the lifecycle workers (queue/cron). Resolves the bound port. */
+  async listen(port = 0, host?: string): Promise<{ port: number }> {
+    this.#queue?.start();
+    this.#cron?.start();
+    const server = createHttpServer(this.app);
+    this.#httpServer = server;
+    await new Promise<void>((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        server.off("error", reject);
+        resolvePromise();
+      });
+    });
+    const address = server.address();
+    const bound = typeof address === "object" && address ? address.port : port;
+    this.#logger.info("server.listening", { port: bound });
+    return { port: bound };
+  }
+
+  /**
+   * Graceful shutdown: stop accepting connections, stop the queue/cron loops,
+   * drain outstanding `waitUntil` work, then release the single-writer lock.
+   */
+  async close(): Promise<void> {
+    const server = this.#httpServer;
+    if (server !== null) {
+      await new Promise<void>((resolvePromise) => {
+        server.close(() => resolvePromise());
+        server.closeIdleConnections?.();
+      });
+      this.#httpServer = null;
+    }
+    await this.#cron?.stop();
+    await this.#queue?.stop();
+    await this.#tracker.drain();
+    this.#release?.();
+    this.#logger.info("server.closed");
+  }
+}
+
+/**
+ * Build a {@link DwkServer} from a {@link HostConfig}. Validates the base URL
+ * and required bindings (fail loud), acquires the single-writer lock, and wires
+ * the Express app with the documented routing precedence.
+ */
+export function createServer(config: HostConfig): DwkServer {
+  const logger = config.logger ?? noopLogger;
+  const origin = resolveOrigin(config.baseUrl, config.devMode ?? false);
+  assertBindings(config.mounts, config.env);
+
+  const release =
+    (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;
+  const tracker = new WaitUntilTracker();
+
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(reservedDispatch(config.mounts, config.env, origin, tracker, logger));
+  if (config.publicDir !== undefined) {
+    app.use(express.static(resolve(config.publicDir)));
+  }
+  app.use(config.fallback ?? defaultFallback(config));
+
+  return new DwkServer({
+    app,
+    origin,
+    release,
+    tracker,
+    queue: config.queue,
+    cron: config.cron,
+    logger,
+  });
+}
+
+/**
+ * Middleware dispatching reserved protocol paths to the matching mount's fetch
+ * handler. Non-reserved paths fall through (`next()`) to static + fallback.
+ */
+function reservedDispatch(
+  mounts: readonly Mount[],
+  env: Readonly<Record<string, unknown>>,
+  origin: string,
+  tracker: WaitUntilTracker,
+  logger: Logger,
+): RequestHandler {
+  return (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
+    const pathname = new URL(req.originalUrl, origin).pathname;
+    const mount = mounts.find((m) => isReservedPath(pathname, m.reservedPaths));
+    if (mount === undefined) {
+      next();
+      return;
+    }
+    void dispatch(mount, req, res, env, origin, tracker, logger);
+  };
+}
+
+async function dispatch(
+  mount: Mount,
+  req: ExpressRequest,
+  res: ExpressResponse,
+  env: Readonly<Record<string, unknown>>,
+  origin: string,
+  tracker: WaitUntilTracker,
+  logger: Logger,
+): Promise<void> {
+  try {
+    const request = toWebRequest(req, origin);
+    const ctx = new HostExecutionContext(tracker);
+    // `env` is the assembled host Env; the handler's specific Env fragment is a
+    // structural subset, so the `never` parameter is widened here at the call.
+    const response = await mount.handler(request, env as never, ctx);
+    await sendWebResponse(res, response);
+  } catch (err) {
+    logger.error("server.handler_error", {
+      mount: mount.name,
+      path: req.path,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    if (!res.headersSent) res.status(500).end();
+    else res.end();
+  }
+}
+
+/** The default fallback: a 404, or an SPA `index.html` rewrite if configured. */
+function defaultFallback(config: HostConfig): RequestHandler {
+  if (config.spaFallback && config.publicDir !== undefined) {
+    const index = resolve(config.publicDir, "index.html");
+    return (req: ExpressRequest, res: ExpressResponse) => {
+      if (req.method === "GET" || req.method === "HEAD") {
+        res.sendFile(index, (err: unknown) => {
+          if (err) res.status(404).end();
+        });
+      } else {
+        res.status(404).end();
+      }
+    };
+  }
+  return (_req: ExpressRequest, res: ExpressResponse) => {
+    res.status(404).type("txt").send("Not Found");
+  };
+}
