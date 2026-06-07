@@ -1,0 +1,40 @@
+{
+  "name": "@dwk/host-meta",
+  "version": "0.0.0",
+  "description": "Web Host Metadata (RFC 6415) host-meta discovery at /.well-known/host-meta with XRD/JRD content negotiation.",
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/host-meta#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/host-meta"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/log": "workspace:*",
+    "@dwk/webfinger": "workspace:*"
+  }
+}

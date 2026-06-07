@@ -78,6 +78,14 @@
         "cases": []
       }
     },
+    "@dwk/host-meta": {
+      "standard": "Web Host Metadata (RFC 6415)",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/activitypub": {
       "standard": "ActivityPub",
       "suites": {
