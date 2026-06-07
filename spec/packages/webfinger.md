@@ -37,8 +37,9 @@ case correctly.
   [composition-contract.md](../composition-contract.md)), mountable at
   `/.well-known/webfinger`.
 - Respond with media type `application/jrd+json`.
-- `resource` absent → **400**; `resource` unknown → **404**; matched → **200**
-  with `subject`, `aliases`, `links`.
+- `resource` absent **or malformed** (no scheme / unparseable URI, RFC 7033
+  §4.2) → **400**; `resource` unknown → **404**; matched → **200** with
+  `subject`, `aliases`, `links`.
 - Honor `rel` (repeatable) by returning only matching link relations.
 - Emit permissive CORS (`Access-Control-Allow-Origin: *`) per RFC 7033 §10.2 —
   WebFinger is public discovery data.

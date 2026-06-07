@@ -44,3 +44,39 @@ export function normalizeResource(resource: string): string {
 
   return `${scheme}:${rest}`;
 }
+
+/**
+ * A valid URI scheme per RFC 3986 §3.1: an ALPHA followed by any number of
+ * ALPHA / DIGIT / "+" / "-" / ".".
+ */
+const SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*$/i;
+
+/**
+ * Decide whether a queried `resource` is a syntactically well-formed URI
+ * (RFC 7033 §4.2): it MUST carry a scheme (RFC 3986 §3.1), and an `http(s)`
+ * resource MUST additionally parse as an absolute URL. A value with no scheme,
+ * an ill-formed scheme, or an unparseable `http(s)` authority is *malformed*,
+ * and the handler answers `400` (not `404`) before any lookup — §4.2 requires a
+ * "bad request" indication when `resource` is absent **or malformed**.
+ *
+ * Validation is deliberately minimal: a syntactically valid scheme is enough for
+ * non-`http(s)` URIs (`acct:`, `mailto:`, `urn:`), since the resolver — not this
+ * gate — owns whether such a resource is controlled.
+ */
+export function isWellFormedResource(resource: string): boolean {
+  const colon = resource.indexOf(":");
+  if (colon <= 0) return false;
+
+  const scheme = resource.slice(0, colon).toLowerCase();
+  if (!SCHEME_PATTERN.test(scheme)) return false;
+
+  if (scheme === "http" || scheme === "https") {
+    try {
+      new URL(resource);
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}

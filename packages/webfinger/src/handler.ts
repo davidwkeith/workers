@@ -2,8 +2,8 @@
  * The WebFinger fetch handler (RFC 7033): a stateless `GET` endpoint, mountable
  * at `/.well-known/webfinger`, that dispatches on the `resource` query parameter,
  * returns the matching JRD (`rel`-filtered), and otherwise distinguishes a
- * missing parameter (`400`) from an uncontrolled resource (`404`). Discovery
- * data is public, so every response carries permissive CORS (§10.2).
+ * missing or malformed parameter (`400`) from an uncontrolled resource (`404`).
+ * Discovery data is public, so every response carries permissive CORS (§10.2).
  */
 
 import { hostFromUrl, type LogFields } from "@dwk/log";
@@ -15,6 +15,7 @@ import {
 } from "./config";
 import { buildJrd } from "./jrd";
 import { WebfingerLogEvent } from "./log";
+import { isWellFormedResource } from "./resource";
 
 /**
  * Cloudflare bindings required by the WebFinger handler: **none**. The resource
@@ -101,8 +102,9 @@ function errorResponse(
  * Build the WebFinger handler from configuration.
  *
  * The returned handler is mountable at `/.well-known/webfinger`. It accepts
- * `GET` (and `HEAD`): a request with no `resource` parameter gets `400`; a
- * `resource` this server does not control gets `404`; a match gets `200` with an
+ * `GET` (and `HEAD`): a request with no `resource` parameter — or a malformed
+ * one (no scheme / unparseable URI, RFC 7033 §4.2) — gets `400`; a `resource`
+ * this server does not control gets `404`; a match gets `200` with an
  * `application/jrd+json` body whose `subject` echoes the queried URI, filtered by
  * any `rel` parameters. `OPTIONS` returns a CORS preflight; other methods get
  * `405`. Fails loudly at construction if no resource source is configured.
@@ -143,6 +145,17 @@ export function createWebfinger(config: WebfingerConfig): WebfingerHandler {
       return errorResponse(
         400,
         "missing_resource: the `resource` query parameter is required",
+      );
+    }
+
+    if (!isWellFormedResource(resource)) {
+      emit(resolved, "warn", WebfingerLogEvent.Rejected, {
+        reason: "malformed_resource",
+        resourceHost: resourceHost(resource),
+      });
+      return errorResponse(
+        400,
+        "malformed_resource: the `resource` query parameter is not a valid URI",
       );
     }
 

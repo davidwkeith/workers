@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { normalizeResource } from "./resource";
+import { normalizeResource, isWellFormedResource } from "./resource";
 
 describe("normalizeResource", () => {
   it("lowercases the scheme and host of an acct: URI", () => {
@@ -44,5 +44,47 @@ describe("normalizeResource", () => {
   it("is idempotent", () => {
     const once = normalizeResource("ACCT:alice@EXAMPLE.COM");
     expect(normalizeResource(once)).toBe(once);
+  });
+});
+
+describe("isWellFormedResource", () => {
+  it("accepts an acct: URI", () => {
+    expect(isWellFormedResource("acct:alice@example.com")).toBe(true);
+  });
+
+  it("accepts a mailto: URI", () => {
+    expect(isWellFormedResource("mailto:bob@example.com")).toBe(true);
+  });
+
+  it("accepts a parseable https: URI", () => {
+    expect(isWellFormedResource("https://example.com/users/alice")).toBe(true);
+  });
+
+  it("accepts an arbitrary scheme without parsing its body", () => {
+    expect(isWellFormedResource("urn:example:resource")).toBe(true);
+  });
+
+  it("accepts a scheme regardless of case", () => {
+    expect(isWellFormedResource("ACCT:alice@example.com")).toBe(true);
+  });
+
+  it("rejects a value with no scheme", () => {
+    expect(isWellFormedResource("alice@example.com")).toBe(false);
+  });
+
+  it("rejects a bare token", () => {
+    expect(isWellFormedResource("not-a-uri")).toBe(false);
+  });
+
+  it("rejects a leading-colon value (empty scheme)", () => {
+    expect(isWellFormedResource(":alice@example.com")).toBe(false);
+  });
+
+  it("rejects a scheme that starts with a digit (RFC 3986 §3.1)", () => {
+    expect(isWellFormedResource("1http://example.com")).toBe(false);
+  });
+
+  it("rejects an unparseable http: URI", () => {
+    expect(isWellFormedResource("https://")).toBe(false);
   });
 });

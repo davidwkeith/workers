@@ -207,6 +207,17 @@ describe("WebFinger handler — errors", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 for a present-but-malformed resource (no scheme, RFC 7033 §4.2)", async () => {
+    const res = await fixture()(get("?resource=alice@example.com"), env, ctx);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("returns 400 for an unparseable http(s) resource", async () => {
+    const res = await fixture()(get("?resource=https://"), env, ctx);
+    expect(res.status).toBe(400);
+  });
+
   it("returns 404 for a resource this server does not control", async () => {
     const res = await fixture()(
       get("?resource=acct:nobody@example.com"),
@@ -314,6 +325,16 @@ describe("WebFinger handler — observability", () => {
     expect(rec?.level).toBe("warn");
     expect(rec?.fields?.reason).toBe("not_found");
     expect(rec?.fields?.resourceHost).toBe("example.com");
+  });
+
+  it("emits a rejected event with the malformed_resource reason", async () => {
+    const logger = captureLogger();
+    await fixture({ logger })(get("?resource=not-a-uri"), env, ctx);
+    const rec = logger.records.find(
+      (r) => r.event === WebfingerLogEvent.Rejected,
+    );
+    expect(rec?.level).toBe("warn");
+    expect(rec?.fields?.reason).toBe("malformed_resource");
   });
 
   it("does not log the local part of an acct: handle", async () => {

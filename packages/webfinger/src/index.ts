@@ -38,7 +38,7 @@ export {
   type ResourceRecord,
 } from "./jrd";
 
-export { normalizeResource } from "./resource";
+export { normalizeResource, isWellFormedResource } from "./resource";
 
 export { WebfingerLogEvent } from "./log";
 export type { Logger, Metrics } from "@dwk/log";
