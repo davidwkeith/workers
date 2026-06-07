@@ -141,17 +141,25 @@ describe("host-meta handler — XRD/JRD information equivalence", () => {
 });
 
 describe("host-meta handler — HEAD and OPTIONS", () => {
-  it("answers HEAD with headers but no body", async () => {
-    const res = await fixture()(
+  it("answers HEAD with headers (incl. Content-Length) but no body", async () => {
+    const handler = fixture();
+    const head = await handler(
       new Request(XRD_BASE, { method: "HEAD" }),
       env,
       ctx,
     );
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe(
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-type")).toBe(
       "application/xrd+xml; charset=utf-8",
     );
-    expect(await res.text()).toBe("");
+    expect(await head.text()).toBe("");
+
+    // RFC 9110 §9.3.2: the HEAD Content-Length matches what GET would return.
+    const get = await handler(new Request(XRD_BASE), env, ctx);
+    const getBody = await get.text();
+    const expected = String(new TextEncoder().encode(getBody).length);
+    expect(head.headers.get("content-length")).toBe(expected);
+    expect(get.headers.get("content-length")).toBe(expected);
   });
 
   it("answers an OPTIONS preflight with CORS headers", async () => {

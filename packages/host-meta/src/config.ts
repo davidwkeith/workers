@@ -10,6 +10,8 @@ import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { Link } from "@dwk/webfinger";
 
 import { buildDocument, type HostMetaDocument } from "./document";
+import { serializeJrd } from "./jrd";
+import { serializeXrd } from "./xrd";
 
 /** Configuration passed to {@link createHostMeta}. */
 export interface HostMetaConfig {
@@ -50,6 +52,10 @@ export interface HostMetaConfig {
 export interface ResolvedConfig {
   /** The host-meta document, built once at construction (it never varies per request). */
   readonly document: HostMetaDocument;
+  /** The XRD representation, serialized once at construction. */
+  readonly xrdBody: string;
+  /** The JRD representation, serialized once at construction. */
+  readonly jrdBody: string;
   readonly logger: Logger;
   readonly metrics: Metrics;
 }
@@ -70,13 +76,20 @@ export function resolveConfig(config: HostMetaConfig): ResolvedConfig {
     );
   }
 
+  // The document is request-invariant, so both representations are serialized
+  // once here and reused verbatim for every response — no per-request XML
+  // serialization or JSON.stringify.
+  const document = buildDocument({
+    webfingerUrl: config.webfingerUrl,
+    links: config.links,
+    subject: config.subject,
+    properties: config.properties,
+  });
+
   return {
-    document: buildDocument({
-      webfingerUrl: config.webfingerUrl,
-      links: config.links,
-      subject: config.subject,
-      properties: config.properties,
-    }),
+    document,
+    xrdBody: serializeXrd(document),
+    jrdBody: serializeJrd(document),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
   };

@@ -34,8 +34,14 @@ export function escapeXml(value: string): string {
 
 /** Whether any property (top-level or per-link) is `null`, requiring the `xsi` namespace. */
 function needsXsi(document: HostMetaDocument): boolean {
-  const hasNil = (props?: Readonly<Record<string, string | null>>): boolean =>
-    props !== undefined && Object.values(props).some((v) => v === null);
+  // Mirror linkXml's null-safety: a missing properties bag (`undefined` or a
+  // runtime `null` from untyped callers) carries no nil values to declare.
+  const hasNil = (
+    props?: Readonly<Record<string, string | null>> | null,
+  ): boolean =>
+    props !== undefined &&
+    props !== null &&
+    Object.values(props).some((v) => v === null);
   if (hasNil(document.properties)) return true;
   return document.links.some((link) => hasNil(link.properties));
 }

@@ -14,10 +14,8 @@ import {
   type ResolvedConfig,
   type HostMetaConfig,
 } from "./config";
-import { serializeJrd } from "./jrd";
 import { HostMetaLogEvent } from "./log";
 import { negotiateFormat, type Format } from "./negotiation";
-import { serializeXrd } from "./xrd";
 
 /**
  * Cloudflare bindings required by the host-meta handler: **none**. The document
@@ -65,6 +63,7 @@ function emit(
 
 function documentResponse(
   body: string,
+  contentLength: string,
   format: Format,
   method: string,
 ): Response {
@@ -72,6 +71,10 @@ function documentResponse(
     status: 200,
     headers: {
       "content-type": format === "jrd" ? JRD_CONTENT_TYPE : XRD_CONTENT_TYPE,
+      // RFC 9110 §9.3.2: a HEAD response carries the same Content-Length the
+      // corresponding GET would, so it is set explicitly (the body is dropped
+      // for HEAD, which would otherwise omit the header).
+      "content-length": contentLength,
       // The representation varies on the negotiated content type; advertise it
       // so shared caches key XRD and JRD responses separately.
       vary: "Accept",
@@ -109,6 +112,15 @@ function errorResponse(
 export function createHostMeta(config: HostMetaConfig): HostMetaHandler {
   const resolved = resolveConfig(config);
 
+  // Pre-serialized bodies and their byte lengths, computed once: nothing about
+  // the document varies per request, so a response is pure header assembly.
+  const byteLength = (body: string): string =>
+    String(new TextEncoder().encode(body).length);
+  const representations: Record<Format, { body: string; length: string }> = {
+    xrd: { body: resolved.xrdBody, length: byteLength(resolved.xrdBody) },
+    jrd: { body: resolved.jrdBody, length: byteLength(resolved.jrdBody) },
+  };
+
   return async (request, _env, _ctx) => {
     const method = request.method;
 
@@ -140,12 +152,8 @@ export function createHostMeta(config: HostMetaConfig): HostMetaHandler {
       isJsonPath,
     );
 
-    const body =
-      format === "jrd"
-        ? serializeJrd(resolved.document)
-        : serializeXrd(resolved.document);
-
+    const { body, length } = representations[format];
     emit(resolved, "info", HostMetaLogEvent.Served, { format });
-    return documentResponse(body, format, method);
+    return documentResponse(body, length, format, method);
   };
 }

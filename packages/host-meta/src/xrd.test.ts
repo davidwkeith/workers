@@ -92,6 +92,22 @@ describe("serializeXrd", () => {
     expect(xml).toContain("</Link>");
   });
 
+  it("does not crash when a link's properties bag is a runtime null", () => {
+    // Untyped (JS) callers can pass `properties: null`; needsXsi must treat it
+    // as "no properties" rather than calling Object.values(null).
+    const xml = serializeXrd({
+      links: [
+        {
+          rel: "self",
+          href: "https://example.com/",
+          properties: null,
+        } as never,
+      ],
+    });
+    expect(xml).toContain('<Link rel="self" href="https://example.com/"/>');
+    expect(xml).not.toContain("xmlns:xsi");
+  });
+
   it("escapes attribute and text content", () => {
     const xml = serializeXrd({
       subject: "https://example.com/?a=1&b=2",
