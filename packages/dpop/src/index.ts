@@ -46,6 +46,7 @@ export type DpopFailureReason =
   | "proof_expired"
   | "proof_future"
   | "jti_missing"
+  | "nonce_mismatch"
   | "ath_mismatch"
   | "jkt_required"
   | "jkt_mismatch";
@@ -74,6 +75,16 @@ export interface DpopVerifyInput {
    * Required whenever {@link accessToken} is supplied (see its note).
    */
   expectedJkt?: string;
+  /**
+   * Server-provided DPoP nonce the proof must carry (RFC 9449 §8/§9). When set,
+   * the proof MUST carry a `nonce` claim equal to this value, else it is
+   * rejected with `nonce_mismatch`. An AS/RS uses this to bound proof lifetime
+   * and force fresh proofs as a replay defense: on a mismatch (or when no nonce
+   * was sent yet) the caller answers with a `use_dpop_nonce` error carrying a
+   * fresh `DPoP-Nonce`. Issuing and rotating the nonce is the caller's job; this
+   * library only checks equality and surfaces the proof's {@link DpopVerifyResult.nonce}.
+   */
+  expectedNonce?: string;
   /** Current time in seconds since the epoch. Defaults to `Date.now()`. */
   now?: number;
   /** Allowed clock skew in seconds for the `iat` window. Defaults to {@link DEFAULT_MAX_AGE_SECONDS}. */
@@ -88,6 +99,13 @@ export interface DpopVerifyResult {
   jti?: string;
   /** The RFC 7638 thumbprint of the proof key (`jkt`). */
   jkt?: string;
+  /**
+   * The proof's `nonce` claim, when it carried one (string only). Surfaced on
+   * both success and a `nonce_mismatch` so a caller enforcing the
+   * `DPoP-Nonce` mechanism (RFC 9449 §8/§9) can decide whether to answer with a
+   * `use_dpop_nonce` error and a fresh nonce.
+   */
+  nonce?: string;
   /** Stable failure code (see {@link DpopFailureReason}) when `valid` is false. */
   reason?: DpopFailureReason;
 }
@@ -450,6 +468,14 @@ export async function verifyDpopProof(
   }
   const jti = payload.jti;
 
+  // Server-provided nonce (RFC 9449 §4.3 step 10): when the caller issued a
+  // nonce, the proof's `nonce` claim MUST equal it. Surface the proof's nonce
+  // either way so the caller can answer a mismatch with `use_dpop_nonce`.
+  const nonce = typeof payload.nonce === "string" ? payload.nonce : undefined;
+  if (input.expectedNonce !== undefined && nonce !== input.expectedNonce) {
+    return { valid: false, reason: "nonce_mismatch", nonce };
+  }
+
   // Compute the thumbprint once, for both the cnf.jkt check and the result.
   const jkt = await jwkThumbprint(jwk);
   if (jkt === null) {
@@ -476,5 +502,5 @@ export async function verifyDpopProof(
   }
 
   // 7. Success.
-  return { valid: true, jti, jkt };
+  return { valid: true, jti, jkt, nonce };
 }

@@ -470,3 +470,65 @@ describe("verifyDpopProof — Resource Server bindings", () => {
     expect(result).toMatchObject({ valid: false, reason: "jkt_mismatch" });
   });
 });
+
+describe("verifyDpopProof — server-provided nonce (RFC 9449 §8/§9)", () => {
+  it("accepts a proof whose nonce matches the expected nonce", async () => {
+    const proof = await makeProof(es256, { payload: { nonce: "srv-nonce-1" } });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      expectedNonce: "srv-nonce-1",
+    });
+    expect(result.valid).toBe(true);
+    expect(result.nonce).toBe("srv-nonce-1");
+  });
+
+  it("rejects a proof carrying the wrong nonce and surfaces it", async () => {
+    const proof = await makeProof(es256, { payload: { nonce: "stale-nonce" } });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      expectedNonce: "srv-nonce-1",
+    });
+    expect(result).toMatchObject({ valid: false, reason: "nonce_mismatch" });
+    expect(result.nonce).toBe("stale-nonce");
+  });
+
+  it("rejects a proof missing a nonce when one is required", async () => {
+    const proof = await makeProof(es256);
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      expectedNonce: "srv-nonce-1",
+    });
+    expect(result).toMatchObject({ valid: false, reason: "nonce_mismatch" });
+    expect(result.nonce).toBeUndefined();
+  });
+
+  it("ignores the proof's nonce when no nonce is expected", async () => {
+    const proof = await makeProof(es256, { payload: { nonce: "client-set" } });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result.valid).toBe(true);
+    expect(result.nonce).toBe("client-set");
+  });
+
+  it("surfaces no nonce on success when the proof carried none", async () => {
+    const result = await verifyDpopProof({
+      ...base(),
+      proof: await makeProof(es256),
+    });
+    expect(result.valid).toBe(true);
+    expect(result.nonce).toBeUndefined();
+  });
+
+  it("treats a non-string nonce as absent and rejects when one is required", async () => {
+    const proof = await makeProof(es256, { payload: { nonce: 12345 } });
+    const result = await verifyDpopProof({
+      ...base(),
+      proof,
+      expectedNonce: "srv-nonce-1",
+    });
+    expect(result).toMatchObject({ valid: false, reason: "nonce_mismatch" });
+    expect(result.nonce).toBeUndefined();
+  });
+});
