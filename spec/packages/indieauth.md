@@ -20,6 +20,13 @@ tokens that `@dwk/micropub` (and other clients) consume.
 
 - Tokens issued here are **DPoP-bound** (see [dpop.md](dpop.md)); token
   validation is shared with the Solid Pod Resource Server.
+- Support **audience-restricted** access tokens (RFC 8707 resource indicators /
+  RFC 9700 §2.3): when a client supplies `resource` parameter(s), the issued
+  token carries an `aud` claim, and resource servers verify it against their own
+  identifier, so a token leaked to one resource server cannot be replayed at
+  another. DPoP's `cnf.jkt` mitigates but does not replace this. The audience is
+  bound at authorization (where consent happens) and may only be narrowed at the
+  token request; an unacceptable `resource` is rejected with `invalid_target`.
 - Publish a metadata endpoint sufficient for clients to discover the
   authorization/token endpoints and supported PKCE methods.
 
@@ -36,6 +43,7 @@ tokens that `@dwk/micropub` (and other clients) consume.
 - `baseUrl` / domain (the identity root).
 - `issuer`.
 - Allowed client origins / redirect policy.
+- Resource-indicator policy (which RFC 8707 `resource` values may audience-restrict a token).
 - Token lifetime and supported scopes.
 
 ## Conformance

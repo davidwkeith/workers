@@ -26,6 +26,7 @@ export type {
   AuthorizationApproval,
   ApproveAuthorization,
   RedirectUriPolicy,
+  ResourceIndicatorPolicy,
   ProfileInfo,
 } from "./config";
 

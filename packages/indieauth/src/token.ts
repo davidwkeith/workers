@@ -45,6 +45,14 @@ export interface AccessTokenClaims {
   readonly scope: string;
   /** DPoP confirmation (`cnf.jkt`). */
   readonly cnf: Confirmation;
+  /**
+   * Audience restriction (RFC 8707 resource indicators / RFC 9700 §2.3): the
+   * resource server identifier(s) the token may be presented to. Present only
+   * when the grant was bound to one or more resource indicators; absent on an
+   * unrestricted token. A Resource Server completes the restriction by passing
+   * its own identifier as the expected `audience` to {@link verifyAccessToken}.
+   */
+  readonly aud?: readonly string[];
   /** Issued-at (seconds since the epoch). */
   readonly iat: number;
   /** Expiry (seconds since the epoch). */
@@ -60,6 +68,13 @@ export interface MintAccessTokenInput {
   readonly clientId: string;
   readonly scope: string;
   readonly jkt: string;
+  /**
+   * Resource indicators (RFC 8707) to audience-restrict the token to. When
+   * non-empty the minted token carries an `aud` claim, so a token leaked to one
+   * resource server cannot be replayed at another (RFC 9700 §2.3). Omit or pass
+   * an empty list for an unrestricted token.
+   */
+  readonly audience?: readonly string[];
   /** Lifetime in seconds; `exp = iat + lifetimeSeconds`. */
   readonly lifetimeSeconds: number;
   /** Current time (seconds since the epoch). Defaults to `Date.now()`. */
@@ -85,6 +100,7 @@ export type AccessTokenFailureReason =
   | "signature_invalid"
   | "payload_invalid"
   | "issuer_mismatch"
+  | "audience_mismatch"
   | "expired"
   | "not_yet_valid";
 
@@ -111,6 +127,22 @@ async function hmacSign(signingInput: string, secret: string): Promise<string> {
 }
 
 /**
+ * Normalize requested resource indicators into the `aud` claim value: drop
+ * empties, de-duplicate (order-preserving), and collapse an empty result to
+ * `undefined` so no `aud` is emitted for an unrestricted token.
+ */
+function normalizeAudience(
+  audience: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (!audience || audience.length === 0) return undefined;
+  const seen = new Set<string>();
+  for (const value of audience) {
+    if (typeof value === "string" && value !== "") seen.add(value);
+  }
+  return seen.size > 0 ? [...seen] : undefined;
+}
+
+/**
  * Mint a DPoP-bound access token. The returned `token` is a compact HS256 JWT;
  * `claims` is the decoded payload (so the caller can record `jti`/`exp` in the
  * token store without re-parsing).
@@ -120,12 +152,16 @@ export async function signAccessToken(
   input: MintAccessTokenInput,
 ): Promise<MintedAccessToken> {
   const iat = input.now ?? Math.floor(Date.now() / 1000);
+  const aud = normalizeAudience(input.audience);
   const claims: AccessTokenClaims = {
     iss: input.issuer,
     sub: input.me,
     client_id: input.clientId,
     scope: input.scope,
     cnf: { jkt: input.jkt },
+    // Only emit `aud` when the grant was audience-restricted, so unrestricted
+    // tokens stay byte-for-byte as before.
+    ...(aud ? { aud } : {}),
     iat,
     exp: iat + input.lifetimeSeconds,
     jti: crypto.randomUUID(),
@@ -149,6 +185,14 @@ function fail(reason: AccessTokenFailureReason): VerifyAccessTokenResult {
 export interface VerifyAccessTokenOptions {
   /** Expected issuer; rejected with `issuer_mismatch` if the `iss` differs. */
   readonly issuer: string;
+  /**
+   * Expected audience — this Resource Server's identifier. When set, the token
+   * MUST carry an `aud` (RFC 8707) that includes this value, otherwise
+   * verification fails with `audience_mismatch` (RFC 9700 §2.3): a token
+   * audience-restricted to (or carrying no restriction for) a different resource
+   * server cannot be replayed here. When omitted, the audience is not checked.
+   */
+  readonly audience?: string;
   /** Current time (seconds since the epoch). Defaults to `Date.now()`. */
   readonly now?: number;
 }
@@ -198,7 +242,7 @@ export async function verifyAccessToken(
     return fail("payload_invalid");
   }
   if (!isObject(payload)) return fail("payload_invalid");
-  const { iss, sub, client_id, scope, cnf, iat, exp, jti } = payload;
+  const { iss, sub, client_id, scope, cnf, aud, iat, exp, jti } = payload;
   if (
     typeof iss !== "string" ||
     typeof sub !== "string" ||
@@ -212,8 +256,20 @@ export async function verifyAccessToken(
   ) {
     return fail("payload_invalid");
   }
+  // `aud` (RFC 7519) is a string or an array of strings; reject any other shape.
+  const audience = readAudienceClaim(aud);
+  if (audience === INVALID_AUDIENCE) return fail("payload_invalid");
 
   if (iss !== options.issuer) return fail("issuer_mismatch");
+  // Audience restriction: when the RS expects an audience, the token must be
+  // explicitly restricted to (or among) it. A token with no `aud` does not
+  // satisfy an expected audience.
+  if (
+    options.audience !== undefined &&
+    !(audience !== undefined && audience.includes(options.audience))
+  ) {
+    return fail("audience_mismatch");
+  }
   const now = options.now ?? Math.floor(Date.now() / 1000);
   if (now >= exp) return fail("expired");
   if (now < iat) return fail("not_yet_valid");
@@ -226,11 +282,36 @@ export async function verifyAccessToken(
       client_id,
       scope,
       cnf: { jkt: cnf.jkt },
+      ...(audience ? { aud: audience } : {}),
       iat,
       exp,
       jti,
     },
   };
+}
+
+/** Sentinel returned by {@link readAudienceClaim} for a malformed `aud`. */
+const INVALID_AUDIENCE = Symbol("invalid_audience");
+
+/**
+ * Interpret a decoded `aud` claim. Returns the normalized audience array (for a
+ * single-string or string-array claim), `undefined` when absent, or
+ * {@link INVALID_AUDIENCE} when present but malformed (empty, or containing a
+ * non-string / empty member).
+ */
+function readAudienceClaim(
+  aud: unknown,
+): readonly string[] | undefined | typeof INVALID_AUDIENCE {
+  if (aud === undefined) return undefined;
+  if (typeof aud === "string") return aud === "" ? INVALID_AUDIENCE : [aud];
+  if (Array.isArray(aud)) {
+    if (aud.length === 0) return INVALID_AUDIENCE;
+    if (!aud.every((value) => typeof value === "string" && value !== "")) {
+      return INVALID_AUDIENCE;
+    }
+    return aud as readonly string[];
+  }
+  return INVALID_AUDIENCE;
 }
 
 /** Compute the `base64url(SHA-256(token))` access-token hash (DPoP `ath`). */

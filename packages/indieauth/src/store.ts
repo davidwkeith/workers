@@ -29,6 +29,12 @@ export interface AuthorizationCodeRecord {
   readonly codeChallengeMethod: CodeChallengeMethod;
   /** JSON-encoded profile information returned at redemption, or `null`. */
   readonly profile: string | null;
+  /**
+   * RFC 8707 resource indicators the grant is bound to, if any. The token minted
+   * at redemption is audience-restricted (`aud`) to these. Absent/empty means an
+   * unrestricted token.
+   */
+  readonly resources?: readonly string[];
   /** Expiry (seconds since the epoch). */
   readonly expiresAt: number;
 }
@@ -83,6 +89,7 @@ const SCHEMA = [
      code_challenge TEXT NOT NULL,
      code_challenge_method TEXT NOT NULL,
      profile TEXT,
+     resource TEXT,
      expires_at INTEGER NOT NULL,
      used INTEGER NOT NULL DEFAULT 0
    )`,
@@ -107,10 +114,12 @@ interface AuthCodeRow {
   readonly code_challenge: string;
   readonly code_challenge_method: string;
   readonly profile: string | null;
+  readonly resource: string | null;
   readonly expires_at: number;
 }
 
 function rowToRecord(row: AuthCodeRow): AuthorizationCodeRecord {
+  const resources = parseResources(row.resource);
   return {
     code: row.code,
     clientId: row.client_id,
@@ -120,8 +129,47 @@ function rowToRecord(row: AuthCodeRow): AuthorizationCodeRecord {
     codeChallenge: row.code_challenge,
     codeChallengeMethod: row.code_challenge_method as CodeChallengeMethod,
     profile: row.profile,
+    ...(resources ? { resources } : {}),
     expiresAt: row.expires_at,
   };
+}
+
+/**
+ * Add `column` to `table` when it is not already present, for backward-compatible
+ * schema evolution on durable D1 databases. The table/column/type are internal
+ * constants (never user input), so interpolating them into the DDL is safe; a
+ * `PRAGMA table_info` check keeps this idempotent rather than relying on
+ * swallowing a duplicate-column error.
+ */
+async function addColumnIfMissing(
+  db: D1Database,
+  table: string,
+  column: string,
+  type: string,
+): Promise<void> {
+  const info = await db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all<{ name: string }>();
+  if (info.results.some((row) => row.name === column)) return;
+  await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+}
+
+/** Parse the JSON-encoded `resource` column into a non-empty list, or `undefined`. */
+function parseResources(raw: string | null): readonly string[] | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((value) => typeof value === "string")
+    ) {
+      return parsed as string[];
+    }
+  } catch {
+    // Fall through to undefined on a malformed column value.
+  }
+  return undefined;
 }
 
 /**
@@ -137,6 +185,12 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
   return {
     async init() {
       for (const ddl of SCHEMA) await db.prepare(ddl).run();
+      // Migration: a database created before the RFC 8707 `resource` column
+      // existed still has the old `authorization_codes` shape, and
+      // `CREATE TABLE IF NOT EXISTS` above will not add the column. Patch it in
+      // when absent so saving/redeeming a code never hits `no such column`.
+      // Idempotent — a no-op once the column is present.
+      await addColumnIfMissing(db, "authorization_codes", "resource", "TEXT");
     },
 
     async saveAuthorizationCode(record) {
@@ -144,8 +198,9 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
         .prepare(
           `INSERT INTO authorization_codes
              (code, client_id, redirect_uri, scope, me,
-              code_challenge, code_challenge_method, profile, expires_at, used)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+              code_challenge, code_challenge_method, profile, resource,
+              expires_at, used)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         )
         .bind(
           record.code,
@@ -156,6 +211,9 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
           record.codeChallenge,
           record.codeChallengeMethod,
           record.profile,
+          record.resources && record.resources.length > 0
+            ? JSON.stringify(record.resources)
+            : null,
           record.expiresAt,
         )
         .run();
@@ -170,7 +228,8 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
              SET used = 1
            WHERE code = ? AND used = 0 AND expires_at > ?
            RETURNING code, client_id, redirect_uri, scope, me,
-                     code_challenge, code_challenge_method, profile, expires_at`,
+                     code_challenge, code_challenge_method, profile, resource,
+                     expires_at`,
         )
         .bind(code, now)
         .first<AuthCodeRow>();

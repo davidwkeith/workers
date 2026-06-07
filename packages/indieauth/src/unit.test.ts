@@ -159,3 +159,69 @@ describe("access token sign/verify", () => {
     if (!expired.valid) expect(expired.reason).toBe("expired");
   });
 });
+
+describe("access token audience restriction (RFC 8707 / RFC 9700 §2.3)", () => {
+  const RS = "https://media.example.com/";
+  const OTHER_RS = "https://pod.example.com/";
+
+  async function mint(audience?: readonly string[]) {
+    return signAccessToken(SECRET, {
+      issuer: "https://example.com",
+      me: "https://alice.example.com/",
+      clientId: "https://app.example/",
+      scope: "create",
+      jkt: "jkt",
+      ...(audience ? { audience } : {}),
+      lifetimeSeconds: 3600,
+    });
+  }
+
+  it("omits aud when no audience is requested", async () => {
+    const { token, claims } = await mint();
+    expect(claims.aud).toBeUndefined();
+    const verified = await verifyAccessToken(token, SECRET, {
+      issuer: "https://example.com",
+    });
+    expect(verified.valid).toBe(true);
+    if (verified.valid) expect(verified.claims.aud).toBeUndefined();
+  });
+
+  it("carries and round-trips aud, de-duplicating", async () => {
+    const { token, claims } = await mint([RS, RS, OTHER_RS]);
+    expect(claims.aud).toEqual([RS, OTHER_RS]);
+    const verified = await verifyAccessToken(token, SECRET, {
+      issuer: "https://example.com",
+      audience: RS,
+    });
+    expect(verified.valid).toBe(true);
+    if (verified.valid) expect(verified.claims.aud).toEqual([RS, OTHER_RS]);
+  });
+
+  it("rejects an expected audience the token is not restricted to", async () => {
+    const { token } = await mint([RS]);
+    const verified = await verifyAccessToken(token, SECRET, {
+      issuer: "https://example.com",
+      audience: OTHER_RS,
+    });
+    expect(verified.valid).toBe(false);
+    if (!verified.valid) expect(verified.reason).toBe("audience_mismatch");
+  });
+
+  it("rejects an expected audience when the token carries no aud", async () => {
+    const { token } = await mint();
+    const verified = await verifyAccessToken(token, SECRET, {
+      issuer: "https://example.com",
+      audience: RS,
+    });
+    expect(verified.valid).toBe(false);
+    if (!verified.valid) expect(verified.reason).toBe("audience_mismatch");
+  });
+
+  it("does not check audience when none is expected", async () => {
+    const { token } = await mint([RS]);
+    const verified = await verifyAccessToken(token, SECRET, {
+      issuer: "https://example.com",
+    });
+    expect(verified.valid).toBe(true);
+  });
+});

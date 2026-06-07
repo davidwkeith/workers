@@ -53,6 +53,18 @@ export default {
 to mint a code and redirect, or a `Response` to take over the exchange (render a
 login/consent page, redirect to an external IdP, etc.).
 
+### Audience-restricted tokens (RFC 8707 / RFC 9700 §2.3)
+
+When a client supplies one or more [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
+`resource` parameters on the authorization (and, to narrow, the token) request,
+the issued token is **audience-restricted**: it carries an `aud` claim naming the
+resource server(s) it may be presented to, so a token leaked to one resource
+server cannot be replayed at another. Each requested `resource` must be a
+well-formed absolute URI and pass the optional `resourceIndicatorPolicy`
+(defaults to accepting any well-formed resource); an unacceptable value is
+rejected with `invalid_target`. Resource servers complete the restriction by
+passing their own identifier as the expected `audience` on verify (below).
+
 ### Bindings
 
 Declared as a TypeScript `Env` fragment; the handler **fails loudly** if either
@@ -71,6 +83,9 @@ import { verifyDpopProof } from "@dwk/dpop";
 
 const result = await verifyAccessToken(token, env.TOKEN_SIGNING_KEY, {
   issuer: "https://example.com",
+  // Optional: when set, the token MUST carry an `aud` (RFC 8707) including this
+  // resource server's identifier, else it fails with `audience_mismatch`.
+  audience: "https://media.example.com/",
 });
 if (result.valid) {
   const dpop = await verifyDpopProof({

@@ -17,9 +17,11 @@
  * Validate and canonicalize an IndieAuth profile URL, or return `null` if it
  * does not satisfy the specification's constraints.
  *
- * A profile URL MUST use `https`/`http`, carry a path (an empty path is
- * canonicalized to `/`), and MUST NOT contain a fragment, credentials, port, or
- * dot path segments, and its host MUST be a domain name (not an IP address).
+ * A profile URL MUST use `https`/`http` and MUST NOT contain a fragment,
+ * credentials, port, or dot path segments, and its host MUST be a domain name
+ * (not an IP address). The spec's "MUST contain a path component" rule is
+ * satisfied by construction: an empty path is canonicalized to `/`, which the
+ * spec accepts as a valid path, so no explicit non-root check is applied.
  */
 export function canonicalizeProfileUrl(input: string): string | null {
   let url: URL;
