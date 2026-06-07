@@ -11,6 +11,7 @@
  * expects, and owns replay detection via the returned `jti`.
  *
  * @see https://datatracker.ietf.org/doc/html/rfc9449
+ * @see spec/packages/dpop.md
  * @packageDocumentation
  */
 

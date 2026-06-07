@@ -2,6 +2,14 @@
   "name": "@dwk/http-signatures",
   "version": "0.0.0",
   "description": "HTTP Message Signatures (RFC 9421) and legacy draft-cavage sign/verify. Cross-standard reusable; no Workers runtime dependency.",
+  "keywords": [
+    "http-signatures",
+    "rfc9421",
+    "cavage",
+    "message-signatures",
+    "activitypub",
+    "cloudflare-workers"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

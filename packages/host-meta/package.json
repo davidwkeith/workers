@@ -2,6 +2,15 @@
   "name": "@dwk/host-meta",
   "version": "0.0.0",
   "description": "Web Host Metadata (RFC 6415) host-meta discovery at /.well-known/host-meta with XRD/JRD content negotiation.",
+  "keywords": [
+    "host-meta",
+    "rfc6415",
+    "well-known",
+    "discovery",
+    "xrd",
+    "jrd",
+    "cloudflare-workers"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

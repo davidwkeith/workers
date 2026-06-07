@@ -2,6 +2,14 @@
   "name": "@dwk/dpop",
   "version": "0.0.0",
   "description": "DPoP (RFC 9449) proof verification. Cross-standard reusable; no Workers runtime dependency.",
+  "keywords": [
+    "dpop",
+    "rfc9449",
+    "oauth2",
+    "proof-of-possession",
+    "access-token",
+    "web-crypto"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

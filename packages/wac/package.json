@@ -2,6 +2,14 @@
   "name": "@dwk/wac",
   "version": "0.0.0",
   "description": "Web Access Control evaluation (effective-ACL walk, Append vs Write). Solid-specific helper.",
+  "keywords": [
+    "web-access-control",
+    "wac",
+    "solid",
+    "authorization",
+    "acl",
+    "linked-data"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

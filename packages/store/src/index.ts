@@ -6,8 +6,9 @@
  * `@dwk/rdf`, `@dwk/dpop`) stay runtime-free. Authoritative state lives only in
  * DO SQLite and R2 — never KV. Blob bodies are content-addressed and
  * copy-on-write; orphaned keys are reported transactionally at delete time and
- * reclaimed by an out-of-band GC Worker that never sweeps Durable Objects. See
- * `spec/packages/store.md`.
+ * reclaimed by an out-of-band GC Worker that never sweeps Durable Objects.
+ *
+ * @see spec/packages/store.md
  */
 
 export {

@@ -2,6 +2,16 @@
   "name": "@dwk/solid-pod",
   "version": "0.0.0",
   "description": "Edge-native Solid Pod: LDP verbs, content negotiation, N3 Patch, WAC, notifications. Ships the per-pod Durable Object.",
+  "keywords": [
+    "solid",
+    "solid-pod",
+    "ldp",
+    "wac",
+    "n3-patch",
+    "linked-data",
+    "cloudflare-workers",
+    "durable-objects"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",

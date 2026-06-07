@@ -5,21 +5,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `@dwk/workers` is a pnpm-workspace monorepo of composable npm packages that each
-implement an open web standard (the **IndieWeb + Solid cohort**), run as
+implement an open web standard (the **IndieWeb, Solid, and Fediverse cohort**,
+plus shared identity/auth, discovery, and storage primitives), run as
 [Cloudflare Workers](https://developers.cloudflare.com/workers/), and deploy onto
 an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** Every package — the reusable libs
-(`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/store`) and the endpoint
-packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`,
-`@dwk/solid-pod`) — now carries real logic with colocated tests; there are no
-remaining `501 Not Implemented` stubs. All packages still sit at version
-`0.0.0`: nothing has been published, and the hosted conformance suites tracked
-in `conformance/status.json` are all `pending` (see the release gate below).
-When changing behaviour, the authoritative requirements are the per-package
-specs under `spec/packages/`, not guesswork.
+**Status: implemented, unreleased.** There are **20 packages** — the reusable
+libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
+`@dwk/http-signatures`, `@dwk/oauth`, `@dwk/store`) and the endpoint/standard
+packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
+`@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
+`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`) — each carries real
+logic with colocated tests; there are no remaining `501 Not Implemented` stubs.
+All packages still sit at version `0.0.0`: nothing has been published, and the
+hosted conformance suites tracked in `conformance/status.json` are all `pending`
+(see the release gate below). A `spec/packages/atproto-pds.md` spec exists for a
+planned package not yet scaffolded. When changing behaviour, the authoritative
+requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
@@ -68,21 +72,28 @@ pushing.
 **Mental model:** stateless Worker front door (routing + edge token validation)
 → per-pod **Durable Object** as the consistency / authz / notification authority
 → **R2** for blob bodies. The IndieWeb trio (`indieauth`, `micropub`,
-`webmention`) is stateless handlers backed by D1 / R2; `@dwk/solid-pod` is the
-**only** package that ships a Durable Object.
+`webmention`) is stateless handlers backed by D1 / R2; the packages that ship a
+**Durable Object** are `@dwk/solid-pod` (per-pod), `@dwk/activitypub`
+(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP), and
+`@dwk/store` (the DO-SQLite storage object the others build on).
 
 ### Package taxonomy
 
-- **Endpoint packages** — named for the standard: `@dwk/indieauth`,
-  `@dwk/micropub`, `@dwk/webmention`, `@dwk/solid-pod`.
+- **Endpoint / standard packages** — named for the standard:
+  `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
+  `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`.
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
-  `@dwk/ldn`. These MUST stay free of IndieWeb/Solid assumptions so future `@dwk`
-  standards adopt them unchanged. This is a hard constraint, not a preference.
-  `@dwk/log` is the injectable structured-logging seam (see
-  `spec/observability.md`). `@dwk/ldn` holds the RDF-only Linked Data
-  Notifications primitives (inbox discovery, notification validation, listing)
-  shared by `@dwk/solid-pod` and `@dwk/activitypub`; its discovery helpers are
-  reachable n3-free as `@dwk/ldn/discovery` for Workers-runtime consumers.
+  `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`. These MUST stay free of
+  IndieWeb/Solid assumptions so future `@dwk` standards adopt them unchanged.
+  This is a hard constraint, not a preference. `@dwk/log` is the injectable
+  structured-logging seam (see `spec/observability.md`). `@dwk/ldn` holds the
+  RDF-only Linked Data Notifications primitives (inbox discovery, notification
+  validation, listing) shared by `@dwk/solid-pod` and `@dwk/activitypub`; its
+  discovery helpers are reachable n3-free as `@dwk/ldn/discovery` for
+  Workers-runtime consumers. `@dwk/http-signatures` (RFC 9421 + draft-cavage)
+  and `@dwk/oauth` (RFC 8414/7662/7009/9126/7591 building blocks) are likewise
+  protocol-agnostic and Workers-runtime-free.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 
@@ -152,9 +163,11 @@ packages/<name>/
   `createX` factory), and feature modules (`auth.ts`, `store.ts`, plus
   standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
   `negotiation.ts`, `inbox.ts`/`sender.ts`/`safe-fetch.ts`). `workerd`-bound
-  packages (`@dwk/store`, `@dwk/solid-pod`) keep a `test-harness.ts` for Miniflare
-  setup. `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable Object
-  (from `pod.ts`) and a GC handler (`gc.ts`).
+  packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
+  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`)
+  keep a `test-harness.ts` (excluded from both the build and the published
+  `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
+  Object (from `pod.ts`) and a GC handler (`gc.ts`).
 
 ### Test environment split (important)
 
@@ -162,11 +175,14 @@ Each package's `vitest.config.ts` picks one of two environments — get this rig
 when adding a package:
 
 - **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
-  `@dwk/wac`, `@dwk/log`. They take plain-data inputs and need no Workers runtime.
+  `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
+  `@dwk/webfinger`, `@dwk/host-meta`. They take plain-data inputs and need no
+  Workers runtime.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
-  `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/webmention`,
-  `@dwk/solid-pod`.
+  `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
+  `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.
