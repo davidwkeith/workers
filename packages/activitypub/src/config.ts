@@ -207,8 +207,22 @@ export function deriveIris(baseUrl: string, username: string): ActorIris {
  */
 function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
   return async (keyId: string): Promise<ResolvedKey | null> => {
-    const actorUrl = keyId.split("#")[0];
-    if (!actorUrl) return null;
+    // The key IRI is the actor (or key) document URL with its fragment
+    // stripped. Parse it as a URL so the fragment is removed per the URL spec
+    // (rather than by string surgery) and an unparseable `keyId` is rejected
+    // before it reaches `fetch`.
+    let actorUrl: string;
+    try {
+      const url = new URL(keyId);
+      // Only ever dereference a remote actor/key document over HTTP(S); reject
+      // other schemes (`file:`, `data:`, …) outright so a crafted `keyId`
+      // cannot redirect the fetch at a non-network resource.
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      url.hash = "";
+      actorUrl = url.href;
+    } catch {
+      return null;
+    }
     let response: Response;
     try {
       response = await fetchImpl(actorUrl, {
