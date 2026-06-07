@@ -510,6 +510,21 @@ describe("Content-Digest", () => {
     );
   });
 
+  it("parses the field as an RFC 8941 dictionary", async () => {
+    const body = '{"type":"Create"}';
+    const cd = await createContentDigest(body);
+    // An uppercase algorithm key is not a valid sf-key: reject, do not lowercase.
+    expect(await verifyContentDigest(cd.toUpperCase(), body)).toBe(
+      "digest_mismatch",
+    );
+    // A member carrying parameters is parsed as a byte sequence, not mis-split.
+    expect(await verifyContentDigest(`${cd};foo=bar`, body)).toBeNull();
+    // A malformed (non-byte-sequence) value fails closed.
+    expect(await verifyContentDigest("sha-256=notbytes", body)).toBe(
+      "digest_mismatch",
+    );
+  });
+
   it("verifies a covered digest against the body during verification", async () => {
     const k = keys["ed25519"]!;
     const body = '{"type":"Create","actor":"https://example.com/actor"}';
