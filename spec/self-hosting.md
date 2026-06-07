@@ -136,8 +136,8 @@ proposal and the non-goal stands as written.
                                           + WebSocket-hibernation shim
 ```
 
-The new package is **`@dwk/server`** (working name; `@dwk/node-host` is an
-alternative). It is the Node analogue of "the Worker entry + `wrangler.toml`"
+The new package is **`@dwk/server`**. It is the Node analogue of "the Worker
+entry + `wrangler.toml`"
 that a Cloudflare deployer writes by hand, packaged and reusable. Its
 responsibilities:
 
@@ -196,7 +196,10 @@ Express app mounts, in this order:
    adapter and MUST win over any static file of the same name.
 2. **`express.static(publicDir)`** — the user's generated site (e.g. an
    Anglesite/Eleventy build output). Serves `index.html`, assets, etc.
-3. **Fallback** — configurable: a 404, or SPA-style `index.html` rewrite.
+3. **Fallback** — a configurable handler hook (default: a 404, or SPA-style
+   `index.html` rewrite). Consumers that want dynamic rendering plug their own
+   middleware in here; `@dwk/server` ships no template engine
+   ([§16](#16-resolved-decisions) decision 5).
 
 Precedence is explicit because a static `/.well-known/webfinger` file would
 otherwise shadow the WebFinger endpoint. The reserved-paths set is derived from
@@ -212,10 +215,11 @@ above load-bearing.
 
 Each shim implements the **same TypeScript interface** the packages already
 program against (the Cloudflare Workers types), so the packages are oblivious.
-SQLite is provided by **`node:sqlite`** (stable in Node ≥ 22) or
-**`better-sqlite3`** (synchronous, battle-tested, works on Node 20); the choice
-is an implementation detail behind the shim. Default storage root is a single
-configurable data directory (e.g. `~/.dwk/` or `./data/`).
+SQLite is provided by **`node:sqlite`** (built-in, zero-dependency, synchronous —
+matching the synchronous `SqlStorage`/D1 surface), which sets the package's floor
+at **Node ≥ 22** (≥ 24 for flagless stable use; see [§16](#16-resolved-decisions)
+decision 2). It is confined to the shim module, so the driver is swappable. Default
+storage root is a single configurable data directory (e.g. `~/.dwk/` or `./data/`).
 
 ### 7.1 `D1Database` → SQLite
 
@@ -283,14 +287,15 @@ the distributed original, because there is exactly one process.
   pod id), exposing the `sql.exec(query, ...bindings)` cursor interface
   `@dwk/store` expects.
 - **`DurableObject` base class / `cloudflare:workers` import.** `pod.ts` does
-  `import { DurableObject } from "cloudflare:workers"`. Under Node that specifier
-  must resolve to a shim. Resolution options, cleanest first:
-  - a Node **subpath import / conditions** map or bundler alias that points
-    `cloudflare:workers` at `@dwk/server`'s shim for the Node build;
-  - a small **loader/`register`** hook;
-  - bundling the host with esbuild and aliasing the specifier.
-  The shim's `DurableObject` simply stores `ctx` (the emulated
-  `DurableObjectState`) and `env`, matching the real base class.
+  `import { DurableObject } from "cloudflare:workers"` — the **only** runtime
+  import from that module, in 5 files. Under Node it resolves via a
+  **`module.register` loader hook** that redirects the bare specifier to the
+  shim ([§16](#16-resolved-decisions) decision 1), so the packages run unchanged
+  from their published dist; an esbuild-aliased bundle is an optional Phase 5
+  output. (Node's `imports` field can't be used — it only remaps `#`-prefixed
+  specifiers, which would require editing the source imports.) The shim's
+  `DurableObject` simply stores `ctx` (the emulated `DurableObjectState`) and
+  `env`, matching the real base class.
 - **WebSocket hibernation.** `acceptWebSocket`/`getWebSockets` map onto a real
   `ws` server the Express server upgrades; "hibernation" is a no-op on Node
   (the object is always resident), which is behaviourally a superset.
@@ -313,9 +318,10 @@ advisory lock on the directory).
   provides an **in-process queue**: `send`/`sendBatch` enqueue, a worker loop
   delivers batches to the registered consumer with the same `MessageBatch`
   shape, including `retry()` semantics (re-enqueue with backoff) and a
-  dead-letter cap. Durability across restarts is optional — back the queue with
-  a SQLite table if at-least-once across crashes is wanted; otherwise in-memory
-  is acceptable for these "verify later" workloads.
+  dead-letter cap. The queue is **SQLite-backed and durable by default** so jobs
+  survive a reboot (at-least-once across crashes, matching the contract the
+  consumers assume); an in-memory mode is available via config for dev/tests
+  ([§16](#16-resolved-decisions) decision 3).
 - **Cron / `scheduled`** (`microsub` poller, `solid-pod` & `remotestorage` R2
   GC). The shim runs the `scheduled` handler on a timer (`setInterval` /
   `node-cron`) at the cadence the `wrangler.toml` cron would specify, passing a
@@ -367,9 +373,11 @@ Worker entry does. Proposed model:
 ## 10. Distribution & CLI
 
 - `@dwk/server` ships **ESM, fully typed**, deps minimised and pinned, like
-  every other package. SQLite (`node:sqlite` or `better-sqlite3`) and the
-  WebSocket lib (`ws`) are its notable runtime deps; Express is a peer/runtime
-  dep.
+  every other package, and declares **`engines.node` ≥ 22** (≥ 24 for flagless
+  `node:sqlite`). SQLite is the built-in `node:sqlite` (zero dependency); the
+  WebSocket lib (`ws`) is its notable runtime dep; Express is a peer/runtime dep.
+  An optional **esbuild-aliased single-file bundle** is published for `docker run`
+  alongside the source ESM.
 - A **`bin`** (`dwk-serve` / `npx @dwk/server`) reads the host config and starts
   listening, so a self-hoster's path is: `npm i @dwk/server`, write a config,
   point a reverse proxy at it. A reference `systemd` unit and a `Dockerfile`
@@ -465,24 +473,41 @@ reinforcement of the self-ownership thesis.
 5. **Packaging.** `bin`/CLI, single-writer lockfile, `systemd` unit + Docker
    reference, README, changeset, and a Node column in `conformance/status.json`.
 
-## 16. Open questions
+## 16. Resolved decisions
 
-1. **Specifier resolution for `cloudflare:workers`.** Node subpath
-   imports/conditions vs. a loader hook vs. shipping a pre-bundled host. Affects
-   whether self-hosters consume source ESM or a bundle.
-2. **`node:sqlite` vs `better-sqlite3`.** The former drops a dependency but
-   needs Node ≥ 22; the latter works on Node 20 (the current floor) but is a
-   native addon. Pick one or abstract behind the shim.
-3. **Queue durability default.** In-memory (simplest) vs SQLite-backed
-   (survives restart) for webmention/microsub/websub jobs — what is the right
-   default for a home server that reboots?
-4. **Multi-process story.** Is single-process-forever acceptable, or do we need
-   an opt-in advisory-lock/leader driver for HA self-hosters? ([§8](#8-consistency--correctness))
-5. **Static hosting scope.** Just `express.static`, or also a templating/render
-   hook so the same process can render dynamic IndieWeb pages?
-6. **Package name & placement.** `@dwk/server` vs `@dwk/node-host`; and does the
-   binding-shim layer warrant its own package (`@dwk/cf-shims`) reusable outside
-   the Express host (e.g. for Bun/Deno or test harnesses)?
+The six questions this study opened have been decided (tracking issue
+[#125](https://github.com/davidwkeith/workers/issues/125)):
+
+1. **`cloudflare:workers` resolution → a `module.register` loader hook**, with an
+   esbuild-aliased single-file bundle as a Phase 5 packaging convenience. The
+   resolve hook redirects the bare `cloudflare:workers` specifier (the only
+   runtime import is `{ DurableObject }`, in 5 files) to the ~10-line shim, so
+   the endpoint packages run unchanged from their published dist; the host
+   registers the hook before importing them. The bundle is an *output* for
+   `docker run`, not the contract of record. (See [§7.4](#74-durable-objects-the-hard-part).)
+2. **SQLite driver → `node:sqlite`** (built-in, zero-dependency, synchronous —
+   matching the synchronous `SqlStorage`/D1 surface). This raises **`@dwk/server`'s
+   floor to Node ≥ 22**; in practice that means Node ≥ 24 for flagless stable use,
+   or `--experimental-sqlite` on 22.5–23.3 (the `bin` re-execs with the flag, or
+   the README pins ≥ 24). The driver is confined to the shim module, so this is
+   reversible at low cost.
+3. **Queue durability → SQLite-backed durable by default**, with an in-memory
+   mode available via config for dev/tests. This matches the at-least-once
+   contract the consumers assume and survives a home-server reboot, at no new
+   dependency cost (reuses `node:sqlite`). (See [§7.5](#75-queues-cron-and-waituntil).)
+4. **Multi-process → single-process only, enforced by the startup lockfile**;
+   HA is out of scope. The DO-namespace shim stays behind a clean interface as a
+   future placement-driver seam, but no HA code is built. (See
+   [§8](#8-consistency--correctness).)
+5. **Static hosting → `express.static` + a configurable fallback-handler hook**
+   (default 404 or SPA `index.html` rewrite). No built-in template engine;
+   dynamic rendering stays a pluggable consumer concern, matching the Cloudflare
+   model and Anglesite's role. (See [§6.3](#63-static-hosting-and-routing-precedence).)
+6. **Packaging → one package, `@dwk/server`**, with the Cloudflare-interface
+   shims as internal modules behind a clean, Express-free boundary so a later
+   `@dwk/cf-shims` extraction (for test harnesses or alternative Node HTTP
+   frameworks) is mechanical. Nothing is published yet, so deferring the split
+   costs nothing.
 
 ## 17. Reference links
 
