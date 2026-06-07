@@ -27,8 +27,8 @@ export const WebfingerLogEvent = {
   Resolved: "webfinger.resolved",
   /**
    * A request was rejected before a JRD could be returned. Field: `reason`
-   * (`missing_resource`, `not_found`, or `method_not_allowed`), plus
-   * `resourceHost` when a `resource` was supplied.
+   * (`missing_resource`, `malformed_resource`, `not_found`, or
+   * `method_not_allowed`), plus `resourceHost` when a `resource` was supplied.
    */
   Rejected: "webfinger.rejected",
 } as const;
