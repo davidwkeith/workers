@@ -46,6 +46,16 @@ describe("buildCredential", () => {
     expect(cred.validUntil).toBe("2030-01-01T00:00:00Z");
     expect(cred.credentialStatus).toEqual({ type: "BitstringStatusListEntry" });
   });
+
+  it("rejects an invalid validUntil datetime", () => {
+    expect(() =>
+      buildCredential({
+        issuer: "did:web:example.com",
+        credentialSubject: {},
+        validUntil: "not-a-date",
+      }),
+    ).toThrow(/dateTimeStamp/);
+  });
 });
 
 describe("validateCredential", () => {
@@ -101,6 +111,28 @@ describe("checkValidityPeriod", () => {
     ).toBe("not_yet_valid");
     expect(
       checkValidityPeriod({ validUntil: "2020-01-01T00:00:00Z" }, now),
+    ).toBe("expired");
+  });
+
+  it("fails closed on a malformed or non-string bound", () => {
+    // A garbled expiry must not be read as "no expiry".
+    expect(checkValidityPeriod({ validUntil: "not-a-date" }, now)).toBe(
+      "expired",
+    );
+    expect(
+      checkValidityPeriod({ validUntil: "2026-02-30T00:00:00Z" }, now),
+    ).toBe("expired");
+    expect(
+      checkValidityPeriod({ validUntil: 1234 as unknown as string }, now),
+    ).toBe("expired");
+    expect(checkValidityPeriod({ validFrom: "nope" }, now)).toBe(
+      "not_yet_valid",
+    );
+  });
+
+  it("rejects a validUntil without a timezone (not a dateTimeStamp)", () => {
+    expect(
+      checkValidityPeriod({ validUntil: "2027-01-01T00:00:00" }, now),
     ).toBe("expired");
   });
 });

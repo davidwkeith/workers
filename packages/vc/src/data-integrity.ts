@@ -22,11 +22,13 @@
  * @see https://www.w3.org/TR/vc-di-ecdsa/
  */
 
-import { canonicalizeToBytes, type JcsValue } from "./jcs";
+import { toXsdDateTime } from "./datetime";
+import { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs";
 import {
-  decodeMultibase,
+  base58btcDecode,
   decodeMultikey,
   encodeMultibaseBase58btc,
+  MULTIBASE_BASE58BTC,
 } from "./multibase";
 
 /** A JSON object with string keys — a credential, proof, or proof config. */
@@ -164,13 +166,6 @@ export interface AddProofOptions {
   readonly created?: Date | string;
 }
 
-function toXsdDateTime(value: Date | string | undefined): string {
-  if (typeof value === "string") return value;
-  const date = value ?? new Date();
-  // Drop milliseconds for the canonical, second-precision VC form.
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
 /** A document carrying its attached Data Integrity proof. */
 export type SecuredDocument = JsonObject & { proof: JsonObject };
 
@@ -187,7 +182,7 @@ export async function addProof(
   const proofConfig: JsonObject = {
     type: "DataIntegrityProof",
     cryptosuite: signer.cryptosuite,
-    created: toXsdDateTime(options.created),
+    created: toXsdDateTime(options.created ?? new Date()),
     verificationMethod: options.verificationMethod,
     proofPurpose: options.proofPurpose ?? "assertionMethod",
   };
@@ -311,6 +306,31 @@ function asProofArray(proof: JcsValue | undefined): JsonObject[] {
   return isJsonObject(proof) ? [proof] : [];
 }
 
+function asContextArray(context: JcsValue | undefined): JcsValue[] {
+  if (context === undefined) return [];
+  return Array.isArray(context) ? context : [context];
+}
+
+/**
+ * Whether the document's `@context` begins with every value in the proof's
+ * `@context`, in order (vc-di-eddsa §3.3.2 step 4.1). A proof without an
+ * `@context` imposes no constraint. Values are compared by JCS canonical form,
+ * so embedded context objects match structurally regardless of key order.
+ */
+function contextStartsWith(
+  documentContext: JcsValue | undefined,
+  proofContext: JcsValue | undefined,
+): boolean {
+  const proofArr = asContextArray(proofContext);
+  if (proofArr.length === 0) return true;
+  const docArr = asContextArray(documentContext);
+  if (docArr.length < proofArr.length) return false;
+  for (let i = 0; i < proofArr.length; i++) {
+    if (canonicalize(proofArr[i]!) !== canonicalize(docArr[i]!)) return false;
+  }
+  return true;
+}
+
 async function verifySingleProof(
   document: JsonObject,
   proof: JsonObject,
@@ -333,11 +353,22 @@ async function verifySingleProof(
     return "proof is missing a string proofValue";
   }
 
+  // vc-di-eddsa §3.3.2 step 4.1: the secured document's `@context` MUST begin
+  // with the proof's `@context` values, in order, or verification fails.
+  if (!contextStartsWith(document["@context"], proof["@context"])) {
+    return "document @context does not start with the proof's @context values, in order";
+  }
+
+  // Both JCS cryptosuites mandate a base58-btc (`z`) proofValue; reject any
+  // other multibase encoding (e.g. base64url) rather than silently decoding it.
+  if (proof.proofValue[0] !== MULTIBASE_BASE58BTC) {
+    return `proofValue must be base58-btc multibase (a "${MULTIBASE_BASE58BTC}" prefix), got "${proof.proofValue[0] ?? ""}"`;
+  }
   let signature: Uint8Array;
   try {
-    signature = decodeMultibase(proof.proofValue);
+    signature = base58btcDecode(proof.proofValue.slice(1));
   } catch (error) {
-    return `proofValue is not valid multibase: ${(error as Error).message}`;
+    return `proofValue is not valid base58-btc: ${(error as Error).message}`;
   }
 
   const vm = await options.resolveVerificationMethod(proof.verificationMethod);

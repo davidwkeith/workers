@@ -15,6 +15,7 @@
  * @see https://www.w3.org/TR/vc-bitstring-status-list/
  */
 
+import { toXsdDateTime } from "./datetime";
 import type { JcsValue } from "./jcs";
 import type { JsonObject } from "./data-integrity";
 import { decodeMultibase, encodeMultibaseBase64url } from "./multibase";
@@ -32,6 +33,26 @@ export const BITSTRING_STATUS_LIST_SUBJECT_TYPE = "BitstringStatusList";
 
 /** A status purpose. `revocation` is permanent; `suspension` is reversible. */
 export type StatusPurpose = "revocation" | "suspension" | (string & {});
+
+/**
+ * A `statusPurpose` value as it appears on a credential or entry. The Bitstring
+ * Status List spec allows "one or more" purposes, so a single purpose or an
+ * array of them are both valid.
+ */
+export type StatusPurposeValue = StatusPurpose | readonly StatusPurpose[];
+
+/** Emit a `statusPurpose` as plain data (a mutable array when one was given). */
+function statusPurposeValue(purpose: StatusPurposeValue): JcsValue {
+  return Array.isArray(purpose) ? [...purpose] : (purpose as StatusPurpose);
+}
+
+/** Whether `purpose` (a `statusPurpose` field) covers `wanted`. */
+function statusPurposeMatches(
+  purpose: JcsValue | undefined,
+  wanted: StatusPurpose,
+): boolean {
+  return Array.isArray(purpose) ? purpose.includes(wanted) : purpose === wanted;
+}
 
 /** Get the bit at `index` in a most-significant-bit-first bitstring. */
 export function getBit(bits: Uint8Array, index: number): boolean {
@@ -101,19 +122,33 @@ export async function buildEncodedList(
 export interface StatusListCredentialOptions {
   /** The status list credential's id (a URL). */
   readonly id: string;
-  /** The status purpose this list tracks. */
-  readonly statusPurpose: StatusPurpose;
+  /** The status purpose(s) this list tracks (one or more). */
+  readonly statusPurpose: StatusPurposeValue;
   /** The pre-built `encodedList` value. */
   readonly encodedList: string;
   /** The issuer (string or object with id). */
   readonly issuer: string | (JsonObject & { id: string });
-  /** Bit length advertised on the subject. Defaults to the encoded length. */
+  /** `validFrom` (XSD dateTime). Defaults to now when omitted. */
+  readonly validFrom?: Date | string;
+  /**
+   * `validUntil` (XSD dateTime). Bounds how long a verifier may treat the
+   * cached status as authoritative.
+   */
+  readonly validUntil?: Date | string;
+  /**
+   * Cache time-to-live in milliseconds, advertised on both the credential and
+   * its status-list subject so verifiers can bound status caching.
+   */
   readonly ttl?: number;
 }
 
 /**
  * Assemble an **unsigned** `BitstringStatusListCredential`. The caller signs it
  * with {@link ./data-integrity.addProof} before publishing.
+ *
+ * Per the Bitstring Status List spec, `validFrom`/`validUntil`/`ttl` bound how
+ * long the published status may be cached; `validUntil` and `ttl` are emitted on
+ * the credential (and `ttl` also on the subject) when supplied.
  */
 export function buildStatusListCredential(
   options: StatusListCredentialOptions,
@@ -121,25 +156,30 @@ export function buildStatusListCredential(
   const subject: JsonObject = {
     id: `${options.id}#list`,
     type: BITSTRING_STATUS_LIST_SUBJECT_TYPE,
-    statusPurpose: options.statusPurpose,
+    statusPurpose: statusPurposeValue(options.statusPurpose),
     encodedList: options.encodedList,
   };
   if (options.ttl !== undefined) subject.ttl = options.ttl;
-  return {
+  const credential: JsonObject = {
     "@context": ["https://www.w3.org/ns/credentials/v2"],
     id: options.id,
     type: ["VerifiableCredential", BITSTRING_STATUS_LIST_CREDENTIAL_TYPE],
     issuer: options.issuer,
-    validFrom: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    validFrom: toXsdDateTime(options.validFrom ?? new Date()),
     credentialSubject: subject,
   };
+  if (options.validUntil !== undefined) {
+    credential.validUntil = toXsdDateTime(options.validUntil);
+  }
+  if (options.ttl !== undefined) credential.ttl = options.ttl;
+  return credential;
 }
 
 /** Build a `credentialStatus` entry referencing a list index. */
 export function buildStatusEntry(options: {
   readonly statusListCredential: string;
   readonly statusListIndex: number;
-  readonly statusPurpose: StatusPurpose;
+  readonly statusPurpose: StatusPurposeValue;
   readonly id?: string;
 }): JsonObject {
   return {
@@ -147,7 +187,7 @@ export function buildStatusEntry(options: {
       options.id ??
       `${options.statusListCredential}#${options.statusListIndex}`,
     type: BITSTRING_STATUS_LIST_ENTRY_TYPE,
-    statusPurpose: options.statusPurpose,
+    statusPurpose: statusPurposeValue(options.statusPurpose),
     statusListIndex: String(options.statusListIndex),
     statusListCredential: options.statusListCredential,
   };
@@ -178,7 +218,7 @@ export function findStatusEntry(
       entry !== null &&
       typeof entry === "object" &&
       !Array.isArray(entry) &&
-      (entry as JsonObject).statusPurpose === statusPurpose
+      statusPurposeMatches((entry as JsonObject).statusPurpose, statusPurpose)
     ) {
       return entry as JsonObject;
     }
