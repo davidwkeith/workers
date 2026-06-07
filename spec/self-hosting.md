@@ -54,20 +54,21 @@ that bridges Express's `(req, res)` to the fetch handler, and (b) a set of
 **Node-native shims that implement the Cloudflare binding interfaces** on top of
 SQLite and the local filesystem.
 
-## 3. Relationship to the Cloudflare-only non-goal
+## 3. Relationship to the Cloudflare target — DECIDED
 
-[`overview.md` §3](overview.md#3-non-goals-v1) currently states:
+**Decision: Cloudflare first; self-hosting ships as a Docker image.** Cloudflare
+Workers remains the **primary, recommended** deployment target. Self-hosting is a
+**supported secondary** path, delivered as a **Docker image** of the Node/Express
+host (`@dwk/server`) that emulates the Cloudflare primitive interfaces on SQLite +
+the local filesystem. [`overview.md` §3](overview.md#3-non-goals-v1) is updated to
+match: the old "Cloudflare is the sole deployment target" non-goal is reclassified.
 
-> **Runtimes other than Cloudflare Workers.** Cloudflare is the sole deployment
-> target; packages MAY freely assume Workers, Durable Objects, R2, D1, and KV
-> primitives.
-
-This design **does not require weakening that licence to assume Cloudflare
-primitives**, and that is deliberate. The portability strategy is *not* "make
-the packages runtime-agnostic." It is "**re-implement the Cloudflare primitive
-interfaces on Node**, and let the packages keep assuming them." The packages
-keep importing `cloudflare:workers`, keep typing their bindings as `D1Database`
-/ `R2Bucket` / `DurableObjectNamespace`, and keep streaming R2 bodies — the host
+Crucially, this does **not** weaken the licence for packages to assume Cloudflare
+primitives, and that is deliberate. The portability strategy is *not* "make the
+packages runtime-agnostic." It is "**re-implement the Cloudflare primitive
+interfaces on Node**, and let the packages keep assuming them." The packages keep
+importing `cloudflare:workers`, keep typing their bindings as `D1Database` /
+`R2Bucket` / `DurableObjectNamespace`, and keep streaming R2 bodies — the host
 makes those names resolve to Node-backed implementations.
 
 That keeps the existing confinement principle intact and inverts it cleanly:
@@ -76,12 +77,12 @@ That keeps the existing confinement principle intact and inverts it cleanly:
 - A new **`@dwk/server`** package confines *the Node runtime and the
   Cloudflare-interface emulation* so the endpoint packages stay unchanged.
 
-If this path is adopted, the **only** spec edit required is to reclassify the
-non-goal: change "Cloudflare is the sole deployment target" to "Cloudflare is
-the primary target; a Node/Express host is a supported secondary target that
-emulates the Cloudflare primitive interfaces," and add this file's normative
-parts to the spec set. Until that decision is made, this document stands as a
-proposal and the non-goal stands as written.
+The **Docker image is the headline self-host artifact** — `docker run` with a
+config and a mounted data volume is the supported, documented path; the raw
+npm/`bin` route ([§10](#10-distribution--cli)) remains available for those who
+want it. "Cloudflare first" also sets the documentation and support posture:
+Workers is the path the project recommends and conformance-certifies first, with
+the Docker self-host image following close behind.
 
 ## 4. Goals / non-goals of the self-host path
 
@@ -97,6 +98,8 @@ proposal and the non-goal stands as written.
   as the endpoints, with deterministic routing precedence between them.
 - **Reuse the protocol logic byte-for-byte** — no second implementation of any
   standard, so conformance results transfer.
+- **Ship a Docker image as the primary self-host distribution** — `docker run`
+  with a config and a mounted data volume; the npm/`bin` route stays available.
 - Preserve the [composition contract](composition-contract.md): config is
   injected, bindings are declared, missing bindings fail loudly at startup.
 
@@ -376,12 +379,16 @@ Worker entry does. Proposed model:
   every other package, and declares **`engines.node` ≥ 22** (≥ 24 for flagless
   `node:sqlite`). SQLite is the built-in `node:sqlite` (zero dependency); the
   WebSocket lib (`ws`) is its notable runtime dep; Express is a peer/runtime dep.
-  An optional **esbuild-aliased single-file bundle** is published for `docker run`
+  An **esbuild-aliased single-file bundle** is produced for the Docker image
   alongside the source ESM.
+- **The Docker image is the primary self-host artifact** ([§3](#3-relationship-to-the-cloudflare-target--decided)):
+  a published, versioned container (the bundled host) that a self-hoster runs with
+  `docker run`, a mounted data volume, config via env/file, and a reverse proxy in
+  front for TLS. This is the supported, documented path.
 - A **`bin`** (`dwk-serve` / `npx @dwk/server`) reads the host config and starts
-  listening, so a self-hoster's path is: `npm i @dwk/server`, write a config,
-  point a reverse proxy at it. A reference `systemd` unit and a `Dockerfile`
-  belong in its README.
+  listening, for those who prefer running on the host directly: `npm i
+  @dwk/server`, write a config, point a reverse proxy at it. A reference `systemd`
+  unit accompanies it.
 - It carries its **own changeset and independent semver**, and is marked
   experimental until the conformance suites pass against it
   ([§11](#11-testing--conformance)).
