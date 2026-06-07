@@ -61,10 +61,11 @@ async function resolveJwks(
   try {
     const response = await config.fetch(config.jwksUri);
     if (!response.ok) return cached?.keys ?? null;
-    const body = (await response.json()) as { keys?: JsonWebKey[] };
-    // Only cache a well-formed JWKS; caching an empty/garbled body would poison
+    const body = (await response.json()) as { keys?: JsonWebKey[] } | null;
+    // Only cache a well-formed JWKS; a null/empty/garbled body (e.g. literal
+    // JSON `null`) is ignored rather than throwing — and caching it would poison
     // verification for the whole TTL and discard the last good keys.
-    if (!Array.isArray(body.keys)) return cached?.keys ?? null;
+    if (!body || !Array.isArray(body.keys)) return cached?.keys ?? null;
     jwksCache.set(config.jwksUri, { keys: body.keys, fetchedAt: now });
     return body.keys;
   } catch {

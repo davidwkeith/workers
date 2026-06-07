@@ -128,6 +128,8 @@ export async function verifyJwtSignature(
     if (candidates.length === 0) return false;
   }
 
+  // The signing input is the same for every candidate key; encode it once.
+  const signingInput = new TextEncoder().encode(decoded.signingInput);
   for (const jwk of candidates) {
     try {
       const key = await crypto.subtle.importKey(
@@ -141,7 +143,7 @@ export async function verifyJwtSignature(
         spec.verifyParams,
         key,
         decoded.signature,
-        new TextEncoder().encode(decoded.signingInput),
+        signingInput,
       );
       if (ok) return true;
     } catch {
