@@ -214,6 +214,10 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
     let actorUrl: string;
     try {
       const url = new URL(keyId);
+      // Only ever dereference a remote actor/key document over HTTP(S); reject
+      // other schemes (`file:`, `data:`, …) outright so a crafted `keyId`
+      // cannot redirect the fetch at a non-network resource.
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
       url.hash = "";
       actorUrl = url.href;
     } catch {

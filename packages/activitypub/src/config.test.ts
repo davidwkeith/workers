@@ -118,6 +118,18 @@ describe("default key resolver", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-http(s) keyId without fetching", async () => {
+    const fetchImpl = vi.fn();
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    // A `data:` keyId could otherwise smuggle an attacker-chosen key past
+    // signature verification on runtimes whose `fetch` dereferences it.
+    expect(
+      await resolve("data:application/json,%7B%22publicKeyPem%22%3A%22x%22%7D"),
+    ).toBeNull();
+    expect(await resolve("file:///etc/passwd")).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("returns null when the fetch throws", async () => {
     const resolve = resolverWith(
       vi.fn(async () => {
