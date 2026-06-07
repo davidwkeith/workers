@@ -166,6 +166,17 @@ function formValue(value: string | File | null): string | null {
 }
 
 /**
+ * Whether the request body is `application/x-www-form-urlencoded` — the encoding
+ * Webmention §3.1.3 requires. `Request.formData()` would also accept
+ * `multipart/form-data`, so the essence is checked up front rather than relying
+ * on it.
+ */
+function isFormUrlEncoded(contentType: string | null): boolean {
+  const essence = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+  return essence === "application/x-www-form-urlencoded";
+}
+
+/**
  * Build the Webmention receiver handler from configuration.
  *
  * The returned handler is mountable under any path prefix. It accepts a
@@ -188,6 +199,16 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
     if (env.WEBMENTION_QUEUE === undefined) {
       throw new Error(
         "@dwk/webmention: missing required binding WEBMENTION_QUEUE.",
+      );
+    }
+
+    if (!isFormUrlEncoded(request.headers.get("content-type"))) {
+      const fields = { reason: "invalid_content_type" as const };
+      logger.warn(WebmentionLogEvent.ReceiveRejected, fields);
+      metrics.count(WebmentionLogEvent.ReceiveRejected, fields);
+      return textResponse(
+        400,
+        "invalid_request: Content-Type must be application/x-www-form-urlencoded",
       );
     }
 
