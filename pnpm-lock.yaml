@@ -144,9 +144,27 @@ importers:
         specifier: 5.2.1
         version: 5.2.1
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 4.20260530.1
+        version: 4.20260530.1
+      '@dwk/host-meta':
+        specifier: workspace:*
+        version: link:../host-meta
+      '@dwk/indieauth':
+        specifier: workspace:*
+        version: link:../indieauth
+      '@dwk/micropub':
+        specifier: workspace:*
+        version: link:../micropub
+      '@dwk/vc':
+        specifier: workspace:*
+        version: link:../vc
       '@dwk/webfinger':
         specifier: workspace:*
         version: link:../webfinger
+      '@dwk/webmention':
+        specifier: workspace:*
+        version: link:../webmention
       '@types/express':
         specifier: 5.0.6
         version: 5.0.6

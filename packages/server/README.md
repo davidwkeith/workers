@@ -45,26 +45,24 @@ a startup lockfile and refuses a second writer; clustering / HA is out of scope.
 ## Usage
 
 ```ts
-import {
-  createServer,
-  createD1Database,
-  createR2Bucket,
-  QueueBroker,
-} from "@dwk/server";
+import { createServer, assembleBindings } from "@dwk/server";
 import { createWebfinger } from "@dwk/webfinger";
 import { createIndieAuth } from "@dwk/indieauth";
 
+const baseUrl = "https://example.com"; // identity is HTTPS-rooted
 const dataDir = process.env.DWK_DATA_DIR ?? "./data";
 
 // Assemble the Env from Node-backed shims + secrets (the composition root is the
-// one place allowed to read the environment).
-const env = {
-  AUTH_DB: createD1Database(`${dataDir}/auth.sqlite`),
-  TOKEN_SIGNING_KEY: process.env.TOKEN_SIGNING_KEY!,
-};
+// one place allowed to read the environment). Each binding becomes a store under
+// the data dir: D1 → `d1/<NAME>.sqlite`, R2 → `r2/<NAME>/`, KV → `kv/<NAME>.sqlite`.
+const env = assembleBindings({
+  dataDir,
+  d1: ["AUTH_DB"],
+  secrets: { TOKEN_SIGNING_KEY: process.env.TOKEN_SIGNING_KEY },
+});
 
 const server = createServer({
-  baseUrl: "https://example.com", // identity is HTTPS-rooted
+  baseUrl,
   dataDir,
   publicDir: "./public", // the user's website
   env,
@@ -76,7 +74,7 @@ const server = createServer({
     },
     {
       name: "@dwk/indieauth",
-      handler: createIndieAuth({ baseUrl: "https://example.com", approveAuthorization }),
+      handler: createIndieAuth({ baseUrl, approveAuthorization }),
       reservedPaths: ["/authorize", "/token", "/.well-known/oauth-authorization-server"],
       requires: ["AUTH_DB", "TOKEN_SIGNING_KEY"], // asserted at startup (fail loud)
     },
@@ -86,6 +84,13 @@ const server = createServer({
 await server.listen(3000);
 // later, on SIGTERM: await server.close();  // drains waitUntil work, releases the lock
 ```
+
+A full reference composition wiring the IndieWeb trio + discovery packages
+(`indieauth`, `micropub`, `webmention`, `webfinger`, `host-meta`, `vc`) on the
+shims — authenticated DPoP-bound Micropub publishing, media upload to disk, the
+Webmention receiver — lives in `src/phase2.integration.test.ts`. The lower-level
+shim factories (`createD1Database`, `createR2Bucket`, `createKVNamespace`,
+`QueueBroker`, `CronScheduler`) are also exported for bespoke wiring.
 
 Put a reverse proxy (Caddy / nginx / Traefik) in front for TLS; DDoS / rate
 limiting is now your concern, not the platform's. The data directory holds keys
