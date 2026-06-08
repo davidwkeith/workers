@@ -156,6 +156,40 @@ describe("createServer (end-to-end)", () => {
     ).toThrow(MissingBindingError);
   });
 
+  it("serves the SPA fallback for unmatched GETs when configured", async () => {
+    const publicDir = dataDir();
+    writeFileSync(join(publicDir, "index.html"), "<h1>spa</h1>");
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      publicDir,
+      spaFallback: true,
+      mounts: [webfingerMount],
+      env: {},
+    });
+    const res = await fetch(`${base}/some/client/route`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("spa");
+  });
+
+  it("returns 500 when a mounted handler throws", async () => {
+    const mount: Mount = {
+      name: "boom",
+      reservedPaths: ["/boom"],
+      handler: (async () => {
+        throw new Error("handler boom");
+      }) as FetchHandler,
+    };
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [mount],
+      env: {},
+    });
+    const res = await fetch(`${base}/boom`);
+    expect(res.status).toBe(500);
+  });
+
   it("refuses an insecure non-localhost base URL outside dev mode", () => {
     expect(() =>
       createServer({

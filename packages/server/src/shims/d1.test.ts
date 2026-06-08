@@ -116,6 +116,30 @@ describe("D1 → node:sqlite shim", () => {
     expect(row?.body).toBeNull();
   });
 
+  it("raw() returns row value arrays, optionally prefixed with column names", async () => {
+    await db
+      .prepare("INSERT INTO notes (slug, n) VALUES (?, ?)")
+      .bind("a", 1)
+      .run();
+    const rows = await db.prepare("SELECT slug, n FROM notes").raw<unknown[]>();
+    expect(rows[0]).toEqual(["a", 1]);
+    const withCols = await db
+      .prepare("SELECT slug, n FROM notes")
+      .raw<unknown[]>({ columnNames: true });
+    expect(withCols[0]).toEqual(["slug", "n"]);
+  });
+
+  it("coerces boolean bindings to integers", async () => {
+    await db
+      .prepare("INSERT INTO notes (slug, n) VALUES (?, ?)")
+      .bind("flag", true)
+      .run();
+    const n = await db
+      .prepare("SELECT n FROM notes WHERE slug = 'flag'")
+      .first<number>("n");
+    expect(n).toBe(1);
+  });
+
   it("persists across reopening the same file (read-your-writes)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dwk-d1-"));
     const path = join(dir, "data.sqlite");

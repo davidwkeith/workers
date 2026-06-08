@@ -92,4 +92,43 @@ describe("R2 → filesystem shim", () => {
   it("rejects keys that escape the bucket root", async () => {
     await expect(r2.put("../escape", "x")).rejects.toThrow();
   });
+
+  it("exposes the body helpers (arrayBuffer/bytes/text/json/blob)", async () => {
+    await r2.put("j", JSON.stringify({ a: 1 }));
+    const o = (await r2.get("j"))!;
+    expect(new Uint8Array(await o.arrayBuffer())).toEqual(
+      new TextEncoder().encode('{"a":1}'),
+    );
+    expect(await o.bytes()).toEqual(new TextEncoder().encode('{"a":1}'));
+    expect(await o.text()).toBe('{"a":1}');
+    expect(await o.json<{ a: number }>()).toEqual({ a: 1 });
+    expect(await (await o.blob()).text()).toBe('{"a":1}');
+  });
+
+  it("accepts ArrayBuffer, typed-array, Blob, and null bodies", async () => {
+    await r2.put("ab", new TextEncoder().encode("ab").buffer as ArrayBuffer);
+    expect(await (await r2.get("ab"))!.text()).toBe("ab");
+    await r2.put("ta", new TextEncoder().encode("ta"));
+    expect(await (await r2.get("ta"))!.text()).toBe("ta");
+    await r2.put("bl", new Blob(["bl"]));
+    expect(await (await r2.get("bl"))!.text()).toBe("bl");
+    const empty = await r2.put("nul", null);
+    expect(empty!.size).toBe(0);
+  });
+
+  it("accepts httpMetadata supplied as a Headers object", async () => {
+    const headers = new Headers({ "content-type": "text/markdown" });
+    await r2.put("h.md", "# hi", { httpMetadata: headers as never });
+    expect((await r2.head("h.md"))!.httpMetadata?.contentType).toBe(
+      "text/markdown",
+    );
+  });
+
+  it("honours a list limit", async () => {
+    await r2.put("k1", "1");
+    await r2.put("k2", "2");
+    await r2.put("k3", "3");
+    const limited = await r2.list({ limit: 2 });
+    expect(limited.objects).toHaveLength(2);
+  });
 });

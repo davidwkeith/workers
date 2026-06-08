@@ -97,6 +97,31 @@ describe("in-process Queue shim", () => {
     expect(broker.pending("q")).toBe(0);
   });
 
+  it("sendBatch enqueues every message", async () => {
+    const broker = new QueueBroker();
+    const q = broker.producer<Job>("q");
+    await q.sendBatch([{ body: { value: 1 } }, { body: { value: 2 } }]);
+    expect(broker.pending("q")).toBe(2);
+  });
+
+  it("drops a poison-pill (un-parseable) body instead of looping forever", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "dwk-queue-")), "q.sqlite");
+    const broker = new QueueBroker({ location: path });
+    // Enqueue a valid job, then corrupt a row directly to simulate a bad body.
+    await broker.producer<Job>("q").send({ value: 1 });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path);
+    db.prepare("UPDATE queue_jobs SET body = ? WHERE id = 1").run("{not json");
+
+    let delivered = 0;
+    broker.consumer<Job>("q", async (batch) => {
+      delivered += batch.messages.length;
+    });
+    await broker.tick();
+    expect(delivered).toBe(0); // poison pill not delivered
+    expect(broker.pending("q")).toBe(0); // and removed, not retried forever
+  });
+
   it("is durable across a restart when SQLite-backed", async () => {
     const path = join(mkdtempSync(join(tmpdir(), "dwk-queue-")), "q.sqlite");
     const first = new QueueBroker({ location: path });
