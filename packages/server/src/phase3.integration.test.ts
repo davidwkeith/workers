@@ -125,26 +125,29 @@ describe("Phase 3 — lifecycle bring-up on the shims", () => {
     const { port } = await server.listen(0, "127.0.0.1");
     const base = `http://127.0.0.1:${port}`;
 
-    // Sync receive → 202 + enqueued; nothing verified yet.
-    const res = await fetch(`${base}/webmention`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ source, target }).toString(),
-    });
-    expect(res.status).toBe(202);
-    expect(broker.pending("WEBMENTION_QUEUE")).toBe(1);
+    try {
+      // Sync receive → 202 + enqueued; nothing verified yet.
+      const res = await fetch(`${base}/webmention`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ source, target }).toString(),
+      });
+      expect(res.status).toBe(202);
+      expect(broker.pending("WEBMENTION_QUEUE")).toBe(1);
 
-    // The queue consumer fetches the source, scans it (HTMLRewriter global is
-    // installed by the host), finds the link, and stores the mention.
-    await broker.tick();
-    expect(broker.pending("WEBMENTION_QUEUE")).toBe(0);
+      // The queue consumer fetches the source, scans it (HTMLRewriter global is
+      // installed by the host), finds the link, and stores the mention.
+      await broker.tick();
+      expect(broker.pending("WEBMENTION_QUEUE")).toBe(0);
 
-    const mentions = await createD1Inbox(
-      env.WEBMENTION_INBOX as D1Database,
-    ).list();
-    expect(mentions.map((m) => m.source)).toContain(source);
-
-    await server.close();
+      const mentions = await createD1Inbox(
+        env.WEBMENTION_INBOX as D1Database,
+      ).list();
+      expect(mentions.map((m) => m.source)).toContain(source);
+    } finally {
+      // Always release the listener + single-writer lock, even on assertion fail.
+      await server.close();
+    }
   });
 
   it("populates a Microsub timeline from a scheduled poll", async () => {
