@@ -170,6 +170,7 @@ class ShimDurableObjectState {
   readonly id: ShimDurableObjectId;
   readonly storage: ShimDurableObjectStorage;
   readonly #sockets = new Set<WebSocket>();
+  #concurrencyGate: Promise<unknown> = Promise.resolve();
 
   constructor(id: ShimDurableObjectId, sqlitePath: string) {
     this.id = id;
@@ -179,13 +180,36 @@ class ShimDurableObjectState {
     this.storage = new ShimDurableObjectStorage(new DatabaseSync(sqlitePath));
   }
 
-  /** Run `fn` to completion; on Node there is no concurrent entry to block. */
-  async blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T> {
-    return fn();
+  /**
+   * Work the namespace awaits before delivering the next request, so a
+   * `blockConcurrencyWhile` call — typically async initialisation in a DO
+   * constructor — actually gates incoming requests rather than racing them.
+   */
+  get concurrencyGate(): Promise<unknown> {
+    return this.#concurrencyGate;
+  }
+
+  /**
+   * Run `fn` while holding off request delivery (see {@link concurrencyGate}).
+   * Chains onto the current gate so multiple calls run in order; a rejection is
+   * isolated to its caller and does not wedge the gate.
+   */
+  blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#concurrencyGate.then(fn);
+    this.#concurrencyGate = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   acceptWebSocket(ws: WebSocket): void {
     this.#sockets.add(ws);
+    // Real DO drops hibernatable sockets on close; track that so the set does
+    // not grow without bound as connections come and go.
+    const cleanup = (): void => void this.#sockets.delete(ws);
+    ws.addEventListener("close", cleanup);
+    ws.addEventListener("error", cleanup);
   }
 
   getWebSockets(): WebSocket[] {
@@ -223,6 +247,7 @@ interface ShimStub {
 
 interface Instance {
   readonly object: { fetch(request: Request): Promise<Response> };
+  readonly state: ShimDurableObjectState;
   /** Per-id serialisation: each fetch chains after the previous settles. */
   chain: Promise<unknown>;
 }
@@ -291,13 +316,17 @@ class ShimDurableObjectNamespace<
       );
       const state = new ShimDurableObjectState(id, sqlitePath);
       const object = new this.#ctor(state as never, this.#options.env as never);
-      instance = { object, chain: Promise.resolve() };
+      instance = { object, state, chain: Promise.resolve() };
       this.#instances.set(key, instance);
     }
+    const current = instance;
     // Serialise: this fetch runs only after the previous one for this id has
-    // settled — reproducing the single-thread-per-object guarantee.
-    const result = instance.chain.then(() => instance.object.fetch(request));
-    instance.chain = result.then(
+    // settled (single-thread-per-object), and after any in-flight
+    // `blockConcurrencyWhile` work (e.g. async constructor init) completes.
+    const result = current.chain
+      .then(() => current.state.concurrencyGate)
+      .then(() => current.object.fetch(request));
+    current.chain = result.then(
       () => undefined,
       () => undefined,
     );
