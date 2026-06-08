@@ -17,6 +17,7 @@
 
 import type { Logger } from "@dwk/log";
 import type { RequestHandler } from "express";
+import type { WaitUntilTracker } from "./context";
 import type { QueueBroker } from "./shims/queue";
 import type { CronScheduler } from "./shims/cron";
 
@@ -81,6 +82,13 @@ export interface HostConfig {
   readonly queue?: QueueBroker;
   /** Cron scheduler to run for the host lifecycle (Phase 3 scheduled handlers). */
   readonly cron?: CronScheduler;
+  /**
+   * Tracker for `waitUntil` background work, drained on shutdown. Pass the same
+   * instance to {@link bindQueueConsumer} / {@link bindScheduledTask} so a
+   * consumer's or scheduled task's background work is drained at close.
+   * Defaults to a fresh tracker owned by the server.
+   */
+  readonly tracker?: WaitUntilTracker;
 }
 
 /** Raised at startup when a mounted package's required binding is absent. */
