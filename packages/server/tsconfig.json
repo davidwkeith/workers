@@ -6,7 +6,12 @@
     // typecheck ahead of build). This config is `noEmit`, so rootDir is moot.
     "paths": {
       "@dwk/log": ["../log/src/index.ts"],
-      "@dwk/webfinger": ["../webfinger/src/index.ts"]
+      "@dwk/host-meta": ["../host-meta/src/index.ts"],
+      "@dwk/indieauth": ["../indieauth/src/index.ts"],
+      "@dwk/micropub": ["../micropub/src/index.ts"],
+      "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/webfinger": ["../webfinger/src/index.ts"],
+      "@dwk/webmention": ["../webmention/src/index.ts"]
     },
     "types": ["node", "@cloudflare/workers-types"],
     "noEmit": true

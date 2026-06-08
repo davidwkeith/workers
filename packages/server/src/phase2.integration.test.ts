@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,12 +45,7 @@ const TOKEN_SIGNING_KEY = "phase2-test-signing-key-0123456789abcdef";
 // --- DPoP + token helpers (real ES256 signatures, mirroring the micropub suite)
 
 function bytesToBase64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return Buffer.from(bytes).toString("base64url");
 }
 
 async function sha256Base64url(input: string): Promise<string> {
@@ -285,6 +280,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.close();
   server = null;
+  if (dataDir) rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe("Phase 2 — IndieWeb trio + discovery on the shims", () => {

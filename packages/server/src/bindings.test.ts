@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { mkdtempSync, existsSync } from "node:fs";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assembleBindings } from "./bindings";
@@ -9,9 +9,18 @@ import type {
   KVNamespace,
 } from "@cloudflare/workers-types";
 
+const tempDirs: string[] = [];
+
 function dataDir(): string {
-  return mkdtempSync(join(tmpdir(), "dwk-bind-"));
+  const dir = mkdtempSync(join(tmpdir(), "dwk-bind-"));
+  tempDirs.push(dir);
+  return dir;
 }
+
+afterEach(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+  tempDirs.length = 0;
+});
 
 describe("assembleBindings", () => {
   it("creates a working D1 database persisted under d1/<name>.sqlite", async () => {
