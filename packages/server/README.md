@@ -28,7 +28,12 @@ lifecycle hooks. `@dwk/server` closes that gap:
 - **Node-backed shims for the Cloudflare binding interfaces** so the endpoint
   packages run unchanged: `D1Database` → `node:sqlite`, `R2Bucket` → filesystem,
   `KVNamespace` → SQLite/memory, plus an in-process durable **Queue** and a
-  cron/`scheduled` timer.
+  cron/`scheduled` timer;
+- **lifecycle binding** (`bindQueueConsumer` / `bindScheduledTask`) that adapts
+  the packages' Cloudflare-shaped `(batch|controller, env, ctx)` queue consumers
+  and `scheduled` handlers onto the broker/scheduler, plus a WASM `HTMLRewriter`
+  global (installed at startup) so packages that scan HTML (webmention
+  verification, microsub feed discovery) run on Node.
 
 It mirrors how `@dwk/store` confines Cloudflare *storage*; this package confines
 the *Node runtime and the Cloudflare-interface emulation*. The shims live behind

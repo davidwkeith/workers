@@ -23,6 +23,7 @@ import express, {
 import { noopLogger, type Logger } from "@dwk/log";
 import { sendWebResponse, toWebRequest } from "./adapter";
 import { HostExecutionContext, WaitUntilTracker } from "./context";
+import { installHTMLRewriter } from "./html-rewriter";
 import { acquireWriterLock, type ReleaseLock } from "./lock";
 import {
   assertBindings,
@@ -118,10 +119,13 @@ export function createServer(config: HostConfig): DwkServer {
   const logger = config.logger ?? noopLogger;
   const origin = resolveOrigin(config.baseUrl, config.devMode ?? false);
   assertBindings(config.mounts, config.env);
+  // Provide the workerd `HTMLRewriter` global packages scan HTML with (webmention
+  // verification, microsub feed discovery) so they run unchanged on Node.
+  installHTMLRewriter();
 
   const release =
     (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;
-  const tracker = new WaitUntilTracker();
+  const tracker = config.tracker ?? new WaitUntilTracker();
 
   const app = express();
   app.disable("x-powered-by");

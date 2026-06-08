@@ -46,6 +46,15 @@ export {
 export { WaitUntilTracker, HostExecutionContext } from "./context";
 
 export {
+  bindQueueConsumer,
+  bindScheduledTask,
+  type QueueHandler,
+  type ScheduledTaskHandler,
+} from "./lifecycle";
+
+export { installHTMLRewriter } from "./html-rewriter";
+
+export {
   acquireWriterLock,
   DataDirectoryLockedError,
   type ReleaseLock,

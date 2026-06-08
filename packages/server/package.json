@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@dwk/log": "workspace:*",
+    "@worker-tools/html-rewriter": "0.1.0-pre.19",
     "express": "5.2.1"
   },
   "devDependencies": {
@@ -53,9 +54,12 @@
     "@dwk/host-meta": "workspace:*",
     "@dwk/indieauth": "workspace:*",
     "@dwk/micropub": "workspace:*",
+    "@dwk/microsub": "workspace:*",
+    "@dwk/store": "workspace:*",
     "@dwk/vc": "workspace:*",
     "@dwk/webfinger": "workspace:*",
     "@dwk/webmention": "workspace:*",
+    "@dwk/websub": "workspace:*",
     "@types/express": "5.0.6",
     "@types/node": "22.18.12"
   }
