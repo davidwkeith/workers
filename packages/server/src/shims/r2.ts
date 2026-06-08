@@ -23,9 +23,9 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { once } from "node:events";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type {
   R2Bucket,
   R2Object,
@@ -86,18 +86,22 @@ class FsR2Bucket {
     const tmp = `${path}.${randomUUID()}.tmp`;
     const hash = createHash("md5");
     let size = 0;
-    const sink = createWriteStream(tmp);
     try {
-      for await (const chunk of toNodeStream(value)) {
-        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        hash.update(buf);
-        size += buf.length;
-        if (!sink.write(buf)) await once(sink, "drain");
-      }
-      sink.end();
-      await once(sink, "finish");
+      // `pipeline` handles backpressure and destroys both streams on error
+      // (e.g. a full disk), so a write failure can't hang awaiting `drain`.
+      await pipeline(
+        toNodeStream(value),
+        async function* (source): AsyncGenerator<Buffer> {
+          for await (const chunk of source) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            hash.update(buf);
+            size += buf.length;
+            yield buf;
+          }
+        },
+        createWriteStream(tmp),
+      );
     } catch (err) {
-      sink.destroy();
       await rm(tmp, { force: true });
       throw err;
     }

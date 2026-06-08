@@ -133,7 +133,9 @@ class SqliteJobStore implements JobStore {
          attempts INTEGER NOT NULL DEFAULT 0,
          visible_at INTEGER NOT NULL,
          dead INTEGER NOT NULL DEFAULT 0
-       )`,
+       );
+       CREATE INDEX IF NOT EXISTS idx_queue_jobs_poll
+         ON queue_jobs (queue, dead, visible_at);`,
     );
     this.#enqueue = this.#db.prepare(
       "INSERT INTO queue_jobs (queue, body, visible_at) VALUES (?, ?, ?)",
@@ -334,17 +336,31 @@ export class QueueBroker {
 
     const acked = new Set<number>();
     const retried = new Map<number, number | undefined>();
-    const messages: Message<unknown>[] = claimed.map((row) =>
-      makeMessage(row, this.#now(), acked, retried),
-    );
+    // Parse bodies defensively: an un-parseable body is a poison pill that can
+    // never succeed, so drop it rather than let it block the queue forever
+    // (the parse would otherwise throw out of the tick, leaving the job leased
+    // and redelivered indefinitely).
+    const live: JobRow[] = [];
+    const messages: Message<unknown>[] = [];
+    for (const row of claimed) {
+      try {
+        const body: unknown = JSON.parse(row.body);
+        messages.push(makeMessage(row, body, this.#now(), acked, retried));
+        live.push(row);
+      } catch {
+        this.#store.ack(row.id);
+      }
+    }
+    if (messages.length === 0) return;
+
     const batch = {
       queue: name,
       messages,
       ackAll(): void {
-        for (const row of claimed) acked.add(row.id);
+        for (const row of live) acked.add(row.id);
       },
       retryAll(options?: { delaySeconds?: number }): void {
-        for (const row of claimed) retried.set(row.id, options?.delaySeconds);
+        for (const row of live) retried.set(row.id, options?.delaySeconds);
       },
     } as unknown as MessageBatch<unknown>;
 
@@ -356,7 +372,7 @@ export class QueueBroker {
       threw = true;
     }
 
-    for (const row of claimed) {
+    for (const row of live) {
       if (retried.has(row.id)) {
         // Explicit per-message retry (wins over a throw or an ack).
         this.#requeue(row, reg.options, retried.get(row.id));
@@ -392,6 +408,7 @@ export class QueueBroker {
 
 function makeMessage(
   row: JobRow,
+  body: unknown,
   timestamp: number,
   acked: Set<number>,
   retried: Map<number, number | undefined>,
@@ -399,7 +416,7 @@ function makeMessage(
   return {
     id: String(row.id),
     timestamp: new Date(timestamp),
-    body: JSON.parse(row.body) as unknown,
+    body,
     attempts: row.attempts + 1,
     ack(): void {
       acked.add(row.id);

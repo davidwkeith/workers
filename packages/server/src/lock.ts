@@ -18,6 +18,7 @@ import {
   writeSync,
   readFileSync,
   unlinkSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -56,8 +57,14 @@ export function acquireWriterLock(dataDir: string): ReleaseLock {
     if (holder !== null && isProcessAlive(holder)) {
       throw new DataDirectoryLockedError(dataDir, holder);
     }
+    // An empty lockfile may belong to a process that created it micro-seconds
+    // ago but hasn't written its pid yet (the create→write window). Treat a
+    // very recent pid-less lock as held rather than stealing it (TOCTOU guard).
+    if (holder === null && lockAgeMs(lockPath) < 5000) {
+      throw new DataDirectoryLockedError(dataDir, -1);
+    }
     // Stale lock (holder dead or unreadable) — reclaim it.
-    unlinkSync(lockPath);
+    tolerantUnlink(lockPath);
     fd = tryCreate(lockPath);
     if (fd === null) {
       // Lost a race to another starting process.
@@ -66,8 +73,11 @@ export function acquireWriterLock(dataDir: string): ReleaseLock {
     }
   }
 
-  writeSync(fd, String(process.pid));
-  closeSync(fd);
+  try {
+    writeSync(fd, String(process.pid));
+  } finally {
+    closeSync(fd);
+  }
 
   let released = false;
   return () => {
@@ -79,6 +89,24 @@ export function acquireWriterLock(dataDir: string): ReleaseLock {
       // Already gone — nothing to release.
     }
   };
+}
+
+/** Age of the lockfile in ms, or `Infinity` if it has vanished. */
+function lockAgeMs(lockPath: string): number {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs;
+  } catch {
+    return Infinity;
+  }
+}
+
+/** `unlink` that ignores a file that another process already removed. */
+function tolerantUnlink(lockPath: string): void {
+  try {
+    unlinkSync(lockPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
 }
 
 /** `open` with `wx` (O_CREAT|O_EXCL): succeeds only if the file does not exist. */

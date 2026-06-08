@@ -18,6 +18,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 /** Methods that, per the Fetch standard, never carry a request body. */
 const BODILESS_METHODS = new Set(["GET", "HEAD"]);
@@ -103,10 +104,7 @@ export async function sendWebResponse(
   const nodeStream = Readable.fromWeb(
     response.body as import("node:stream/web").ReadableStream<Uint8Array>,
   );
-  await new Promise<void>((resolve, reject) => {
-    nodeStream.pipe(res);
-    nodeStream.on("error", reject);
-    res.on("finish", resolve);
-    res.on("error", reject);
-  });
+  // `pipeline` pipes, awaits completion, and destroys both streams on error,
+  // so a client disconnect or upstream error can't leak the source stream.
+  await pipeline(nodeStream, res);
 }
