@@ -37,6 +37,12 @@ export {
 
 export { toWebRequest, sendWebResponse } from "./adapter";
 
+export {
+  assembleBindings,
+  type BindingsSpec,
+  type KvBindingSpec,
+} from "./bindings";
+
 export { WaitUntilTracker, HostExecutionContext } from "./context";
 
 export {

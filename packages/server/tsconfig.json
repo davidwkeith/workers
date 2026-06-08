@@ -1,12 +1,21 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // No `rootDir`: the `paths` mapping resolves the `@dwk/log` import to its
+    // No `rootDir`: the `paths` mappings resolve workspace imports to their
     // source so `typecheck` works before the workspace is built (CI runs
-    // typecheck ahead of build). This config is `noEmit`, so rootDir is moot.
+    // typecheck ahead of build). Because mapping a package to its source pulls
+    // that source's own imports into the program, this lists the full transitive
+    // closure of the mounted packages' workspace deps (e.g. `@dwk/dpop` via
+    // indieauth/micropub). This config is `noEmit`, so rootDir is moot.
     "paths": {
+      "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/host-meta": ["../host-meta/src/index.ts"],
+      "@dwk/indieauth": ["../indieauth/src/index.ts"],
       "@dwk/log": ["../log/src/index.ts"],
-      "@dwk/webfinger": ["../webfinger/src/index.ts"]
+      "@dwk/micropub": ["../micropub/src/index.ts"],
+      "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/webfinger": ["../webfinger/src/index.ts"],
+      "@dwk/webmention": ["../webmention/src/index.ts"]
     },
     "types": ["node", "@cloudflare/workers-types"],
     "noEmit": true
