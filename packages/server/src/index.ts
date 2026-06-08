@@ -54,6 +54,8 @@ export {
 
 export { installHTMLRewriter } from "./html-rewriter";
 
+export { installRequestDuplex } from "./request-duplex";
+
 export {
   acquireWriterLock,
   DataDirectoryLockedError,

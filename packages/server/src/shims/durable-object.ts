@@ -207,11 +207,14 @@ export class DurableObject<Env = unknown> {
   }
 }
 
-/** A DO class as the namespace constructs it: `new Ctor(state, env)`. */
-export type DurableObjectClass<T> = new (
-  state: ShimDurableObjectState,
-  env: never,
-) => T;
+/**
+ * A DO class as the namespace constructs it: `new Ctor(state, env)`. The
+ * parameters are `never` so a class whose constructor is typed against the
+ * workerd `DurableObjectState` / its concrete `Env` (e.g. `WebAuthnObject`,
+ * `SolidPodObject`) is assignable by contravariance; the shim supplies its own
+ * `ShimDurableObjectState` and the assembled `Env` at construction.
+ */
+export type DurableObjectClass<T> = new (state: never, env: never) => T;
 
 /** Minimal `fetch`-bearing stub returned by `namespace.get(id)`. */
 interface ShimStub {
@@ -287,7 +290,7 @@ class ShimDurableObjectNamespace<
         `${key}.sqlite`,
       );
       const state = new ShimDurableObjectState(id, sqlitePath);
-      const object = new this.#ctor(state, this.#options.env as never);
+      const object = new this.#ctor(state as never, this.#options.env as never);
       instance = { object, chain: Promise.resolve() };
       this.#instances.set(key, instance);
     }

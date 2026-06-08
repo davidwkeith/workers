@@ -17,6 +17,7 @@
       "@dwk/rdf": ["../rdf/src/index.ts"],
       "@dwk/store": ["../store/src/index.ts"],
       "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/webauthn": ["../webauthn/src/index.ts"],
       "@dwk/webfinger": ["../webfinger/src/index.ts"],
       "@dwk/webmention": ["../webmention/src/index.ts"],
       "@dwk/websub": ["../websub/src/index.ts"]

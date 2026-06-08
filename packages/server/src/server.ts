@@ -24,6 +24,7 @@ import { noopLogger, type Logger } from "@dwk/log";
 import { sendWebResponse, toWebRequest } from "./adapter";
 import { HostExecutionContext, WaitUntilTracker } from "./context";
 import { installHTMLRewriter } from "./html-rewriter";
+import { installRequestDuplex } from "./request-duplex";
 import { acquireWriterLock, type ReleaseLock } from "./lock";
 import {
   assertBindings,
@@ -119,9 +120,11 @@ export function createServer(config: HostConfig): DwkServer {
   const logger = config.logger ?? noopLogger;
   const origin = resolveOrigin(config.baseUrl, config.devMode ?? false);
   assertBindings(config.mounts, config.env);
-  // Provide the workerd `HTMLRewriter` global packages scan HTML with (webmention
-  // verification, microsub feed discovery) so they run unchanged on Node.
+  // Install the workerd runtime parity shims packages rely on: the `HTMLRewriter`
+  // global (webmention/microsub HTML scanning) and a `Request` that defaults
+  // `duplex` for streaming bodies (DO sub-request forwarding).
   installHTMLRewriter();
+  installRequestDuplex();
 
   const release =
     (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;

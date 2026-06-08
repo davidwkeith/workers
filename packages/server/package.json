@@ -57,6 +57,7 @@
     "@dwk/microsub": "workspace:*",
     "@dwk/store": "workspace:*",
     "@dwk/vc": "workspace:*",
+    "@dwk/webauthn": "workspace:*",
     "@dwk/webfinger": "workspace:*",
     "@dwk/webmention": "workspace:*",
     "@dwk/websub": "workspace:*",

@@ -33,7 +33,12 @@ lifecycle hooks. `@dwk/server` closes that gap:
   the packages' Cloudflare-shaped `(batch|controller, env, ctx)` queue consumers
   and `scheduled` handlers onto the broker/scheduler, plus a WASM `HTMLRewriter`
   global (installed at startup) so packages that scan HTML (webmention
-  verification, microsub feed discovery) run on Node.
+  verification, microsub feed discovery) run on Node;
+- **Durable Object emulation** (`createDurableObjectNamespace`): `SqlStorage`
+  over `node:sqlite`, one object per id behind a per-id mutex (the single-writer
+  guarantee), with the `cloudflare:workers` import redirected to the shim by a
+  `module.register` loader hook (production) or a Vitest alias (tests) — so
+  `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
 
 It mirrors how `@dwk/store` confines Cloudflare *storage*; this package confines
 the *Node runtime and the Cloudflare-interface emulation*. The shims live behind
