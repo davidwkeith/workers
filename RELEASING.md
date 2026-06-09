@@ -22,8 +22,11 @@ happens only through the gated **Release** GitHub Actions workflow.
 - **Changesets**, independent semver per package. Config in `.changeset/config.json`
   (`access: public`, `commit: false`, changelog via `@changesets/cli/changelog`).
 - **Pre mode is active.** `.changeset/pre.json` exists with `tag: beta`, so every
-  package currently sits at `0.1.0-beta.N` and `changeset publish` targets the
-  **`beta`** npm dist-tag (not `latest`). Nothing has hit a stable `1.0.0` yet.
+  package currently sits at `0.1.0-beta.N`. Nothing has hit a stable `1.0.0` yet.
+  **Dist-tag caveat:** despite the `beta` pre-mode tag, `changeset publish`
+  publishes packages that have _never had a stable release_ to the **`latest`**
+  dist-tag, not `beta` (see the "Dist-tags" gotcha below). So until a `1.0.0`
+  ships, `latest` tracks the newest beta and plain `npm i @dwk/<pkg>` installs it.
 - **Release gate.** `pnpm release:gate` (`scripts/release-gate.mjs`) blocks any
   package at a **stable** version (`major >= 1`, no prerelease tag) whose
   conformance/integration status in `conformance/status.json` isn't `passing` or
@@ -39,7 +42,9 @@ happens only through the gated **Release** GitHub Actions workflow.
     `NPM_TOKEN` secret and any protection rules (required reviewers, allowed
     branches). The environment is gated to the `main` branch.
   - Publishes with **provenance** (`id-token: write` + `NPM_CONFIG_PROVENANCE`),
-    then `git push origin --tags`.
+    then tags origin by re-deriving `name@version` tags from each non-private
+    `package.json` and pushing (changeset's own tags don't survive the step —
+    see the gotcha).
 - **`@dwk/server` is `"private": true`** — the Node/Express self-hosting host
   ships only as a Docker image and is never published to npm.
 
@@ -85,7 +90,8 @@ happens only through the gated **Release** GitHub Actions workflow.
    ```
 
    Watch it; the same two steps now _run_. `changeset publish` publishes each
-   package whose local version isn't yet on npm, under the `beta` dist-tag.
+   package whose local version isn't yet on npm (to the `latest` dist-tag while
+   no stable release exists — see the dist-tag caveat above).
 
 5. **Verify** (see below).
 
@@ -130,9 +136,13 @@ npm view @dwk/server version            # expect E404
 git ls-remote --tags origin | grep -c '@dwk'   # expect 20
 ```
 
-If `npm view` 404s a package you _just_ published, give it a minute — see the
-propagation note below. Confirm the run's **Publish to npm** step listed it as
-`published successfully` before assuming failure.
+The meaningful tag pre-1.0 is **`latest`** — it should equal the version you just
+released (`beta` stays pinned at `0.1.0-beta.0` and is not advanced; see the
+dist-tag gotcha). If `npm view` 404s or shows the old version for a package you
+_just_ published, give it a minute — registry GET-propagation lags. Confirm the
+run's **Publish to npm** step listed it as `published successfully`, and check the
+published **version list** (`npm view @dwk/<pkg> versions`) which updates before
+the dist-tag pointer does.
 
 ## Gotchas (learned the hard way)
 
@@ -142,14 +152,21 @@ propagation note below. Confirm the run's **Publish to npm** step listed it as
   path against a known-public package (e.g. `@types/node` → 200) before
   concluding a publish failed. Trust the workflow's `published successfully`
   line first.
-- **First-ever publish also sets `latest`.** npm assigns a `latest` tag on a
-  package's first publish even with `--tag beta`, so `latest` currently points at
-  `0.1.0-beta.0` and a plain `npm i @dwk/<pkg>` installs the beta. This is
-  harmless pre-1.0 and self-corrects when you exit pre mode and publish a stable.
-- **Changesets tags are lightweight.** `git push --follow-tags` only pushes
-  _annotated_ tags and silently skips lightweight ones — which is why the
-  workflow uses `git push origin --tags`. If a release's tags ever go missing,
-  recreate them at the publish commit and push:
+- **Dist-tags: betas land on `latest`, not `beta`.** In pre mode, `changeset
+publish` sends packages that have _never had a stable release_ to the `latest`
+  dist-tag (it only uses the pre-mode `beta` tag for packages that already have a
+  normal release). Since none of ours do, every beta publishes to `latest`, and
+  the `beta` tag stays frozen at `0.1.0-beta.0` (a leftover from the first
+  publish). **Net effect pre-1.0:** the install channel is plain
+  `npm i @dwk/<pkg>` (→ newest beta); `@dwk/<pkg>@beta` is stale — don't advertise
+  it. This self-corrects on `pre exit` + `1.0.0`, when `latest` moves to the
+  stable. We deliberately do **not** maintain the `beta` tag in the meantime.
+- **Changeset's git tags don't survive to the push step.** `changeset publish`
+  logs `New tag: ...` but those lightweight tags are not present when the next
+  workflow step runs (`git push origin --tags` → "Everything up-to-date"), so the
+  workflow instead **re-derives** `name@version` tags from each non-private
+  `package.json` and pushes those. If a release's tags ever go missing, recreate
+  them at the publish commit and push:
   `git tag "@dwk/<pkg>@<version>" <sha> && git push origin "refs/tags/@dwk/*"`.
 - **`changeset publish` is a no-op for already-published versions.** Re-running a
   publish without bumping versions publishes nothing and still exits 0. Bump
