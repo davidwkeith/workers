@@ -4,7 +4,8 @@ OAuth 2.0 server building blocks — a cross-standard reusable.
 
 ## What this is
 
-Shared OAuth 2.0 server primitives for Solid-OIDC OP and IndieAuth. Provides
+Shared OAuth 2.0 server primitives designed for use by authorization servers
+(e.g. the eventual Solid-OIDC OP, or alongside IndieAuth). Provides
 handler factories for token introspection (RFC 7662), token revocation
 (RFC 7009), Pushed Authorization Requests (RFC 9126), and dynamic client
 registration (RFC 7591). Also generates RFC 8414 authorization server metadata.
@@ -20,7 +21,7 @@ Reuses `@dwk/dpop` for DPoP-bound token support.
   Must not import IndieWeb or Solid specifics.
 - **No Cloudflare imports.** Pure-data library, tests under Node.
 - **Caller-provided storage.** Handler factories accept store interfaces; they
-  don't assume D1/DO/KV. The caller (indieauth, eventual Solid-OIDC OP) wires
+  don't assume D1/DO/KV. The caller (e.g. the eventual Solid-OIDC OP) wires
   the concrete persistence.
 - **DPoP integration.** When DPoP is in use, introspection responses include
   `cnf.jkt` and tokens without valid proofs are rejected.
@@ -52,4 +53,6 @@ src/*.test.ts         # colocated tests
 
 ## Depended on by
 
-`@dwk/remotestorage` (for bearer token authentication)
+No workspace packages currently depend on `@dwk/oauth` in their `package.json`.
+It is designed to be adopted by future authorization server implementations
+(Solid-OIDC OP, or as a complement to `@dwk/indieauth`).
