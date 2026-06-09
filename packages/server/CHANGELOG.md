@@ -1,5 +1,12 @@
 # @dwk/server
 
+## 0.1.0-beta.1
+
+### Patch Changes
+
+- Updated dependencies [25d9cec]
+  - @dwk/log@0.1.0-beta.1
+
 ## 0.1.0-beta.0
 
 ### Minor Changes
