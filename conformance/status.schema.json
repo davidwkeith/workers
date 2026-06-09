@@ -2,12 +2,17 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/davidwkeith/workers/conformance/status.schema.json",
   "title": "Conformance status",
-  "description": "Per-package conformance-suite and integration-lifecycle status consumed by the release gate.",
+  "description": "Per-package conformance-suite and integration-lifecycle status consumed by the release gate. The flat `status` on each suite/integration is the primary target (Cloudflare Workers); an optional `targets` map records additional deployment targets (e.g. the self-hosted Node host).",
   "type": "object",
   "required": ["packages"],
   "properties": {
     "$schema": { "type": "string" },
     "description": { "type": "string" },
+    "targets": {
+      "type": "object",
+      "description": "Declared conformance/deployment targets, keyed by id. The flat statuses below are the primary target; `targets` entries on a suite/integration record the others.",
+      "additionalProperties": { "$ref": "#/definitions/targetDeclaration" }
+    },
     "packages": {
       "type": "object",
       "additionalProperties": { "$ref": "#/definitions/package" }
@@ -18,6 +23,36 @@
     "state": {
       "type": "string",
       "enum": ["pending", "failing", "passing", "not-applicable"]
+    },
+    "targetDeclaration": {
+      "type": "object",
+      "required": ["description"],
+      "properties": {
+        "description": { "type": "string" },
+        "host": {
+          "type": "string",
+          "description": "Runtime/host that serves this target (e.g. \"workerd\", \"@dwk/server\")."
+        }
+      },
+      "additionalProperties": false
+    },
+    "targetSuiteResult": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "$ref": "#/definitions/state" },
+        "report": { "type": ["string", "null"] },
+        "lastRun": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "targetIntegrationResult": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "$ref": "#/definitions/state" }
+      },
+      "additionalProperties": false
     },
     "package": {
       "type": "object",
@@ -44,6 +79,11 @@
         "lastRun": {
           "type": ["string", "null"],
           "description": "ISO-8601 timestamp of the last recorded run."
+        },
+        "targets": {
+          "type": "object",
+          "description": "Per-target results for this suite, keyed by target id (the flat status above is the primary target).",
+          "additionalProperties": { "$ref": "#/definitions/targetSuiteResult" }
         }
       },
       "additionalProperties": false
@@ -56,6 +96,13 @@
         "cases": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "targets": {
+          "type": "object",
+          "description": "Per-target integration-lifecycle status, keyed by target id.",
+          "additionalProperties": {
+            "$ref": "#/definitions/targetIntegrationResult"
+          }
         }
       },
       "additionalProperties": false

@@ -1,6 +1,16 @@
 {
   "$schema": "./status.schema.json",
   "description": "Single source of truth for per-package conformance and integration status. The release gate (scripts/release-gate.mjs) refuses to publish any package at a stable (>=1.0.0) version until every suite listed here is \"passing\" and its integration lifecycle tests are \"passing\". See conformance/README.md.",
+  "targets": {
+    "cloudflare": {
+      "description": "Cloudflare Workers — the primary, recommended, conformance-certified target.",
+      "host": "workerd"
+    },
+    "node": {
+      "description": "Self-hosted Node/Express host — the @dwk/server Docker image or dwk-serve bin.",
+      "host": "@dwk/server"
+    }
+  },
   "packages": {
     "@dwk/micropub": {
       "standard": "Micropub",
@@ -8,12 +18,24 @@
         "micropub.rocks": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/webmention": {
@@ -22,17 +44,36 @@
         "webmention.rocks/receiver": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         },
         "webmention.rocks/sender": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/indieauth": {
@@ -40,7 +81,12 @@
       "suites": {},
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/websub": {
@@ -49,12 +95,24 @@
         "websub.rocks/hub": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/microsub": {
@@ -67,7 +125,12 @@
           "timeline paginates with before/after cursors",
           "mark_read clears the per-channel unread count",
           "scheduled poll appends new entries deduped across runs"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/webfinger": {
@@ -75,7 +138,12 @@
       "suites": {},
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/host-meta": {
@@ -83,7 +151,12 @@
       "suites": {},
       "integration": {
         "status": "pending",
-        "cases": []
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/activitypub": {
@@ -92,7 +165,14 @@
         "activitypub-federation": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -102,7 +182,12 @@
           "auto-Accept delivered to the follower inbox (signed)",
           "retryable delivery requeued with backoff",
           "owner publish fans a Create to the outbox"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "pending"
+          }
+        }
       }
     },
     "@dwk/vc": {
@@ -111,7 +196,14 @@
         "vc-data-model-2.0": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -121,7 +213,12 @@
           "revoke via the status list, then verification fails",
           "served status list credential is itself signed and verifiable",
           "did:web verification method round-trips issuance"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/solid-pod": {
@@ -130,7 +227,14 @@
         "solid-conformance": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -140,7 +244,12 @@
           "PATCH with a solid:where match",
           "PATCH whose where does not bind (409)",
           "If-Match / ETag preconditioned write"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/remotestorage": {
@@ -149,7 +258,14 @@
         "remotestorage-api-test-suite": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -161,7 +277,12 @@
           "public /public/ document read needs no token; folders never public",
           "read-only scope is refused a write (403)",
           "document/folder name collision is rejected (409)"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "pending"
+          }
+        }
       }
     },
     "@dwk/webauthn": {
@@ -170,7 +291,14 @@
         "webauthn-l3": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -180,7 +308,12 @@
           "authentication ceremony verifies an assertion",
           "challenge is single-use (no replay)",
           "counter regression is rejected (clone detection)"
-        ]
+        ],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
       }
     },
     "@dwk/ldn": {
@@ -189,7 +322,14 @@
         "ldn-test-suite": {
           "status": "pending",
           "report": null,
-          "lastRun": null
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
         }
       },
       "integration": {
@@ -251,6 +391,19 @@
       "integration": {
         "status": "pending",
         "cases": []
+      }
+    },
+    "@dwk/server": {
+      "standard": "Self-hosting (Node/Express)",
+      "suites": {},
+      "integration": {
+        "status": "passing",
+        "cases": [
+          "IndieWeb trio + discovery on the binding shims (phase 2)",
+          "queue/cron lifecycle: webmention verify, microsub poll, websub distribute, R2 GC (phase 3)",
+          "Durable Objects: webauthn ceremonies, solid-pod LDP/WAC/N3-patch + WebSocket notifications (phase 4)",
+          "dwk-serve bin + esbuild Docker bundle boot/serve/shutdown (phase 5)"
+        ]
       }
     }
   }

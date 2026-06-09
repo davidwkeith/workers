@@ -127,6 +127,15 @@ export function evaluateReleaseGate({ packages, status }) {
           `${pkg.name}@${pkg.version}: conformance suite "${suite}" is "${status}" (must be "passing").`,
         );
       }
+      // Per-target results (e.g. the self-hosted Node host) gate too.
+      for (const [target, tResult] of Object.entries(result?.targets ?? {})) {
+        const tStatus = tResult?.status;
+        if (tStatus !== "passing" && tStatus !== "not-applicable") {
+          violations.push(
+            `${pkg.name}@${pkg.version}: conformance suite "${suite}" on target "${target}" is "${tStatus}" (must be "passing").`,
+          );
+        }
+      }
     }
 
     const integration = entry.integration?.status;
@@ -134,6 +143,16 @@ export function evaluateReleaseGate({ packages, status }) {
       violations.push(
         `${pkg.name}@${pkg.version}: integration lifecycle tests are "${integration}" (must be "passing").`,
       );
+    }
+    for (const [target, tResult] of Object.entries(
+      entry.integration?.targets ?? {},
+    )) {
+      const tStatus = tResult?.status;
+      if (tStatus !== "passing" && tStatus !== "not-applicable") {
+        violations.push(
+          `${pkg.name}@${pkg.version}: integration lifecycle tests on target "${target}" are "${tStatus}" (must be "passing").`,
+        );
+      }
     }
   }
   return violations;
@@ -154,8 +173,12 @@ export function renderReport({ packages, status }) {
           .join(", ") || "—"
       : "(no entry)";
     const integration = entry?.integration?.status ?? "(none)";
+    const targets = entry?.integration?.targets ?? {};
+    const targetsSummary = Object.entries(targets)
+      .map(([target, r]) => ` ${target}:${r?.status ?? "unknown"}`)
+      .join("");
     lines.push(
-      `  ${pkg.name}@${pkg.version} [${gated}]  suites: ${suites}  integration: ${integration}`,
+      `  ${pkg.name}@${pkg.version} [${gated}]  suites: ${suites}  integration: ${integration}${targetsSummary}`,
     );
   }
   return lines.join("\n");

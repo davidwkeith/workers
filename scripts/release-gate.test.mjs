@@ -134,3 +134,66 @@ test('"not-applicable" suites and integration do not block', () => {
   });
   assert.deepEqual(violations, []);
 });
+
+test("a stable package with a pending per-target (node) suite is blocked", () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/micropub", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/micropub": {
+          suites: {
+            "micropub.rocks": {
+              status: "passing",
+              targets: { node: { status: "pending" } },
+            },
+          },
+          integration: { status: "passing" },
+        },
+      },
+    },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /target "node"/);
+});
+
+test("a stable package with a failing per-target (node) integration is blocked", () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/solid-pod", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/solid-pod": {
+          suites: { "solid-conformance": { status: "passing" } },
+          integration: {
+            status: "passing",
+            targets: { node: { status: "failing" } },
+          },
+        },
+      },
+    },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /integration lifecycle tests on target "node"/);
+});
+
+test("passing / not-applicable per-target results do not block", () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/micropub", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/micropub": {
+          suites: {
+            "micropub.rocks": {
+              status: "passing",
+              targets: { node: { status: "passing" } },
+            },
+          },
+          integration: {
+            status: "passing",
+            targets: { node: { status: "not-applicable" } },
+          },
+        },
+      },
+    },
+  });
+  assert.deepEqual(violations, []);
+});
