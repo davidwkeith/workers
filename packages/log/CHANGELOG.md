@@ -1,5 +1,12 @@
 # @dwk/log
 
+## 0.1.0-beta.2
+
+### Patch Changes
+
+- Coordinated beta iteration: roll all published packages to the next prerelease
+  (`0.1.0-beta.2`). No public API changes.
+
 ## 0.1.0-beta.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@dwk/dpop",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "DPoP (RFC 9449) proof verification. Cross-standard reusable; no Workers runtime dependency.",
   "keywords": [
     "dpop",

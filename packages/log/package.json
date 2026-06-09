@@ -1,6 +1,6 @@
 {
   "name": "@dwk/log",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Minimal injectable structured-logging and metrics seam. Cross-standard reusable; protocol-agnostic, no Workers runtime dependency.",
   "keywords": [
     "logging",
