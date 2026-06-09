@@ -227,23 +227,38 @@ class ShimDurableObjectState {
   acceptWebSocket(ws: WebSocket): void {
     this.#sockets.add(ws);
     // The DO drives delivery through the hibernation API, not events: a frame on
-    // an accepted socket invokes its `webSocketMessage` override.
-    ws.addEventListener("message", (event) => {
-      const data = (event as { data: string | ArrayBuffer }).data;
+    // an accepted socket invokes its `webSocketMessage` override, an error its
+    // `webSocketError`, and close its `webSocketClose`.
+    const onMessage = (event: Event): void => {
+      const data = (event as unknown as { data: string | ArrayBuffer }).data;
       void this.#owner?.webSocketMessage?.(ws, data);
-    });
-    // Real DO drops hibernatable sockets on close (and signals the override), so
-    // the set does not grow without bound as connections come and go.
+    };
+    const onError = (event: Event): void => {
+      const error = ((event ?? {}) as { error?: unknown }).error;
+      void this.#owner?.webSocketError?.(ws, error);
+    };
+    // Drop the socket on close and detach the listeners, so a closed connection
+    // does not retain this state (and the DO instance) via the socket.
     const cleanup = (event?: Event): void => {
       if (!this.#sockets.delete(ws)) return;
-      const { code, reason } = (event ?? {}) as {
+      ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("error", onError);
+      ws.removeEventListener("close", cleanup);
+      const { code, reason, wasClean } = (event ?? {}) as {
         code?: number;
         reason?: string;
+        wasClean?: boolean;
       };
-      void this.#owner?.webSocketClose?.(ws, code ?? 1000, reason ?? "", true);
+      void this.#owner?.webSocketClose?.(
+        ws,
+        code ?? 1000,
+        reason ?? "",
+        wasClean ?? true,
+      );
     };
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("error", onError);
     ws.addEventListener("close", cleanup);
-    ws.addEventListener("error", cleanup);
   }
 
   getWebSockets(): WebSocket[] {

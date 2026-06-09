@@ -56,8 +56,13 @@ export class EmulatedWebSocket extends EventTarget {
   close(code?: number, reason?: string): void {
     if (this.readyState === EmulatedWebSocket.CLOSED) return;
     this.readyState = EmulatedWebSocket.CLOSED;
+    const wasClean = code === undefined || code === 1000;
     this.dispatchEvent(
-      Object.assign(new Event("close"), { code: code ?? 1000, reason }),
+      Object.assign(new Event("close"), {
+        code: code ?? 1000,
+        reason,
+        wasClean,
+      }),
     );
     const peer = this.#peer;
     if (peer && peer.readyState !== EmulatedWebSocket.CLOSED) {

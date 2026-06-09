@@ -65,32 +65,82 @@ function bridge(real: WsWebSocket, pod: EmulatedWebSocket): void {
     ).data;
     real.send(data);
   });
-  pod.addEventListener("close", () => real.close());
+  pod.addEventListener("close", (event) => {
+    const { code, reason } = event as { code?: number; reason?: string };
+    real.close(code, reason);
+  });
   // network → DO: deliver to the DO's accepted (server) end → webSocketMessage.
   real.on("message", (data: Buffer, isBinary: boolean) => {
     pod.send(isBinary ? toArrayBuffer(data) : data.toString());
   });
-  real.on("close", () => pod.close());
-  real.on("error", () => pod.close());
+  real.on("close", (code: number, reason: Buffer) =>
+    pod.close(code, reason.toString()),
+  );
+  real.on("error", (err: Error) => {
+    // Surface the error to the DO's `webSocketError` override, then close.
+    pod.dispatchEvent(Object.assign(new Event("error"), { error: err }));
+    pod.close(1006, err.message);
+  });
+}
+
+/** Reject an upgrade with a bare status line, then close the socket. */
+function rejectStatus(socket: Duplex, status: number, message: string): void {
+  if (socket.writable) {
+    socket.write(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n\r\n`);
+  }
+  socket.destroy();
+}
+
+/**
+ * Write a handler `Response` (e.g. a `401` with a DPoP challenge) back over the
+ * raw socket so a rejected upgrade still delivers status + headers, then close.
+ */
+async function rejectResponse(
+  socket: Duplex,
+  response: Response,
+): Promise<void> {
+  if (!socket.writable) {
+    socket.destroy();
+    return;
+  }
+  const body = await response.text().catch(() => "");
+  const lines = [
+    `HTTP/1.1 ${response.status} ${response.statusText || "Error"}`,
+  ];
+  response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
+  lines.push(
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    "Connection: close",
+    "",
+    body,
+  );
+  socket.write(lines.join("\r\n"));
+  socket.destroy();
 }
 
 /**
  * Attach an `upgrade` handler to `server` that routes WebSocket upgrades to the
  * matching mount and bridges the connection. A no-op for paths no mount claims.
+ * Returns a cleanup that detaches the listener and closes the WebSocket server
+ * (and any open connections) — call it on server shutdown.
  */
 export function attachWebSocketUpgrade(
   server: Server,
   ctx: UpgradeContext,
-): void {
+): () => void {
   const wss = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const onUpgrade = (
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ): void => {
     const pathname = new URL(req.url ?? "/", ctx.origin).pathname;
     const mount = ctx.mounts.find((m) =>
       isReservedPath(pathname, m.reservedPaths),
     );
     if (mount === undefined) {
-      socket.destroy();
+      rejectStatus(socket, 404, "Not Found");
       return;
     }
 
@@ -101,7 +151,8 @@ export function attachWebSocketUpgrade(
         const response = await mount.handler(request, ctx.env as never, exec);
         const pod = responseWebSocket(response);
         if (response.status !== 101 || pod === null) {
-          socket.destroy();
+          // Not an upgrade: relay the handler's status/headers to the client.
+          await rejectResponse(socket, response);
           return;
         }
         wss.handleUpgrade(req, socket, head, (real) => bridge(real, pod));
@@ -110,8 +161,17 @@ export function attachWebSocketUpgrade(
           mount: mount.name,
           error: err instanceof Error ? err.message : String(err),
         });
-        socket.destroy();
+        rejectStatus(socket, 500, "Internal Server Error");
       }
     })();
-  });
+  };
+
+  server.on("upgrade", onUpgrade);
+
+  return () => {
+    server.off("upgrade", onUpgrade);
+    for (const client of wss.clients)
+      client.close(1001, "server shutting down");
+    wss.close();
+  };
 }

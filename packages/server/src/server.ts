@@ -66,6 +66,7 @@ export class DwkServer {
   readonly #cron?: CronScheduler;
   readonly #logger: Logger;
   #httpServer: Server | null = null;
+  #wsCleanup: (() => void) | null = null;
 
   constructor(parts: ServerParts) {
     this.app = parts.app;
@@ -87,7 +88,7 @@ export class DwkServer {
     this.#httpServer = server;
     // WebSocket upgrades (e.g. Solid notifications) bypass Express; bridge them
     // straight to the matching mount's Durable Object.
-    attachWebSocketUpgrade(server, {
+    this.#wsCleanup = attachWebSocketUpgrade(server, {
       mounts: this.#mounts,
       env: this.#env,
       origin: this.origin,
@@ -112,6 +113,10 @@ export class DwkServer {
    * drain outstanding `waitUntil` work, then release the single-writer lock.
    */
   async close(): Promise<void> {
+    // Detach the upgrade listener and close any open WebSocket connections first,
+    // so they do not keep the HTTP server from closing.
+    this.#wsCleanup?.();
+    this.#wsCleanup = null;
     const server = this.#httpServer;
     if (server !== null) {
       await new Promise<void>((resolvePromise) => {
