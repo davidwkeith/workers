@@ -91,4 +91,7 @@ jobs:
 
       - name: Push release tags
         if: ${{ !inputs.dry_run }}
-        run: git push --follow-tags
+        # `changeset publish` creates *lightweight* tags, which `--follow-tags`
+        # (annotated-only) silently skips. Push all tags so each release is
+        # tagged on origin.
+        run: git push origin --tags
