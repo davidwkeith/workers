@@ -84,8 +84,26 @@ export function createShutdown(
     server
       .close()
       .then(() => exit(0))
-      .catch(() => exit(1));
+      .catch((err: unknown) => {
+        logger.error("cli.shutdown_error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        exit(1);
+      });
   };
+}
+
+/** Parse a port value, rejecting anything that is not a valid TCP port. */
+function parsePort(
+  value: string | undefined,
+  source: string,
+): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`${source}: invalid port ${JSON.stringify(value)}`);
+  }
+  return port;
 }
 
 /** Install graceful-shutdown handlers that close `server` then exit. */
@@ -106,7 +124,7 @@ export async function startServer(
 ): Promise<{ server: DwkServer; port: number }> {
   const logger = options.logger ?? noopLogger;
   const server = createServer(config);
-  const port = options.port ?? Number(process.env.PORT ?? 3000);
+  const port = options.port ?? parsePort(process.env.PORT, "$PORT") ?? 3000;
   const bound = await server.listen(port, options.host ?? process.env.HOST);
   logger.info("cli.listening", { baseUrl: server.origin, port: bound.port });
   if (options.signals !== false) installSignals(server, logger);
@@ -133,7 +151,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     if (arg === undefined) continue;
     if (arg === "--port" || arg === "-p") {
       i += 1;
-      port = Number(argv[i]);
+      port = parsePort(argv[i], arg);
     } else if (arg === "--host" || arg === "-H") {
       i += 1;
       host = argv[i];

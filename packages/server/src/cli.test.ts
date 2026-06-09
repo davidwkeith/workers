@@ -93,6 +93,13 @@ describe("dwk-serve CLI", () => {
       if (prev === undefined) delete process.env.DWK_CONFIG;
       else process.env.DWK_CONFIG = prev;
     });
+
+    it("rejects an invalid --port rather than passing NaN to listen", () => {
+      expect(() => parseArgs(["--port", "abc"])).toThrow(/invalid port/);
+      expect(() => parseArgs(["--port", "70000"])).toThrow(/invalid port/);
+      // A dangling flag with no value is ignored (falls back to the default).
+      expect(parseArgs(["--port"]).port).toBeUndefined();
+    });
   });
 
   describe("loadConfig", () => {
@@ -191,6 +198,25 @@ describe("dwk-serve CLI", () => {
     });
   });
 
+  describe("startServer", () => {
+    it("reads the port from $PORT when no option is given", async () => {
+      const config = await loadConfig(configFile(pingConfig()));
+      const prev = process.env.PORT;
+      process.env.PORT = "0"; // a free port
+      try {
+        const { server, port } = await startServer(config, {
+          host: "127.0.0.1",
+          signals: false,
+        });
+        expect(port).toBeGreaterThan(0);
+        await server.close();
+      } finally {
+        if (prev === undefined) delete process.env.PORT;
+        else process.env.PORT = prev;
+      }
+    });
+  });
+
   describe("createShutdown", () => {
     it("closes the server and exits 0", async () => {
       const config = await loadConfig(configFile(pingConfig()));
@@ -205,6 +231,29 @@ describe("dwk-serve CLI", () => {
       });
       expect(code).toBe(0);
       expect(cap.events.some((e) => e.event === "cli.shutdown")).toBe(true);
+    });
+
+    it("logs and exits 1 when close fails", async () => {
+      const failing = {
+        close: () => Promise.reject(new Error("lock stuck")),
+      } as unknown as Parameters<typeof createShutdown>[0];
+      const events: Array<{ event: string; fields?: Record<string, unknown> }> =
+        [];
+      const logger = {
+        debug() {},
+        info() {},
+        warn() {},
+        error(event: string, fields?: Record<string, unknown>) {
+          events.push({ event, fields });
+        },
+      } as unknown as Parameters<typeof createShutdown>[1];
+      const code = await new Promise<number>((resolveCode) => {
+        createShutdown(failing, logger, resolveCode)("SIGINT");
+      });
+      expect(code).toBe(1);
+      expect(
+        events.find((e) => e.event === "cli.shutdown_error")?.fields,
+      ).toEqual({ error: "lock stuck" });
     });
   });
 });
