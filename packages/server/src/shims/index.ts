@@ -24,3 +24,11 @@ export {
   type CronSchedulerOptions,
   type ScheduledHandler,
 } from "./cron";
+export {
+  DurableObject,
+  createDurableObjectNamespace,
+  type DurableObjectClass,
+  type DurableObjectNamespaceOptions,
+  type DurableObjectState,
+  type SqlStorage,
+} from "./durable-object";

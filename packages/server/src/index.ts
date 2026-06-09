@@ -54,6 +54,8 @@ export {
 
 export { installHTMLRewriter } from "./html-rewriter";
 
+export { installRequestDuplex } from "./request-duplex";
+
 export {
   acquireWriterLock,
   DataDirectoryLockedError,
@@ -66,10 +68,21 @@ export {
   createKVNamespace,
   QueueBroker,
   CronScheduler,
+  DurableObject,
+  createDurableObjectNamespace,
   type KVOptions,
   type QueueBrokerOptions,
   type ConsumerOptions,
   type QueueConsumerHandler,
   type CronSchedulerOptions,
   type ScheduledHandler,
+  type DurableObjectClass,
+  type DurableObjectNamespaceOptions,
+  type DurableObjectState,
+  type SqlStorage,
 } from "./shims";
+
+export {
+  resolve,
+  registerCloudflareWorkers,
+} from "./cloudflare-workers-loader";

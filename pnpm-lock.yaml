@@ -168,6 +168,9 @@ importers:
       '@dwk/vc':
         specifier: workspace:*
         version: link:../vc
+      '@dwk/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
       '@dwk/webfinger':
         specifier: workspace:*
         version: link:../webfinger
