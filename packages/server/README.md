@@ -104,20 +104,70 @@ Webmention receiver — lives in `src/phase2.integration.test.ts`. The lower-lev
 shim factories (`createD1Database`, `createR2Bucket`, `createKVNamespace`,
 `QueueBroker`, `CronScheduler`) are also exported for bespoke wiring.
 
-Put a reverse proxy (Caddy / nginx / Traefik) in front for TLS; DDoS / rate
-limiting is now your concern, not the platform's. The data directory holds keys
-and pod data — it is created `0700`; back it up.
+## Running it: Docker (primary) or the `dwk-serve` bin
+
+The composition above is a **config module** — the "Worker entry + `wrangler.toml`"
+you'd otherwise write by hand. `examples/composition.mjs` is a runnable reference
+(WebFinger + WebAuthn over the shims); copy and extend it.
+
+**Docker (the recommended self-host path).** A multi-stage `Dockerfile` builds an
+esbuild single-file bundle (the `cloudflare:workers` import is aliased to the
+Node shim at build time) and ships it on a minimal Node 24 image — non-root, a
+`/data` volume, and a healthcheck:
+
+```sh
+docker build -f packages/server/Dockerfile -t dwk-server .
+docker run -p 3000:3000 -v dwk-data:/data \
+  -e DWK_BASE_URL=https://pod.example dwk-server
+```
+
+Point your config at your own composition by rebuilding the bundle
+(`pnpm --filter @dwk/server bundle <entry>`); put a TLS-terminating reverse proxy
+in front.
+
+**The `bin` (run on the host directly).** `npm i @dwk/server`, write a config
+module, and:
+
+```sh
+dwk-serve ./composition.mjs --port 3000     # or: PORT, HOST, DWK_CONFIG env vars
+```
+
+A reference `systemd` unit (`examples/dwk-serve.service`) hardens it and maps
+SIGTERM to a clean drain. On Node 22 `node:sqlite` prints an experimental
+warning; Node ≥ 24 runs it flag-free.
+
+## Security (you now own what Cloudflare provided)
+
+- **TLS**: identity is HTTPS-rooted, so the host **refuses a non-localhost
+  `http://` `baseUrl`** outside `devMode`. Terminate TLS at a reverse proxy
+  (Caddy / nginx / Traefik) and set `baseUrl` to your public `https://` origin.
+- **DDoS / rate limiting** is now your reverse proxy / firewall's job.
+- **SSRF**: `webmention` / `microsub` fetch remote URLs behind the shared
+  `safe-fetch` guards — but on a home network an SSRF bypass can reach the LAN,
+  so review the allow/deny posture for your network.
+- **Filesystem**: the data directory holds keys and all pod data — it is created
+  `0700`. Mount it as a private volume and back it up.
+
+## Data portability
+
+The shims are mechanical mirrors of the Cloudflare stores, so migration is a copy
+in either direction: **D1 ⇄ `node:sqlite` file**, **R2 ⇄ a directory of objects**,
+**DO-SQLite ⇄ one SQLite file per object id** (`<dataDir>/do/<class>/<id>.sqlite`).
+Moving between Cloudflare and self-hosted is export-then-import, no schema change.
 
 ## Status
 
 **Experimental, unreleased (`0.0.0`).** This package implements the host
 skeleton + adapter + static hosting, the D1/R2/KV storage shims, the
-queue/cron/`waitUntil` lifecycle shims, and the Durable Object emulation
-(`SqlStorage`, per-id single-writer, WebSocket hibernation) — enough to run
-**every** `@dwk` package: the stateless and D1/R2-backed ones (IndieAuth,
-Micropub, Webmention, Microsub, WebSub, WebFinger, host-meta, VC) and the
-Durable-Object-backed ones (`@dwk/webauthn`, `@dwk/solid-pod`). The Docker image
-/ CLI packaging is tracked in the self-hosting issue series.
+queue/cron/`waitUntil` lifecycle shims, the Durable Object emulation
+(`SqlStorage`, per-id single-writer, WebSocket hibernation), and the packaging
+(the `dwk-serve` bin + the esbuild bundle + Dockerfile) — enough to run **every**
+`@dwk` package: the stateless and D1/R2-backed ones (IndieAuth, Micropub,
+Webmention, Microsub, WebSub, WebFinger, host-meta, VC) and the
+Durable-Object-backed ones (`@dwk/webauthn`, `@dwk/solid-pod`). Wiring a Node
+conformance column into `conformance/status.json` and publishing versioned image
+tags are the remaining self-hosting tasks; the package stays experimental until
+its conformance column is green.
 
 ## Requirements
 
