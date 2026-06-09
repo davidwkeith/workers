@@ -156,18 +156,27 @@ importers:
       '@dwk/indieauth':
         specifier: workspace:*
         version: link:../indieauth
+      '@dwk/ldn':
+        specifier: workspace:*
+        version: link:../ldn
       '@dwk/micropub':
         specifier: workspace:*
         version: link:../micropub
       '@dwk/microsub':
         specifier: workspace:*
         version: link:../microsub
+      '@dwk/solid-pod':
+        specifier: workspace:*
+        version: link:../solid-pod
       '@dwk/store':
         specifier: workspace:*
         version: link:../store
       '@dwk/vc':
         specifier: workspace:*
         version: link:../vc
+      '@dwk/wac':
+        specifier: workspace:*
+        version: link:../wac
       '@dwk/webauthn':
         specifier: workspace:*
         version: link:../webauthn
