@@ -56,6 +56,8 @@ export { installHTMLRewriter } from "./html-rewriter";
 
 export { installRequestDuplex } from "./request-duplex";
 
+export { installWebSocketGlobals, WebSocketPair } from "./web-socket";
+
 export {
   acquireWriterLock,
   DataDirectoryLockedError,

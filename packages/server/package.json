@@ -47,7 +47,8 @@
   "dependencies": {
     "@dwk/log": "workspace:*",
     "@worker-tools/html-rewriter": "0.1.0-pre.19",
-    "express": "5.2.1"
+    "express": "5.2.1",
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260530.1",
@@ -65,6 +66,7 @@
     "@dwk/webmention": "workspace:*",
     "@dwk/websub": "workspace:*",
     "@types/express": "5.0.6",
-    "@types/node": "22.18.12"
+    "@types/node": "22.18.12",
+    "@types/ws": "8.18.1"
   }
 }

@@ -25,6 +25,8 @@ import { sendWebResponse, toWebRequest } from "./adapter";
 import { HostExecutionContext, WaitUntilTracker } from "./context";
 import { installHTMLRewriter } from "./html-rewriter";
 import { installRequestDuplex } from "./request-duplex";
+import { installWebSocketGlobals } from "./web-socket";
+import { attachWebSocketUpgrade } from "./web-socket-upgrade";
 import { acquireWriterLock, type ReleaseLock } from "./lock";
 import {
   assertBindings,
@@ -42,6 +44,8 @@ interface ServerParts {
   readonly origin: string;
   readonly release: ReleaseLock | null;
   readonly tracker: WaitUntilTracker;
+  readonly mounts: readonly Mount[];
+  readonly env: Readonly<Record<string, unknown>>;
   readonly queue?: QueueBroker;
   readonly cron?: CronScheduler;
   readonly logger: Logger;
@@ -56,6 +60,8 @@ export class DwkServer {
 
   readonly #release: ReleaseLock | null;
   readonly #tracker: WaitUntilTracker;
+  readonly #mounts: readonly Mount[];
+  readonly #env: Readonly<Record<string, unknown>>;
   readonly #queue?: QueueBroker;
   readonly #cron?: CronScheduler;
   readonly #logger: Logger;
@@ -66,6 +72,8 @@ export class DwkServer {
     this.origin = parts.origin;
     this.#release = parts.release;
     this.#tracker = parts.tracker;
+    this.#mounts = parts.mounts;
+    this.#env = parts.env;
     this.#queue = parts.queue;
     this.#cron = parts.cron;
     this.#logger = parts.logger;
@@ -77,6 +85,15 @@ export class DwkServer {
     this.#cron?.start();
     const server = createHttpServer(this.app);
     this.#httpServer = server;
+    // WebSocket upgrades (e.g. Solid notifications) bypass Express; bridge them
+    // straight to the matching mount's Durable Object.
+    attachWebSocketUpgrade(server, {
+      mounts: this.#mounts,
+      env: this.#env,
+      origin: this.origin,
+      tracker: this.#tracker,
+      logger: this.#logger,
+    });
     await new Promise<void>((resolvePromise, reject) => {
       server.once("error", reject);
       server.listen(port, host, () => {
@@ -125,6 +142,7 @@ export function createServer(config: HostConfig): DwkServer {
   // `duplex` for streaming bodies (DO sub-request forwarding).
   installHTMLRewriter();
   installRequestDuplex();
+  installWebSocketGlobals();
 
   const release =
     (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;
@@ -143,6 +161,8 @@ export function createServer(config: HostConfig): DwkServer {
     origin,
     release,
     tracker,
+    mounts: config.mounts,
+    env: config.env,
     queue: config.queue,
     cron: config.cron,
     logger,
