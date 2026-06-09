@@ -91,7 +91,15 @@ jobs:
 
       - name: Push release tags
         if: ${{ !inputs.dry_run }}
-        # `changeset publish` creates *lightweight* tags, which `--follow-tags`
-        # (annotated-only) silently skips. Push all tags so each release is
-        # tagged on origin.
-        run: git push origin --tags
+        # Do NOT rely on the lightweight tags `changeset publish` creates: in this
+        # setup they do not survive into this step (`git push --tags` reports
+        # "Everything up-to-date" despite changeset logging "New tag: ..."). Instead
+        # re-derive a `name@version` tag for every publishable (non-private) package
+        # from the committed package.json and push. Idempotent: existing tags are
+        # skipped, so only the just-released versions get new tags.
+        run: |
+          for pkg in packages/*/package.json; do
+            tag=$(node -e 'const p=require("./"+process.argv[1]); if(!p.private) console.log(p.name+"@"+p.version)' "$pkg")
+            [ -n "$tag" ] && git tag "$tag" 2>/dev/null || true
+          done
+          git push origin --tags
