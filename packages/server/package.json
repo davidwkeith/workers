@@ -25,21 +25,31 @@
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "dwk-serve": "./bin/dwk-serve.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
     }
   },
   "files": [
     "dist",
+    "bin",
     "src",
+    "Dockerfile",
     "!src/**/*.test.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist dist-bundle"
   },
   "publishConfig": {
     "access": "public"
@@ -52,6 +62,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260530.1",
+    "esbuild": "0.27.3",
     "@dwk/host-meta": "workspace:*",
     "@dwk/indieauth": "workspace:*",
     "@dwk/ldn": "workspace:*",
