@@ -5,3 +5,8 @@ coverage/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# pnpm-only repo: pnpm-lock.yaml is the source of truth. Ignore stray lockfiles
+# from an accidental `npm install` / `yarn`.
+package-lock.json
+yarn.lock

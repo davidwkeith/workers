@@ -1,0 +1,91 @@
+name: Release
+
+# Manual, deliberate publish of the @dwk/* packages to npm.
+#
+# The repo is in Changesets "pre" mode (tag `beta`), so versions are managed
+# locally (`changeset version`) and committed before a release is cut. This
+# workflow does NOT bump versions — it publishes whatever `0.1.0-beta.N` is in
+# the committed package.json files, exactly like running `pnpm release` locally
+# (release:gate -> build -> changeset publish), then pushes the git tags that
+# `changeset publish` creates.
+#
+# Requires repo secret NPM_TOKEN: an npm automation/granular token with
+# publish rights to the @dwk scope (automation tokens bypass 2FA prompts).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + gate only; skip the actual npm publish"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the git tags changeset publish creates
+  id-token: write # npm provenance (OIDC) for published packages
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # NPM_TOKEN lives in the `npm-publish` environment; attach any environment
+    # protection rules (required reviewers, branch restrictions) there.
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so changeset can tag releases
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 24 so the @dwk/server SQLite shims (built-in `node:sqlite`) run
+          # flag-free; matches ci.yml.
+          node-version: 24
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Mirror the ci.yml gate so we never publish an artifact that wouldn't
+      # pass CI. The release gate inside `pnpm release` runs again, but lint /
+      # format / typecheck / test are not part of `pnpm release`.
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (with coverage)
+        run: pnpm test:coverage
+
+      - name: Build
+        run: pnpm build
+
+      - name: Release gate (dry run)
+        if: ${{ inputs.dry_run }}
+        run: pnpm release:gate
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        # `pnpm release` = release:gate -> build -> changeset publish.
+        # changeset publish reads .changeset/pre.json and publishes under the
+        # `beta` dist-tag (not `latest`); @dwk/server is `private` and skipped.
+        run: pnpm release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Push release tags
+        if: ${{ !inputs.dry_run }}
+        run: git push --follow-tags

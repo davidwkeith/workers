@@ -12,16 +12,20 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **20 packages** — the reusable
-libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
+**Status: implemented, unreleased.** There are **20 publishable packages** — the
+reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/store`) and the endpoint/standard
 packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
 `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`) — each carries real
-logic with colocated tests; there are no remaining `501 Not Implemented` stubs.
-All packages still sit at version `0.0.0`: nothing has been published, and the
-hosted conformance suites tracked in `conformance/status.json` are all `pending`
-(see the release gate below). A `spec/packages/atproto-pds.md` spec exists for a
+`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`) — plus a 21st,
+`@dwk/server`, the Node/Express self-hosting host, which is marked
+`"private": true` and is **never published** (it ships only as a Docker image).
+Each carries real logic with colocated tests; there are no remaining `501 Not
+Implemented` stubs. All packages sit at version `0.1.0-beta.0` under Changesets
+**pre mode** (`.changeset/pre.json`, tag `beta`): nothing has been published yet,
+so a release publishes under the `beta` dist-tag, not `latest`. The hosted
+conformance suites tracked in `conformance/status.json` are all `pending` (see
+the release gate below). A `spec/packages/atproto-pds.md` spec exists for a
 planned package not yet scaffolded. When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 

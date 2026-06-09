@@ -1,6 +1,7 @@
 {
   "name": "@dwk/server",
   "version": "0.1.0-beta.0",
+  "private": true,
   "description": "Node.js/Express self-hosting host for the @dwk packages: Express⇄Fetch adapter, static hosting, and Node-backed shims (SQLite/filesystem) for the Cloudflare binding interfaces.",
   "keywords": [
     "self-hosting",
@@ -52,9 +53,6 @@
     "bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "clean": "rm -rf dist dist-bundle"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "dependencies": {
     "@dwk/log": "workspace:*",
