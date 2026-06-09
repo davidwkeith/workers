@@ -66,11 +66,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test (with coverage)
-        run: pnpm test:coverage
-
+      # Build before test: package tests import sibling @dwk/* deps through their
+      # `exports` map (dist/), so the workspace must be built first. Matches the
+      # build -> test order in ci.yml.
       - name: Build
         run: pnpm build
+
+      - name: Test (with coverage)
+        run: pnpm test:coverage
 
       - name: Release gate (dry run)
         if: ${{ inputs.dry_run }}
