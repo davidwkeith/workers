@@ -53,5 +53,13 @@ export async function resolve(
  * "cloudflare:workers"`.
  */
 export function registerCloudflareWorkers(): void {
-  register("./cloudflare-workers-loader.js", import.meta.url);
+  try {
+    register("./cloudflare-workers-loader.js", import.meta.url);
+  } catch {
+    // Best-effort. Environments that resolve `cloudflare:workers` another way —
+    // the esbuild bundle's build-time alias, or a test-runner alias — do not
+    // need the hook, and failing to register one there is benign. A genuine
+    // misconfiguration still surfaces as a clear missing-module error when a
+    // Durable-Object package is first imported.
+  }
 }

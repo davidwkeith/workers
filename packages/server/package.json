@@ -42,6 +42,8 @@
     "dist",
     "bin",
     "src",
+    "examples",
+    "scripts",
     "Dockerfile",
     "!src/**/*.test.ts"
   ],

@@ -1,0 +1,43 @@
+# Reference systemd unit for running @dwk/server directly on a host (the npm/bin
+# path; the Docker image is the primary route). Install to
+# /etc/systemd/system/dwk-serve.service, then: systemctl enable --now dwk-serve
+#
+# Put a TLS-terminating reverse proxy (Caddy/nginx/Traefik) in front; identity is
+# HTTPS-rooted, so DWK_BASE_URL must be your public https origin.
+# @see spec/self-hosting.md §10, §12
+
+[Unit]
+Description=dwk self-hosted pod (@dwk/server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Either run the prebuilt bundle, or the bin against a config module:
+#   ExecStart=/usr/bin/node /opt/dwk/dwk-serve.mjs
+ExecStart=/usr/bin/dwk-serve /etc/dwk/composition.mjs
+Environment=DWK_BASE_URL=https://pod.example
+Environment=DWK_DATA_DIR=/var/lib/dwk
+Environment=PORT=3000
+User=dwk
+Group=dwk
+
+# The data directory holds keys and pod data — private, persisted, backed up.
+StateDirectory=dwk
+StateDirectoryMode=0700
+
+Restart=on-failure
+RestartSec=5
+# A clean SIGTERM lets the host drain in-flight work and release the writer lock.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dwk
+
+[Install]
+WantedBy=multi-user.target

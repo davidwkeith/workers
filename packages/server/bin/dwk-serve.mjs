@@ -6,7 +6,9 @@
 import { main } from "../dist/cli.js";
 
 const write = (stream) => (event, fields) =>
-  stream.write(`dwk-serve ${event}${fields ? ` ${JSON.stringify(fields)}` : ""}\n`);
+  stream.write(
+    `dwk-serve ${event}${fields ? ` ${JSON.stringify(fields)}` : ""}\n`,
+  );
 
 const logger = {
   debug: () => {},

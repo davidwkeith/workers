@@ -3,13 +3,20 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/.wrangler/**"],
+    ignores: [
+      "**/dist/**",
+      "**/dist-bundle/**",
+      "**/coverage/**",
+      "**/node_modules/**",
+      "**/.wrangler/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Node build/CI scripts: plain ESM run by `node`, not part of the TS build.
-    files: ["scripts/**/*.mjs"],
+    // Plain-ESM Node scripts run by `node`, not part of the TS build: CI/build
+    // scripts, the `dwk-serve` bin, and the self-host config examples.
+    files: ["**/*.mjs"],
     languageOptions: {
       globals: {
         process: "readonly",

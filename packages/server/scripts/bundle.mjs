@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
 
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const entry = process.argv[2] ?? resolve(pkgRoot, "examples/serve.mjs");
-const outfile = process.argv[3] ?? resolve(pkgRoot, "dist-bundle/dwk-serve.mjs");
+const outfile =
+  process.argv[3] ?? resolve(pkgRoot, "dist-bundle/dwk-serve.mjs");
 
 await build({
   entryPoints: [entry],

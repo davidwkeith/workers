@@ -70,15 +70,27 @@ export async function loadConfig(configPath: string): Promise<HostConfig> {
   return config;
 }
 
-/** Install graceful-shutdown handlers that close `server` then exit. */
-function installSignals(server: DwkServer, logger: Logger): void {
-  const shutdown = (signal: string): void => {
+/**
+ * Build the shutdown handler: log the signal, close the server, and exit `0`
+ * (or `1` if close throws). `exit` is injectable for tests.
+ */
+export function createShutdown(
+  server: DwkServer,
+  logger: Logger,
+  exit: (code: number) => void = process.exit,
+): (signal: string) => void {
+  return (signal: string): void => {
     logger.info("cli.shutdown", { signal });
     server
       .close()
-      .then(() => process.exit(0))
-      .catch(() => process.exit(1));
+      .then(() => exit(0))
+      .catch(() => exit(1));
   };
+}
+
+/** Install graceful-shutdown handlers that close `server` then exit. */
+function installSignals(server: DwkServer, logger: Logger): void {
+  const shutdown = createShutdown(server, logger);
   process.once("SIGTERM", () => shutdown("SIGTERM"));
   process.once("SIGINT", () => shutdown("SIGINT"));
 }
