@@ -32,6 +32,7 @@ notification on publish. Includes documented Bridgy Fed federation support.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - D1: `WEBMENTION_INBOX`
 
 ```bash

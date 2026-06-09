@@ -36,6 +36,7 @@ Serves actor documents, collection pages, and NodeInfo for fediverse discovery.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - DO: `ActivityPubObject` (useSQLite)
 - Compatibility flags: `nodejs_compat`
 

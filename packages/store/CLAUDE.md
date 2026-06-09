@@ -35,6 +35,7 @@ orphan-outbox GC pattern for safe blob cleanup.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - DO: `StoreTestObject` (useSQLite)
 - R2: `BLOBS`
 - D1: `GC_DB`

@@ -33,6 +33,7 @@ multicodec encoding, and XSD datetime utilities.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - D1: `VC_STATUS_DB`
 - Bindings: `VC_SIGNING_KEY` (test key)
 

@@ -36,6 +36,7 @@ OAuth 2.0 bearer tokens (not DPoP), per-module scope enforcement, public
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - DO: `RemoteStorageObject` (useSQLite)
 - R2: `BLOBS`
 - D1: `GC_DB`

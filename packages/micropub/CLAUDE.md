@@ -31,6 +31,7 @@ Requires IndieAuth access tokens with scope-based authorization — `create`,
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - D1: `MICROPUB_DB`, `AUTH_DB`
 - R2: `MEDIA`
 - Bindings: `TOKEN_SIGNING_KEY` (test key)

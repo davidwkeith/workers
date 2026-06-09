@@ -32,6 +32,7 @@ algorithm support (ES256, ES384, RS256, PS256).
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - DO: `WebAuthnObject` (useSQLite)
 - Compatibility flags: `nodejs_compat`
 

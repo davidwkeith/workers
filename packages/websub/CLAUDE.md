@@ -34,6 +34,7 @@ publish-ping entry point for atomicity with Anglesite site builds.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - D1: `WEBSUB_DB`
 
 ```bash

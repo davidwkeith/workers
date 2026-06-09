@@ -31,6 +31,7 @@ tokens, and audience restriction via RFC 8707 resource indicators.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - D1: `AUTH_DB`
 - Bindings: `TOKEN_SIGNING_KEY` (test key)
 

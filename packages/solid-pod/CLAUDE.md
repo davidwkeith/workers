@@ -41,6 +41,7 @@ complex package in the monorepo.
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
+
 - DO: `SolidPodObject` (useSQLite)
 - R2: `BLOBS`
 - D1: `GC_DB`
