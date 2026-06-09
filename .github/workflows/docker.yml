@@ -7,6 +7,14 @@ name: Docker image
 # so the Dockerfile can be validated on demand.
 
 on:
+  # Build-only validation when the image inputs change, so a Dockerfile/bundle
+  # break is caught on the PR (this workflow otherwise only runs on release).
+  pull_request:
+    paths:
+      - "packages/server/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/docker.yml"
   release:
     types: [published]
   workflow_dispatch:
