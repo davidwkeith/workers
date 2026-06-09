@@ -1,6 +1,6 @@
 {
   "name": "@dwk/rdf",
-  "version": "0.0.0",
+  "version": "0.1.0-beta.0",
   "description": "Thin Turtle/JSON-LD parse and serialize layer over N3.js. Cross-standard reusable.",
   "keywords": [
     "rdf",
