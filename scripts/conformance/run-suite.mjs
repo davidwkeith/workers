@@ -81,9 +81,24 @@ function main() {
       ? rest[targetFlagIndex + 1]
       : env[`${standard.toUpperCase()}_TARGET`];
 
+  // Which conformance column the result is recorded into: the primary Cloudflare
+  // target, or the self-hosted Node host (a deployed @dwk/server instance).
+  const targetIdFlagIndex = rest.indexOf("--target-id");
+  const targetId =
+    targetIdFlagIndex !== -1
+      ? rest[targetIdFlagIndex + 1]
+      : (env.CONFORMANCE_TARGET_ID ?? "cloudflare");
+  const column =
+    targetId === "cloudflare"
+      ? '"<suite>"'
+      : `"<suite>" -> targets -> "${targetId}"`;
+
   const suite = SUITES[standard];
   stdout.write(`Conformance: ${suite.package} (${suite.suites.join(", ")})\n`);
-  stdout.write(`Reference: ${suite.docs}\n\n`);
+  stdout.write(`Reference: ${suite.docs}\n`);
+  stdout.write(
+    `Recording column: ${targetId} (status.json suite ${column})\n\n`,
+  );
 
   if (!target) {
     stdout.write(

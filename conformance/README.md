@@ -13,13 +13,38 @@ A single source of truth for every workspace package:
 "@dwk/micropub": {
   "standard": "Micropub",
   "suites": {
-    "micropub.rocks": { "status": "pending", "report": null, "lastRun": null },
+    "micropub.rocks": {
+      "status": "pending", "report": null, "lastRun": null,
+      "targets": { "node": { "status": "pending", "report": null, "lastRun": null } },
+    },
   },
-  "integration": { "status": "pending", "cases": [] },
+  "integration": {
+    "status": "pending", "cases": [],
+    "targets": { "node": { "status": "passing" } },
+  },
 },
 ```
 
 `status` is one of `pending`, `failing`, `passing`, `not-applicable`.
+
+## Targets: Cloudflare (primary) and the Node self-host
+
+Conformance is tracked per **target**, declared at the top of `status.json`:
+
+- **`cloudflare`** — Cloudflare Workers, the primary, recommended,
+  conformance-certified target. The flat `status` on each suite/integration is
+  this target.
+- **`node`** — the self-hosted Node/Express host (the `@dwk/server` Docker image
+  or `dwk-serve` bin). Recorded in the optional `targets.node` slot on a suite or
+  integration block, plus the `@dwk/server` package's own row.
+
+The Node host's **integration lifecycle is already green** for every package it
+brings up end to end (the `@dwk/server` `phase2`–`phase5` tests), so those carry
+`integration.targets.node = "passing"`. The **hosted suites** (micropub.rocks,
+etc.) against a deployed Node host stay `pending` until a public `@dwk/server`
+target is wired in — record them with
+`run-suite.mjs <standard> --target <url> --target-id node`. The gate checks every
+target's status, so a stable package must be green on each target it declares.
 
 ## The gate
 
