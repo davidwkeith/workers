@@ -1,5 +1,16 @@
 # @dwk/remotestorage
 
+## 0.1.0-beta.1
+
+### Patch Changes
+
+- 25d9cec: Coordinated beta iteration: roll all published packages to the next prerelease
+  (`0.1.0-beta.1`). No public API changes.
+- Updated dependencies [25d9cec]
+  - @dwk/log@0.1.0-beta.1
+  - @dwk/store@0.1.0-beta.1
+  - @dwk/webfinger@0.1.0-beta.1
+
 ## 0.1.0-beta.0
 
 ### Minor Changes

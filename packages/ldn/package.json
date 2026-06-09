@@ -1,6 +1,6 @@
 {
   "name": "@dwk/ldn",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Linked Data Notifications (W3C LDN) primitives: inbox discovery, notification validation, and listing. RDF-only, protocol-agnostic.",
   "keywords": [
     "linked-data-notifications",
