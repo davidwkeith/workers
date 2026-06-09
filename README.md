@@ -13,17 +13,21 @@ publishing/interaction today, a [Solid](https://solidproject.org/) Pod data
 vault next — running serverless on infrastructure the user controls.
 
 There is **no hosted product and no central server.** A developer can
-`npm install` any of these packages, compose them into a single Worker behind
-one domain, and deploy to a user's account. [Anglesite](https://anglesite.app)
-is the first consumer; every package must also stand alone for any third-party
-developer.
+`npm install` any of these packages and compose them into a single Worker behind
+one domain — then deploy to a user's **own** Cloudflare account, or self-host the
+same packages on a box the user owns via the `@dwk/server` Docker image /
+`dwk-serve` bin (see [Running it](#running-it)). Either way the data and keys
+live only on infrastructure the user controls.
+[Anglesite](https://anglesite.app) is the first consumer; every package must
+also stand alone for any third-party developer.
 
 ## Why
 
 Owning your internet presence across open protocols today means either trusting
-a hosted service or babysitting a server. These packages remove that choice:
-the data and keys live only on infrastructure the user owns, and the runtime is
-serverless edge compute that scales to zero.
+a hosted service or babysitting a server. These packages remove that choice: the
+data and keys live only on infrastructure the user owns — serverless edge compute
+that scales to zero on Cloudflare, or a single self-hosted process on a box of
+their own.
 
 ## Packages
 
