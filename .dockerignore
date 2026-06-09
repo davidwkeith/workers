@@ -1,0 +1,10 @@
+# Keep the Docker build context small and reproducible: install + build happen
+# inside the image (see packages/server/Dockerfile).
+**/node_modules
+**/dist
+**/dist-bundle
+**/coverage
+.git
+**/*.log
+.changeset/*.md
+**/.DS_Store
