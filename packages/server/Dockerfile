@@ -15,8 +15,10 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /repo
 RUN corepack enable
 COPY . .
+# Build all workspace packages (the bundle resolves @dwk/* deps from their dist),
+# then bundle @dwk/server into the single-file image payload.
 RUN pnpm install --frozen-lockfile \
- && pnpm --filter @dwk/server build \
+ && pnpm build \
  && pnpm --filter @dwk/server bundle
 
 FROM node:24-bookworm-slim AS runtime
@@ -26,7 +28,9 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=builder /repo/packages/server/dist-bundle/dwk-serve.mjs ./dwk-serve.mjs
 # The data dir holds keys and all pod data — mount a volume and keep it private.
-RUN useradd --system --uid 10001 --home-dir /app dwk \
+# Deterministic uid/gid (10001) for predictable ownership of the mounted volume.
+RUN groupadd --gid 10001 dwk \
+ && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin dwk \
  && mkdir -p /data \
  && chown -R dwk:dwk /app /data \
  && chmod 700 /data
