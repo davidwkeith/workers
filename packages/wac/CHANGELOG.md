@@ -1,5 +1,14 @@
 # @dwk/wac
 
+## 0.1.0-beta.2
+
+### Patch Changes
+
+- Coordinated beta iteration: roll all published packages to the next prerelease
+  (`0.1.0-beta.2`). No public API changes.
+- Updated dependencies
+  - @dwk/rdf@0.1.0-beta.2
+
 ## 0.1.0-beta.1
 
 ### Patch Changes

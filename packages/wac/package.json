@@ -1,6 +1,6 @@
 {
   "name": "@dwk/wac",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "Web Access Control evaluation (effective-ACL walk, Append vs Write). Solid-specific helper.",
   "keywords": [
     "web-access-control",
