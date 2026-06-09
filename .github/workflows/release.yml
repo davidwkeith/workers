@@ -31,6 +31,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # NPM_TOKEN lives in the `npm-publish` environment; attach any environment
+    # protection rules (required reviewers, branch restrictions) there.
+    environment: npm-publish
     steps:
       - uses: actions/checkout@v4
         with:
