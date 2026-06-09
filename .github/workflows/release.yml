@@ -82,8 +82,10 @@ jobs:
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
         # `pnpm release` = release:gate -> build -> changeset publish.
-        # changeset publish reads .changeset/pre.json and publishes under the
-        # `beta` dist-tag (not `latest`); @dwk/server is `private` and skipped.
+        # NOTE: although we're in pre mode (tag `beta`), changeset publishes
+        # packages that have never had a stable release to the `latest` dist-tag,
+        # not `beta` — so until a 1.0.0 ships, `latest` tracks the newest beta and
+        # plain `npm i @dwk/<pkg>` installs it. @dwk/server is `private` and skipped.
         run: pnpm release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
