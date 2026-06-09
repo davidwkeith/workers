@@ -54,9 +54,6 @@
     "typecheck": "tsc -p tsconfig.json",
     "clean": "rm -rf dist dist-bundle"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "dependencies": {
     "@dwk/log": "workspace:*",
     "@worker-tools/html-rewriter": "0.1.0-pre.19",
