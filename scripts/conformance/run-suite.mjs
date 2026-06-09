@@ -85,9 +85,9 @@ function main() {
   // target, or the self-hosted Node host (a deployed @dwk/server instance).
   const targetIdFlagIndex = rest.indexOf("--target-id");
   const targetId =
-    targetIdFlagIndex !== -1
-      ? rest[targetIdFlagIndex + 1]
-      : (env.CONFORMANCE_TARGET_ID ?? "cloudflare");
+    (targetIdFlagIndex !== -1 ? rest[targetIdFlagIndex + 1] : undefined) ||
+    env.CONFORMANCE_TARGET_ID ||
+    "cloudflare";
   const column =
     targetId === "cloudflare"
       ? '"<suite>"'
