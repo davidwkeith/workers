@@ -48,25 +48,45 @@ class Counter extends DurableObject {
   }
 }
 
-/** A fake hibernatable WebSocket recording listeners so close can be fired. */
-function fakeWebSocket(): WebSocket & { fire(type: string): void } {
-  const listeners = new Map<string, Array<() => void>>();
+type Listener = (event: Event) => void;
+
+/** A fake hibernatable WebSocket so close/error/message events can be fired. */
+function fakeWebSocket(): WebSocket & {
+  fire(type: string, props?: Record<string, unknown>): void;
+} {
+  const listeners = new Map<string, Listener[]>();
   return {
-    addEventListener(type: string, cb: () => void) {
+    addEventListener(type: string, cb: Listener) {
       const list = listeners.get(type) ?? [];
       list.push(cb);
       listeners.set(type, list);
     },
-    fire(type: string) {
-      for (const cb of listeners.get(type) ?? []) cb();
+    removeEventListener(type: string, cb: Listener) {
+      const list = listeners.get(type);
+      if (list)
+        listeners.set(
+          type,
+          list.filter((x) => x !== cb),
+        );
     },
-  } as unknown as WebSocket & { fire(type: string): void };
+    fire(type: string, props: Record<string, unknown> = {}) {
+      const event = Object.assign(new Event(type), props);
+      for (const cb of [...(listeners.get(type) ?? [])]) cb(event);
+    },
+  } as unknown as WebSocket & {
+    fire(type: string, props?: Record<string, unknown>): void;
+  };
 }
 
 /** Exercises the full SqlStorage / state surface so each method is covered. */
 class Kitchen extends DurableObject {
   ready = false;
+  errors = 0;
   readonly #state: DurableObjectState;
+
+  webSocketError(): void {
+    this.errors += 1;
+  }
 
   constructor(state: DurableObjectState, env: unknown) {
     super(state, env);
@@ -148,13 +168,15 @@ class Kitchen extends DurableObject {
       case "/ws": {
         const ws = fakeWebSocket();
         this.#state.acceptWebSocket(ws);
-        const before = this.#state.getWebSockets().length;
-        ws.fire("close");
+        const accepted = this.#state.getWebSockets().length;
+        ws.fire("close", { code: 1000, wasClean: true });
+        const afterClose = this.#state.getWebSockets().length;
+        // An error invokes webSocketError but does not drop the socket.
         const errored = fakeWebSocket();
         this.#state.acceptWebSocket(errored);
-        errored.fire("error");
-        const after = this.#state.getWebSockets().length;
-        return json({ before, after });
+        errored.fire("error", { error: new Error("boom") });
+        const afterError = this.#state.getWebSockets().length;
+        return json({ accepted, afterClose, afterError, errors: this.errors });
       }
       default:
         return new Response("ok");
@@ -278,14 +300,18 @@ describe("Durable Object emulation", () => {
     });
   });
 
-  it("tracks accepted WebSockets and drops them on close/error", async () => {
+  it("drops sockets on close and routes errors to webSocketError", async () => {
     const ns = kitchenNs();
     const res = await ns
       .get(ns.idFromName("k"))
       .fetch(new Request("http://do/ws"));
-    expect((await res.json()) as { before: number; after: number }).toEqual({
-      before: 1,
-      after: 0,
-    });
+    expect(
+      (await res.json()) as {
+        accepted: number;
+        afterClose: number;
+        afterError: number;
+        errors: number;
+      },
+    ).toEqual({ accepted: 1, afterClose: 0, afterError: 1, errors: 1 });
   });
 });

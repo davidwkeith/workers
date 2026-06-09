@@ -36,9 +36,11 @@ lifecycle hooks. `@dwk/server` closes that gap:
   verification, microsub feed discovery) run on Node;
 - **Durable Object emulation** (`createDurableObjectNamespace`): `SqlStorage`
   over `node:sqlite`, one object per id behind a per-id mutex (the single-writer
-  guarantee), with the `cloudflare:workers` import redirected to the shim by a
-  `module.register` loader hook (production) or a Vitest alias (tests) — so
-  `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
+  guarantee) with `blockConcurrencyWhile` gating, plus emulated hibernatable
+  **WebSockets** bridged to real client connections over HTTP `upgrade` (the `ws`
+  library) so Solid notifications work. The `cloudflare:workers` import is
+  redirected to the shim by a `module.register` loader hook (production) or a
+  Vitest alias (tests), so `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
 
 It mirrors how `@dwk/store` confines Cloudflare *storage*; this package confines
 the *Node runtime and the Cloudflare-interface emulation*. The shims live behind
@@ -108,13 +110,14 @@ and pod data — it is created `0700`; back it up.
 
 ## Status
 
-**Experimental, unreleased (`0.0.0`).** This package currently implements the
-host skeleton + adapter + static hosting, the D1/R2/KV storage shims, and the
-queue/cron/`waitUntil` lifecycle shims — enough to run the stateless and
-D1/R2-backed packages (IndieAuth, Micropub, Webmention, Microsub, WebSub,
-WebFinger, host-meta, VC). Durable Object emulation (for `solid-pod` /
-`webauthn`) and the Docker image / CLI are tracked in the self-hosting issue
-series.
+**Experimental, unreleased (`0.0.0`).** This package implements the host
+skeleton + adapter + static hosting, the D1/R2/KV storage shims, the
+queue/cron/`waitUntil` lifecycle shims, and the Durable Object emulation
+(`SqlStorage`, per-id single-writer, WebSocket hibernation) — enough to run
+**every** `@dwk` package: the stateless and D1/R2-backed ones (IndieAuth,
+Micropub, Webmention, Microsub, WebSub, WebFinger, host-meta, VC) and the
+Durable-Object-backed ones (`@dwk/webauthn`, `@dwk/solid-pod`). The Docker image
+/ CLI packaging is tracked in the self-hosting issue series.
 
 ## Requirements
 

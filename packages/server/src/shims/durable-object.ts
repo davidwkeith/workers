@@ -165,12 +165,25 @@ class ShimDurableObjectId {
   }
 }
 
+/** The hibernation overrides a DO class may implement (all optional). */
+interface HibernationHandlers {
+  webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): unknown;
+  webSocketClose?(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+    wasClean: boolean,
+  ): unknown;
+  webSocketError?(ws: WebSocket, error: unknown): unknown;
+}
+
 /** The `DurableObjectState` (`ctx`) a DO instance is constructed with. */
 class ShimDurableObjectState {
   readonly id: ShimDurableObjectId;
   readonly storage: ShimDurableObjectStorage;
   readonly #sockets = new Set<WebSocket>();
   #concurrencyGate: Promise<unknown> = Promise.resolve();
+  #owner?: HibernationHandlers;
 
   constructor(id: ShimDurableObjectId, sqlitePath: string) {
     this.id = id;
@@ -178,6 +191,14 @@ class ShimDurableObjectState {
       mkdirSync(dirname(sqlitePath), { recursive: true });
     }
     this.storage = new ShimDurableObjectStorage(new DatabaseSync(sqlitePath));
+  }
+
+  /**
+   * The owning DO instance, set by the namespace once constructed, so accepted
+   * WebSockets can be dispatched to its hibernation overrides.
+   */
+  _setOwner(owner: HibernationHandlers): void {
+    this.#owner = owner;
   }
 
   /**
@@ -205,11 +226,39 @@ class ShimDurableObjectState {
 
   acceptWebSocket(ws: WebSocket): void {
     this.#sockets.add(ws);
-    // Real DO drops hibernatable sockets on close; track that so the set does
-    // not grow without bound as connections come and go.
-    const cleanup = (): void => void this.#sockets.delete(ws);
+    // The DO drives delivery through the hibernation API, not events: a frame on
+    // an accepted socket invokes its `webSocketMessage` override, an error its
+    // `webSocketError`, and close its `webSocketClose`.
+    const onMessage = (event: Event): void => {
+      const data = (event as unknown as { data: string | ArrayBuffer }).data;
+      void this.#owner?.webSocketMessage?.(ws, data);
+    };
+    const onError = (event: Event): void => {
+      const error = ((event ?? {}) as { error?: unknown }).error;
+      void this.#owner?.webSocketError?.(ws, error);
+    };
+    // Drop the socket on close and detach the listeners, so a closed connection
+    // does not retain this state (and the DO instance) via the socket.
+    const cleanup = (event?: Event): void => {
+      if (!this.#sockets.delete(ws)) return;
+      ws.removeEventListener("message", onMessage);
+      ws.removeEventListener("error", onError);
+      ws.removeEventListener("close", cleanup);
+      const { code, reason, wasClean } = (event ?? {}) as {
+        code?: number;
+        reason?: string;
+        wasClean?: boolean;
+      };
+      void this.#owner?.webSocketClose?.(
+        ws,
+        code ?? 1000,
+        reason ?? "",
+        wasClean ?? true,
+      );
+    };
+    ws.addEventListener("message", onMessage);
+    ws.addEventListener("error", onError);
     ws.addEventListener("close", cleanup);
-    ws.addEventListener("error", cleanup);
   }
 
   getWebSockets(): WebSocket[] {
@@ -316,6 +365,8 @@ class ShimDurableObjectNamespace<
       );
       const state = new ShimDurableObjectState(id, sqlitePath);
       const object = new this.#ctor(state as never, this.#options.env as never);
+      // Let accepted WebSockets reach the instance's hibernation overrides.
+      state._setOwner(object as HibernationHandlers);
       instance = { object, state, chain: Promise.resolve() };
       this.#instances.set(key, instance);
     }
