@@ -208,6 +208,9 @@ both groups in one pass.
 
 ## Conformance & release gate
 
+**For the step-by-step publish runbook (Changesets pre mode, the gated Release
+workflow, verification, and the npm gotchas), see [`RELEASING.md`](./RELEASING.md).**
+
 `conformance/status.json` is the single source of truth for per-package
 conformance + integration status, validated against `conformance/status.schema.json`.
 
