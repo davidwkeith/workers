@@ -3,8 +3,8 @@
 > Composable npm packages that each implement an open web standard, run as
 > [Cloudflare Workers](https://developers.cloudflare.com/workers/), and deploy
 > onto an end user's **own** Cloudflare account — or, for those who'd rather run
-> their own box, a self-hostable **Docker image** (planned; see
-> [Self-hosting](#self-hosting)).
+> their own box, self-host the same packages with the `@dwk/server` Docker image
+> or `dwk-serve` bin (see [Running it](#running-it)).
 
 `@dwk` is an npm scope under which standards-implementing packages live. This
 repository contains the **IndieWeb + Solid cohort**: building blocks that give
@@ -86,24 +86,56 @@ for the full rules.
 > Identity is rooted at the user's domain: the same domain serves the IndieWeb
 > identity (IndieAuth) and the WebID the Pod authenticates against.
 
-## Self-hosting
+## Running it
 
 **Cloudflare first.** Cloudflare Workers is the primary, recommended deployment
-target, and the packages freely assume Workers, Durable Objects, R2, D1, and KV
-primitives.
+target; self-hosting runs the **same protocol logic byte-for-byte** on your own
+box. Pick one:
 
-For users who'd rather run their own server, the same packages are **planned** to
-ship as a self-hostable **Docker image**: a single long-running Node.js process
-(behind [Express](https://expressjs.com/)) that serves the standards endpoints
-**and** static files from one domain. It reuses the protocol logic byte-for-byte
-— no second implementation — and emulates the Cloudflare primitive interfaces on
-**SQLite + the local filesystem** (zero extra services), so the same handlers run
-unchanged. This is a **supported secondary** path, not a separate product.
+### On Cloudflare (primary)
 
-> **Status: proposed, not yet built.** The design is captured in
-> [`spec/self-hosting.md`](spec/self-hosting.md); the `@dwk/server` host package
-> and its Docker image do not exist yet. Tracking:
-> [issue #125](https://github.com/davidwkeith/workers/issues/125).
+`npm install` the packages you want, compose them into one Worker (the
+[composition above](#composition-model)), declare the union of each package's
+`Env` bindings in `wrangler.toml`, and deploy to your own account:
+
+```sh
+npm i @dwk/indieauth @dwk/micropub @dwk/webmention
+# wrangler.toml: a route for your domain + the bindings the packages declare —
+# D1 databases, R2 buckets, KV namespaces, secrets, and (for @dwk/solid-pod /
+# @dwk/webauthn) a [[durable_objects.bindings]] entry + migration.
+npx wrangler deploy
+```
+
+Each package's [spec](spec/packages/) lists the exact bindings it needs; a
+missing binding fails loudly at startup.
+
+### Self-hosted (Node: Docker or the `dwk-serve` bin)
+
+[`@dwk/server`](packages/server/README.md) runs every package on a single
+Node.js/[Express](https://expressjs.com/) process that serves the endpoints
+**and** static files from one domain, emulating the Cloudflare primitives
+(Durable Objects, R2, D1, KV, queues/cron, WebSockets) on **SQLite + the local
+filesystem** — no extra services. Write a composition-root config module (the
+"Worker entry + `wrangler.toml`" you'd otherwise hand-write; see
+[`examples/`](packages/server/examples/)), then either:
+
+```sh
+# Docker (the recommended self-host path):
+docker build -f packages/server/Dockerfile -t dwk-server .
+docker run -p 3000:3000 -v dwk-data:/data \
+  -e DWK_BASE_URL=https://pod.example dwk-server
+
+# …or the bin, to run on the host directly:
+npm i @dwk/server
+dwk-serve ./composition.mjs --port 3000
+```
+
+Put a TLS-terminating reverse proxy (Caddy / nginx / Traefik) in front —
+identity is HTTPS-rooted. The data directory holds keys and all pod data; mount
+it as a private volume (`0700`) and back it up. See the
+[`@dwk/server` README](packages/server/README.md) for the config format,
+security posture, and Cloudflare ⇄ self-host data portability. Design notes:
+[`spec/self-hosting.md`](spec/self-hosting.md).
 
 ## Status
 
@@ -128,7 +160,7 @@ The [`spec/`](spec/) directory holds the technical requirements:
   consistency, runtime budget, security, distribution.
 - [Conformance & testing](spec/conformance-and-testing.md) — the test bars.
 - [Self-hosting](spec/self-hosting.md) — the Cloudflare-first stance and the
-  planned Node/Express + Docker self-host host (design only).
+  Node/Express + Docker self-host host ([`@dwk/server`](packages/server/README.md)).
 - [Open questions](spec/open-questions.md) — deferred decisions.
 - [`spec/packages/`](spec/packages/) — one detailed spec per package.
 
