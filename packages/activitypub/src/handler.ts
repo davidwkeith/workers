@@ -225,6 +225,7 @@ export function createActivityPub(
       const body = JSON.stringify(
         buildActorDocument(iris, resolved.actor, resolved.publicKeyPem, {
           sharedInbox: resolved.sharedInbox,
+          webfinger: resolved.webfinger,
         }),
       );
       return new Response(method === "HEAD" ? null : body, {
@@ -265,6 +266,20 @@ export function createActivityPub(
         emit(resolved, "warn", ActivityPubLogEvent.SignatureRejected, {
           reason: result.reason,
         });
+        // A *temporary* failure — we could not resolve the signer's key (their
+        // server may have been briefly unreachable) — answers 503 + Retry-After
+        // so the peer redelivers later, rather than 401 which signals a
+        // permanent rejection and drops the activity (Mastodon 4.6 behaviour).
+        // Cryptographic/format failures are permanent and stay 401.
+        if (result.reason === "key_unresolved") {
+          return new Response(`invalid_signature: ${result.reason}`, {
+            status: 503,
+            headers: {
+              "content-type": "text/plain; charset=utf-8",
+              "retry-after": "60",
+            },
+          });
+        }
         return text(401, `invalid_signature: ${result.reason}`);
       }
       emit(resolved, "info", ActivityPubLogEvent.SignatureAccepted, {

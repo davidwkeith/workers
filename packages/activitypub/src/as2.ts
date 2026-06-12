@@ -23,8 +23,10 @@ export const PUBLIC_AUDIENCE = "https://www.w3.org/ns/activitystreams#Public";
 
 /**
  * The `@context` an actor document advertises: the AS2 base plus the security
- * vocabulary (so `publicKey` resolves) and the handful of property aliases
- * (`manuallyApprovesFollowers`, `discoverable`) the fediverse expects.
+ * vocabulary (so `publicKey` resolves) and the handful of property aliases the
+ * fediverse expects — `manuallyApprovesFollowers`, `discoverable`, the FEP-2c59
+ * `webfinger` back-link, and the Mastodon 4.6 profile-preference flags
+ * (`showFeatured`, `showMedia`, `showRepliesInMedia`).
  */
 export const ACTOR_CONTEXT: readonly unknown[] = [
   AS2_NS,
@@ -33,6 +35,14 @@ export const ACTOR_CONTEXT: readonly unknown[] = [
     manuallyApprovesFollowers: "as:manuallyApprovesFollowers",
     toot: "http://joinmastodon.org/ns#",
     discoverable: "toot:discoverable",
+    // FEP-2c59: the actor's back-link to its WebFinger `acct:` handle, so a
+    // peer can validate the handle ↔ actor mapping without a reverse lookup.
+    webfinger: "https://purl.archive.org/socialweb/webfinger#webfinger",
+    // Mastodon 4.6 profile-preference federation (the toot namespace): which
+    // profile tabs the owner exposes to followers.
+    showFeatured: "toot:showFeatured",
+    showMedia: "toot:showMedia",
+    showRepliesInMedia: "toot:showRepliesInMedia",
   },
 ];
 
@@ -132,6 +142,16 @@ export interface ActorProfile {
   readonly manuallyApprovesFollowers?: boolean;
   /** Whether the actor opts into discovery/search (Mastodon `toot:discoverable`). */
   readonly discoverable?: boolean;
+  /**
+   * Whether the "featured" tab is shown on the profile (Mastodon 4.6
+   * `toot:showFeatured`). Emitted only when set, so an actor that does not
+   * federate the preference simply omits it.
+   */
+  readonly showFeatured?: boolean;
+  /** Whether the "media" tab is shown on the profile (`toot:showMedia`). Emitted only when set. */
+  readonly showMedia?: boolean;
+  /** Whether replies appear in the "media" tab (`toot:showRepliesInMedia`). Emitted only when set. */
+  readonly showRepliesInMedia?: boolean;
 }
 
 /** Optional extras woven into the actor document. */
@@ -142,6 +162,14 @@ export interface ActorDocumentOptions {
    * when the deployment does not serve one.
    */
   readonly sharedInbox?: string;
+  /**
+   * The actor's canonical WebFinger handle (FEP-2c59), emitted as the
+   * `webfinger` property — e.g. `acct:user@example.com` (an `acct:` prefix is
+   * permitted, as is the bare `user@example.com` form). Lets a peer confirm the
+   * `acct:` ↔ actor mapping without a reverse WebFinger lookup. Omitted when not
+   * supplied.
+   */
+  readonly webfinger?: string;
 }
 
 /**
@@ -177,6 +205,16 @@ export function buildActorDocument(
   if (profile.icon !== undefined) {
     doc.icon = { type: "Image", url: profile.icon };
   }
+  // Mastodon 4.6 profile-preference federation: only the flags the owner set.
+  if (profile.showFeatured !== undefined) {
+    doc.showFeatured = profile.showFeatured;
+  }
+  if (profile.showMedia !== undefined) doc.showMedia = profile.showMedia;
+  if (profile.showRepliesInMedia !== undefined) {
+    doc.showRepliesInMedia = profile.showRepliesInMedia;
+  }
+  // FEP-2c59 back-link to the actor's WebFinger handle.
+  if (options.webfinger !== undefined) doc.webfinger = options.webfinger;
   if (options.sharedInbox !== undefined) {
     doc.endpoints = { sharedInbox: options.sharedInbox };
   }

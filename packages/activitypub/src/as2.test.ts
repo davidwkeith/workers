@@ -66,6 +66,29 @@ describe("buildActorDocument", () => {
       sharedInbox: "https://example.com/inbox",
     });
   });
+
+  it("emits the FEP-2c59 webfinger back-link when supplied", () => {
+    const doc = buildActorDocument(IRIS, { username: "bob" }, "PEM", {
+      webfinger: "acct:bob@example.com",
+    });
+    expect(doc.webfinger).toBe("acct:bob@example.com");
+  });
+
+  it("federates only the profile-preference flags that are set", () => {
+    const doc = buildActorDocument(
+      IRIS,
+      { username: "bob", showFeatured: true, showRepliesInMedia: false },
+      "PEM",
+    );
+    expect(doc.showFeatured).toBe(true);
+    expect(doc.showRepliesInMedia).toBe(false);
+    // An unset flag is omitted entirely rather than defaulted.
+    expect(doc.showMedia).toBeUndefined();
+    // A bare actor (no flags, no handle) carries none of these properties.
+    const bare = buildActorDocument(IRIS, { username: "bob" }, "PEM");
+    expect(bare.webfinger).toBeUndefined();
+    expect(bare.showFeatured).toBeUndefined();
+  });
 });
 
 describe("collections", () => {
