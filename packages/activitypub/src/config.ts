@@ -51,6 +51,15 @@ export interface ActivityPubConfig {
   readonly actor: ActorProfile;
 
   /**
+   * The domain used in the actor's WebFinger handle (`<username>@<domain>`),
+   * federated as the FEP-2c59 `webfinger` property on the actor document.
+   * Defaults to the host of {@link baseUrl}. Override when the handle domain
+   * differs from the actor-URL host (e.g. handles live on the apex while the
+   * actor is served from a subdomain).
+   */
+  readonly acctDomain?: string;
+
+  /**
    * PEM-encoded SPKI **public** key, published inline in the actor document so
    * peers can verify this actor's outbound signatures.
    */
@@ -125,6 +134,8 @@ export interface ResolvedConfig {
   readonly baseUrl: string;
   readonly actor: ActorProfile;
   readonly iris: ActorIris;
+  /** The actor's canonical WebFinger handle, `acct:<username>@<domain>` (FEP-2c59). */
+  readonly webfinger: string;
   /** Instance-level shared inbox IRI, or `undefined` when not served. */
   readonly sharedInbox?: string;
   readonly publicKeyPem: string;
@@ -267,11 +278,17 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   const fetchImpl = config.fetch ?? fetch;
   const sharedInbox =
     (config.sharedInbox ?? true) ? `${baseUrl}/inbox` : undefined;
+  // FEP-2c59 handle: the WebFinger `acct:` URI for this actor. The domain
+  // defaults to the actor-URL host but may be overridden when handles live on a
+  // different domain than the actor is served from.
+  const acctDomain = config.acctDomain ?? new URL(baseUrl).host;
+  const webfinger = `acct:${config.actor.username}@${acctDomain}`;
 
   return {
     baseUrl,
     actor: config.actor,
     iris: deriveIris(baseUrl, config.actor.username),
+    webfinger,
     sharedInbox,
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,

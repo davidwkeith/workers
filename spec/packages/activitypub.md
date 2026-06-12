@@ -36,6 +36,14 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   served as `application/activity+json`, content-negotiating to the
   `application/ld+json; profile="…activitystreams"` variant when a strict client
   asks for it (§3.2).
+- The actor document carries a **FEP-2c59 `webfinger` back-link** — its
+  canonical `acct:<username>@<domain>` handle — so a peer can validate the
+  handle ↔ actor mapping without a reverse lookup. The handle domain defaults to
+  the actor-URL host and is overridable via `acctDomain` config (Mastodon 4.6).
+- When the owner sets them, the actor document federates the Mastodon 4.6
+  **profile-preference flags** `showFeatured` / `showMedia` /
+  `showRepliesInMedia` (toot namespace), advertising which profile tabs are
+  exposed. Unset flags are omitted.
 - Optionally serve and advertise an instance-level **shared inbox** at
   `${baseUrl}/inbox` (§4.1 / §7.1.3) via `endpoints.sharedInbox`, so large peers
   can batch-deliver. Enabled by default; the single actor is the only recipient,
@@ -45,7 +53,11 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 
 - Inbound `POST /inbox`: verify the HTTP signature, dedup by activity `id`, and
   handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `Announce` /
-  `Delete`.
+  `Delete`. A **temporary** signature-verification failure — the signer's key
+  could not be resolved (e.g. their server was briefly unreachable) — answers
+  **`503` + `Retry-After`** so the peer redelivers, rather than `401` which
+  permanently drops the activity (Mastodon 4.6). Cryptographic/format failures
+  stay `401`.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request.
 

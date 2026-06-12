@@ -104,6 +104,23 @@ describe("actor document", () => {
     );
   });
 
+  it("federates the FEP-2c59 webfinger handle derived from the base URL", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    // Host of BASE (`social.example`) + the actor's username.
+    expect(doc.webfinger).toBe(`acct:${config.actor.username}@social.example`);
+  });
+
+  it("honours an explicit acctDomain for the webfinger handle", async () => {
+    const config = makeConfig({ acctDomain: "example.com" });
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    expect(doc.webfinger).toBe(`acct:${config.actor.username}@example.com`);
+  });
+
   it("rejects a write to the actor IRI", async () => {
     const config = makeConfig();
     const handler = createActivityPub(config);
@@ -212,6 +229,49 @@ describe("inbox", () => {
       new Request(`${actorUrl(config)}/inbox`, {
         method: "POST",
         body: JSON.stringify({ type: "Follow" }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("answers 503 + Retry-After when the signer key cannot be resolved", async () => {
+    // A temporary failure (the signer's server was briefly unreachable, so the
+    // key did not resolve) must ask the peer to redeliver, not drop with 401.
+    const config = makeConfig({
+      verifyInboxSignature: () => ({ ok: false, reason: "key_unresolved" }),
+    });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/1",
+          type: "Follow",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("60");
+  });
+
+  it("keeps 401 for a permanent (cryptographic) signature failure", async () => {
+    const config = makeConfig({
+      verifyInboxSignature: () => ({ ok: false, reason: "signature_invalid" }),
+    });
+    const handler = createActivityPub(config);
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-type": "application/activity+json" },
+        body: JSON.stringify({
+          id: "https://remote.example/2",
+          type: "Follow",
+        }),
       }),
       testEnv,
       ctx,
