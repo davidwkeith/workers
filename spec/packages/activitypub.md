@@ -39,7 +39,8 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 - The actor document carries a **FEP-2c59 `webfinger` back-link** — its
   canonical `acct:<username>@<domain>` handle — so a peer can validate the
   handle ↔ actor mapping without a reverse lookup. The handle domain defaults to
-  the actor-URL host and is overridable via `acctDomain` config (Mastodon 4.6).
+  the actor-URL hostname (no port) and is overridable via `acctDomain` config
+  (Mastodon 4.6).
 - When the owner sets them, the actor document federates the Mastodon 4.6
   **profile-preference flags** `showFeatured` / `showMedia` /
   `showRepliesInMedia` (toot namespace), advertising which profile tabs are

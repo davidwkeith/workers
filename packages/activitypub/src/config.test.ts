@@ -52,6 +52,19 @@ describe("resolveConfig defaults and derivation", () => {
     expect(resolved.iris.id).toBe("https://example.com/users/alice");
   });
 
+  it("derives the FEP-2c59 webfinger handle from the baseUrl hostname", () => {
+    expect(resolveConfig(VALID).webfinger).toBe("acct:alice@example.com");
+    // The port is never part of a WebFinger handle, even on a non-standard one.
+    const ported = resolveConfig({
+      ...VALID,
+      baseUrl: "https://example.com:8080",
+    });
+    expect(ported.webfinger).toBe("acct:alice@example.com");
+    // An explicit acctDomain wins over the derived hostname.
+    const override = resolveConfig({ ...VALID, acctDomain: "handles.example" });
+    expect(override.webfinger).toBe("acct:alice@handles.example");
+  });
+
   it("honors explicit overrides", () => {
     const resolved = resolveConfig({
       ...VALID,

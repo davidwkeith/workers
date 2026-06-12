@@ -279,9 +279,10 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   const sharedInbox =
     (config.sharedInbox ?? true) ? `${baseUrl}/inbox` : undefined;
   // FEP-2c59 handle: the WebFinger `acct:` URI for this actor. The domain
-  // defaults to the actor-URL host but may be overridden when handles live on a
-  // different domain than the actor is served from.
-  const acctDomain = config.acctDomain ?? new URL(baseUrl).host;
+  // defaults to the actor-URL hostname (not `host` — a WebFinger handle never
+  // carries a port) but may be overridden when handles live on a different
+  // domain than the actor is served from.
+  const acctDomain = config.acctDomain ?? new URL(baseUrl).hostname;
   const webfinger = `acct:${config.actor.username}@${acctDomain}`;
 
   return {
