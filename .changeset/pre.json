@@ -27,6 +27,7 @@
   "changesets": [
     "activitypub-actor-federation",
     "activitypub-inbox-forwarding-id",
+    "activitypub-mastodon-4-6",
     "activitypub-spec-followups",
     "dpop-hardening-42",
     "dpop-initial",
