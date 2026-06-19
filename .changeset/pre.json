@@ -28,7 +28,6 @@
     "activitypub-actor-federation",
     "activitypub-inbox-forwarding-id",
     "activitypub-spec-followups",
-    "beta-2-tag-verification",
     "dpop-hardening-42",
     "dpop-initial",
     "dpop-server-nonce-99",
