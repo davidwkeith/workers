@@ -77,7 +77,7 @@
     "@dwk/webmention": "workspace:*",
     "@dwk/websub": "workspace:*",
     "@types/express": "5.0.6",
-    "@types/node": "22.18.12",
+    "@types/node": "26.0.0",
     "@types/ws": "8.18.1"
   }
 }
