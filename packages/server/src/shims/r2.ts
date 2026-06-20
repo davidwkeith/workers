@@ -277,12 +277,12 @@ function toNodeStream(value: R2PutValue): Readable {
   }
   if (value instanceof Blob) {
     return Readable.fromWeb(
-      value.stream() as import("node:stream/web").ReadableStream<Uint8Array>,
+      value.stream() as unknown as import("node:stream/web").ReadableStream<Uint8Array>,
     );
   }
   // Web ReadableStream
   return Readable.fromWeb(
-    value as import("node:stream/web").ReadableStream<Uint8Array>,
+    value as unknown as import("node:stream/web").ReadableStream<Uint8Array>,
   );
 }
 
