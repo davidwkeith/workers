@@ -21,11 +21,14 @@ packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
 plus a 22nd, `@dwk/server`, the Node/Express self-hosting host, which is marked
 `"private": true` and is **never published** (it ships only as a Docker image).
 Each carries real logic with colocated tests; there are no remaining `501 Not
-Implemented` stubs. All packages sit at version `0.1.0-beta.0` under Changesets
-**pre mode** (`.changeset/pre.json`, tag `beta`): nothing has been published yet,
-so a release publishes under the `beta` dist-tag, not `latest`. The hosted
-conformance suites tracked in `conformance/status.json` are all `pending` (see
-the release gate below). `@dwk/atproto-pds` is the newest package — a Workers-native
+Implemented` stubs. Versioning is via Changesets **pre mode**
+(`.changeset/pre.json`, tag `beta`); the packages are published to npm as
+`0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds` is
+scaffolded but not yet published). Note that in pre mode, packages with no prior
+stable release publish to the **`latest`** dist-tag, not `beta`, so plain
+`npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
+full release runbook. The hosted conformance suites tracked in
+`conformance/status.json` are all `pending` (see the release gate below). `@dwk/atproto-pds` is the newest package — a Workers-native
 AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
 P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
 neither `@dwk/store` nor `@dwk/rdf`. When changing behaviour, the authoritative

@@ -54,7 +54,9 @@ export function toWebRequest(req: IncomingMessage, origin: string): Request {
   if (!BODILESS_METHODS.has(method.toUpperCase())) {
     // Stream the Node request body through as a Web stream — no buffering.
     // `duplex: "half"` is required when a streaming body is supplied.
-    init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
+    // The `unknown` hop bridges node:stream/web's ReadableStream and the global
+    // one, which @types/node >=24 types as structurally distinct (same runtime).
+    init.body = Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>;
     (init as { duplex?: "half" }).duplex = "half";
   }
 
@@ -102,7 +104,7 @@ export async function sendWebResponse(
   }
 
   const nodeStream = Readable.fromWeb(
-    response.body as import("node:stream/web").ReadableStream<Uint8Array>,
+    response.body as unknown as import("node:stream/web").ReadableStream<Uint8Array>,
   );
   // `pipeline` pipes, awaits completion, and destroys both streams on error,
   // so a client disconnect or upstream error can't leak the source stream.
