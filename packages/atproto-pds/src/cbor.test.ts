@@ -55,4 +55,19 @@ describe("DAG-CBOR", () => {
     const bytes = new Uint8Array([0x01, 0x02]);
     expect(() => decodeCbor(bytes)).toThrow();
   });
+
+  it("rejects truncated input with a clear end-of-input error", () => {
+    // A map header claiming one entry, but no key/value follows.
+    expect(() => decodeCbor(new Uint8Array([0xa1]))).toThrow(
+      /unexpected end of input/,
+    );
+    // A byte string claiming 4 bytes with none present.
+    expect(() => decodeCbor(new Uint8Array([0x44]))).toThrow(
+      /unexpected end of input/,
+    );
+    // Empty input.
+    expect(() => decodeCbor(new Uint8Array([]))).toThrow(
+      /unexpected end of input/,
+    );
+  });
 });

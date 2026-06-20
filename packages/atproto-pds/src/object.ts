@@ -80,9 +80,18 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   readonly #tid = new TidClock();
   #config: ForwardedConfig | null = null;
   #privateKey: CryptoKey | null = null;
+  #initPromise: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: AtprotoPdsEnv) {
     super(state, env);
+    // DO SQLite is opt-in; without it `state.storage.sql` is undefined and every
+    // query would throw an opaque TypeError. Fail loudly with the fix instead.
+    if (!state.storage.sql) {
+      throw new Error(
+        "@dwk/atproto-pds: Durable Object SQLite is not enabled — bind " +
+          "AtprotoRepoObject with `useSQLite: true` (a `new_sqlite_classes` migration)",
+      );
+    }
     this.#sql = state.storage.sql;
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
@@ -105,8 +114,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (!header) {
       return new Response("missing internal config", { status: 500 });
     }
-    this.#config = JSON.parse(header) as ForwardedConfig;
     try {
+      // Parse inside the guard so a corrupt internal header yields a clean,
+      // logged error envelope rather than an unhandled 500.
+      this.#config = JSON.parse(header) as ForwardedConfig;
       await this.#ensureRepo();
       const url = new URL(request.url);
       if (url.pathname === "/.well-known/did.json") {
@@ -127,8 +138,25 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     return this.#config;
   }
 
-  /** Lazily generate the signing key and the genesis (empty) commit. */
+  /**
+   * Lazily generate the signing key and the genesis (empty) commit, exactly
+   * once. DOs interleave concurrent requests at `await` points, so the first
+   * caller's init must complete before any other proceeds — otherwise two
+   * requests could each generate a key and genesis commit and corrupt the repo.
+   * A cached init promise serialises them; a failure clears it so a later
+   * request can retry.
+   */
   async #ensureRepo(): Promise<void> {
+    if (!this.#initPromise) {
+      this.#initPromise = this.#initRepo().catch((error) => {
+        this.#initPromise = null;
+        throw error;
+      });
+    }
+    return this.#initPromise;
+  }
+
+  async #initRepo(): Promise<void> {
     const existing = this.#kvGet("signing_jwk");
     if (existing) return;
     const pair = await generateSigningKey();
@@ -496,6 +524,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #uploadBlob(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
+    // Reject an oversized upload by its declared length *before* buffering it,
+    // so a hostile Content-Length cannot push the DO past its 128 MB ceiling.
+    const declared = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > this.#cfg.maxBlobSizeBytes) {
+      throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");
+    }
     const bytes = new Uint8Array(await request.arrayBuffer());
     if (bytes.length > this.#cfg.maxBlobSizeBytes) {
       throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");

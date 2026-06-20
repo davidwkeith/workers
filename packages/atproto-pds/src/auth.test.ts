@@ -39,6 +39,15 @@ describe("session JWTs", () => {
     expect(await verifyJwt(SECRET, "not.a.jwt")).toBeNull();
     expect(await verifyJwt(SECRET, "onlyonepart")).toBeNull();
   });
+
+  it("returns null (not a thrown error) for an invalid-base64 signature", async () => {
+    const token = await signJwt(SECRET, claims());
+    const [header, payload] = token.split(".");
+    // `@@@@` is not valid base64url; the decode must be caught, not propagated.
+    await expect(
+      verifyJwt(SECRET, `${header}.${payload}.@@@@`),
+    ).resolves.toBeNull();
+  });
 });
 
 describe("constantTimeEqual", () => {

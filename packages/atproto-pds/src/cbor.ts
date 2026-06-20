@@ -164,17 +164,29 @@ interface Reader {
   pos: number;
 }
 
+/** Assert at least `n` more bytes are available before reading them. */
+function need(reader: Reader, n: number): void {
+  if (reader.pos + n > reader.bytes.length) {
+    throw new Error("dag-cbor: unexpected end of input");
+  }
+}
+
 function readUint(reader: Reader, info: number): number {
   if (info < 24) return info;
   const { bytes } = reader;
-  if (info === 24) return bytes[reader.pos++] as number;
+  if (info === 24) {
+    need(reader, 1);
+    return bytes[reader.pos++] as number;
+  }
   if (info === 25) {
+    need(reader, 2);
     const v =
       ((bytes[reader.pos] as number) << 8) | (bytes[reader.pos + 1] as number);
     reader.pos += 2;
     return v;
   }
   if (info === 26) {
+    need(reader, 4);
     const v =
       (bytes[reader.pos] as number) * 0x1000000 +
       ((bytes[reader.pos + 1] as number) << 16) +
@@ -184,6 +196,7 @@ function readUint(reader: Reader, info: number): number {
     return v;
   }
   if (info === 27) {
+    need(reader, 8);
     let v = 0n;
     for (let i = 0; i < 8; i++)
       v = (v << 8n) | BigInt(bytes[reader.pos + i] as number);
@@ -197,6 +210,7 @@ function readUint(reader: Reader, info: number): number {
 }
 
 function readValue(reader: Reader): CborValue {
+  need(reader, 1);
   const initial = reader.bytes[reader.pos++] as number;
   const major = initial >> 5;
   const info = initial & 0x1f;
@@ -207,12 +221,14 @@ function readValue(reader: Reader): CborValue {
       return -1 - readUint(reader, info);
     case MAJOR.bytes: {
       const len = readUint(reader, info);
+      need(reader, len);
       const slice = reader.bytes.slice(reader.pos, reader.pos + len);
       reader.pos += len;
       return slice;
     }
     case MAJOR.string: {
       const len = readUint(reader, info);
+      need(reader, len);
       const slice = reader.bytes.slice(reader.pos, reader.pos + len);
       reader.pos += len;
       return textDecoder.decode(slice);
@@ -249,6 +265,7 @@ function readValue(reader: Reader): CborValue {
       if (info === 21) return true;
       if (info === 22) return null;
       if (info === 27) {
+        need(reader, 8);
         const view = new DataView(
           reader.bytes.buffer,
           reader.bytes.byteOffset + reader.pos,

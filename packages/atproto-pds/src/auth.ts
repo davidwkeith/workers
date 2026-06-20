@@ -79,21 +79,27 @@ export async function verifyJwt(
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [header, payload, sig] = parts as [string, string, string];
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    await hmacKey(secret),
-    base64urlDecode(sig) as BufferSource,
-    encoder.encode(`${header}.${payload}`) as BufferSource,
-  );
-  if (!valid) return null;
-  let claims: SessionClaims;
+  // A malformed signature/payload (e.g. invalid base64) must read as an invalid
+  // token — `atob` throws on bad input, so the whole verify path is guarded and
+  // any failure maps to `null` (unauthorized), never a 500.
   try {
-    claims = JSON.parse(new TextDecoder().decode(base64urlDecode(payload)));
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      await hmacKey(secret),
+      base64urlDecode(sig) as BufferSource,
+      encoder.encode(`${header}.${payload}`) as BufferSource,
+    );
+    if (!valid) return null;
+    const claims = JSON.parse(
+      new TextDecoder().decode(base64urlDecode(payload)),
+    ) as SessionClaims;
+    if (typeof claims.exp !== "number" || claims.exp * 1000 < now()) {
+      return null;
+    }
+    return claims;
   } catch {
     return null;
   }
-  if (typeof claims.exp !== "number" || claims.exp * 1000 < now()) return null;
-  return claims;
 }
 
 /**

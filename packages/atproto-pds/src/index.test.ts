@@ -267,6 +267,26 @@ describe("AT Protocol PDS", () => {
     ]);
   });
 
+  it("rejects an oversized blob by its declared Content-Length", async () => {
+    const host = "bigblob.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxBlobSizeBytes: 4,
+    });
+    const token = await login(handler, host);
+    const res = await call(handler, host, "/xrpc/com.atproto.repo.uploadBlob", {
+      raw: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+      contentType: "application/octet-stream",
+      token,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "BlobTooLarge",
+    });
+  });
+
   it("resolves its own handle and describes the repo", async () => {
     const host = "resolve.example";
     const handler = pds(host);
