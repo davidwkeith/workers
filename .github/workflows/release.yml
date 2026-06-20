@@ -35,15 +35,15 @@ jobs:
     # protection rules (required reviewers, branch restrictions) there.
     environment: npm-publish
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history so changeset can tag releases
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           # Node 24 so the @dwk/server SQLite shims (built-in `node:sqlite`) run
           # flag-free; matches ci.yml.
