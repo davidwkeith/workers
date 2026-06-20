@@ -190,6 +190,25 @@
         }
       }
     },
+    "@dwk/atproto-pds": {
+      "standard": "AT Protocol",
+      "suites": {
+        "atproto-interop": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [
+          "createSession authenticates the account and rejects bad passwords",
+          "create/get/list/put/delete record lifecycle commits and reads back",
+          "uploadBlob stores by raw CID and getBlob serves it",
+          "getRepo exports a CAR whose root commit verifies against the did:web key"
+        ]
+      }
+    },
     "@dwk/vc": {
       "standard": "Verifiable Credentials",
       "suites": {

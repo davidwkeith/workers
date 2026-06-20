@@ -1,0 +1,167 @@
+/**
+ * Configuration, the declared Cloudflare `Env` fragment, and config resolution
+ * for `@dwk/atproto-pds`.
+ *
+ * Per the composition contract the package never reads the global environment
+ * directly: the account identity, credentials, and limits are all passed into
+ * {@link createAtprotoPds}, so the PDS can be instantiated multiple times and
+ * unit-tested in isolation. The repository signing key is **not** configured —
+ * it is generated inside and never leaves the per-account Durable Object — so
+ * key custody stays as tight as possible. Missing bindings fail loudly.
+ */
+
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
+
+import { didWebFromHost, isValidHandle } from "./identity";
+import type { AtprotoRepoObject } from "./object";
+
+/** Cloudflare bindings required by the PDS handler and repository DO. */
+export interface AtprotoPdsEnv {
+  /**
+   * Durable Object namespace for the per-account repository class
+   * ({@link AtprotoRepoObject}): the single authority for the MST, the signed
+   * commit chain, the repository signing key, and session issuance.
+   */
+  readonly REPO: DurableObjectNamespace<AtprotoRepoObject>;
+  /** R2 bucket holding blob bodies (`uploadBlob` → `getBlob`). */
+  readonly BLOBS: R2Bucket;
+}
+
+/** Configuration passed to {@link createAtprotoPds}. */
+export interface AtprotoPdsConfig {
+  /**
+   * The PDS origin / identity root, e.g. `https://alice.example.com`. The
+   * account's `did:web`, handle, and the `serviceEndpoint` in its DID document
+   * all derive from it. No trailing slash.
+   */
+  readonly baseUrl: string;
+
+  /**
+   * The account handle (a domain name). Defaults to the host of {@link baseUrl}.
+   * Federated apps resolve `at://<handle>` to the account DID.
+   */
+  readonly handle?: string;
+
+  /**
+   * The account DID. Defaults to the `did:web` derived from {@link baseUrl}'s
+   * host, keeping identity at the user's own domain (no PLC directory).
+   */
+  readonly did?: string;
+
+  /**
+   * The account password (a secret binding's value) accepted by
+   * `com.atproto.server.createSession`. Required to issue sessions; omit it for
+   * a read-only deployment that serves the repository but accepts no writes.
+   */
+  readonly password?: string;
+
+  /**
+   * HS256 signing secret for session JWTs (a secret binding's value). Required
+   * whenever {@link password} is set.
+   */
+  readonly jwtSecret?: string;
+
+  /** Access-token lifetime in seconds. Defaults to 7200 (2 hours). */
+  readonly accessTokenTtlSeconds?: number;
+  /** Refresh-token lifetime in seconds. Defaults to 7776000 (90 days). */
+  readonly refreshTokenTtlSeconds?: number;
+  /** Maximum accepted blob size in bytes. Defaults to 5 MiB. */
+  readonly maxBlobSizeBytes?: number;
+
+  /** Injectable clock (epoch ms) for deterministic tests. Defaults to `Date.now`. */
+  readonly now?: () => number;
+  /** Structured-logging seam; defaults to a no-op. */
+  readonly logger?: Logger;
+  /** Metrics seam; defaults to a no-op. */
+  readonly metrics?: Metrics;
+}
+
+/** Fully-resolved configuration with defaults applied. */
+export interface ResolvedConfig {
+  readonly baseUrl: string;
+  readonly host: string;
+  readonly handle: string;
+  readonly did: string;
+  readonly password?: string;
+  readonly jwtSecret?: string;
+  readonly accessTokenTtlSeconds: number;
+  readonly refreshTokenTtlSeconds: number;
+  readonly maxBlobSizeBytes: number;
+  readonly now: () => number;
+  readonly logger: Logger;
+  readonly metrics: Metrics;
+}
+
+/**
+ * Internal header the trusted front door uses to hand the DO the config subset
+ * it needs (identity, credentials, limits). The signing key is never included —
+ * it lives only inside the DO.
+ */
+export const INTERNAL_CONFIG_HEADER = "x-atproto-config";
+
+/** The config subset forwarded to the DO. */
+export interface ForwardedConfig {
+  readonly did: string;
+  readonly handle: string;
+  readonly baseUrl: string;
+  readonly password?: string;
+  readonly jwtSecret?: string;
+  readonly accessTokenTtlSeconds: number;
+  readonly refreshTokenTtlSeconds: number;
+  readonly maxBlobSizeBytes: number;
+}
+
+const DEFAULT_ACCESS_TTL = 7200;
+const DEFAULT_REFRESH_TTL = 90 * 24 * 60 * 60;
+const DEFAULT_MAX_BLOB = 5 * 1024 * 1024;
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+}
+
+/** Apply defaults and derive identity from raw {@link AtprotoPdsConfig}. */
+export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
+  if (!config.baseUrl) {
+    throw new Error("@dwk/atproto-pds: `baseUrl` is required");
+  }
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const host = new URL(baseUrl).host;
+  const handle = config.handle ?? new URL(baseUrl).hostname;
+  if (!isValidHandle(handle)) {
+    throw new Error(`@dwk/atproto-pds: invalid handle \`${handle}\``);
+  }
+  if (config.password && !config.jwtSecret) {
+    throw new Error(
+      "@dwk/atproto-pds: `jwtSecret` is required when `password` is set",
+    );
+  }
+  return {
+    baseUrl,
+    host,
+    handle,
+    did: config.did ?? didWebFromHost(host),
+    password: config.password,
+    jwtSecret: config.jwtSecret,
+    accessTokenTtlSeconds: config.accessTokenTtlSeconds ?? DEFAULT_ACCESS_TTL,
+    refreshTokenTtlSeconds:
+      config.refreshTokenTtlSeconds ?? DEFAULT_REFRESH_TTL,
+    maxBlobSizeBytes: config.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB,
+    now: config.now ?? (() => Date.now()),
+    logger: config.logger ?? noopLogger,
+    metrics: config.metrics ?? noopMetrics,
+  };
+}
+
+/** Build the config subset the front door forwards to the DO. */
+export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
+  return {
+    did: config.did,
+    handle: config.handle,
+    baseUrl: config.baseUrl,
+    ...(config.password ? { password: config.password } : {}),
+    ...(config.jwtSecret ? { jwtSecret: config.jwtSecret } : {}),
+    accessTokenTtlSeconds: config.accessTokenTtlSeconds,
+    refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
+    maxBlobSizeBytes: config.maxBlobSizeBytes,
+  };
+}

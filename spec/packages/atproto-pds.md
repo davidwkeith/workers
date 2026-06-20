@@ -5,15 +5,46 @@
 | **Type** | endpoint + Durable Object |
 | **Ships a DO?** | **yes** — a per-account repository Durable Object |
 | **Standard** | [AT Protocol](https://atproto.com/specs/atp) (Bluesky) — Personal Data Server |
-| **Status** | proposed (honorable mention) — **exploratory / strategic, not a clean fit** — tracked in [#106](https://github.com/davidwkeith/workers/issues/106) |
+| **Status** | **implemented (beta), unreleased** — strategically still an honorable mention; scaffolded in answer to "there are no instances in atproto" — tracked in [#106](https://github.com/davidwkeith/workers/issues/106) |
 
 An AT Protocol **Personal Data Server (PDS)**: the self-hosted home of a user's
 repository in the Bluesky network, rooted at the user's own domain. It belongs
 in the "self-owned web presence" thesis by *intent* — one more network where the
 user is a first-class, self-hosted citizen rather than a tenant — but it is **not
 a W3C/IETF open standard** and its data model diverges sharply from everything
-else in `@dwk`, so this is filed as a **strategic question, not a near-term gap**.
-Read this proposal as "what it would take", with the caveats up front.
+else in `@dwk`. It was originally filed as a strategic question; it is now
+scaffolded because the package is the cleanest expression of the
+[no-instances thesis](https://overreacted.io/there-are-no-instances-in-atproto/):
+identity is a DID the user controls and hosting is a swappable service entry, so
+"which server" is not identity-defining. The caveats below still hold — read them
+before extending it.
+
+## Implementation notes (as built)
+
+The package is built and tested, with deliberate, documented divergences from a
+hosted reference PDS to stay Workers-native and dependency-free:
+
+- **Signing curve is P-256, not K-256.** AT Protocol's cryptography spec admits
+  both; WebCrypto supports P-256 (`p256`, multicodec 0x1200) natively but not
+  secp256k1, so the PDS standardises on P-256 to avoid shipping an elliptic-curve
+  dependency. Signatures are emitted compact (64-byte `r‖s`) and **low-S
+  normalised**. K-256 would need a vendored curve and is deferred.
+- **Identity is `did:web`, not `did:plc`.** The account DID, handle binding
+  (`/.well-known/atproto-did`), and DID document (`/.well-known/did.json`) all
+  live under the user's own origin — no external PLC directory. This is the
+  decision that keeps the package on-thesis.
+- **The MST is rebuilt from the full entry set on each commit.** Because an MST's
+  shape is a pure function of its `{key → value}` entries (a key's layer is fixed
+  by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
+  incremental node splitting and is trivially correct/interoperable. Records live
+  in DO SQLite; node blocks are recomputed for commits and CAR export.
+- **Storage core is self-contained.** DAG-CBOR, CIDv1, the MST, CAR, and commit
+  signing are implemented directly on WebCrypto in this package — it shares
+  neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
+- **Scope is a single-account PDS.** One account per `baseUrl`; sessions
+  authenticate the one owner via a configured password → HS256 access/refresh
+  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) and `did:plc`
+  remain future work.
 
 ## Why it does not fit the way the others do
 

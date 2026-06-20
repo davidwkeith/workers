@@ -51,6 +51,12 @@ importers:
         specifier: workspace:*
         version: link:../log
 
+  packages/atproto-pds:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/dpop: {}
 
   packages/host-meta:

@@ -12,21 +12,23 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **20 publishable packages** — the
+**Status: implemented, unreleased.** There are **21 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/store`) and the endpoint/standard
 packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
 `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`) — plus a 21st,
-`@dwk/server`, the Node/Express self-hosting host, which is marked
+`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`) —
+plus a 22nd, `@dwk/server`, the Node/Express self-hosting host, which is marked
 `"private": true` and is **never published** (it ships only as a Docker image).
 Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. All packages sit at version `0.1.0-beta.0` under Changesets
 **pre mode** (`.changeset/pre.json`, tag `beta`): nothing has been published yet,
 so a release publishes under the `beta` dist-tag, not `latest`. The hosted
 conformance suites tracked in `conformance/status.json` are all `pending` (see
-the release gate below). A `spec/packages/atproto-pds.md` spec exists for a
-planned package not yet scaffolded. When changing behaviour, the authoritative
+the release gate below). `@dwk/atproto-pds` is the newest package — a Workers-native
+AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
+P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
+neither `@dwk/store` nor `@dwk/rdf`. When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
@@ -78,15 +80,19 @@ pushing.
 → **R2** for blob bodies. The IndieWeb trio (`indieauth`, `micropub`,
 `webmention`) is stateless handlers backed by D1 / R2; the packages that ship a
 **Durable Object** are `@dwk/solid-pod` (per-pod), `@dwk/activitypub`
-(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP), and
-`@dwk/store` (the DO-SQLite storage object the others build on).
+(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP),
+`@dwk/atproto-pds` (per-account repository), and `@dwk/store` (the DO-SQLite
+storage object the others build on).
 
 ### Package taxonomy
 
 - **Endpoint / standard packages** — named for the standard:
   `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
   `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`.
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`.
+  `@dwk/atproto-pds` is the strategic outlier: it is the AT Protocol PDS endpoint
+  but shares neither `@dwk/store` nor `@dwk/rdf` (its repository is an MST of
+  DAG-CBOR records), so its storage core is self-contained.
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
   `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`. These MUST stay free of
   IndieWeb/Solid assumptions so future `@dwk` standards adopt them unchanged.
@@ -186,7 +192,7 @@ when adding a package:
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`.
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.
