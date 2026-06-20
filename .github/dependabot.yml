@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # npm/pnpm workspace deps. One grouped PR per week keeps the pnpm-lock.yaml
+  # update in a single changeset (separate per-package PRs were racing the
+  # lockfile and failing `--frozen-lockfile`).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
