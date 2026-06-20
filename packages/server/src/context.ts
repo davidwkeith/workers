@@ -62,4 +62,14 @@ export class HostExecutionContext implements ExecutionContext {
   passThroughOnException(): void {
     // No-op: on Node there is no isolate to pass an exception through to.
   }
+
+  /**
+   * Cloudflare's request-tracing API (added to `ExecutionContext` in newer
+   * `@cloudflare/workers-types`). Unused on the Node host, like `props` and
+   * `passThroughOnException`; accessing it throws so accidental reliance is loud
+   * rather than silently doing nothing.
+   */
+  get tracing(): Tracing {
+    throw new Error("Tracing is not supported on the @dwk/server Node host");
+  }
 }
