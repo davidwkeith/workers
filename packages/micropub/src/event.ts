@@ -60,6 +60,24 @@ function escapeHtml(value: string): string {
 }
 
 /**
+ * Whether a `u-*` value is safe to emit as an `href`. Relative URLs and ordinary
+ * schemes pass; script-bearing schemes (`javascript:`, `data:`, `vbscript:`) are
+ * rejected so a rendered event page can never carry an injected script URL —
+ * defence in depth, even though only the authenticated site owner authors posts.
+ * Whitespace and control characters are stripped before the scheme test because
+ * a browser ignores them when resolving an `href` (e.g. `java\tscript:`).
+ */
+function isSafeUrl(value: string): boolean {
+  // Drop ASCII whitespace/control chars (code point <= 0x20) before testing the
+  // scheme, since a browser ignores them when resolving an href (`java\tscript:`).
+  let stripped = "";
+  for (const ch of value) {
+    if (ch.charCodeAt(0) > 0x20) stripped += ch;
+  }
+  return !/^(?:javascript|data|vbscript):/i.test(stripped);
+}
+
+/**
  * Coerce an mf2 property value to display text. A bare string is itself; a
  * nested object yields its `value` (the mf2 parsed-value convention) or, failing
  * that, the `name` of a nested microformat (e.g. a location `h-card`). Anything
@@ -105,7 +123,8 @@ function renderValue(prefix: Mf2Prefix, key: string, value: unknown): string {
   }
   const escaped = escapeHtml(text);
   if (prefix === "u") {
-    return `<a class="${cls}" href="${escaped}">${escaped}</a>`;
+    const href = isSafeUrl(text) ? escaped : "#";
+    return `<a class="${cls}" href="${href}">${escaped}</a>`;
   }
   if (prefix === "dt") {
     return `<time class="${cls}" datetime="${escaped}">${escaped}</time>`;
@@ -123,7 +142,12 @@ function renderValue(prefix: Mf2Prefix, key: string, value: unknown): string {
  */
 export function renderHEvent(event: Mf2Object): string {
   const parts: string[] = [];
-  for (const [key, values] of Object.entries(event.properties)) {
+  // `?? {}` and the array guard tolerate a malformed/partial mf2 object reaching
+  // this public helper — a missing or non-array property is skipped, not thrown.
+  for (const [key, values] of Object.entries(event.properties ?? {})) {
+    if (!Array.isArray(values)) {
+      continue;
+    }
     const prefix = EVENT_PROPERTY_PREFIX[key] ?? "p";
     for (const value of values) {
       parts.push(renderValue(prefix, key, value));

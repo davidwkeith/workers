@@ -80,15 +80,17 @@ export function createD1Inbox(
       )
       .run()
       // Add the `rsvp` column to inboxes created before RSVP support existed.
-      // A fresh table already has it, so the duplicate-column error is expected
-      // and swallowed; an older table gains the column.
-      .then(() =>
-        db
-          .prepare(`ALTER TABLE ${table} ADD COLUMN rsvp TEXT`)
-          .run()
-          .catch(() => undefined),
-      )
-      .then(() => undefined);
+      // `PRAGMA table_info` is consulted first so a fresh table — already created
+      // with the column — skips the `ALTER` rather than throwing a swallowed
+      // duplicate-column error on every init.
+      .then(async () => {
+        const { results } = await db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all<{ name: string }>();
+        if (!results.some((col) => col.name === "rsvp")) {
+          await db.prepare(`ALTER TABLE ${table} ADD COLUMN rsvp TEXT`).run();
+        }
+      });
     return ready;
   };
 

@@ -26,6 +26,14 @@ export type RsvpValue = (typeof RSVP_VALUES)[number];
 
 const RSVP_VALUE_SET: ReadonlySet<string> = new Set(RSVP_VALUES);
 
+/**
+ * Cap on accumulated `p-rsvp` text. A valid value is a short token
+ * (`interested` is the longest at 10 chars), so this bound is generous while
+ * guarding {@link extractRsvp} — a public entry taking arbitrary HTML — against
+ * an oversized text node ballooning the buffer.
+ */
+const MAX_RSVP_TEXT = 128;
+
 /** Whether `value` (already trimmed/lowercased) is a recognized {@link RsvpValue}. */
 export function isRsvpValue(value: string): value is RsvpValue {
   return RSVP_VALUE_SET.has(value);
@@ -96,7 +104,7 @@ export async function extractRsvp(
         });
       },
       text(chunk) {
-        if (depth > 0) {
+        if (depth > 0 && text.length < MAX_RSVP_TEXT) {
           text += chunk.text;
         }
       },

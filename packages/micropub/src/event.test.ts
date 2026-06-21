@@ -109,6 +109,32 @@ describe("renderHEvent", () => {
     );
   });
 
+  it("neutralizes a script-bearing url scheme in the href", async () => {
+    const html = renderHEvent({
+      type: [H_EVENT],
+      properties: { url: ["javascript:alert(1)"] },
+    });
+    expect(await readProperty(html, "u-url", "href")).toEqual(["#"]);
+    // An ordinary http(s) url is still emitted as-is.
+    const ok = renderHEvent({
+      type: [H_EVENT],
+      properties: { url: ["https://example.com/e"] },
+    });
+    expect(await readProperty(ok, "u-url", "href")).toEqual([
+      "https://example.com/e",
+    ]);
+  });
+
+  it("tolerates a malformed mf2 object without throwing", () => {
+    const bogus = { type: [H_EVENT] } as unknown as Mf2Object;
+    expect(renderHEvent(bogus)).toBe('<div class="h-event"></div>');
+    const nonArray = {
+      type: [H_EVENT],
+      properties: { name: "oops" },
+    } as unknown as Mf2Object;
+    expect(renderHEvent(nonArray)).toBe('<div class="h-event"></div>');
+  });
+
   it("reads a nested location microformat's name", async () => {
     const html = renderHEvent({
       type: [H_EVENT],
