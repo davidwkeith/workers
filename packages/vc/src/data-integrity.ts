@@ -22,14 +22,14 @@
  * @see https://www.w3.org/TR/vc-di-ecdsa/
  */
 
-import { toXsdDateTime } from "./datetime";
-import { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs";
+import { toXsdDateTime } from "./datetime.js";
+import { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs.js";
 import {
   base58btcDecode,
   decodeMultikey,
   encodeMultibaseBase58btc,
   MULTIBASE_BASE58BTC,
-} from "./multibase";
+} from "./multibase.js";
 
 /** A JSON object with string keys — a credential, proof, or proof config. */
 export type JsonObject = { [key: string]: JcsValue | undefined };

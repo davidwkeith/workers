@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createKVNamespace } from "./kv";
+import { createKVNamespace } from "./kv.js";
 import type { KVNamespace } from "@cloudflare/workers-types";
 
 describe("KV → SQLite/memory shim", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { CID, DAG_CBOR_CODEC } from "./cid";
-import { buildMst, keyLayer, walkEntries, type MstEntry } from "./mst";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { buildMst, keyLayer, walkEntries, type MstEntry } from "./mst.js";
 
 async function valueCid(seed: string): Promise<CID> {
   return CID.create(DAG_CBOR_CODEC, new TextEncoder().encode(seed));

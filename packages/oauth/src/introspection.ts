@@ -17,15 +17,15 @@
 
 import { hostFromUrl } from "@dwk/log";
 
-import { OAuthError, oauthErrorResponse } from "./errors";
-import { json, methodNotAllowed, readForm } from "./http";
-import { OAuthLogEvent } from "./log";
+import { OAuthError, oauthErrorResponse } from "./errors.js";
+import { json, methodNotAllowed, readForm } from "./http.js";
+import { OAuthLogEvent } from "./log.js";
 import {
   emit,
   resolveObservability,
   type ObservabilityConfig,
-} from "./observability";
-import type { IntrospectionTokenRecord } from "./store";
+} from "./observability.js";
+import type { IntrospectionTokenRecord } from "./store.js";
 
 /**
  * Authenticates the calling Resource Server / client at a protected endpoint.

@@ -6,8 +6,8 @@ import {
   type VerifiedMention,
   type WebmentionEnv,
   type WebmentionJob,
-} from "./index";
-import type { FetchLike } from "./fetch";
+} from "./index.js";
+import type { FetchLike } from "./fetch.js";
 import type {
   ExecutionContext,
   Message,

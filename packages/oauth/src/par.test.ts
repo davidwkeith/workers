@@ -6,8 +6,8 @@ import {
   requestUriFor,
   PUSHED_REQUEST_URI_PREFIX,
   type PushedAuthorizationRequestConfig,
-} from "./par";
-import type { PushedRequestRecord } from "./store";
+} from "./par.js";
+import type { PushedRequestRecord } from "./store.js";
 
 const ENDPOINT = "https://as.example/par";
 

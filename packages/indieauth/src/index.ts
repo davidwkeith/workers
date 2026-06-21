@@ -17,8 +17,8 @@
  * @packageDocumentation
  */
 
-export { createIndieAuth } from "./handler";
-export type { IndieAuthEnv, IndieAuthHandler } from "./handler";
+export { createIndieAuth } from "./handler.js";
+export type { IndieAuthEnv, IndieAuthHandler } from "./handler.js";
 
 export type {
   IndieAuthConfig,
@@ -28,7 +28,7 @@ export type {
   RedirectUriPolicy,
   ResourceIndicatorPolicy,
   ProfileInfo,
-} from "./config";
+} from "./config.js";
 
 export {
   verifyAccessToken,
@@ -39,7 +39,7 @@ export {
   type VerifyAccessTokenResult,
   type VerifyAccessTokenOptions,
   type AccessTokenFailureReason,
-} from "./token";
+} from "./token.js";
 
 export {
   createIndieAuthStore,
@@ -47,22 +47,22 @@ export {
   type IndieAuthStoreEnv,
   type AuthorizationCodeRecord,
   type IssuedTokenRecord,
-} from "./store";
+} from "./store.js";
 
 export {
   verifyPkce,
   isSupportedChallengeMethod,
   SUPPORTED_CODE_CHALLENGE_METHODS,
   type CodeChallengeMethod,
-} from "./pkce";
+} from "./pkce.js";
 
 export {
   canonicalizeProfileUrl,
   parseRelMeLinks,
   relMeLinksBack,
-} from "./profile";
+} from "./profile.js";
 
-export { buildServerMetadata, type ServerMetadata } from "./metadata";
+export { buildServerMetadata, type ServerMetadata } from "./metadata.js";
 
-export { IndieAuthLogEvent } from "./log";
+export { IndieAuthLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

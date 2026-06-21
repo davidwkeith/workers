@@ -9,7 +9,7 @@
  * is bounded by the number of *pending orphans*, not the number of pods.
  */
 
-import type { OrphanRecord, Store } from "./store";
+import type { OrphanRecord, Store } from "./store.js";
 
 /** Sink the per-pod outbox is drained into (the shared GC tracking store). */
 export interface OrphanSink {

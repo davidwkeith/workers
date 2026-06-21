@@ -19,15 +19,15 @@ import {
   signJwt,
   verifyJwt,
   type SessionClaims,
-} from "./auth";
-import { writeCar, type CarBlock } from "./car";
-import { decodeCbor, encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid";
+} from "./auth.js";
+import { writeCar, type CarBlock } from "./car.js";
+import { decodeCbor, encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 import {
   INTERNAL_CONFIG_HEADER,
   type AtprotoPdsEnv,
   type ForwardedConfig,
-} from "./config";
+} from "./config.js";
 import {
   exportPrivateJwk,
   exportPublicKeyRaw,
@@ -35,18 +35,18 @@ import {
   importPrivateJwk,
   publicKeyMultibase,
   signData,
-} from "./crypto";
-import { buildDidDocument } from "./identity";
-import { buildMst, type MstEntry } from "./mst";
+} from "./crypto.js";
+import { buildDidDocument } from "./identity.js";
+import { buildMst, type MstEntry } from "./mst.js";
 import {
   atUri,
   cborToJson,
   jsonToCbor,
   recordPath,
   type JsonValue,
-} from "./record";
-import { formatCommit } from "./repo";
-import { TidClock } from "./tid";
+} from "./record.js";
+import { formatCommit } from "./repo.js";
+import { TidClock } from "./tid.js";
 import {
   authRequired,
   errorResponse,
@@ -56,7 +56,7 @@ import {
   isValidRecordKey,
   jsonResponse,
   namedError,
-} from "./xrpc";
+} from "./xrpc.js";
 
 const ACCESS_SCOPE = "com.atproto.access";
 const REFRESH_SCOPE = "com.atproto.refresh";

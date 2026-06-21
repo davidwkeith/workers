@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { createSolidPod, type SolidPodEnv } from "./index";
+import { createSolidPod, type SolidPodEnv } from "./index.js";
 
 /**
  * End-to-end tests over the real Worker front door + per-pod Durable Object,

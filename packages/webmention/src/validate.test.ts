@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateWebmentionParams } from "./validate";
+import { validateWebmentionParams } from "./validate.js";
 
 const baseUrl = "https://example.com";
 

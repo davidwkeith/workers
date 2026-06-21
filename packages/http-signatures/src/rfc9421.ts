@@ -10,21 +10,21 @@ import {
   signBytes,
   validateKey,
   verifyBytes,
-} from "./algorithms";
-import { bytesToBase64, utf8 } from "./base64";
-import { deriveComponentValue, derivationContext } from "./components";
+} from "./algorithms.js";
+import { bytesToBase64, utf8 } from "./base64.js";
+import { deriveComponentValue, derivationContext } from "./components.js";
 import {
   parseSignatureHeader,
   parseSignatureInput,
   serializeString,
   type SfBareItem,
-} from "./sf";
+} from "./sf.js";
 import type {
   HttpMessage,
   SignatureAlgorithm,
   SignatureFailureReason,
   VerifyResult,
-} from "./types";
+} from "./types.js";
 
 /** Resolved signing inputs for the RFC 9421 profile. */
 export interface Rfc9421SignParams {

@@ -18,7 +18,7 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 
-import type { Jf2Entry } from "./jf2";
+import type { Jf2Entry } from "./jf2.js";
 
 /** The reserved channel that always exists and cannot be deleted or renamed. */
 export const NOTIFICATIONS_CHANNEL = "notifications";

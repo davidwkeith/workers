@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime";
+import { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime.js";
 
 describe("isValidXsdDateTimeStamp", () => {
   it("accepts well-formed dateTimeStamps with a timezone", () => {

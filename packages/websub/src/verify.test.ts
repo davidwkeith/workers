@@ -5,8 +5,8 @@ import {
   generateChallenge,
   buildDenialUrl,
   notifyDenial,
-} from "./verify";
-import type { FetchLike } from "./fetch";
+} from "./verify.js";
+import type { FetchLike } from "./fetch.js";
 
 describe("buildVerificationUrl", () => {
   it("appends hub.* params, preserving existing query", () => {

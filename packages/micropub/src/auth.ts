@@ -19,9 +19,9 @@ import {
   type IndieAuthStoreEnv,
 } from "@dwk/indieauth";
 
-import type { ResolvedConfig } from "./config";
-import { createDpopReplayStore } from "./replay";
-import type { MicropubStoreEnv } from "./store";
+import type { ResolvedConfig } from "./config.js";
+import { createDpopReplayStore } from "./replay.js";
+import type { MicropubStoreEnv } from "./store.js";
 
 /** Bindings the authorization path needs. */
 export interface AuthEnv extends IndieAuthStoreEnv, MicropubStoreEnv {

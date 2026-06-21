@@ -3,10 +3,10 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWebfinger } from "@dwk/webfinger";
-import { createServer, type DwkServer } from "./server";
-import { WaitUntilTracker } from "./context";
-import { MissingBindingError } from "./config";
-import type { FetchHandler, Mount } from "./config";
+import { createServer, type DwkServer } from "./server.js";
+import { WaitUntilTracker } from "./context.js";
+import { MissingBindingError } from "./config.js";
+import type { FetchHandler, Mount } from "./config.js";
 
 function dataDir(): string {
   return mkdtempSync(join(tmpdir(), "dwk-srv-"));

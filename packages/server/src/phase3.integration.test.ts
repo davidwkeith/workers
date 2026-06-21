@@ -42,13 +42,13 @@ import {
 } from "@dwk/websub";
 import { collectGarbage, ensureGcSchema, d1OrphanSink } from "@dwk/store";
 
-import { createServer } from "./server";
-import { assembleBindings } from "./bindings";
-import { bindQueueConsumer, bindScheduledTask } from "./lifecycle";
-import { WaitUntilTracker } from "./context";
-import { QueueBroker } from "./shims/queue";
-import { CronScheduler } from "./shims/cron";
-import type { FetchHandler } from "./config";
+import { createServer } from "./server.js";
+import { assembleBindings } from "./bindings.js";
+import { bindQueueConsumer, bindScheduledTask } from "./lifecycle.js";
+import { WaitUntilTracker } from "./context.js";
+import { QueueBroker } from "./shims/queue.js";
+import { CronScheduler } from "./shims/cron.js";
+import type { FetchHandler } from "./config.js";
 
 const tempDirs: string[] = [];
 

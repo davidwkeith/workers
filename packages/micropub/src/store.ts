@@ -9,7 +9,7 @@
  * only their metadata-free URLs ever appear in post properties.
  */
 
-import type { Mf2Object } from "./mf2";
+import type { Mf2Object } from "./mf2.js";
 
 /** Cloudflare binding required by the Micropub post store. */
 export interface MicropubStoreEnv {

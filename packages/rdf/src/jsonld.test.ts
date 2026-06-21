@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DataFactory } from "n3";
 
-import { JsonLdError, parseJsonLd, writeJsonLd } from "./jsonld";
+import { JsonLdError, parseJsonLd, writeJsonLd } from "./jsonld.js";
 import type { Quad } from "n3";
 
 const { namedNode, blankNode, literal, quad, defaultGraph, variable } =

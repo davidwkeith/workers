@@ -27,12 +27,12 @@ import {
   type MicrosubConfig,
   type MicrosubEnv,
   type ResolvedConfig,
-} from "./config";
-import { fetchFeed } from "./discovery";
-import { orderEntriesForInsert } from "./jf2";
-import { MicrosubLogEvent } from "./log";
-import type { MicrosubJob } from "./queue";
-import { createMicrosubStore, type MicrosubStore } from "./store";
+} from "./config.js";
+import { fetchFeed } from "./discovery.js";
+import { orderEntriesForInsert } from "./jf2.js";
+import { MicrosubLogEvent } from "./log.js";
+import type { MicrosubJob } from "./queue.js";
+import { createMicrosubStore, type MicrosubStore } from "./store.js";
 
 /** A Queue consumer for Microsub poll jobs. */
 export type MicrosubQueueConsumer = (

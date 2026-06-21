@@ -8,8 +8,8 @@ import {
   inboxLinkHeader,
   inboxTriple,
   parseInboxLinks,
-} from "./discovery";
-import { LDP_CONSTRAINED_BY, LDP_INBOX } from "./vocab";
+} from "./discovery.js";
+import { LDP_CONSTRAINED_BY, LDP_INBOX } from "./vocab.js";
 
 const named = (value: string) => ({ termType: "NamedNode" as const, value });
 const graph = { termType: "DefaultGraph" as const, value: "" };

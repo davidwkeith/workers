@@ -3,13 +3,13 @@
  * the header(s) to merge into the outbound request.
  */
 
-import { signCavage } from "./cavage";
-import { signRfc9421 } from "./rfc9421";
+import { signCavage } from "./cavage.js";
+import { signRfc9421 } from "./rfc9421.js";
 import type {
   HttpMessage,
   SignatureAlgorithm,
   SignatureProfile,
-} from "./types";
+} from "./types.js";
 
 /** Inputs for {@link signMessage}. */
 export interface SignParams {

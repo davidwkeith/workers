@@ -12,8 +12,8 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import { DEFAULT_COSE_ALGORITHMS } from "./cose";
-import type { WebAuthnObject } from "./rp";
+import { DEFAULT_COSE_ALGORITHMS } from "./cose.js";
+import type { WebAuthnObject } from "./rp.js";
 
 /** Cloudflare bindings required by the WebAuthn handler and Durable Object. */
 export interface WebAuthnEnv {

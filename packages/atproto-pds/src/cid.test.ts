@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid";
+import { encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 
 describe("CID", () => {
   it("creates a base32 CIDv1 string with the multibase prefix", async () => {

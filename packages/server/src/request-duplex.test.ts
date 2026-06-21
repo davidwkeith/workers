@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { installRequestDuplex } from "./request-duplex";
+import { installRequestDuplex } from "./request-duplex.js";
 
 /** A one-chunk stream body — invalid as a Request body without `duplex`. */
 function streamBody(): ReadableStream<Uint8Array> {

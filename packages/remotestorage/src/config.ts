@@ -13,8 +13,8 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { RemoteStorageAuth } from "./auth";
-import type { RemoteStorageObject } from "./storage";
+import type { RemoteStorageAuth } from "./auth.js";
+import type { RemoteStorageObject } from "./storage.js";
 
 /** Cloudflare bindings required by the handler and the per-account Durable Object. */
 export interface RemoteStorageEnv {

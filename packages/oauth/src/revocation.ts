@@ -11,15 +11,15 @@
  * @see https://www.rfc-editor.org/rfc/rfc7009
  */
 
-import { OAuthError, oauthErrorResponse } from "./errors";
-import { methodNotAllowed, readForm } from "./http";
-import { OAuthLogEvent } from "./log";
+import { OAuthError, oauthErrorResponse } from "./errors.js";
+import { methodNotAllowed, readForm } from "./http.js";
+import { OAuthLogEvent } from "./log.js";
 import {
   emit,
   resolveObservability,
   type ObservabilityConfig,
-} from "./observability";
-import type { EndpointAuthenticator } from "./introspection";
+} from "./observability.js";
+import type { EndpointAuthenticator } from "./introspection.js";
 
 /** Configuration for {@link createRevocationHandler}. */
 export interface RevocationConfig extends ObservabilityConfig {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { JsonObject } from "./data-integrity";
+import type { JsonObject } from "./data-integrity.js";
 import {
   buildDidDocument,
   createDidWebResolver,
   didWebToUrl,
   findVerificationMethod,
   urlToDidWeb,
-} from "./did-web";
+} from "./did-web.js";
 
 describe("didWebToUrl", () => {
   it("maps a bare host to the well-known path", () => {

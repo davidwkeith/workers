@@ -5,10 +5,10 @@
  * package's public surface.
  */
 
-import { createActivityPub } from "./handler";
-import type { ActivityPubEnv } from "./config";
+import { createActivityPub } from "./handler.js";
+import type { ActivityPubEnv } from "./config.js";
 
-export { ActivityPubObject } from "./object";
+export { ActivityPubObject } from "./object.js";
 
 export default {
   fetch(): Response {

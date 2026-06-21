@@ -5,7 +5,7 @@ import {
   noopLogger,
   withContext,
   type ConsoleLike,
-} from "./index";
+} from "./index.js";
 
 function spySink(): ConsoleLike & {
   records: { level: string; line: string }[];

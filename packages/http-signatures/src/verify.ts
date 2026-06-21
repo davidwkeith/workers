@@ -5,10 +5,10 @@
  * is caught alongside header tampering.
  */
 
-import { verifyCavage } from "./cavage";
-import { verifyContentDigest, verifyDigest } from "./digest";
-import { verifyRfc9421, type KeyResolver } from "./rfc9421";
-import type { HttpMessage, SignatureProfile, VerifyResult } from "./types";
+import { verifyCavage } from "./cavage.js";
+import { verifyContentDigest, verifyDigest } from "./digest.js";
+import { verifyRfc9421, type KeyResolver } from "./rfc9421.js";
+import type { HttpMessage, SignatureProfile, VerifyResult } from "./types.js";
 
 /** Inputs for {@link verifyMessage}. */
 export interface VerifyParams {

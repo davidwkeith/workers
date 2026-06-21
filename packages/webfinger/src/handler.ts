@@ -12,10 +12,10 @@ import {
   resolveConfig,
   type ResolvedConfig,
   type WebfingerConfig,
-} from "./config";
-import { buildJrd } from "./jrd";
-import { WebfingerLogEvent } from "./log";
-import { isWellFormedResource } from "./resource";
+} from "./config.js";
+import { buildJrd } from "./jrd.js";
+import { WebfingerLogEvent } from "./log.js";
+import { isWellFormedResource } from "./resource.js";
 
 /**
  * Cloudflare bindings required by the WebFinger handler: **none**. The resource

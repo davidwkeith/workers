@@ -2,11 +2,11 @@ import { env } from "cloudflare:test";
 import { createIndieAuthStore } from "@dwk/indieauth";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMicrosub, type MicrosubHandler } from "./handler";
-import type { MicrosubEnv } from "./config";
-import type { FetchLike } from "./fetch";
-import { createMicrosubStore } from "./store";
-import { createDpopReplayStore } from "./replay";
+import { createMicrosub, type MicrosubHandler } from "./handler.js";
+import type { MicrosubEnv } from "./config.js";
+import type { FetchLike } from "./fetch.js";
+import { createMicrosubStore } from "./store.js";
+import { createDpopReplayStore } from "./replay.js";
 import {
   authHeaders,
   BASE,
@@ -14,7 +14,7 @@ import {
   MICROSUB,
   mintToken,
   type MintedToken,
-} from "./test-harness";
+} from "./test-harness.js";
 
 const ctx = {} as ExecutionContext;
 

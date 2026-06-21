@@ -1,14 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { COSE_ALG_ES256 } from "./cose";
-import { utf8ToBytes } from "./encoding";
+import { COSE_ALG_ES256 } from "./cose.js";
+import { utf8ToBytes } from "./encoding.js";
 import {
   parseAuthenticatorData,
   parseClientData,
   verifyAuthentication,
   verifyRegistration,
   type VerifiedCredential,
-} from "./verify";
+} from "./verify.js";
 import {
   buildAttestationObject,
   buildAuthData,
@@ -16,7 +16,7 @@ import {
   createTestCredential,
   signAssertion,
   type TestCredential,
-} from "./test-harness";
+} from "./test-harness.js";
 
 const RP_ID = "example.com";
 const ORIGIN = "https://example.com";

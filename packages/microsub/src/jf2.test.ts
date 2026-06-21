@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseFeed, type Jf2Entry } from "./jf2";
+import { parseFeed, type Jf2Entry } from "./jf2.js";
 import {
   child,
   childText,
@@ -8,7 +8,7 @@ import {
   decodeEntities,
   parseXml,
   text,
-} from "./xml";
+} from "./xml.js";
 
 describe("xml reader", () => {
   it("parses elements, attributes, and nested text", () => {

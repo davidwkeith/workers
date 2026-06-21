@@ -11,9 +11,9 @@
  * the built-in path (e.g. to introspect opaque tokens via RFC 7662).
  */
 
-import type { ResolvedConfig } from "./config";
-import { decodeJwt, verifyJwtSignature } from "./jwt";
-import { parseScopes, type RemoteStorageScope } from "./scope";
+import type { ResolvedConfig } from "./config.js";
+import { decodeJwt, verifyJwtSignature } from "./jwt.js";
+import { parseScopes, type RemoteStorageScope } from "./scope.js";
 
 /** The verified facts a token yields: its scopes and (optionally) its subject. */
 export interface RemoteStorageAuth {

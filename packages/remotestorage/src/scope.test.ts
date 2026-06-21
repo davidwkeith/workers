@@ -7,7 +7,7 @@ import {
   moduleForPath,
   parseScopes,
   ROOT_MODULE,
-} from "./scope";
+} from "./scope.js";
 
 describe("parseScopes", () => {
   it("parses space-delimited module:mode entries", () => {

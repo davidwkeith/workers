@@ -12,16 +12,16 @@ import {
   signBytes,
   validateKey,
   verifyBytes,
-} from "./algorithms";
-import { base64ToBytes, bytesToBase64, utf8 } from "./base64";
-import { derivationContext, type DerivationContext } from "./components";
-import type { KeyResolver } from "./rfc9421";
+} from "./algorithms.js";
+import { base64ToBytes, bytesToBase64, utf8 } from "./base64.js";
+import { derivationContext, type DerivationContext } from "./components.js";
+import type { KeyResolver } from "./rfc9421.js";
 import type {
   HttpMessage,
   SignatureAlgorithm,
   SignatureFailureReason,
   VerifyResult,
-} from "./types";
+} from "./types.js";
 
 /** Map our algorithm identifiers to a `draft-cavage` `algorithm` token. */
 const CAVAGE_TOKEN: Record<SignatureAlgorithm, string> = {

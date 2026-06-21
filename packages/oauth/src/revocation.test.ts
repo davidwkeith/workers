@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createRevocationHandler, type RevocationConfig } from "./revocation";
+import {
+  createRevocationHandler,
+  type RevocationConfig,
+} from "./revocation.js";
 
 const ENDPOINT = "https://as.example/revoke";
 

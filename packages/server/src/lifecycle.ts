@@ -19,9 +19,9 @@ import type {
   MessageBatch,
   ScheduledController,
 } from "@cloudflare/workers-types";
-import { HostExecutionContext, type WaitUntilTracker } from "./context";
-import type { QueueConsumerHandler } from "./shims/queue";
-import type { ScheduledHandler } from "./shims/cron";
+import { HostExecutionContext, type WaitUntilTracker } from "./context.js";
+import type { QueueConsumerHandler } from "./shims/queue.js";
+import type { ScheduledHandler } from "./shims/cron.js";
 
 /**
  * A Cloudflare-shaped queue consumer. `env` is typed `never` so a consumer

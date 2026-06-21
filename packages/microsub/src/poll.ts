@@ -21,9 +21,9 @@ import {
   type MicrosubConfig,
   type MicrosubEnv,
   type ResolvedConfig,
-} from "./config";
-import { MicrosubLogEvent } from "./log";
-import { createMicrosubStore } from "./store";
+} from "./config.js";
+import { MicrosubLogEvent } from "./log.js";
+import { createMicrosubStore } from "./store.js";
 
 /** A `scheduled`-compatible Worker handler. */
 export type MicrosubScheduledHandler = (

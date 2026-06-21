@@ -8,7 +8,7 @@ import {
   normalizeBase64url,
   sha256,
   utf8ToBytes,
-} from "./encoding";
+} from "./encoding.js";
 
 describe("@dwk/webauthn encoding", () => {
   it("round-trips bytes through base64url", () => {

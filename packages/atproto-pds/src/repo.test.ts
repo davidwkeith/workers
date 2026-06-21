@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
-import { exportPublicKeyRaw, generateSigningKey, signData } from "./crypto";
-import { formatCommit, verifyCommit } from "./repo";
+import { encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { exportPublicKeyRaw, generateSigningKey, signData } from "./crypto.js";
+import { formatCommit, verifyCommit } from "./repo.js";
 
 describe("repository commits", () => {
   it("signs a commit whose signature verifies against the repo key", async () => {

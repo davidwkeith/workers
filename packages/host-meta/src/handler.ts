@@ -13,9 +13,9 @@ import {
   resolveConfig,
   type ResolvedConfig,
   type HostMetaConfig,
-} from "./config";
-import { HostMetaLogEvent } from "./log";
-import { negotiateFormat, type Format } from "./negotiation";
+} from "./config.js";
+import { HostMetaLogEvent } from "./log.js";
+import { negotiateFormat, type Format } from "./negotiation.js";
 
 /**
  * Cloudflare bindings required by the host-meta handler: **none**. The document

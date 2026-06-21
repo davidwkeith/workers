@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Logger, Metrics } from "@dwk/log";
 
-import { createIntrospectionHandler } from "./introspection";
-import { OAuthLogEvent } from "./log";
+import { createIntrospectionHandler } from "./introspection.js";
+import { OAuthLogEvent } from "./log.js";
 
 function spyLogger(): Logger & { calls: [string, string][] } {
   const calls: [string, string][] = [];

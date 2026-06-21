@@ -6,13 +6,13 @@ import {
   verifyProof,
   type JsonObject,
   type VerificationMethod,
-} from "./data-integrity";
+} from "./data-integrity.js";
 import {
   base58btcDecode,
   encodeEd25519Multikey,
   encodeMultibaseBase64url,
-} from "./multibase";
-import type { JcsValue } from "./jcs";
+} from "./multibase.js";
+import type { JcsValue } from "./jcs.js";
 
 const VM_ID = "did:web:example.com#key-0";
 

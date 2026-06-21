@@ -28,8 +28,8 @@
  * @packageDocumentation
  */
 
-export { createVc } from "./handler";
-export type { VcEnv, VcHandler } from "./handler";
+export { createVc } from "./handler.js";
+export type { VcEnv, VcHandler } from "./handler.js";
 
 export {
   resolveConfig,
@@ -39,7 +39,7 @@ export {
   type VcOperation,
   type AuthorizeOperation,
   type DidResolver,
-} from "./config";
+} from "./config.js";
 
 // Data Integrity (cryptosuites + proof pipeline)
 export {
@@ -56,7 +56,7 @@ export {
   type VerifyProofResult,
   type VerificationMethod,
   type VerificationMethodResolver,
-} from "./data-integrity";
+} from "./data-integrity.js";
 
 // Credential data model (VCDM 2.0)
 export {
@@ -69,7 +69,7 @@ export {
   type UnsignedCredential,
   type BuildCredentialOptions,
   type Issuer,
-} from "./credential";
+} from "./credential.js";
 
 // did:web
 export {
@@ -86,7 +86,7 @@ export {
   type VerificationRelationships,
   type DidWebResolverOptions,
   type FetchLike,
-} from "./did-web";
+} from "./did-web.js";
 
 // Bitstring Status List
 export {
@@ -109,13 +109,13 @@ export {
   type StatusListCredentialOptions,
   type VcStatusStore,
   type VcStatusStoreEnv,
-} from "./status-list";
+} from "./status-list.js";
 
 // XSD dateTimeStamp validation for VC temporal fields
-export { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime";
+export { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime.js";
 
 // JCS canonicalization and multibase/Multikey codecs
-export { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs";
+export { canonicalize, canonicalizeToBytes, type JcsValue } from "./jcs.js";
 export {
   base58btcEncode,
   base58btcDecode,
@@ -127,7 +127,7 @@ export {
   encodeEd25519Multikey,
   decodeMultikey,
   type DecodedMultikey,
-} from "./multibase";
+} from "./multibase.js";
 
-export { VcLogEvent } from "./log";
+export { VcLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

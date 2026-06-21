@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { derivationContext, deriveComponentValue } from "./components";
-import type { HttpMessage } from "./types";
+import { derivationContext, deriveComponentValue } from "./components.js";
+import type { HttpMessage } from "./types.js";
 
 /**
  * Unit tests for the RFC 9421 §2.2 derived-component values. The round-trip

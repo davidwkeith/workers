@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { createIndieAuth, type IndieAuthEnv } from "@dwk/indieauth";
 import { describe, expect, it } from "vitest";
 
-import { createMicropub, type MicropubEnv } from "./index";
+import { createMicropub, type MicropubEnv } from "./index.js";
 
 /**
  * Composition-contract test: two endpoint packages (`@dwk/indieauth` and

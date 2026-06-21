@@ -6,8 +6,8 @@ import {
   NOTIFICATIONS_CHANNEL,
   type MicrosubStore,
   type MicrosubStoreEnv,
-} from "./store";
-import type { Jf2Entry } from "./jf2";
+} from "./store.js";
+import type { Jf2Entry } from "./jf2.js";
 
 const harness = env as unknown as MicrosubStoreEnv;
 let store: MicrosubStore;

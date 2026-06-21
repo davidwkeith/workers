@@ -9,9 +9,9 @@
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { Link } from "@dwk/webfinger";
 
-import { buildDocument, type HostMetaDocument } from "./document";
-import { serializeJrd } from "./jrd";
-import { serializeXrd } from "./xrd";
+import { buildDocument, type HostMetaDocument } from "./document.js";
+import { serializeJrd } from "./jrd.js";
+import { serializeXrd } from "./xrd.js";
 
 /** Configuration passed to {@link createHostMeta}. */
 export interface HostMetaConfig {

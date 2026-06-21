@@ -25,12 +25,12 @@ import {
   type ResolvedConfig,
   type WebSubConfig,
   type WebSubEnv,
-} from "./config";
-import { deliverToSubscriber, fetchTopicContent } from "./distribute";
-import { WebSubLogEvent } from "./log";
-import type { WebSubJob } from "./queue";
-import { createD1SubscriptionStore, type SubscriptionStore } from "./store";
-import { notifyDenial, verifyIntent } from "./verify";
+} from "./config.js";
+import { deliverToSubscriber, fetchTopicContent } from "./distribute.js";
+import { WebSubLogEvent } from "./log.js";
+import type { WebSubJob } from "./queue.js";
+import { createD1SubscriptionStore, type SubscriptionStore } from "./store.js";
+import { notifyDenial, verifyIntent } from "./verify.js";
 
 /** A Queue consumer for WebSub verification and distribution jobs. */
 export type WebSubQueueConsumer = (

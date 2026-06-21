@@ -19,20 +19,20 @@
  * carrying `x5c` is rejected rather than silently trusted.
  */
 
-import { decodeFirst, CborError, type CborValue } from "./cbor";
+import { decodeFirst, CborError, type CborValue } from "./cbor.js";
 import {
   coseToKey,
   cryptoParamsForCoseAlg,
   derToRawEcdsaSignature,
   CoseError,
-} from "./cose";
+} from "./cose.js";
 import {
   bytesEqual,
   bytesToBase64url,
   bytesToUtf8,
   normalizeBase64url,
   sha256,
-} from "./encoding";
+} from "./encoding.js";
 
 /** Stable, locale-independent verification failure codes. */
 export type VerifyFailureReason =

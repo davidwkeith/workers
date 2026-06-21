@@ -5,10 +5,10 @@
  * public surface.
  */
 
-import { createAtprotoPds } from "./handler";
-import type { AtprotoPdsEnv } from "./config";
+import { createAtprotoPds } from "./handler.js";
+import type { AtprotoPdsEnv } from "./config.js";
 
-export { AtprotoRepoObject } from "./object";
+export { AtprotoRepoObject } from "./object.js";
 
 export default {
   fetch(): Response {

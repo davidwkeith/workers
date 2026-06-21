@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 
-import { verifyDpopProof, DEFAULT_MAX_AGE_SECONDS } from "./index";
+import { verifyDpopProof, DEFAULT_MAX_AGE_SECONDS } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers: craft real, signed DPoP proofs with Web Crypto so the suite

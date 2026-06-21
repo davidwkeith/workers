@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { serializeXrd, escapeXml, XRD_NAMESPACE } from "./index";
+import { serializeXrd, escapeXml, XRD_NAMESPACE } from "./index.js";
 
 describe("escapeXml", () => {
   it("escapes the five predefined XML entities", () => {

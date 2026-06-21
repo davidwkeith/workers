@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeTid, isValidTid, TidClock } from "./tid";
+import { encodeTid, isValidTid, TidClock } from "./tid.js";
 
 describe("TID", () => {
   it("produces 13-character base32-sortable identifiers", () => {

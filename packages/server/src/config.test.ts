@@ -6,7 +6,7 @@ import {
   InsecureBaseUrlError,
   MissingBindingError,
   type Mount,
-} from "./config";
+} from "./config.js";
 
 const noopHandler: Mount["handler"] = async () => new Response("ok");
 

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import type { JsonObject } from "./data-integrity";
+import type { JsonObject } from "./data-integrity.js";
 import {
   buildEncodedList,
   buildStatusEntry,
@@ -14,7 +14,7 @@ import {
   setBit,
   statusEntryIndex,
   type VcStatusStoreEnv,
-} from "./status-list";
+} from "./status-list.js";
 
 const storeEnv = env as unknown as VcStatusStoreEnv;
 

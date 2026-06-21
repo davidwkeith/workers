@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createR2Bucket } from "./r2";
+import { createR2Bucket } from "./r2.js";
 import type { R2Bucket } from "@cloudflare/workers-types";
 
 function bucket(): R2Bucket {

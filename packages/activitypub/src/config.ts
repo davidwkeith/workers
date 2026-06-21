@@ -11,15 +11,15 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { ActorIris, ActorProfile } from "./as2";
+import type { ActorIris, ActorProfile } from "./as2.js";
 import type {
   KeyResolver,
   ResolvedKey,
   VerifyResult,
   InboxRequest,
-} from "./signature";
-import type { SoftwareInfo } from "./nodeinfo";
-import type { ActivityPubObject } from "./object";
+} from "./signature.js";
+import type { SoftwareInfo } from "./nodeinfo.js";
+import type { ActivityPubObject } from "./object.js";
 
 /** Cloudflare bindings required by the ActivityPub handler and Durable Object. */
 export interface ActivityPubEnv {

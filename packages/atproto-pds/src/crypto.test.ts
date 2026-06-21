@@ -7,7 +7,7 @@ import {
   publicKeyMultibase,
   signData,
   verifyData,
-} from "./crypto";
+} from "./crypto.js";
 
 const P256_ORDER =
   0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;

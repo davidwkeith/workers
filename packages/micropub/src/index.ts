@@ -17,16 +17,16 @@
  * @packageDocumentation
  */
 
-export { createMicropub } from "./handler";
-export type { MicropubEnv, MicropubHandler } from "./handler";
+export { createMicropub } from "./handler.js";
+export type { MicropubEnv, MicropubHandler } from "./handler.js";
 
-export { resolveConfig } from "./config";
+export { resolveConfig } from "./config.js";
 export type {
   MicropubConfig,
   ResolvedConfig,
   SyndicationTarget,
   GeneratePostUrl,
-} from "./config";
+} from "./config.js";
 
 export {
   createMicropubStore,
@@ -34,7 +34,7 @@ export {
   type MicropubStore,
   type MicropubStoreEnv,
   type PostRecord,
-} from "./store";
+} from "./store.js";
 
 export {
   parseFormBody,
@@ -47,7 +47,7 @@ export {
   type MicropubCommands,
   type UpdateOperations,
   type ParsedBody,
-} from "./mf2";
+} from "./mf2.js";
 
 export {
   authorize,
@@ -57,7 +57,7 @@ export {
   type AuthResult,
   type AuthSuccess,
   type AuthFailure,
-} from "./auth";
+} from "./auth.js";
 
-export { MicropubLogEvent } from "./log";
+export { MicropubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

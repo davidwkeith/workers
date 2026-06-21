@@ -28,7 +28,7 @@
  * @packageDocumentation
  */
 
-import type { LogFields } from "./index";
+import type { LogFields } from "./index.js";
 
 /**
  * The metrics seam every `@dwk` package writes to, alongside {@link Logger}.

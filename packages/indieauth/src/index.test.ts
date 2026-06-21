@@ -10,7 +10,7 @@ import {
   type AuthorizationRequest,
   type IndieAuthConfig,
   type IndieAuthEnv,
-} from "./index";
+} from "./index.js";
 
 const harness = env as unknown as IndieAuthEnv;
 

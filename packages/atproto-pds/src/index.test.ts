@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import { base58btcDecode } from "./bytes";
-import { readCar } from "./car";
-import { decodeCbor } from "./cbor";
-import { verifyCommit, type SignedCommit } from "./repo";
-import { createAtprotoPds, type AtprotoPdsEnv } from "./index";
+import { base58btcDecode } from "./bytes.js";
+import { readCar } from "./car.js";
+import { decodeCbor } from "./cbor.js";
+import { verifyCommit, type SignedCommit } from "./repo.js";
+import { createAtprotoPds, type AtprotoPdsEnv } from "./index.js";
 
 /**
  * End-to-end tests over the real PDS front door + per-account repository Durable

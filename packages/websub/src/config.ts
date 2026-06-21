@@ -16,9 +16,9 @@ import type { D1Database, Queue } from "@cloudflare/workers-types";
 import {
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
-} from "./distribute";
-import type { FetchLike } from "./fetch";
-import type { WebSubJob } from "./queue";
+} from "./distribute.js";
+import type { FetchLike } from "./fetch.js";
+import type { WebSubJob } from "./queue.js";
 
 /**
  * Cloudflare bindings required by the hub handler and its queue consumer.

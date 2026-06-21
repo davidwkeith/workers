@@ -12,8 +12,8 @@ import {
   resolveConfig,
   type MicropubConfig,
   type ResolvedConfig,
-} from "./config";
-import { MicropubLogEvent } from "./log";
+} from "./config.js";
+import { MicropubLogEvent } from "./log.js";
 import {
   applyUpdate,
   parseFormBody,
@@ -24,14 +24,14 @@ import {
   type Mf2Object,
   type MicropubCommands,
   type ParsedBody,
-} from "./mf2";
+} from "./mf2.js";
 import {
   createMicropubStore,
   recordToMf2,
   type MicropubStore,
   type MicropubStoreEnv,
-} from "./store";
-import { authorize, tokenFromHeader, type AuthEnv } from "./auth";
+} from "./store.js";
+import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
 export interface MicropubEnv extends MicropubStoreEnv, AuthEnv {

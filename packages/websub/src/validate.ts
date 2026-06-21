@@ -10,7 +10,7 @@
  * @packageDocumentation
  */
 
-import type { ResolvedConfig } from "./config";
+import type { ResolvedConfig } from "./config.js";
 
 /** WebSub §6.1.1: a `hub.secret` MUST be less than 200 bytes. */
 export const MAX_SECRET_BYTES = 200;

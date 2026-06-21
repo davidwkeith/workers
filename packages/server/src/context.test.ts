@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WaitUntilTracker, HostExecutionContext } from "./context";
+import { WaitUntilTracker, HostExecutionContext } from "./context.js";
 
 describe("HostExecutionContext / WaitUntilTracker", () => {
   it("tracks waitUntil work and drains it; props and passThroughOnException are no-ops", async () => {

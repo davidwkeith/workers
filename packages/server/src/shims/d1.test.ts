@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createD1Database } from "./d1";
+import { createD1Database } from "./d1.js";
 import type { D1Database } from "@cloudflare/workers-types";
 
 describe("D1 → node:sqlite shim", () => {

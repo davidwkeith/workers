@@ -13,7 +13,7 @@ import {
   rowToQuad,
   type QuadRowRecord,
   type ResourceKind,
-} from "./sql";
+} from "./sql.js";
 
 /** Where a resource body lives. */
 export type StorageTier = "sqlite" | "r2";

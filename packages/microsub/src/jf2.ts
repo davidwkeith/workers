@@ -21,7 +21,7 @@ import {
   parseXml,
   text,
   type XmlElement,
-} from "./xml";
+} from "./xml.js";
 
 /** A JF2 author card. */
 export interface Jf2Author {

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { ensureGcSchema } from "@dwk/store";
 
-import { INTERNAL_HEADERS, type SolidPodEnv } from "./config";
-import type { SolidPodObject } from "./pod";
+import { INTERNAL_HEADERS, type SolidPodEnv } from "./config.js";
+import type { SolidPodObject } from "./pod.js";
 
 /**
  * Durable-Object–level tests that drive {@link SolidPodObject} directly via

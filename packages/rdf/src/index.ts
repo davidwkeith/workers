@@ -1,6 +1,6 @@
-import { formatForMediaType } from "./media-types";
-import { parseJsonLd, writeJsonLd } from "./jsonld";
-import { parseTurtle, writeTurtle } from "./turtle";
+import { formatForMediaType } from "./media-types.js";
+import { parseJsonLd, writeJsonLd } from "./jsonld.js";
+import { parseTurtle, writeTurtle } from "./turtle.js";
 import type { Quad } from "n3";
 
 /**
@@ -17,7 +17,7 @@ export {
   writeTurtle,
   type ParseTurtleOptions,
   type WriteTurtleOptions,
-} from "./turtle";
+} from "./turtle.js";
 
 export {
   parseJsonLd,
@@ -27,13 +27,13 @@ export {
   type WriteJsonLdOptions,
   type JsonValue,
   type JsonObject,
-} from "./jsonld";
+} from "./jsonld.js";
 
 export {
   formatForMediaType,
   MEDIA_TYPE_FORMATS,
   type RdfFormat,
-} from "./media-types";
+} from "./media-types.js";
 
 export {
   termToStored,
@@ -43,7 +43,7 @@ export {
   type StoredTerm,
   type StoredQuad,
   type StoredTermType,
-} from "./store";
+} from "./store.js";
 
 export type { Quad };
 

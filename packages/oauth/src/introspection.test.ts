@@ -5,8 +5,8 @@ import {
   createIntrospectionHandler,
   isTokenActive,
   type IntrospectionConfig,
-} from "./introspection";
-import type { IntrospectionTokenRecord } from "./store";
+} from "./introspection.js";
+import type { IntrospectionTokenRecord } from "./store.js";
 
 const ENDPOINT = "https://as.example/introspect";
 

@@ -15,10 +15,10 @@
  * @see https://www.w3.org/TR/vc-bitstring-status-list/
  */
 
-import { toXsdDateTime } from "./datetime";
-import type { JcsValue } from "./jcs";
-import type { JsonObject } from "./data-integrity";
-import { decodeMultibase, encodeMultibaseBase64url } from "./multibase";
+import { toXsdDateTime } from "./datetime.js";
+import type { JcsValue } from "./jcs.js";
+import type { JsonObject } from "./data-integrity.js";
+import { decodeMultibase, encodeMultibaseBase64url } from "./multibase.js";
 
 /**
  * The minimum bitstring length the spec mandates (131,072 bits / 16 KB), chosen

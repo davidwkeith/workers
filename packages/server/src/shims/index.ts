@@ -10,20 +10,20 @@
  * @see spec/self-hosting.md §7
  */
 
-export { createD1Database } from "./d1";
-export { createR2Bucket } from "./r2";
-export { createKVNamespace, type KVOptions } from "./kv";
+export { createD1Database } from "./d1.js";
+export { createR2Bucket } from "./r2.js";
+export { createKVNamespace, type KVOptions } from "./kv.js";
 export {
   QueueBroker,
   type QueueBrokerOptions,
   type ConsumerOptions,
   type QueueConsumerHandler,
-} from "./queue";
+} from "./queue.js";
 export {
   CronScheduler,
   type CronSchedulerOptions,
   type ScheduledHandler,
-} from "./cron";
+} from "./cron.js";
 export {
   DurableObject,
   createDurableObjectNamespace,
@@ -31,4 +31,4 @@ export {
   type DurableObjectNamespaceOptions,
   type DurableObjectState,
   type SqlStorage,
-} from "./durable-object";
+} from "./durable-object.js";

@@ -7,7 +7,7 @@
  * mismatches are rejected before any signature is checked.
  */
 
-import type { SignatureAlgorithm } from "./types";
+import type { SignatureAlgorithm } from "./types.js";
 
 // Structural shapes for Web Crypto algorithm parameters. We avoid the DOM lib
 // names (RsaPssParams, EcdsaParams, …) because @cloudflare/workers-types does

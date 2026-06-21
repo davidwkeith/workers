@@ -13,7 +13,11 @@
 
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
-import { resolveConfig, type ResolvedVcConfig, type VcConfig } from "./config";
+import {
+  resolveConfig,
+  type ResolvedVcConfig,
+  type VcConfig,
+} from "./config.js";
 import {
   addProof,
   importSigner,
@@ -21,10 +25,10 @@ import {
   type JsonObject,
   type Signer,
   type VerificationMethodResolver,
-} from "./data-integrity";
-import { createDidWebResolver } from "./did-web";
-import { checkValidityPeriod, validateCredential } from "./credential";
-import { VcLogEvent } from "./log";
+} from "./data-integrity.js";
+import { createDidWebResolver } from "./did-web.js";
+import { checkValidityPeriod, validateCredential } from "./credential.js";
+import { VcLogEvent } from "./log.js";
 import {
   buildEncodedList,
   buildStatusEntry,
@@ -37,7 +41,7 @@ import {
   type StatusPurpose,
   type VcStatusStore,
   type VcStatusStoreEnv,
-} from "./status-list";
+} from "./status-list.js";
 
 /** Cloudflare bindings required by the `@dwk/vc` handler. */
 export interface VcEnv extends Partial<VcStatusStoreEnv> {

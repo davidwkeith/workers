@@ -7,7 +7,7 @@ import {
   buildJrd,
   normalizeResource,
   WebfingerLogEvent,
-} from "./index";
+} from "./index.js";
 
 describe("@dwk/webfinger public surface", () => {
   it("re-exports the factory and helpers", () => {

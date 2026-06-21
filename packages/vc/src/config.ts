@@ -9,9 +9,12 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { VerificationMethod } from "./data-integrity";
-import { urlToDidWeb } from "./did-web";
-import { DEFAULT_STATUS_LIST_LENGTH, type StatusPurpose } from "./status-list";
+import type { VerificationMethod } from "./data-integrity.js";
+import { urlToDidWeb } from "./did-web.js";
+import {
+  DEFAULT_STATUS_LIST_LENGTH,
+  type StatusPurpose,
+} from "./status-list.js";
 
 /** A mutating operation an {@link AuthorizeOperation} hook can gate. */
 export type VcOperation = "issue" | "status";

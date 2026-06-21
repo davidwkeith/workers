@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import { signAccessToken, createIndieAuthStore } from "@dwk/indieauth";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createMicropub } from "./index";
-import type { MicropubEnv } from "./index";
+import { createMicropub } from "./index.js";
+import type { MicropubEnv } from "./index.js";
 
 const harness = env as unknown as MicropubEnv;
 
@@ -146,8 +146,8 @@ const handler = createMicropub({
 
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
-  await (await import("./store")).createMicropubStore(harness).init();
-  await (await import("./replay")).createDpopReplayStore(harness).init();
+  await (await import("./store.js")).createMicropubStore(harness).init();
+  await (await import("./replay.js")).createDpopReplayStore(harness).init();
 });
 
 // --- Tests ------------------------------------------------------------------

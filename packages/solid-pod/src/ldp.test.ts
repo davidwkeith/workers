@@ -10,7 +10,7 @@ import {
   parentContainer,
   resourceForAcl,
   toIri,
-} from "./ldp";
+} from "./ldp.js";
 
 describe("@dwk/solid-pod ldp helpers", () => {
   it("classifies containers and acl documents", () => {

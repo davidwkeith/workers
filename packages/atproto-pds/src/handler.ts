@@ -16,7 +16,7 @@ import {
   type AtprotoPdsConfig,
   type AtprotoPdsEnv,
   type ResolvedConfig,
-} from "./config";
+} from "./config.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type AtprotoPdsHandler = (

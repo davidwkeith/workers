@@ -6,7 +6,7 @@ import {
   DurableObject,
   createDurableObjectNamespace,
   type DurableObjectState,
-} from "./durable-object";
+} from "./durable-object.js";
 
 function dataDir(): string {
   return mkdtempSync(join(tmpdir(), "dwk-do-"));

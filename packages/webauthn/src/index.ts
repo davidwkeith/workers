@@ -20,14 +20,14 @@
  * @packageDocumentation
  */
 
-export { createWebAuthn, type WebAuthnHandler } from "./handler";
-export { WebAuthnObject } from "./rp";
+export { createWebAuthn, type WebAuthnHandler } from "./handler.js";
+export { WebAuthnObject } from "./rp.js";
 
 export {
   type WebAuthnConfig,
   type WebAuthnEnv,
   type UserVerificationRequirement,
-} from "./config";
+} from "./config.js";
 
 export {
   DEFAULT_COSE_ALGORITHMS,
@@ -35,7 +35,7 @@ export {
   COSE_ALG_ES384,
   COSE_ALG_RS256,
   COSE_ALG_PS256,
-} from "./cose";
+} from "./cose.js";
 
 export {
   verifyRegistration,
@@ -48,7 +48,7 @@ export {
   type AuthenticationVerifyResult,
   type VerifiedCredential,
   type VerifyFailureReason,
-} from "./verify";
+} from "./verify.js";
 
-export { WebAuthnLogEvent } from "./log";
+export { WebAuthnLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

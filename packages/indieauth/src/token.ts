@@ -19,7 +19,7 @@ import {
   sha256Base64url,
   textToBase64url,
   timingSafeEqual,
-} from "./encoding";
+} from "./encoding.js";
 
 /** JWT header for HS256-signed access tokens. */
 interface AccessTokenHeader {

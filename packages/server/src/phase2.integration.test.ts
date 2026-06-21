@@ -29,10 +29,10 @@ import { createMicropub, createMicropubStore } from "@dwk/micropub";
 import { createWebmention } from "@dwk/webmention";
 import { createVc } from "@dwk/vc";
 
-import { createServer, type DwkServer } from "./server";
-import { assembleBindings } from "./bindings";
-import { QueueBroker } from "./shims/queue";
-import type { FetchHandler, Mount } from "./config";
+import { createServer, type DwkServer } from "./server.js";
+import { assembleBindings } from "./bindings.js";
+import { QueueBroker } from "./shims/queue.js";
+import type { FetchHandler, Mount } from "./config.js";
 
 // The host reconstructs every request URL from the configured baseUrl (never the
 // Host header), so handlers see this origin regardless of the real listen port —

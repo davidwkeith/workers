@@ -5,7 +5,7 @@ import {
   clampLease,
   DEFAULT_MAX_LEASE_SECONDS,
   DEFAULT_MIN_LEASE_SECONDS,
-} from "./config";
+} from "./config.js";
 
 describe("normalizeTopic", () => {
   it("folds default ports, bare paths, and fragments", () => {

@@ -22,11 +22,11 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import type { FetchLike } from "./fetch";
-import { readBytesCapped } from "./fetch";
-import { WebSubLogEvent } from "./log";
-import { safeFetch } from "./safe-fetch";
-import type { Subscription } from "./store";
+import type { FetchLike } from "./fetch.js";
+import { readBytesCapped } from "./fetch.js";
+import { WebSubLogEvent } from "./log.js";
+import { safeFetch } from "./safe-fetch.js";
+import type { Subscription } from "./store.js";
 
 /** A topic's current content, as fetched from the topic URL. */
 export interface TopicContent {

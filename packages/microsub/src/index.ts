@@ -19,17 +19,17 @@
  * @packageDocumentation
  */
 
-export { createMicrosub } from "./handler";
-export type { MicrosubHandler } from "./handler";
+export { createMicrosub } from "./handler.js";
+export type { MicrosubHandler } from "./handler.js";
 
-export { createMicrosubPoller } from "./poll";
-export type { MicrosubScheduledHandler } from "./poll";
+export { createMicrosubPoller } from "./poll.js";
+export type { MicrosubScheduledHandler } from "./poll.js";
 
-export { createMicrosubQueueConsumer } from "./consumer";
-export type { MicrosubQueueConsumer, ConsumerOptions } from "./consumer";
+export { createMicrosubQueueConsumer } from "./consumer.js";
+export type { MicrosubQueueConsumer, ConsumerOptions } from "./consumer.js";
 
-export { resolveConfig } from "./config";
-export type { MicrosubConfig, MicrosubEnv, ResolvedConfig } from "./config";
+export { resolveConfig } from "./config.js";
+export type { MicrosubConfig, MicrosubEnv, ResolvedConfig } from "./config.js";
 
 export {
   createMicrosubStore,
@@ -42,7 +42,7 @@ export {
   type ItemPage,
   type ListOptions,
   type FeedCache,
-} from "./store";
+} from "./store.js";
 
 export {
   authorize,
@@ -52,16 +52,16 @@ export {
   type AuthResult,
   type AuthSuccess,
   type AuthFailure,
-} from "./auth";
+} from "./auth.js";
 
 export {
   parseFeed,
   type Jf2Entry,
   type Jf2Author,
   type Jf2Content,
-} from "./jf2";
+} from "./jf2.js";
 
-export { parseHFeed } from "./hfeed";
+export { parseHFeed } from "./hfeed.js";
 
 export {
   discoverFeed,
@@ -69,7 +69,7 @@ export {
   type DiscoveredFeed,
   type FetchedFeed,
   type DiscoveryOptions,
-} from "./discovery";
+} from "./discovery.js";
 
 export {
   safeFetch,
@@ -77,10 +77,10 @@ export {
   isPrivateOrReservedHost,
   SsrfError,
   type SsrfReason,
-} from "./safe-fetch";
+} from "./safe-fetch.js";
 
-export type { FetchLike } from "./fetch";
-export type { MicrosubJob, PollJob } from "./queue";
+export type { FetchLike } from "./fetch.js";
+export type { MicrosubJob, PollJob } from "./queue.js";
 
-export { MicrosubLogEvent } from "./log";
+export { MicrosubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
-import { createD1Inbox } from "./inbox";
+import { createD1Inbox } from "./inbox.js";
 
 interface TestEnv {
   WEBMENTION_INBOX: import("@cloudflare/workers-types").D1Database;

@@ -6,7 +6,7 @@ import {
   storedToQuad,
   storedToTerm,
   termToStored,
-} from "./store";
+} from "./store.js";
 
 const { namedNode, blankNode, literal, defaultGraph, quad } = DataFactory;
 

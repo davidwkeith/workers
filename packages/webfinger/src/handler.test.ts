@@ -7,7 +7,7 @@ import {
   type Metrics,
   type WebfingerConfig,
   type WebfingerEnv,
-} from "./index";
+} from "./index.js";
 
 const env: WebfingerEnv = {};
 const ctx = {} as ExecutionContext;

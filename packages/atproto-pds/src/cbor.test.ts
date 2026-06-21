@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeCbor, encodeCbor, type CborValue } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
-import { toHex } from "./bytes";
+import { decodeCbor, encodeCbor, type CborValue } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { toHex } from "./bytes.js";
 
 describe("DAG-CBOR", () => {
   it("encodes a small map to the canonical bytes", () => {

@@ -6,7 +6,7 @@ import { register } from "node:module";
 import {
   resolve,
   registerCloudflareWorkers,
-} from "./cloudflare-workers-loader";
+} from "./cloudflare-workers-loader.js";
 
 describe("cloudflare:workers loader hook", () => {
   it("redirects cloudflare:workers to the shim and short-circuits", async () => {

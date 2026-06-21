@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { negotiateFormat } from "./index";
+import { negotiateFormat } from "./index.js";
 
 const url = (query = "") =>
   new URL(`https://example.com/.well-known/host-meta${query}`);

@@ -10,7 +10,7 @@ import {
   encodeEd25519Multikey,
   encodeMultibaseBase58btc,
   encodeMultibaseBase64url,
-} from "./multibase";
+} from "./multibase.js";
 
 describe("base58btc", () => {
   it("round-trips arbitrary bytes", () => {

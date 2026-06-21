@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildDocument, lrddTemplate } from "./index";
+import { buildDocument, lrddTemplate } from "./index.js";
 
 describe("lrddTemplate", () => {
   it("appends resource={uri} to a bare WebFinger URL", () => {

@@ -20,7 +20,7 @@ import {
   type WebAuthnConfig,
   type WebAuthnEnv,
   type WebAuthnOperation,
-} from "./config";
+} from "./config.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type WebAuthnHandler = (

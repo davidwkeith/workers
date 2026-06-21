@@ -12,7 +12,7 @@
  * primitive; this module wires it to the network.
  */
 
-import { signRequest, type SignerKey } from "./signature";
+import { signRequest, type SignerKey } from "./signature.js";
 
 /** Machine-readable cause of a blocked delivery target. */
 export type BlockedReason =

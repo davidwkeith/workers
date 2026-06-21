@@ -11,8 +11,8 @@
  * digest over the received body proves that value still describes the body.
  */
 
-import { base64ToBytes, bytesToBase64 } from "./base64";
-import { parseByteSequenceDictionary, SfParseError } from "./sf";
+import { base64ToBytes, bytesToBase64 } from "./base64.js";
+import { parseByteSequenceDictionary, SfParseError } from "./sf.js";
 
 /** Hash algorithms supported for digests. */
 export type DigestAlgorithm = "sha-256" | "sha-512";

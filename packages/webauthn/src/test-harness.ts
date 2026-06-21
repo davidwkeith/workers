@@ -9,11 +9,11 @@
  * build and from coverage; not part of the package's public surface.
  */
 
-import { createWebAuthn } from "./handler";
-import type { WebAuthnEnv } from "./config";
-import { bytesToBase64url, sha256, utf8ToBytes } from "./encoding";
+import { createWebAuthn } from "./handler.js";
+import type { WebAuthnEnv } from "./config.js";
+import { bytesToBase64url, sha256, utf8ToBytes } from "./encoding.js";
 
-export { WebAuthnObject } from "./rp";
+export { WebAuthnObject } from "./rp.js";
 
 export default {
   fetch(): Response {

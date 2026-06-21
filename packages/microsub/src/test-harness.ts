@@ -11,7 +11,7 @@ import {
   type IndieAuthStoreEnv,
 } from "@dwk/indieauth";
 
-import type { AuthEnv } from "./auth";
+import type { AuthEnv } from "./auth.js";
 
 export const BASE = "https://example.com";
 export const ME = "https://alice.example.com/";

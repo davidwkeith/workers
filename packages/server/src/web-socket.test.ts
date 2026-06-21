@@ -3,7 +3,7 @@ import {
   installWebSocketGlobals,
   WebSocketPair,
   responseWebSocket,
-} from "./web-socket";
+} from "./web-socket.js";
 
 function dataOf(event: Event): unknown {
   return (event as unknown as { data: unknown }).data;

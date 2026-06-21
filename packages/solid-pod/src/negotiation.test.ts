@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { negotiateMediaType } from "./negotiation";
+import { negotiateMediaType } from "./negotiation.js";
 
 describe("@dwk/solid-pod content negotiation", () => {
   it("defaults to Turtle when no Accept is given", () => {

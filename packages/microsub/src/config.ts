@@ -16,8 +16,8 @@ import { canonicalizeProfileUrl } from "@dwk/indieauth";
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { D1Database, Queue } from "@cloudflare/workers-types";
 
-import type { FetchLike } from "./fetch";
-import type { MicrosubJob } from "./queue";
+import type { FetchLike } from "./fetch.js";
+import type { MicrosubJob } from "./queue.js";
 
 /**
  * Cloudflare bindings required by the Microsub handler, poller, and queue

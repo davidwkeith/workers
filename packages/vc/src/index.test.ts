@@ -16,7 +16,7 @@ import {
   type VcConfig,
   type VcEnv,
   type VerificationMethod,
-} from "./index";
+} from "./index.js";
 
 const BASE = "https://example.com";
 const DID = "did:web:example.com";

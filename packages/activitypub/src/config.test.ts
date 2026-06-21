@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { deriveIris, resolveConfig, type ActivityPubConfig } from "./config";
+import { deriveIris, resolveConfig, type ActivityPubConfig } from "./config.js";
 
 /**
  * Tests for config resolution and the default key resolver. The resolver is the

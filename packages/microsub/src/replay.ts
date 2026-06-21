@@ -14,7 +14,7 @@
  * @packageDocumentation
  */
 
-import type { MicrosubStoreEnv } from "./store";
+import type { MicrosubStoreEnv } from "./store.js";
 
 /** Storage interface over accepted DPoP proof `jti`s. */
 export interface DpopReplayStore {

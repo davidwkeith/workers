@@ -19,10 +19,10 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import type { FetchLike } from "./fetch";
-import { readBytesCapped } from "./fetch";
-import { WebSubLogEvent } from "./log";
-import { safeFetch } from "./safe-fetch";
+import type { FetchLike } from "./fetch.js";
+import { readBytesCapped } from "./fetch.js";
+import { WebSubLogEvent } from "./log.js";
+import { safeFetch } from "./safe-fetch.js";
 
 /** Bytes of randomness in a generated challenge (hex-encoded → twice as many chars). */
 const CHALLENGE_BYTES = 24;

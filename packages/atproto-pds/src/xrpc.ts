@@ -8,7 +8,7 @@
  * Pure and runtime-free.
  */
 
-import type { CborValue } from "./cbor";
+import type { CborValue } from "./cbor.js";
 
 /** A structured XRPC error, surfaced with the `error` name clients switch on. */
 export class XrpcError extends Error {

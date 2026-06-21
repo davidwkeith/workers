@@ -9,7 +9,7 @@ import {
   type IndieAuthEnv,
   type Logger,
   type Metrics,
-} from "./index";
+} from "./index.js";
 
 const harness = env as unknown as IndieAuthEnv;
 

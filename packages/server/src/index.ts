@@ -22,7 +22,7 @@
  * @packageDocumentation
  */
 
-export { createServer, DwkServer } from "./server";
+export { createServer, DwkServer } from "./server.js";
 
 export {
   resolveOrigin,
@@ -33,36 +33,36 @@ export {
   type HostConfig,
   type Mount,
   type FetchHandler,
-} from "./config";
+} from "./config.js";
 
-export { toWebRequest, sendWebResponse } from "./adapter";
+export { toWebRequest, sendWebResponse } from "./adapter.js";
 
 export {
   assembleBindings,
   type BindingsSpec,
   type KvBindingSpec,
-} from "./bindings";
+} from "./bindings.js";
 
-export { WaitUntilTracker, HostExecutionContext } from "./context";
+export { WaitUntilTracker, HostExecutionContext } from "./context.js";
 
 export {
   bindQueueConsumer,
   bindScheduledTask,
   type QueueHandler,
   type ScheduledTaskHandler,
-} from "./lifecycle";
+} from "./lifecycle.js";
 
-export { installHTMLRewriter } from "./html-rewriter";
+export { installHTMLRewriter } from "./html-rewriter.js";
 
-export { installRequestDuplex } from "./request-duplex";
+export { installRequestDuplex } from "./request-duplex.js";
 
-export { installWebSocketGlobals, WebSocketPair } from "./web-socket";
+export { installWebSocketGlobals, WebSocketPair } from "./web-socket.js";
 
 export {
   acquireWriterLock,
   DataDirectoryLockedError,
   type ReleaseLock,
-} from "./lock";
+} from "./lock.js";
 
 export {
   createD1Database,
@@ -82,9 +82,9 @@ export {
   type DurableObjectNamespaceOptions,
   type DurableObjectState,
   type SqlStorage,
-} from "./shims";
+} from "./shims/index.js";
 
 export {
   resolve,
   registerCloudflareWorkers,
-} from "./cloudflare-workers-loader";
+} from "./cloudflare-workers-loader.js";

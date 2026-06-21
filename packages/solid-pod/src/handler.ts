@@ -17,9 +17,9 @@ import {
   type ResolvedConfig,
   type SolidPodConfig,
   type SolidPodEnv,
-} from "./config";
-import { authenticate } from "./auth";
-import { PodOutcome, SolidPodLogEvent } from "./log";
+} from "./config.js";
+import { authenticate } from "./auth.js";
+import { PodOutcome, SolidPodLogEvent } from "./log.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type SolidPodHandler = (

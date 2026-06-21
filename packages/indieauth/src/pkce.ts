@@ -6,7 +6,7 @@
  * @see https://datatracker.ietf.org/doc/html/rfc7636
  */
 
-import { sha256Base64url, timingSafeEqual } from "./encoding";
+import { sha256Base64url, timingSafeEqual } from "./encoding.js";
 
 /** The only PKCE challenge method this server accepts. */
 export const SUPPORTED_CODE_CHALLENGE_METHODS = ["S256"] as const;

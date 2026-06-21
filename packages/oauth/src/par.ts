@@ -21,17 +21,17 @@
 import { verifyDpopProof } from "@dwk/dpop";
 import { hostFromUrl } from "@dwk/log";
 
-import { randomIdentifier } from "./encoding";
-import { OAuthError, oauthErrorResponse } from "./errors";
-import { json, methodNotAllowed, readForm } from "./http";
-import { OAuthLogEvent } from "./log";
+import { randomIdentifier } from "./encoding.js";
+import { OAuthError, oauthErrorResponse } from "./errors.js";
+import { json, methodNotAllowed, readForm } from "./http.js";
+import { OAuthLogEvent } from "./log.js";
 import {
   emit,
   resolveObservability,
   type ObservabilityConfig,
-} from "./observability";
-import type { EndpointAuthenticator } from "./introspection";
-import type { PushedRequestRecord } from "./store";
+} from "./observability.js";
+import type { EndpointAuthenticator } from "./introspection.js";
+import type { PushedRequestRecord } from "./store.js";
 
 /** The URN prefix RFC 9126 §2.2 mandates for a PAR `request_uri`. */
 export const PUSHED_REQUEST_URI_PREFIX = "urn:ietf:params:oauth:request_uri:";

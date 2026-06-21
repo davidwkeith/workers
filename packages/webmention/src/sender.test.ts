@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { sendWebmention, sendWebmentions } from "./sender";
-import type { FetchLike } from "./fetch";
+import { sendWebmention, sendWebmentions } from "./sender.js";
+import type { FetchLike } from "./fetch.js";
 
 const source = "https://me.example/post";
 const target = "https://target.example/article";
