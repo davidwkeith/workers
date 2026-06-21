@@ -10,7 +10,7 @@
  * supported and are reported by the caller as malformed.
  */
 
-import type { HttpMessage } from "./types";
+import type { HttpMessage } from "./types.js";
 
 /** Build a case-insensitive view of the message's header values, OWS-trimmed. */
 function headerMap(headers: HttpMessage["headers"]): Map<string, string> {

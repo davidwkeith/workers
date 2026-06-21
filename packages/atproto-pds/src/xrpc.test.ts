@@ -6,7 +6,7 @@ import {
   isValidNsid,
   isValidRecordKey,
   XrpcError,
-} from "./xrpc";
+} from "./xrpc.js";
 
 describe("XRPC helpers", () => {
   it("renders an XrpcError as the standard envelope", async () => {

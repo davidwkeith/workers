@@ -15,17 +15,17 @@ import {
   type IndieAuthConfig,
   type ProfileInfo,
   type ResolvedConfig,
-} from "./config";
-import { IndieAuthLogEvent } from "./log";
-import { buildServerMetadata } from "./metadata";
-import { isSupportedChallengeMethod, verifyPkce } from "./pkce";
-import { canonicalizeProfileUrl } from "./profile";
-import { signAccessToken, verifyAccessToken } from "./token";
+} from "./config.js";
+import { IndieAuthLogEvent } from "./log.js";
+import { buildServerMetadata } from "./metadata.js";
+import { isSupportedChallengeMethod, verifyPkce } from "./pkce.js";
+import { canonicalizeProfileUrl } from "./profile.js";
+import { signAccessToken, verifyAccessToken } from "./token.js";
 import {
   createIndieAuthStore,
   type AuthorizationCodeRecord,
   type IndieAuthStoreEnv,
-} from "./store";
+} from "./store.js";
 
 /** Cloudflare bindings required by the IndieAuth handler. */
 export interface IndieAuthEnv extends IndieAuthStoreEnv {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveConfig } from "./index";
+import { resolveConfig } from "./index.js";
 
 describe("resolveConfig", () => {
   it("throws when neither a WebFinger URL nor links are configured", () => {

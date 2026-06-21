@@ -34,8 +34,8 @@ import {
 import { discoverInboxIris, inboxLinkHeader } from "@dwk/ldn/discovery";
 import type { AccessMode } from "@dwk/wac";
 
-import { INTERNAL_HEADERS, type SolidPodEnv } from "./config";
-import { PodOutcome } from "./log";
+import { INTERNAL_HEADERS, type SolidPodEnv } from "./config.js";
+import { PodOutcome } from "./log.js";
 import {
   ancestorContainers,
   childKey,
@@ -45,15 +45,15 @@ import {
   parentContainer,
   resourceForAcl,
   toIri,
-} from "./ldp";
-import { negotiateMediaType, type Negotiated } from "./negotiation";
+} from "./ldp.js";
+import { negotiateMediaType, type Negotiated } from "./negotiation.js";
 import {
   parsePatch,
   PatchConstraintError,
   PatchProblem,
   resolvePatch,
-} from "./patch";
-import { authorize, grantedModes } from "./wac";
+} from "./patch.js";
+import { authorize, grantedModes } from "./wac.js";
 
 const LDP = "http://www.w3.org/ns/ldp#";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";

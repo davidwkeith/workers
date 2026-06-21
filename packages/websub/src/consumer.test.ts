@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { createWebSubQueueConsumer } from "./consumer";
-import type { WebSubEnv } from "./config";
-import type { WebSubJob } from "./queue";
+import { createWebSubQueueConsumer } from "./consumer.js";
+import type { WebSubEnv } from "./config.js";
+import type { WebSubJob } from "./queue.js";
 import type {
   Subscription,
   SubscriptionStore,
   SubscriptionUpsert,
-} from "./store";
-import type { FetchLike } from "./fetch";
+} from "./store.js";
+import type { FetchLike } from "./fetch.js";
 import type {
   ExecutionContext,
   Message,

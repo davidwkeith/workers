@@ -20,15 +20,15 @@
  * @packageDocumentation
  */
 
-export { createWebfinger } from "./handler";
-export type { WebfingerEnv, WebfingerHandler } from "./handler";
+export { createWebfinger } from "./handler.js";
+export type { WebfingerEnv, WebfingerHandler } from "./handler.js";
 
 export {
   resolveConfig,
   type WebfingerConfig,
   type ResourceResolver,
   type ResolvedConfig,
-} from "./config";
+} from "./config.js";
 
 export {
   filterLinksByRel,
@@ -36,9 +36,9 @@ export {
   type Jrd,
   type Link,
   type ResourceRecord,
-} from "./jrd";
+} from "./jrd.js";
 
-export { normalizeResource, isWellFormedResource } from "./resource";
+export { normalizeResource, isWellFormedResource } from "./resource.js";
 
-export { WebfingerLogEvent } from "./log";
+export { WebfingerLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

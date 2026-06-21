@@ -20,9 +20,9 @@
  * @packageDocumentation
  */
 
-export { createRemoteStorage, type RemoteStorageHandler } from "./handler";
-export { createRemoteStorageGc, type RemoteStorageGcHandler } from "./gc";
-export { RemoteStorageObject } from "./storage";
+export { createRemoteStorage, type RemoteStorageHandler } from "./handler.js";
+export { createRemoteStorageGc, type RemoteStorageGcHandler } from "./gc.js";
+export { RemoteStorageObject } from "./storage.js";
 
 export {
   resolveConfig,
@@ -32,7 +32,7 @@ export {
   type RemoteStorageGcEnv,
   type ResolvedConfig,
   type ParsedPath,
-} from "./config";
+} from "./config.js";
 
 export {
   authenticate,
@@ -40,7 +40,7 @@ export {
   type RemoteStorageAuth,
   type AuthResult,
   type AuthFailureReason,
-} from "./auth";
+} from "./auth.js";
 
 export {
   parseScopes,
@@ -51,7 +51,7 @@ export {
   ROOT_MODULE,
   type RemoteStorageScope,
   type ScopeMode,
-} from "./scope";
+} from "./scope.js";
 
 export {
   buildFolderModel,
@@ -64,21 +64,21 @@ export {
   type FolderSubfolder,
   type FolderDescription,
   type FolderItem,
-} from "./folder";
+} from "./folder.js";
 
 export {
   corsHeaders,
   preflightResponse,
   withCors,
   ALLOWED_METHODS,
-} from "./cors";
+} from "./cors.js";
 
 export {
   remoteStorageLink,
   REMOTESTORAGE_REL,
   REMOTESTORAGE_VERSION,
   type RemoteStorageLinkConfig,
-} from "./discovery";
+} from "./discovery.js";
 
-export { RemoteStorageLogEvent } from "./log";
+export { RemoteStorageLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

@@ -5,10 +5,10 @@
  * package's public surface.
  */
 
-import { createRemoteStorage } from "./handler";
-import type { RemoteStorageEnv } from "./config";
+import { createRemoteStorage } from "./handler.js";
+import type { RemoteStorageEnv } from "./config.js";
 
-export { RemoteStorageObject } from "./storage";
+export { RemoteStorageObject } from "./storage.js";
 
 export default {
   fetch(): Response {

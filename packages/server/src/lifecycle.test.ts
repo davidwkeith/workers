@@ -3,8 +3,8 @@ import type {
   MessageBatch,
   ScheduledController,
 } from "@cloudflare/workers-types";
-import { bindQueueConsumer, bindScheduledTask } from "./lifecycle";
-import { WaitUntilTracker } from "./context";
+import { bindQueueConsumer, bindScheduledTask } from "./lifecycle.js";
+import { WaitUntilTracker } from "./context.js";
 
 const emptyBatch = { queue: "q", messages: [] } as unknown as MessageBatch<{
   n: number;

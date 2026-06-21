@@ -7,7 +7,7 @@ import {
   FOLDER_DESCRIPTION_CONTEXT,
   hashSignature,
   renderFolderDescription,
-} from "./folder";
+} from "./folder.js";
 
 function meta(
   key: string,

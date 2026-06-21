@@ -10,8 +10,13 @@
  * is multibase base32-lower (`b…`). This module is pure data + one async hash.
  */
 
-import { base32Decode, base32Encode, bytesEqual, concatBytes } from "./bytes";
-import { decodeVarint, encodeVarint } from "./varint";
+import {
+  base32Decode,
+  base32Encode,
+  bytesEqual,
+  concatBytes,
+} from "./bytes.js";
+import { decodeVarint, encodeVarint } from "./varint.js";
 
 /** Multicodec content type for DAG-CBOR blocks (commits, MST nodes, records). */
 export const DAG_CBOR_CODEC = 0x71;

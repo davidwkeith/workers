@@ -4,8 +4,8 @@ import {
   createClientRegistrationHandler,
   validateClientMetadata,
   type ClientRegistrationConfig,
-} from "./registration";
-import type { ClientRecord } from "./store";
+} from "./registration.js";
+import type { ClientRecord } from "./store.js";
 
 const ENDPOINT = "https://as.example/register";
 

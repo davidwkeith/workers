@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
-import { resolveConfig } from "./config";
-import type { ResourceRecord } from "./jrd";
+import { resolveConfig } from "./config.js";
+import type { ResourceRecord } from "./jrd.js";
 
 describe("resolveConfig", () => {
   it("throws when neither a resource map nor a resolver is configured", () => {

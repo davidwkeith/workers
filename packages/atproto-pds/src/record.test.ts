@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
-import { atUri, cborToJson, jsonToCbor, recordPath } from "./record";
+import { encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { atUri, cborToJson, jsonToCbor, recordPath } from "./record.js";
 
 describe("record JSON ⇄ DAG-CBOR", () => {
   it("round-trips a plain lexicon record", () => {

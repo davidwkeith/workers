@@ -27,7 +27,7 @@ export {
   type DeleteOptions,
   type OrphanRecord,
   type OrphanCancelRecord,
-} from "./store";
+} from "./store.js";
 
 export {
   collectGarbage,
@@ -39,6 +39,6 @@ export {
   DEFAULT_FORWARDED_RETENTION_MS,
   type OrphanSink,
   type GcEnv,
-} from "./gc";
+} from "./gc.js";
 
-export type { ResourceKind } from "./sql";
+export type { ResourceKind } from "./sql.js";

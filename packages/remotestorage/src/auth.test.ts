@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { authenticate, bearerToken } from "./auth";
-import { resolveConfig, type RemoteStorageConfig } from "./config";
+import { authenticate, bearerToken } from "./auth.js";
+import { resolveConfig, type RemoteStorageConfig } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // ES256 issuer fixtures

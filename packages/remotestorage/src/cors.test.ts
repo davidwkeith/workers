@@ -5,7 +5,7 @@ import {
   corsHeaders,
   preflightResponse,
   withCors,
-} from "./cors";
+} from "./cors.js";
 
 describe("corsHeaders", () => {
   it("echoes a concrete Origin and varies on it", () => {

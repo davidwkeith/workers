@@ -40,7 +40,7 @@ export {
   type AnalyticsEngineDatasetLike,
   type AnalyticsEngineDataPoint,
   type AnalyticsEngineMetricsOptions,
-} from "./metrics";
+} from "./metrics.js";
 
 /** Severity of a log record, in increasing order of importance. */
 export type LogLevel = "debug" | "info" | "warn" | "error";

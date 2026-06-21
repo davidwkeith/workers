@@ -8,7 +8,7 @@
  * keeping the two representations information-equivalent.
  */
 
-import type { HostMetaDocument, Link } from "./document";
+import type { HostMetaDocument, Link } from "./document.js";
 
 /**
  * A fully-rendered host-meta JRD. `links` is always present (possibly empty);

@@ -29,8 +29,8 @@
  * @packageDocumentation
  */
 
-export { createActivityPub, type ActivityPubHandler } from "./handler";
-export { ActivityPubObject } from "./object";
+export { createActivityPub, type ActivityPubHandler } from "./handler.js";
+export { ActivityPubObject } from "./object.js";
 
 export {
   resolveConfig,
@@ -39,7 +39,7 @@ export {
   type ActivityPubEnv,
   type ResolvedConfig,
   type InboxVerifier,
-} from "./config";
+} from "./config.js";
 
 export {
   AS2_NS,
@@ -55,7 +55,7 @@ export {
   type ActorIris,
   type ActorDocumentOptions,
   type ActivityObject,
-} from "./as2";
+} from "./as2.js";
 
 export {
   buildNodeInfoDiscovery,
@@ -63,7 +63,7 @@ export {
   buildNodeInfo21,
   type SoftwareInfo,
   type UsageCounts,
-} from "./nodeinfo";
+} from "./nodeinfo.js";
 
 export {
   signRequest,
@@ -77,14 +77,14 @@ export {
   type VerifyFailureReason,
   type InboxRequest,
   type SignerKey,
-} from "./signature";
+} from "./signature.js";
 
 export {
   deliverActivity,
   assertPublicHttpsTarget,
   DeliveryBlockedError,
   type DeliveryResult,
-} from "./delivery";
+} from "./delivery.js";
 
-export { ActivityPubLogEvent } from "./log";
+export { ActivityPubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

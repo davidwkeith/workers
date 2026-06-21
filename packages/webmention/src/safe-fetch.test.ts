@@ -4,8 +4,8 @@ import {
   isPrivateOrReservedHost,
   safeFetch,
   SsrfError,
-} from "./safe-fetch";
-import type { FetchLike } from "./fetch";
+} from "./safe-fetch.js";
+import type { FetchLike } from "./fetch.js";
 
 describe("isPrivateOrReservedHost", () => {
   it("blocks loopback addresses", () => {

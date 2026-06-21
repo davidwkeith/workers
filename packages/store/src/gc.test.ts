@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { collectGarbage, d1OrphanSink, ensureGcSchema } from "./index";
-import type { HarnessEnv } from "./test-harness";
+import { collectGarbage, d1OrphanSink, ensureGcSchema } from "./index.js";
+import type { HarnessEnv } from "./test-harness.js";
 
 const harness = env as unknown as HarnessEnv;
 

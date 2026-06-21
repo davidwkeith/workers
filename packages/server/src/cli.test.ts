@@ -9,7 +9,7 @@ import {
   startServer,
   main,
   createShutdown,
-} from "./cli";
+} from "./cli.js";
 
 const dirs: string[] = [];
 

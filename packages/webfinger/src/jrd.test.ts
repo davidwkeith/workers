@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildJrd, filterLinksByRel, type Link } from "./jrd";
+import { buildJrd, filterLinksByRel, type Link } from "./jrd.js";
 
 const profile: Link = {
   rel: "http://webfinger.net/rel/profile-page",

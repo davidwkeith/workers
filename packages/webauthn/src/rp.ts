@@ -18,14 +18,14 @@ import {
   INTERNAL_HEADERS,
   type ForwardedConfig,
   type WebAuthnEnv,
-} from "./config";
-import { base64urlToBytes, bytesToBase64url } from "./encoding";
-import { WebAuthnLogEvent } from "./log";
+} from "./config.js";
+import { base64urlToBytes, bytesToBase64url } from "./encoding.js";
+import { WebAuthnLogEvent } from "./log.js";
 import {
   verifyAuthentication,
   verifyRegistration,
   type VerifyFailureReason,
-} from "./verify";
+} from "./verify.js";
 
 /** A stored challenge row. */
 type ChallengeRow = {

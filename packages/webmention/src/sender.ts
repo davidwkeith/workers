@@ -15,10 +15,10 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import { discoverEndpoint } from "./discovery";
-import type { FetchLike } from "./fetch";
-import { WebmentionLogEvent } from "./log";
-import { safeFetch } from "./safe-fetch";
+import { discoverEndpoint } from "./discovery.js";
+import type { FetchLike } from "./fetch.js";
+import { WebmentionLogEvent } from "./log.js";
+import { safeFetch } from "./safe-fetch.js";
 
 /** Options for {@link sendWebmention} / {@link sendWebmentions}. */
 export interface SendOptions {

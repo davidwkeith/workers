@@ -12,8 +12,8 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import { didWebFromHost, isValidHandle } from "./identity";
-import type { AtprotoRepoObject } from "./object";
+import { didWebFromHost, isValidHandle } from "./identity.js";
+import type { AtprotoRepoObject } from "./object.js";
 
 /** Cloudflare bindings required by the PDS handler and repository DO. */
 export interface AtprotoPdsEnv {

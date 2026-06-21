@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CronScheduler } from "./cron";
+import { CronScheduler } from "./cron.js";
 import type { ScheduledController } from "@cloudflare/workers-types";
 
 describe("cron / scheduled shim", () => {

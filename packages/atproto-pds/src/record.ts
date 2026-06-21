@@ -8,8 +8,8 @@
  * Pure and runtime-free.
  */
 
-import type { CborValue } from "./cbor";
-import { CID } from "./cid";
+import type { CborValue } from "./cbor.js";
+import { CID } from "./cid.js";
 
 /** Any JSON value (records are JSON on the wire). */
 export type JsonValue =

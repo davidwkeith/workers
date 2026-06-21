@@ -11,7 +11,7 @@
  * the repository lives and verify its commits.
  */
 
-import type { CborValue } from "./cbor";
+import type { CborValue } from "./cbor.js";
 
 /** Derive the `did:web` identifier for a hostname (optionally a port). */
 export function didWebFromHost(host: string): string {

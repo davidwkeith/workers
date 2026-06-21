@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { d1OrphanSink, ensureGcSchema } from "@dwk/store";
 
-import { createSolidPodGc } from "./index";
-import type { SolidPodGcEnv } from "./config";
+import { createSolidPodGc } from "./index.js";
+import type { SolidPodGcEnv } from "./config.js";
 
 /**
  * Unit tests for the cron GC wiring (`createSolidPodGc`). The reclamation

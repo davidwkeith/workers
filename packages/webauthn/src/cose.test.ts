@@ -7,9 +7,9 @@ import {
   coseToKey,
   cryptoParamsForCoseAlg,
   derToRawEcdsaSignature,
-} from "./cose";
-import { base64urlToBytes, bytesToBase64url } from "./encoding";
-import { rawToDerEcdsaSignature } from "./test-harness";
+} from "./cose.js";
+import { base64urlToBytes, bytesToBase64url } from "./encoding.js";
+import { rawToDerEcdsaSignature } from "./test-harness.js";
 
 describe("@dwk/webauthn cose", () => {
   it("converts an EC2 COSE key to a JWK", () => {

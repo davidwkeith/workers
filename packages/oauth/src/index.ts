@@ -30,13 +30,17 @@
  * @packageDocumentation
  */
 
-export { OAuthError, oauthErrorResponse, type OAuthErrorCode } from "./errors";
+export {
+  OAuthError,
+  oauthErrorResponse,
+  type OAuthErrorCode,
+} from "./errors.js";
 
 export {
   buildAuthorizationServerMetadata,
   type AuthorizationServerMetadata,
   type AuthorizationServerMetadataConfig,
-} from "./metadata";
+} from "./metadata.js";
 
 export {
   createIntrospectionHandler,
@@ -45,9 +49,12 @@ export {
   type IntrospectionConfig,
   type IntrospectionResponse,
   type EndpointAuthenticator,
-} from "./introspection";
+} from "./introspection.js";
 
-export { createRevocationHandler, type RevocationConfig } from "./revocation";
+export {
+  createRevocationHandler,
+  type RevocationConfig,
+} from "./revocation.js";
 
 export {
   createPushedAuthorizationRequestHandler,
@@ -55,21 +62,21 @@ export {
   requestUriFor,
   PUSHED_REQUEST_URI_PREFIX,
   type PushedAuthorizationRequestConfig,
-} from "./par";
+} from "./par.js";
 
 export {
   createClientRegistrationHandler,
   validateClientMetadata,
   type ClientRegistrationConfig,
-} from "./registration";
+} from "./registration.js";
 
 export type {
   IntrospectionTokenRecord,
   PushedRequestRecord,
   PushedAuthorizationStore,
   ClientRecord,
-} from "./store";
+} from "./store.js";
 
-export { OAuthLogEvent } from "./log";
-export type { ObservabilityConfig } from "./observability";
+export { OAuthLogEvent } from "./log.js";
+export type { ObservabilityConfig } from "./observability.js";
 export type { Logger, Metrics } from "@dwk/log";

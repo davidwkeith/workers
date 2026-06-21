@@ -10,8 +10,8 @@
 import {
   DPOP_SIGNING_ALG_VALUES_SUPPORTED,
   type ResolvedConfig,
-} from "./config";
-import { SUPPORTED_CODE_CHALLENGE_METHODS } from "./pkce";
+} from "./config.js";
+import { SUPPORTED_CODE_CHALLENGE_METHODS } from "./pkce.js";
 
 /** The JSON shape of the metadata document. */
 export interface ServerMetadata {

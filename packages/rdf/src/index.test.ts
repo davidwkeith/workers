@@ -6,8 +6,8 @@ import {
   parseTurtle,
   serialize,
   writeTurtle,
-} from "./index";
-import type { Quad } from "./index";
+} from "./index.js";
+import type { Quad } from "./index.js";
 
 /** Order-independent canonical form for comparing quad sets. */
 function canonical(quads: Quad[]): string[] {

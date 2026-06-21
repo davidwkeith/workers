@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { toWebRequest, sendWebResponse } from "./adapter";
+import { toWebRequest, sendWebResponse } from "./adapter.js";
 
 type WebHandler = (request: Request) => Promise<Response>;
 

@@ -15,7 +15,7 @@
  * Workers runtime needed.
  */
 
-import { CID } from "./cid";
+import { CID } from "./cid.js";
 
 /** The value model DAG-CBOR can represent in this package. */
 export type CborValue =

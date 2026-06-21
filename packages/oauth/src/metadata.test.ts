@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAuthorizationServerMetadata } from "./metadata";
+import { buildAuthorizationServerMetadata } from "./metadata.js";
 
 describe("buildAuthorizationServerMetadata", () => {
   it("always emits issuer and the defaulted supported-value lists", () => {

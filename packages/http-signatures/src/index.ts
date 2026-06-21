@@ -20,10 +20,10 @@
  * @packageDocumentation
  */
 
-export { signMessage, type SignParams } from "./sign";
-export { verifyMessage, type VerifyParams } from "./verify";
+export { signMessage, type SignParams } from "./sign.js";
+export { verifyMessage, type VerifyParams } from "./verify.js";
 
-export type { KeyResolver } from "./rfc9421";
+export type { KeyResolver } from "./rfc9421.js";
 
 export {
   createContentDigest,
@@ -32,9 +32,9 @@ export {
   verifyDigest,
   type DigestAlgorithm,
   type DigestRejection,
-} from "./digest";
+} from "./digest.js";
 
-export { isSupportedAlgorithm } from "./algorithms";
+export { isSupportedAlgorithm } from "./algorithms.js";
 
 export type {
   HttpMessage,
@@ -42,4 +42,4 @@ export type {
   SignatureProfile,
   SignatureFailureReason,
   VerifyResult,
-} from "./types";
+} from "./types.js";

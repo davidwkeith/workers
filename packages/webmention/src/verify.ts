@@ -23,10 +23,10 @@ import {
   isJsonContentType,
   resolveUrl,
   scanElements,
-} from "./html";
-import { readBodyCapped, type FetchLike } from "./fetch";
-import { WebmentionLogEvent } from "./log";
-import { safeFetch } from "./safe-fetch";
+} from "./html.js";
+import { readBodyCapped, type FetchLike } from "./fetch.js";
+import { WebmentionLogEvent } from "./log.js";
+import { safeFetch } from "./safe-fetch.js";
 
 /** Elements whose `href` may constitute a link to the target. */
 const HREF_TAGS = new Set(["a", "link", "area"]);

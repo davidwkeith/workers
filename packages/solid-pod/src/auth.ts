@@ -12,8 +12,8 @@
 
 import { verifyDpopProof } from "@dwk/dpop";
 
-import type { AuthContext, ResolvedConfig } from "./config";
-import { decodeJwt, verifyJwtSignature } from "./jwt";
+import type { AuthContext, ResolvedConfig } from "./config.js";
+import { decodeJwt, verifyJwtSignature } from "./jwt.js";
 
 /** A stable reason an authentication attempt failed (for `WWW-Authenticate`). */
 export type AuthFailureReason =

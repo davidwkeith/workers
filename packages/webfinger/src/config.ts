@@ -8,8 +8,8 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { ResourceRecord } from "./jrd";
-import { normalizeResource } from "./resource";
+import type { ResourceRecord } from "./jrd.js";
+import { normalizeResource } from "./resource.js";
 
 /**
  * A dynamic resolver from a queried `resource` URI to its {@link ResourceRecord},

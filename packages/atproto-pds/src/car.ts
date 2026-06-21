@@ -9,10 +9,10 @@
  * Pure byte assembly; no Workers runtime needed.
  */
 
-import { concatBytes } from "./bytes";
-import { decodeCbor, encodeCbor } from "./cbor";
-import { CID } from "./cid";
-import { decodeVarint, encodeVarint } from "./varint";
+import { concatBytes } from "./bytes.js";
+import { decodeCbor, encodeCbor } from "./cbor.js";
+import { CID } from "./cid.js";
+import { decodeVarint, encodeVarint } from "./varint.js";
 
 /** One content-addressed block in a CAR. */
 export interface CarBlock {

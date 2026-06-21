@@ -15,7 +15,7 @@ import {
   resolveConfig,
   type SolidPodConfig,
   type SolidPodGcEnv,
-} from "./config";
+} from "./config.js";
 
 /** A `scheduled`-compatible cron handler for R2 blob garbage collection. */
 export type SolidPodGcHandler = (

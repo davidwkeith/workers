@@ -6,7 +6,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 
-import type { StoreEnv } from "./index";
+import type { StoreEnv } from "./index.js";
 
 /** Bindings wired up by the vitest pool (`vitest.config.ts`). */
 export interface HarnessEnv extends StoreEnv {

@@ -9,7 +9,7 @@
 import { canonicalizeProfileUrl } from "@dwk/indieauth";
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { Mf2Object, MicropubCommands } from "./mf2";
+import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
 export interface SyndicationTarget {

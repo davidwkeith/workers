@@ -7,7 +7,7 @@ import {
   type HostMetaEnv,
   type Logger,
   type Metrics,
-} from "./index";
+} from "./index.js";
 
 const env: HostMetaEnv = {};
 const ctx = {} as ExecutionContext;

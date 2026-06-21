@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { discoverEndpoint, findWebmentionEndpoint } from "./discovery";
-import type { FetchLike } from "./fetch";
+import { discoverEndpoint, findWebmentionEndpoint } from "./discovery.js";
+import type { FetchLike } from "./fetch.js";
 
 const doc = "https://target.example/post";
 

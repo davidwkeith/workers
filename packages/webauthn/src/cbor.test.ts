@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeFirst, CborError } from "./cbor";
-import { encodeCbor } from "./test-harness";
+import { decodeFirst, CborError } from "./cbor.js";
+import { encodeCbor } from "./test-harness.js";
 
 describe("@dwk/webauthn cbor decoder", () => {
   it("decodes small unsigned integers inline", () => {

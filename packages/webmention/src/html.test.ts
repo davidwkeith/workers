@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLinkHeader, scanElements, splitTokens } from "./html";
+import { parseLinkHeader, scanElements, splitTokens } from "./html.js";
 
 describe("scanElements", () => {
   it("reports matching elements in document order with requested attributes", async () => {

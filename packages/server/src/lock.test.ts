@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireWriterLock, DataDirectoryLockedError } from "./lock";
+import { acquireWriterLock, DataDirectoryLockedError } from "./lock.js";
 
 function freshDir(): string {
   return mkdtempSync(join(tmpdir(), "dwk-lock-"));

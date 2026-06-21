@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleBindings } from "./bindings";
+import { assembleBindings } from "./bindings.js";
 import type {
   D1Database,
   R2Bucket,

@@ -3,10 +3,10 @@ import { createServer, type Server } from "node:http";
 import { WebSocket as WsClient } from "ws";
 import { noopLogger } from "@dwk/log";
 
-import { installWebSocketGlobals } from "./web-socket";
-import { attachWebSocketUpgrade } from "./web-socket-upgrade";
-import { WaitUntilTracker } from "./context";
-import type { Mount } from "./config";
+import { installWebSocketGlobals } from "./web-socket.js";
+import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
+import { WaitUntilTracker } from "./context.js";
+import type { Mount } from "./config.js";
 
 installWebSocketGlobals();
 

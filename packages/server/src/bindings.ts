@@ -25,9 +25,9 @@
  */
 
 import { join } from "node:path";
-import { createD1Database } from "./shims/d1";
-import { createR2Bucket } from "./shims/r2";
-import { createKVNamespace } from "./shims/kv";
+import { createD1Database } from "./shims/d1.js";
+import { createR2Bucket } from "./shims/r2.js";
+import { createKVNamespace } from "./shims/kv.js";
 
 /** A KV namespace binding that may opt out of on-disk persistence. */
 export interface KvBindingSpec {

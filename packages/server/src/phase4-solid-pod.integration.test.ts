@@ -24,10 +24,10 @@ import { WebSocket as WsClient } from "ws";
 
 import { createSolidPod, SolidPodObject } from "@dwk/solid-pod";
 
-import { createServer } from "./server";
-import { assembleBindings } from "./bindings";
-import { createDurableObjectNamespace } from "./shims/durable-object";
-import type { FetchHandler } from "./config";
+import { createServer } from "./server.js";
+import { assembleBindings } from "./bindings.js";
+import { createDurableObjectNamespace } from "./shims/durable-object.js";
+import type { FetchHandler } from "./config.js";
 
 const OWNER = "https://owner.example/profile#me";
 const BOB = "https://bob.example/profile#me";

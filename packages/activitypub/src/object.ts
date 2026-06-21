@@ -24,15 +24,15 @@ import {
   type ActivityObject,
   type ActorIris,
   type JsonValue,
-} from "./as2";
-import { ApOutcome, OUTCOME_ACTIVITY_HEADER, OUTCOME_HEADER } from "./log";
-import { INTERNAL_HEADERS, type ForwardedConfig } from "./config";
+} from "./as2.js";
+import { ApOutcome, OUTCOME_ACTIVITY_HEADER, OUTCOME_HEADER } from "./log.js";
+import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
 import {
   assertPublicHttpsTarget,
   deliverActivity,
   DeliveryBlockedError,
-} from "./delivery";
-import type { ActivityPubEnv } from "./config";
+} from "./delivery.js";
+import type { ActivityPubEnv } from "./config.js";
 
 /** How long a seen activity `id` is remembered for dedup (7 days). */
 const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;

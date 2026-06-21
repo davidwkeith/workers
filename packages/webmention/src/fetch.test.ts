@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readBodyCapped } from "./fetch";
+import { readBodyCapped } from "./fetch.js";
 
 describe("readBodyCapped", () => {
   it("reads a small body", async () => {

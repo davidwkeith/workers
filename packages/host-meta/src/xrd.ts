@@ -11,7 +11,7 @@
  * children. All text and attribute values are XML-escaped.
  */
 
-import type { HostMetaDocument, Link } from "./document";
+import type { HostMetaDocument, Link } from "./document.js";
 
 /** The XRD 1.0 default namespace (OASIS). */
 export const XRD_NAMESPACE = "http://docs.oasis-open.org/ns/xri/xrd-1.0";

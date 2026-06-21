@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildHostMetaJrd, serializeJrd } from "./index";
+import { buildHostMetaJrd, serializeJrd } from "./index.js";
 
 describe("buildHostMetaJrd", () => {
   it("always includes links", () => {

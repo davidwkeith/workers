@@ -8,7 +8,7 @@ import {
   verifyInboxSignature,
   type InboxRequest,
   type KeyResolver,
-} from "./signature";
+} from "./signature.js";
 
 // ---------------------------------------------------------------------------
 // RSA key fixtures (generated once, exported to PEM exactly as Mastodon does)

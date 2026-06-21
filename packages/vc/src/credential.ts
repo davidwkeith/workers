@@ -8,9 +8,9 @@
  * @see https://www.w3.org/TR/vc-data-model-2.0/
  */
 
-import { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime";
-import type { JcsValue } from "./jcs";
-import type { JsonObject } from "./data-integrity";
+import { isValidXsdDateTimeStamp, toXsdDateTime } from "./datetime.js";
+import type { JcsValue } from "./jcs.js";
+import type { JsonObject } from "./data-integrity.js";
 
 /** The base VCDM 2.0 context, which MUST be the first `@context` entry. */
 export const VC_CONTEXT_V2 = "https://www.w3.org/ns/credentials/v2";

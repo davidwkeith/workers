@@ -1,13 +1,16 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMicrosubQueueConsumer, type ConsumerOptions } from "./consumer";
-import type { MicrosubEnv } from "./config";
-import type { FetchLike } from "./fetch";
-import type { Jf2Entry } from "./jf2";
-import { createMicrosubPoller } from "./poll";
-import type { MicrosubJob, PollJob } from "./queue";
-import { createMicrosubStore, type MicrosubStore } from "./store";
+import {
+  createMicrosubQueueConsumer,
+  type ConsumerOptions,
+} from "./consumer.js";
+import type { MicrosubEnv } from "./config.js";
+import type { FetchLike } from "./fetch.js";
+import type { Jf2Entry } from "./jf2.js";
+import { createMicrosubPoller } from "./poll.js";
+import type { MicrosubJob, PollJob } from "./queue.js";
+import { createMicrosubStore, type MicrosubStore } from "./store.js";
 
 const config = { baseUrl: "https://example.com", me: "https://example.com/" };
 const ctx = {} as ExecutionContext;

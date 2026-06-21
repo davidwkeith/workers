@@ -27,43 +27,43 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import { createD1Inbox, type InboxStore } from "./inbox";
-import type { FetchLike } from "./fetch";
-import { WebmentionLogEvent } from "./log";
-import { validateWebmentionParams } from "./validate";
-import { verifySource } from "./verify";
+import { createD1Inbox, type InboxStore } from "./inbox.js";
+import type { FetchLike } from "./fetch.js";
+import { WebmentionLogEvent } from "./log.js";
+import { validateWebmentionParams } from "./validate.js";
+import { verifySource } from "./verify.js";
 
 export {
   validateWebmentionParams,
   type ValidateParams,
   type ValidationResult,
   type WebmentionValidationError,
-} from "./validate";
+} from "./validate.js";
 export {
   discoverEndpoint,
   findWebmentionEndpoint,
   type DiscoverOptions,
-} from "./discovery";
+} from "./discovery.js";
 export {
   sendWebmention,
   sendWebmentions,
   type SendOptions,
   type SendResult,
-} from "./sender";
+} from "./sender.js";
 export {
   verifySource,
   sourceLinksTo,
   extractLinks,
   type VerifyOptions,
   type VerifyResult,
-} from "./verify";
+} from "./verify.js";
 export {
   createD1Inbox,
   type InboxStore,
   type VerifiedMention,
   type D1InboxOptions,
-} from "./inbox";
-export type { FetchLike } from "./fetch";
+} from "./inbox.js";
+export type { FetchLike } from "./fetch.js";
 export {
   safeFetch,
   assertPublicUrl,
@@ -74,8 +74,8 @@ export {
   type SafeFetchOptions,
   type SafeFetchResult,
   type SsrfReason,
-} from "./safe-fetch";
-export { WebmentionLogEvent } from "./log";
+} from "./safe-fetch.js";
+export { WebmentionLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";
 
 /** A queued verification job: confirm that `source` links to `target`. */

@@ -18,9 +18,9 @@ import {
   resolveUrl,
   scanElements,
   splitTokens,
-} from "./html";
-import { readBodyCapped, type FetchLike } from "./fetch";
-import { safeFetch } from "./safe-fetch";
+} from "./html.js";
+import { readBodyCapped, type FetchLike } from "./fetch.js";
+import { safeFetch } from "./safe-fetch.js";
 
 // The legacy rel values predating the standardized `webmention` token. They are
 // absolute URLs, so a candidate rel is normalized through `URL` before being

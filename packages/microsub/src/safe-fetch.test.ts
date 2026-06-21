@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { FetchLike } from "./fetch";
+import type { FetchLike } from "./fetch.js";
 import {
   assertPublicUrl,
   isPrivateOrReservedHost,
   safeFetch,
   SsrfError,
-} from "./safe-fetch";
+} from "./safe-fetch.js";
 
 describe("isPrivateOrReservedHost", () => {
   it("blocks private, loopback, link-local, and reserved IPv4", () => {

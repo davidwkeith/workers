@@ -10,7 +10,7 @@
  * (from the DO) or omit them.
  */
 
-import type { JsonValue } from "./as2";
+import type { JsonValue } from "./as2.js";
 
 /** Identifies the running software in the NodeInfo `software` block. */
 export interface SoftwareInfo {

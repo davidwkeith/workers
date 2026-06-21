@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { canonicalize, canonicalizeToBytes } from "./jcs";
+import { canonicalize, canonicalizeToBytes } from "./jcs.js";
 
 describe("canonicalize (RFC 8785)", () => {
   it("sorts object keys by UTF-16 code unit", () => {

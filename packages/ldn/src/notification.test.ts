@@ -5,7 +5,7 @@ import {
   acceptPostHeader,
   acceptedContentTypes,
   parseNotification,
-} from "./notification";
+} from "./notification.js";
 
 const TURTLE =
   "<https://sender.example/a> " +

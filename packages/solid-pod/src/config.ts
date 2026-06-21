@@ -13,7 +13,7 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { SolidPodObject } from "./pod";
+import type { SolidPodObject } from "./pod.js";
 
 /** Cloudflare bindings required by the Solid Pod handler and Durable Object. */
 export interface SolidPodEnv {

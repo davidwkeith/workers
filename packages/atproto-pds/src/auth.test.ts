@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { constantTimeEqual, signJwt, verifyJwt } from "./auth";
+import { constantTimeEqual, signJwt, verifyJwt } from "./auth.js";
 
 const SECRET = "test-secret";
 

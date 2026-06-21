@@ -4,7 +4,7 @@ import {
   buildNodeInfo20,
   buildNodeInfo21,
   buildNodeInfoDiscovery,
-} from "./nodeinfo";
+} from "./nodeinfo.js";
 
 describe("NodeInfo", () => {
   it("the discovery doc points at both the 2.0 and 2.1 documents", () => {

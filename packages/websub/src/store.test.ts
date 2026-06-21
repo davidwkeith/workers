@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
-import { createD1SubscriptionStore } from "./store";
+import { createD1SubscriptionStore } from "./store.js";
 
 interface TestEnv {
   WEBSUB_DB: import("@cloudflare/workers-types").D1Database;

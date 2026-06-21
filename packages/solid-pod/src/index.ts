@@ -16,9 +16,9 @@
  * @packageDocumentation
  */
 
-export { createSolidPod, type SolidPodHandler } from "./handler";
-export { createSolidPodGc, type SolidPodGcHandler } from "./gc";
-export { SolidPodObject } from "./pod";
+export { createSolidPod, type SolidPodHandler } from "./handler.js";
+export { createSolidPodGc, type SolidPodGcHandler } from "./gc.js";
+export { SolidPodObject } from "./pod.js";
 
 export {
   type SolidPodConfig,
@@ -26,7 +26,7 @@ export {
   type SolidPodGcEnv,
   type AuthContext,
   type Jwks,
-} from "./config";
+} from "./config.js";
 
-export { SolidPodLogEvent } from "./log";
+export { SolidPodLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

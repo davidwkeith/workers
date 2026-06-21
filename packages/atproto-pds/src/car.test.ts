@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { readCar, writeCar, type CarBlock } from "./car";
-import { encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
+import { readCar, writeCar, type CarBlock } from "./car.js";
+import { encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
 
 async function block(value: { [k: string]: number }): Promise<CarBlock> {
   const bytes = encodeCbor(value);

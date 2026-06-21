@@ -6,7 +6,7 @@ import {
   deriveIris,
   type ActivityPubEnv,
   type ForwardedConfig,
-} from "./config";
+} from "./config.js";
 
 /**
  * Branch-focused tests over the per-actor Durable Object ({@link

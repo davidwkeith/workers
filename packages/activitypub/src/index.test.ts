@@ -5,9 +5,9 @@ import {
   createActivityPub,
   type ActivityPubConfig,
   type ActivityPubEnv,
-} from "./index";
-import { INTERNAL_HEADERS, type ForwardedConfig } from "./config";
-import { deriveIris } from "./config";
+} from "./index.js";
+import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
+import { deriveIris } from "./config.js";
 
 /**
  * End-to-end tests over the real ActivityPub front door + per-actor Durable

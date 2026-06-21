@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { normalizeResource, isWellFormedResource } from "./resource";
+import { normalizeResource, isWellFormedResource } from "./resource.js";
 
 describe("normalizeResource", () => {
   it("lowercases the scheme and host of an acct: URI", () => {

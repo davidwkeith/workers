@@ -19,21 +19,21 @@ import {
   tokenFromHeader,
   type AuthEnv,
   type AuthResult,
-} from "./auth";
+} from "./auth.js";
 import {
   resolveConfig,
   type MicrosubConfig,
   type MicrosubEnv,
   type ResolvedConfig,
-} from "./config";
-import { discoverFeed } from "./discovery";
-import { orderEntriesForInsert } from "./jf2";
-import { MicrosubLogEvent } from "./log";
+} from "./config.js";
+import { discoverFeed } from "./discovery.js";
+import { orderEntriesForInsert } from "./jf2.js";
+import { MicrosubLogEvent } from "./log.js";
 import {
   createMicrosubStore,
   NOTIFICATIONS_CHANNEL,
   type MicrosubStore,
-} from "./store";
+} from "./store.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type MicrosubHandler = (

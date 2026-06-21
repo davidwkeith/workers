@@ -10,7 +10,7 @@ import {
   type HttpMessage,
   type KeyResolver,
   type SignatureAlgorithm,
-} from "./index";
+} from "./index.js";
 
 // --- key fixtures -----------------------------------------------------------
 

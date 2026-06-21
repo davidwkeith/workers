@@ -13,13 +13,13 @@
 import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
-import { as2ContentType, buildActorDocument, type JsonValue } from "./as2";
+import { as2ContentType, buildActorDocument, type JsonValue } from "./as2.js";
 import {
   buildNodeInfo20,
   buildNodeInfo21,
   buildNodeInfoDiscovery,
   type UsageCounts,
-} from "./nodeinfo";
+} from "./nodeinfo.js";
 import {
   INTERNAL_HEADERS,
   resolveConfig,
@@ -27,14 +27,14 @@ import {
   type ActivityPubEnv,
   type ForwardedConfig,
   type ResolvedConfig,
-} from "./config";
+} from "./config.js";
 import {
   ActivityPubLogEvent,
   ApOutcome,
   OUTCOME_ACTIVITY_HEADER,
   OUTCOME_HEADER,
-} from "./log";
-import { verifyInboxSignature, type InboxRequest } from "./signature";
+} from "./log.js";
+import { verifyInboxSignature, type InboxRequest } from "./signature.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type ActivityPubHandler = (

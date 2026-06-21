@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { resolveConfig, type ResolvedConfig } from "./config";
+import { resolveConfig, type ResolvedConfig } from "./config.js";
 import {
   validateSubscribe,
   validatePublish,
   readHubParams,
   MAX_SECRET_BYTES,
-} from "./validate";
+} from "./validate.js";
 
 const config: ResolvedConfig = resolveConfig({
   baseUrl: "https://hub.example",

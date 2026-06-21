@@ -12,7 +12,7 @@ import {
   objectType,
   wantsActivityJson,
   type ActorIris,
-} from "./as2";
+} from "./as2.js";
 
 const IRIS: ActorIris = {
   id: "https://example.com/users/bob",

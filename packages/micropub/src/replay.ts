@@ -12,7 +12,7 @@
  * live window.
  */
 
-import type { MicropubStoreEnv } from "./store";
+import type { MicropubStoreEnv } from "./store.js";
 
 /** Storage interface over accepted DPoP proof `jti`s. */
 export interface DpopReplayStore {

@@ -17,17 +17,21 @@
 
 import { hostFromUrl } from "@dwk/log";
 
-import { randomIdentifier } from "./encoding";
-import { OAuthError, oauthErrorResponse, type OAuthErrorCode } from "./errors";
-import { json, methodNotAllowed, readJson } from "./http";
-import { OAuthLogEvent } from "./log";
+import { randomIdentifier } from "./encoding.js";
+import {
+  OAuthError,
+  oauthErrorResponse,
+  type OAuthErrorCode,
+} from "./errors.js";
+import { json, methodNotAllowed, readJson } from "./http.js";
+import { OAuthLogEvent } from "./log.js";
 import {
   emit,
   resolveObservability,
   type ObservabilityConfig,
-} from "./observability";
-import type { EndpointAuthenticator } from "./introspection";
-import type { ClientRecord } from "./store";
+} from "./observability.js";
+import type { EndpointAuthenticator } from "./introspection.js";
+import type { ClientRecord } from "./store.js";
 
 const DEFAULT_GRANT_TYPES = ["authorization_code", "refresh_token"] as const;
 const DEFAULT_RESPONSE_TYPES = ["code"] as const;

@@ -24,8 +24,8 @@
  * @packageDocumentation
  */
 
-export { createAtprotoPds, type AtprotoPdsHandler } from "./handler";
-export { AtprotoRepoObject } from "./object";
+export { createAtprotoPds, type AtprotoPdsHandler } from "./handler.js";
+export { AtprotoRepoObject } from "./object.js";
 
 export {
   resolveConfig,
@@ -35,17 +35,17 @@ export {
   type AtprotoPdsEnv,
   type ResolvedConfig,
   type ForwardedConfig,
-} from "./config";
+} from "./config.js";
 
-export { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid";
-export { encodeCbor, decodeCbor, type CborValue } from "./cbor";
+export { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
+export { encodeCbor, decodeCbor, type CborValue } from "./cbor.js";
 export {
   buildMst,
   walkEntries,
   keyLayer,
   type MstEntry,
   type MstResult,
-} from "./mst";
+} from "./mst.js";
 export {
   formatCommit,
   verifyCommit,
@@ -54,8 +54,8 @@ export {
   type UnsignedCommit,
   type SignedCommit,
   type FormattedCommit,
-} from "./repo";
-export { writeCar, readCar, type CarBlock, type ParsedCar } from "./car";
+} from "./repo.js";
+export { writeCar, readCar, type CarBlock, type ParsedCar } from "./car.js";
 export {
   generateSigningKey,
   signData,
@@ -63,21 +63,21 @@ export {
   didKeyFromPublicKey,
   publicKeyMultibase,
   exportPublicKeyRaw,
-} from "./crypto";
+} from "./crypto.js";
 export {
   buildDidDocument,
   didWebFromHost,
   isValidHandle,
   type DidDocumentInput,
-} from "./identity";
-export { TidClock, encodeTid, isValidTid } from "./tid";
+} from "./identity.js";
+export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,
   cborToJson,
   atUri,
   recordPath,
   type JsonValue,
-} from "./record";
-export { XrpcError, isValidNsid, isValidRecordKey } from "./xrpc";
+} from "./record.js";
+export { XrpcError, isValidNsid, isValidRecordKey } from "./xrpc.js";
 
 export type { Logger, Metrics } from "@dwk/log";

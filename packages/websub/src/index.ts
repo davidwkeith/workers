@@ -23,12 +23,12 @@ export {
   createPublishNotifier,
   type WebSubHandler,
   type PublishNotifier,
-} from "./handler";
+} from "./handler.js";
 export {
   createWebSubQueueConsumer,
   type WebSubQueueConsumer,
   type ConsumerOptions,
-} from "./consumer";
+} from "./consumer.js";
 export {
   resolveConfig,
   normalizeTopic,
@@ -38,14 +38,14 @@ export {
   type WebSubConfig,
   type WebSubEnv,
   type ResolvedConfig,
-} from "./config";
+} from "./config.js";
 export {
   createD1SubscriptionStore,
   type SubscriptionStore,
   type Subscription,
   type SubscriptionUpsert,
   type D1StoreOptions,
-} from "./store";
+} from "./store.js";
 export {
   validateSubscribe,
   validatePublish,
@@ -58,7 +58,7 @@ export {
   type PublishRequest,
   type PublishError,
   type RawHubParams,
-} from "./validate";
+} from "./validate.js";
 export {
   verifyIntent,
   buildVerificationUrl,
@@ -68,7 +68,7 @@ export {
   type VerifyIntentOptions,
   type VerifyIntentResult,
   type NotifyDenialOptions,
-} from "./verify";
+} from "./verify.js";
 export {
   contentSignature,
   buildLinkHeader,
@@ -80,9 +80,9 @@ export {
   type TopicFetchResult,
   type DeliveryResult,
   type DistributeOptions,
-} from "./distribute";
-export type { WebSubJob, VerifyJob, DistributeJob } from "./queue";
-export type { FetchLike } from "./fetch";
+} from "./distribute.js";
+export type { WebSubJob, VerifyJob, DistributeJob } from "./queue.js";
+export type { FetchLike } from "./fetch.js";
 export {
   safeFetch,
   assertPublicUrl,
@@ -93,6 +93,6 @@ export {
   type SafeFetchOptions,
   type SafeFetchResult,
   type SsrfReason,
-} from "./safe-fetch";
-export { WebSubLogEvent } from "./log";
+} from "./safe-fetch.js";
+export { WebSubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

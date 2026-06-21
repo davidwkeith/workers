@@ -13,7 +13,7 @@
  * normalised**, as the protocol requires for deterministic verification.
  */
 
-import { base58btcEncode, concatBytes } from "./bytes";
+import { base58btcEncode, concatBytes } from "./bytes.js";
 
 /** P-256 group order, for low-S normalisation. */
 const P256_ORDER =

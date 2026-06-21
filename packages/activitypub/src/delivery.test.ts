@@ -5,7 +5,7 @@ import {
   deliverActivity,
   DeliveryBlockedError,
   type DeliveryResult,
-} from "./delivery";
+} from "./delivery.js";
 
 // A throwaway RSA key is unnecessary for the SSRF/result-classification tests;
 // only deliverActivity's success/failure path signs, so we generate one there.

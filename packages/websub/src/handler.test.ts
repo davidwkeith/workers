@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { createWebSub, createPublishNotifier } from "./handler";
-import type { WebSubEnv } from "./config";
-import type { WebSubJob } from "./queue";
+import { createWebSub, createPublishNotifier } from "./handler.js";
+import type { WebSubEnv } from "./config.js";
+import type { WebSubJob } from "./queue.js";
 import type { ExecutionContext } from "@cloudflare/workers-types";
 
 const config = {

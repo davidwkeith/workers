@@ -15,7 +15,7 @@
  * @see https://w3c-ccg.github.io/did-method-web/
  */
 
-import type { JsonObject, VerificationMethod } from "./data-integrity";
+import type { JsonObject, VerificationMethod } from "./data-integrity.js";
 
 const DID_WEB_PREFIX = "did:web:";
 

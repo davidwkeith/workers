@@ -8,7 +8,7 @@ import {
   signAccessToken,
   verifyAccessToken,
   verifyPkce,
-} from "./index";
+} from "./index.js";
 
 const SECRET = "unit-test-secret";
 

@@ -21,22 +21,22 @@ import express, {
   type RequestHandler,
 } from "express";
 import { noopLogger, type Logger } from "@dwk/log";
-import { sendWebResponse, toWebRequest } from "./adapter";
-import { HostExecutionContext, WaitUntilTracker } from "./context";
-import { installHTMLRewriter } from "./html-rewriter";
-import { installRequestDuplex } from "./request-duplex";
-import { installWebSocketGlobals } from "./web-socket";
-import { attachWebSocketUpgrade } from "./web-socket-upgrade";
-import { acquireWriterLock, type ReleaseLock } from "./lock";
+import { sendWebResponse, toWebRequest } from "./adapter.js";
+import { HostExecutionContext, WaitUntilTracker } from "./context.js";
+import { installHTMLRewriter } from "./html-rewriter.js";
+import { installRequestDuplex } from "./request-duplex.js";
+import { installWebSocketGlobals } from "./web-socket.js";
+import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
+import { acquireWriterLock, type ReleaseLock } from "./lock.js";
 import {
   assertBindings,
   isReservedPath,
   resolveOrigin,
   type HostConfig,
   type Mount,
-} from "./config";
-import type { QueueBroker } from "./shims/queue";
-import type { CronScheduler } from "./shims/cron";
+} from "./config.js";
+import type { QueueBroker } from "./shims/queue.js";
+import type { CronScheduler } from "./shims/cron.js";
 
 /** Internal wiring handed to {@link DwkServer}. */
 interface ServerParts {

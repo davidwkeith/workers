@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseHFeed } from "./hfeed";
+import { parseHFeed } from "./hfeed.js";
 
 describe("parseHFeed", () => {
   it("extracts h-entry properties with a nested author h-card", async () => {

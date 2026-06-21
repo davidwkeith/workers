@@ -10,7 +10,7 @@
  * RETURNING`, so two concurrent redemptions cannot both win.
  */
 
-import type { CodeChallengeMethod } from "./pkce";
+import type { CodeChallengeMethod } from "./pkce.js";
 
 /** Cloudflare bindings required by the IndieAuth token/code store. */
 export interface IndieAuthStoreEnv {

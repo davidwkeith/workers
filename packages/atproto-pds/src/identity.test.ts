@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDidDocument, didWebFromHost, isValidHandle } from "./identity";
+import { buildDidDocument, didWebFromHost, isValidHandle } from "./identity.js";
 
 describe("identity", () => {
   it("derives did:web from a hostname", () => {

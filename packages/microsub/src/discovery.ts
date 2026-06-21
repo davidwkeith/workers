@@ -19,10 +19,10 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import { readTextCapped, type FetchLike } from "./fetch";
-import { parseHFeed } from "./hfeed";
-import { parseFeed, type Jf2Entry } from "./jf2";
-import { safeFetch } from "./safe-fetch";
+import { readTextCapped, type FetchLike } from "./fetch.js";
+import { parseHFeed } from "./hfeed.js";
+import { parseFeed, type Jf2Entry } from "./jf2.js";
+import { safeFetch } from "./safe-fetch.js";
 
 /** Shared options for the discovery/fetch helpers. */
 export interface DiscoveryOptions {

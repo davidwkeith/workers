@@ -24,7 +24,7 @@ export {
   LDP_CONTAINER,
   LDP_RESOURCE,
   RDF_TYPE,
-} from "./vocab";
+} from "./vocab.js";
 
 export {
   inboxLinkHeader,
@@ -32,7 +32,7 @@ export {
   constrainedByLinkHeader,
   discoverInboxIris,
   parseInboxLinks,
-} from "./discovery";
+} from "./discovery.js";
 
 export {
   parseNotification,
@@ -42,6 +42,6 @@ export {
   type NotificationProblemCode,
   type ParsedNotification,
   type ParseNotificationOptions,
-} from "./notification";
+} from "./notification.js";
 
-export { inboxListingQuads, listInboxMembers } from "./listing";
+export { inboxListingQuads, listInboxMembers } from "./listing.js";

@@ -4,7 +4,7 @@ import {
   noopMetrics,
   type AnalyticsEngineDataPoint,
   type AnalyticsEngineDatasetLike,
-} from "./index";
+} from "./index.js";
 
 function spyDataset(): AnalyticsEngineDatasetLike & {
   points: AnalyticsEngineDataPoint[];

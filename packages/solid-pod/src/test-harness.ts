@@ -5,10 +5,10 @@
  * package's public surface.
  */
 
-import { createSolidPod } from "./handler";
-import type { SolidPodEnv } from "./config";
+import { createSolidPod } from "./handler.js";
+import type { SolidPodEnv } from "./config.js";
 
-export { SolidPodObject } from "./pod";
+export { SolidPodObject } from "./pod.js";
 
 export default {
   fetch(): Response {

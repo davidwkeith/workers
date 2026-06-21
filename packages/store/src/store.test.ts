@@ -10,8 +10,8 @@ import {
   forwardOrphans,
   PreconditionFailedError,
   type Store,
-} from "./index";
-import type { HarnessEnv } from "./test-harness";
+} from "./index.js";
+import type { HarnessEnv } from "./test-harness.js";
 
 const harness = env as unknown as HarnessEnv;
 

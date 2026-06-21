@@ -22,27 +22,27 @@
  * @packageDocumentation
  */
 
-export { createHostMeta } from "./handler";
-export type { HostMetaEnv, HostMetaHandler } from "./handler";
+export { createHostMeta } from "./handler.js";
+export type { HostMetaEnv, HostMetaHandler } from "./handler.js";
 
 export {
   resolveConfig,
   type HostMetaConfig,
   type ResolvedConfig,
-} from "./config";
+} from "./config.js";
 
 export {
   buildDocument,
   lrddTemplate,
   type HostMetaDocument,
   type Link,
-} from "./document";
+} from "./document.js";
 
-export { buildHostMetaJrd, serializeJrd, type HostMetaJrd } from "./jrd";
+export { buildHostMetaJrd, serializeJrd, type HostMetaJrd } from "./jrd.js";
 
-export { serializeXrd, escapeXml, XRD_NAMESPACE } from "./xrd";
+export { serializeXrd, escapeXml, XRD_NAMESPACE } from "./xrd.js";
 
-export { negotiateFormat, type Format } from "./negotiation";
+export { negotiateFormat, type Format } from "./negotiation.js";
 
-export { HostMetaLogEvent } from "./log";
+export { HostMetaLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

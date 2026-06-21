@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveConfig } from "./config";
+import { resolveConfig } from "./config.js";
 
 describe("resolveConfig", () => {
   it("applies defaults and derives the endpoint path", () => {

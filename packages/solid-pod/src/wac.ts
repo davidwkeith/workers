@@ -26,7 +26,7 @@ import {
   isAclPath,
   resourceForAcl,
   toIri,
-} from "./ldp";
+} from "./ldp.js";
 
 /** Map the store's quads for an ACL document into `@dwk/wac` input. */
 function toAclQuads(store: Store, aclKey: string): AclQuad[] {

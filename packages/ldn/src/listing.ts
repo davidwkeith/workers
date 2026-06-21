@@ -10,7 +10,7 @@
 
 import type { StoredQuad } from "@dwk/rdf";
 
-import { LDP_CONTAINS, LDP_CONTAINER, RDF_TYPE } from "./vocab";
+import { LDP_CONTAINS, LDP_CONTAINER, RDF_TYPE } from "./vocab.js";
 
 const DEFAULT_GRAPH = { termType: "DefaultGraph", value: "" } as const;
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { StoredQuad } from "@dwk/rdf";
 
-import { inboxListingQuads, listInboxMembers } from "./listing";
-import { LDP_CONTAINER, LDP_CONTAINS, RDF_TYPE } from "./vocab";
+import { inboxListingQuads, listInboxMembers } from "./listing.js";
+import { LDP_CONTAINER, LDP_CONTAINS, RDF_TYPE } from "./vocab.js";
 
 const named = (value: string) => ({ termType: "NamedNode" as const, value });
 const graph = { termType: "DefaultGraph" as const, value: "" };

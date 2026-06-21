@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OAuthError, oauthErrorResponse } from "./errors";
+import { OAuthError, oauthErrorResponse } from "./errors.js";
 
 describe("oauthErrorResponse", () => {
   it("builds a JSON error body with error + description", async () => {

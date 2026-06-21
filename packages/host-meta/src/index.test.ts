@@ -11,7 +11,7 @@ import {
   escapeXml,
   negotiateFormat,
   HostMetaLogEvent,
-} from "./index";
+} from "./index.js";
 
 describe("@dwk/host-meta public surface", () => {
   it("re-exports the factory and helpers", () => {

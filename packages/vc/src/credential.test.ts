@@ -7,7 +7,7 @@ import {
   validateCredential,
   VC_CONTEXT_V2,
   VERIFIABLE_CREDENTIAL_TYPE,
-} from "./credential";
+} from "./credential.js";
 
 describe("buildCredential", () => {
   it("puts the base context first and the base type present", () => {

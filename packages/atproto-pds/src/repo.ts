@@ -10,9 +10,9 @@
  * repository — the thing that moves, intact, when an account changes hosts.
  */
 
-import { encodeCbor } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
-import { verifyData } from "./crypto";
+import { encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { verifyData } from "./crypto.js";
 
 /** The current AT Protocol repository commit version. */
 export const COMMIT_VERSION = 3;

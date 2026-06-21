@@ -15,7 +15,7 @@
 
 import type { StoredQuad } from "@dwk/rdf";
 
-import { LDP_INBOX, LDP_CONSTRAINED_BY } from "./vocab";
+import { LDP_INBOX, LDP_CONSTRAINED_BY } from "./vocab.js";
 
 const DEFAULT_GRAPH = { termType: "DefaultGraph", value: "" } as const;
 

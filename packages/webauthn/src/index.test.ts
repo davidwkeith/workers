@@ -1,8 +1,12 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createWebAuthn, type WebAuthnConfig, type WebAuthnEnv } from "./index";
-import { bytesToBase64url } from "./encoding";
+import {
+  createWebAuthn,
+  type WebAuthnConfig,
+  type WebAuthnEnv,
+} from "./index.js";
+import { bytesToBase64url } from "./encoding.js";
 import {
   buildAttestationObject,
   buildAuthData,
@@ -10,7 +14,7 @@ import {
   createTestCredential,
   signAssertion,
   type TestCredential,
-} from "./test-harness";
+} from "./test-harness.js";
 
 const testEnv = env as unknown as WebAuthnEnv;
 

@@ -7,7 +7,7 @@ import {
   type Logger,
   type Metrics,
   type SolidPodEnv,
-} from "./index";
+} from "./index.js";
 
 const testEnv = env as unknown as SolidPodEnv;
 

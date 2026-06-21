@@ -7,7 +7,7 @@ import {
   createRemoteStorage,
   parseScopes,
   type RemoteStorageEnv,
-} from "./index";
+} from "./index.js";
 
 /**
  * End-to-end tests over the real front door + per-account Durable Object: the

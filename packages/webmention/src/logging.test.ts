@@ -15,8 +15,8 @@ import {
   type Logger,
   type WebmentionEnv,
   type WebmentionJob,
-} from "./index";
-import type { FetchLike } from "./fetch";
+} from "./index.js";
+import type { FetchLike } from "./fetch.js";
 
 type LogRecord = {
   level: "debug" | "info" | "warn" | "error";

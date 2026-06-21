@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readBytesCapped, MAX_BODY_BYTES } from "./fetch";
+import { readBytesCapped, MAX_BODY_BYTES } from "./fetch.js";
 
 describe("readBytesCapped", () => {
   it("reads a small body", async () => {

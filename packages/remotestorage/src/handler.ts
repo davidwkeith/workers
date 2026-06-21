@@ -12,17 +12,17 @@
 
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
-import { authenticate, type AuthResult } from "./auth";
+import { authenticate, type AuthResult } from "./auth.js";
 import {
   INTERNAL_HEADERS,
   resolveConfig,
   type RemoteStorageConfig,
   type RemoteStorageEnv,
   type ResolvedConfig,
-} from "./config";
-import { ALLOWED_METHODS, preflightResponse, withCors } from "./cors";
-import { RemoteStorageLogEvent } from "./log";
-import { authorizeScopes, isPublicDocument } from "./scope";
+} from "./config.js";
+import { ALLOWED_METHODS, preflightResponse, withCors } from "./cors.js";
+import { RemoteStorageLogEvent } from "./log.js";
+import { authorizeScopes, isPublicDocument } from "./scope.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type RemoteStorageHandler = (

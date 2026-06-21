@@ -8,7 +8,7 @@ import {
   type Logger,
   type Metrics,
   type MicropubEnv,
-} from "./index";
+} from "./index.js";
 
 const harness = env as unknown as MicropubEnv;
 
@@ -181,8 +181,8 @@ function build() {
 
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
-  await (await import("./store")).createMicropubStore(harness).init();
-  await (await import("./replay")).createDpopReplayStore(harness).init();
+  await (await import("./store.js")).createMicropubStore(harness).init();
+  await (await import("./replay.js")).createDpopReplayStore(harness).init();
 });
 
 describe("@dwk/micropub auth logging", () => {

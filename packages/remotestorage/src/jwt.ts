@@ -13,7 +13,7 @@
  * secret a resource server could not safely hold.
  */
 
-import { base64urlToBytes, base64urlToText } from "./encoding";
+import { base64urlToBytes, base64urlToText } from "./encoding.js";
 
 /** Asymmetric JOSE algorithms accepted for issuer-signed access tokens. */
 export type JwtAlgorithm = "ES256" | "ES384" | "RS256" | "PS256";

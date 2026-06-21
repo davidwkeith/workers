@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { extractLinks, sourceLinksTo, verifySource } from "./verify";
+import { extractLinks, sourceLinksTo, verifySource } from "./verify.js";
 
 const source = "https://blog.example/post";
 const target = "https://example.com/article";

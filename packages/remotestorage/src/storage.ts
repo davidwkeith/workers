@@ -25,14 +25,14 @@ import {
   type WriteOptions,
 } from "@dwk/store";
 
-import { INTERNAL_HEADERS, type RemoteStorageEnv } from "./config";
+import { INTERNAL_HEADERS, type RemoteStorageEnv } from "./config.js";
 import {
   buildFolderModel,
   FOLDER_DESCRIPTION_TYPE,
   hashSignature,
   renderFolderDescription,
-} from "./folder";
-import { isFolderPath } from "./scope";
+} from "./folder.js";
+import { isFolderPath } from "./scope.js";
 
 /** Config the front door forwards to the DO (everything else is per-request). */
 interface ForwardedConfig {

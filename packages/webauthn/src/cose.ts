@@ -14,7 +14,7 @@
  * bridges that gap.
  */
 
-import { bytesToBase64url } from "./encoding";
+import { bytesToBase64url } from "./encoding.js";
 
 /** COSE_Key map labels (RFC 9052 §7, RFC 9053). */
 const COSE_KTY = 1;

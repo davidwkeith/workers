@@ -5,9 +5,9 @@ import {
   fetchTopicContent,
   deliverToSubscriber,
   type TopicContent,
-} from "./distribute";
-import type { Subscription } from "./store";
-import type { FetchLike } from "./fetch";
+} from "./distribute.js";
+import type { Subscription } from "./store.js";
+import type { FetchLike } from "./fetch.js";
 
 const encoder = new TextEncoder();
 

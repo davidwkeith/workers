@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { QueueBroker } from "./queue";
+import { QueueBroker } from "./queue.js";
 import type { MessageBatch, Queue } from "@cloudflare/workers-types";
 
 interface Job {

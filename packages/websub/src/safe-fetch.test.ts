@@ -4,8 +4,8 @@ import {
   assertPublicUrl,
   isPrivateOrReservedHost,
   SsrfError,
-} from "./safe-fetch";
-import type { FetchLike } from "./fetch";
+} from "./safe-fetch.js";
+import type { FetchLike } from "./fetch.js";
 
 describe("isPrivateOrReservedHost", () => {
   it("flags loopback, private, link-local, and named-internal hosts", () => {

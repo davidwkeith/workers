@@ -5,7 +5,7 @@ import {
   parseSignatureInput,
   SfParseError,
   serializeString,
-} from "./sf";
+} from "./sf.js";
 
 /**
  * Direct tests for the structured-field helpers. The round-trip tests cover the

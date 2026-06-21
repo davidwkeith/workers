@@ -26,8 +26,8 @@
  */
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
-import type { FetchLike } from "./fetch";
-import { MicrosubLogEvent } from "./log";
+import type { FetchLike } from "./fetch.js";
+import { MicrosubLogEvent } from "./log.js";
 
 /** Default cap on redirect hops before a fetch is abandoned. */
 export const DEFAULT_MAX_REDIRECTS = 5;

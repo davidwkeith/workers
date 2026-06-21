@@ -6,7 +6,7 @@ import {
   PatchConstraintError,
   PatchProblem,
   resolvePatch,
-} from "./patch";
+} from "./patch.js";
 
 const EX = "http://example.org/";
 const BASE = "https://pod.example/card";

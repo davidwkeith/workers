@@ -17,7 +17,7 @@
  * @packageDocumentation
  */
 
-import type { Jf2Author, Jf2Content, Jf2Entry } from "./jf2";
+import type { Jf2Author, Jf2Content, Jf2Entry } from "./jf2.js";
 
 interface MutableCard {
   name?: string;

@@ -12,8 +12,8 @@
  * key-prefix compression the spec defines. Pure: the only async is SHA-256.
  */
 
-import { decodeCbor, encodeCbor, type CborValue } from "./cbor";
-import { CID, DAG_CBOR_CODEC } from "./cid";
+import { decodeCbor, encodeCbor, type CborValue } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
 
 /** A record-key → record-CID pair held by the tree. */
 export interface MstEntry {

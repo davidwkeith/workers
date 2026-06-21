@@ -20,9 +20,13 @@ import {
   type ResolvedConfig,
   type WebSubConfig,
   type WebSubEnv,
-} from "./config";
-import { WebSubLogEvent } from "./log";
-import { readHubParams, validatePublish, validateSubscribe } from "./validate";
+} from "./config.js";
+import { WebSubLogEvent } from "./log.js";
+import {
+  readHubParams,
+  validatePublish,
+  validateSubscribe,
+} from "./validate.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type WebSubHandler = (
