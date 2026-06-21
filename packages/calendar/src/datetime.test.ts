@@ -48,6 +48,18 @@ describe("toICalDate", () => {
   it("throws on an unparseable value", () => {
     expect(() => toICalDate("not-a-date")).toThrow(/unparseable/);
   });
+
+  it("throws on an in-format but out-of-range date the regex admits", () => {
+    expect(() => toICalDate("2026-13-45")).toThrow(/invalid/);
+    expect(() => toICalDate("2026-02-30T25:00:00Z")).toThrow(/invalid/);
+  });
+
+  it("accepts a space separator alongside an offset", () => {
+    expect(toICalDate("2026-07-01 18:00:00-07:00")).toEqual({
+      value: "20260702T010000Z",
+      params: "",
+    });
+  });
 });
 
 describe("toInstant", () => {

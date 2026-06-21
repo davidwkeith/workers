@@ -40,11 +40,16 @@ const DEFAULT_PRODID = "-//dwk//@dwk/workers calendar//EN";
 
 /** Escape a TEXT value per RFC 5545 §3.3.11 (backslash first, then the rest). */
 function escapeText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\n/g, "\\n")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,");
+  return (
+    value
+      // Normalise CRLF/CR to LF first so no stray `\r` survives into a folded
+      // content line (which would break strict parsers); LF then escapes to `\n`.
+      .replace(/\r\n|\r/g, "\n")
+      .replace(/\\/g, "\\\\")
+      .replace(/\n/g, "\\n")
+      .replace(/;/g, "\\;")
+      .replace(/,/g, "\\,")
+  );
 }
 
 /** UTF-8 byte length of a single code point, for octet-accurate line folding. */

@@ -116,7 +116,26 @@ describe("toJSCalendar", () => {
     expect(JSON.parse(JSON.stringify(js))).toEqual(js);
   });
 
+  it("omits duration for a sub-second span (rounds to no whole seconds)", () => {
+    const js = toJSCalendar({
+      uid: "u",
+      start: "2026-07-01T18:00:00.000Z",
+      end: "2026-07-01T18:00:00.500Z",
+    });
+    expect(js.duration).toBeUndefined();
+  });
+
   it("throws without a uid", () => {
     expect(() => toJSCalendar({ uid: "", start: "2026-07-04" })).toThrow(/uid/);
+  });
+
+  it("throws when end is before start", () => {
+    expect(() =>
+      toJSCalendar({
+        uid: "u",
+        start: "2026-07-01T20:00:00Z",
+        end: "2026-07-01T18:00:00Z",
+      }),
+    ).toThrow(/before "start"/);
   });
 });

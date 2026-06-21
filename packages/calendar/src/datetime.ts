@@ -39,13 +39,24 @@ export function formatUtc(date: Date): string {
   );
 }
 
+/** Parse an ISO string to a `Date`, throwing on an invalid (NaN) result. */
+function parseValid(iso: string, original: string): Date {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`invalid calendar date-time: ${JSON.stringify(original)}`);
+  }
+  return date;
+}
+
 /**
  * Convert an RFC 3339 date or date-time to its iCalendar property form, honoring
  * the three shapes above. `timeZone` qualifies a floating date-time only; it is
  * ignored when the value already pins an offset (the instant is unambiguous) and
  * for date-only values (all-day events are zoneless by definition).
  *
- * Throws on an unparseable value rather than emitting a malformed property.
+ * Throws on an unparseable or out-of-range value (e.g. month 13) rather than
+ * emitting a malformed property — `new Date` would otherwise yield a `NaN`
+ * instant and a garbage `NaNNaN…` string for a date the loose regex admits.
  */
 export function toICalDate(
   value: string,
@@ -54,6 +65,7 @@ export function toICalDate(
   const dateOnly = DATE_ONLY.exec(value);
   if (dateOnly) {
     const [, y, m, d] = dateOnly;
+    parseValid(`${y}-${m}-${d}T00:00:00Z`, value); // reject e.g. 2026-13-45
     return { value: `${y}${m}${d}`, params: ";VALUE=DATE" };
   }
 
@@ -66,13 +78,18 @@ export function toICalDate(
 
   if (offset) {
     // Absolute instant: let `Date` apply the offset (it parses `Z` and numeric
-    // offsets reliably) and render the canonical UTC form. The instant is
-    // preserved even though the original wall-clock zone name is not.
-    return { value: formatUtc(new Date(value)), params: "" };
+    // offsets reliably) and render the canonical UTC form. The space→`T`
+    // normalisation keeps engines that reject a space separator happy. The
+    // instant is preserved even though the original wall-clock zone name is not.
+    return {
+      value: formatUtc(parseValid(value.replace(" ", "T"), value)),
+      params: "",
+    };
   }
 
-  // Floating wall clock: emit the digits verbatim. With a zone it becomes a
-  // `TZID` local time; without one it stays floating (same clock everywhere).
+  // Floating wall clock: emit the digits verbatim. Validate them first (a real
+  // calendar date/time, not 2026-13-45T25:61) since nothing downstream will.
+  parseValid(`${y}-${m}-${d}T${hh}:${mm}:${secs}Z`, value);
   const local = `${y}${m}${d}T${hh}${mm}${secs}`;
   return {
     value: local,
@@ -95,7 +112,7 @@ export function toInstant(value: string): Date | null {
   // Append `Z` to a floating date-time (and treat a date-only as UTC midnight)
   // so `Date` does not silently apply the host's local zone.
   const normalized = hasOffset
-    ? value
+    ? value.replace(" ", "T")
     : DATE_ONLY.test(value)
       ? `${value}T00:00:00Z`
       : `${value.replace(" ", "T")}Z`;

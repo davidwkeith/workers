@@ -198,4 +198,32 @@ describe("validation", () => {
       toICalendar({ uid: "", start: "2026-07-01T18:00:00Z" }),
     ).toThrow(/uid/);
   });
+
+  it("throws when start is an invalid date-time", () => {
+    expect(() =>
+      toICalendar({ uid: "u", start: "2026-13-45T00:00:00Z" }),
+    ).toThrow(/invalid "start"/);
+  });
+
+  it("throws when end is chronologically before start (RFC 5545 §3.6.1)", () => {
+    expect(() =>
+      toICalendar({
+        uid: "u",
+        start: "2026-07-01T20:00:00Z",
+        end: "2026-07-01T18:00:00Z",
+      }),
+    ).toThrow(/before "start"/);
+  });
+});
+
+describe("newline handling", () => {
+  it("normalises CRLF/CR to escaped \\n with no stray carriage returns", () => {
+    const ics = toICalendar(
+      { uid: "u", start: "2026-07-01T18:00:00Z", description: "a\r\nb\rc" },
+      { now: NOW },
+    );
+    expect(ics).toContain("DESCRIPTION:a\\nb\\nc");
+    // No bare CR may survive except as part of a CRLF line terminator.
+    expect(ics.replace(/\r\n/g, "")).not.toContain("\r");
+  });
 });

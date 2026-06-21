@@ -18,6 +18,8 @@
  * @packageDocumentation
  */
 
+import { toInstant } from "./datetime.js";
+
 /** A place an event happens. Mirrors the JSCalendar `Location` object (subset). */
 export interface EventLocation {
   /** Human-readable location name, e.g. `"Civic Center, Room 12"`. */
@@ -82,10 +84,15 @@ export interface CalendarEvent {
 }
 
 /**
- * Assert an event carries the identity and start every serializer requires,
- * narrowing nothing but throwing a single clear error instead of emitting an
+ * Assert an event carries the identity, start, and well-ordered times every
+ * serializer requires, throwing a single clear error instead of emitting an
  * invalid `VEVENT`/JSCalendar object. Called by each serializer entry point so
  * the failure is loud and uniform regardless of output format.
+ *
+ * Beyond presence of `uid`/`start`, it rejects an unparseable or out-of-range
+ * `start`/`end` and an `end` chronologically before `start` (RFC 5545 §3.6.1
+ * requires `DTEND` to be no earlier than `DTSTART`), so malformed event data
+ * fails here rather than producing a calendar a client silently drops.
  */
 export function assertSerializable(event: CalendarEvent): void {
   if (!event.uid) {
@@ -93,5 +100,24 @@ export function assertSerializable(event: CalendarEvent): void {
   }
   if (!event.start) {
     throw new Error(`calendar event ${event.uid} requires a "start"`);
+  }
+  const startInstant = toInstant(event.start);
+  if (!startInstant) {
+    throw new Error(
+      `calendar event ${event.uid} has an invalid "start": ${event.start}`,
+    );
+  }
+  if (event.end !== undefined) {
+    const endInstant = toInstant(event.end);
+    if (!endInstant) {
+      throw new Error(
+        `calendar event ${event.uid} has an invalid "end": ${event.end}`,
+      );
+    }
+    if (endInstant.getTime() < startInstant.getTime()) {
+      throw new Error(
+        `calendar event ${event.uid} "end" (${event.end}) is before "start" (${event.start})`,
+      );
+    }
   }
 }

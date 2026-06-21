@@ -194,6 +194,15 @@ export function hEventToCalendarEvent(event: Mf2Object): CalendarEvent {
     );
   }
 
+  // Resolve each single-valued property once (each call iterates and coerces).
+  const name = firstText(event, "name");
+  const description =
+    firstText(event, "summary") ?? firstText(event, "content");
+  const end = firstText(event, "end");
+  const duration = firstText(event, "duration");
+  const published = firstText(event, "published");
+  const updated = firstText(event, "updated");
+
   const locations = allText(event, "location").map((name) => ({ name }));
   const keywords = allText(event, "category");
   const links: EventLink[] = allText(event, "url").map((href) => ({ href }));
@@ -201,30 +210,15 @@ export function hEventToCalendarEvent(event: Mf2Object): CalendarEvent {
   return {
     uid,
     start,
-    ...(firstText(event, "name") !== undefined
-      ? { title: firstText(event, "name") }
-      : {}),
-    ...((firstText(event, "summary") ?? firstText(event, "content"))
-      ? {
-          description:
-            firstText(event, "summary") ?? firstText(event, "content"),
-        }
-      : {}),
-    ...(firstText(event, "end") !== undefined
-      ? { end: firstText(event, "end") }
-      : {}),
-    ...(firstText(event, "duration") !== undefined
-      ? { duration: firstText(event, "duration") }
-      : {}),
+    ...(name !== undefined ? { title: name } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(end !== undefined ? { end } : {}),
+    ...(duration !== undefined ? { duration } : {}),
     ...(locations.length ? { locations } : {}),
     ...(keywords.length ? { keywords } : {}),
     ...(links.length ? { links } : {}),
-    ...(firstText(event, "published") !== undefined
-      ? { created: firstText(event, "published") }
-      : {}),
-    ...(firstText(event, "updated") !== undefined
-      ? { updated: firstText(event, "updated") }
-      : {}),
+    ...(published !== undefined ? { created: published } : {}),
+    ...(updated !== undefined ? { updated } : {}),
   };
 }
 

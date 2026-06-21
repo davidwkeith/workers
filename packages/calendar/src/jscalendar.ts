@@ -101,9 +101,10 @@ function resolveStart(
   const [, y, mo, d, hh, mm, ss, offset] = m;
   if (offset) {
     // Absolute instant → normalise to UTC, naming the zone so the wall clock is
-    // unambiguous (JSCalendar's `start` is always a floating local time).
+    // unambiguous (JSCalendar's `start` is always a floating local time). The
+    // space→`T` keeps engines that reject a space separator happy.
     return {
-      start: utcLocalDateTime(new Date(value)),
+      start: utcLocalDateTime(new Date(value.replace(" ", "T"))),
       timeZone: "Etc/UTC",
       showWithoutTime: false,
     };
@@ -115,10 +116,15 @@ function resolveStart(
   };
 }
 
-/** Build an ISO 8601 duration from a millisecond span, or `null` if non-positive. */
+/**
+ * Build an ISO 8601 duration from a millisecond span, or `null` when it rounds
+ * to nothing. The guard is on whole seconds, not `ms`: a sub-second span (e.g.
+ * 500 ms) floors to zero, and emitting a bare `P` would be an invalid duration,
+ * so it is treated as no duration (the JSCalendar default).
+ */
 function msToDuration(ms: number): string | null {
-  if (ms <= 0) return null;
   const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds <= 0) return null;
   const days = Math.floor(totalSeconds / 86400);
   let rem = totalSeconds - days * 86400;
   const hours = Math.floor(rem / 3600);
@@ -128,7 +134,7 @@ function msToDuration(ms: number): string | null {
   const time =
     `${hours ? `${hours}H` : ""}${minutes ? `${minutes}M` : ""}` +
     `${seconds ? `${seconds}S` : ""}`;
-  // `ms > 0` guarantees at least one component, so the result is never bare "P".
+  // `totalSeconds > 0` guarantees at least one component, never a bare "P".
   return `P${days ? `${days}D` : ""}${time ? `T${time}` : ""}`;
 }
 
