@@ -167,6 +167,11 @@ export interface AuthContext {
 export interface ResolvedConfig {
   readonly baseUrl: string;
   readonly origin: string;
+  /**
+   * The storage root container's path — the `baseUrl` pathname normalized to a
+   * trailing slash (`"/"` for an origin-root pod). This container is undeletable.
+   */
+  readonly storageRoot: string;
   readonly owners: readonly string[];
   readonly issuer?: string;
   readonly audience: readonly string[];
@@ -216,7 +221,13 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
     throw new Error("@dwk/solid-pod: `baseUrl` is required");
   }
   const baseUrl = normalizeBaseUrl(config.baseUrl);
-  const origin = new URL(baseUrl).origin;
+  const url = new URL(baseUrl);
+  const origin = url.origin;
+  // The storage root is the pod's pathname as an LDP container (trailing slash);
+  // an origin-root pod normalizes to "/". This container MUST NOT be deletable.
+  const storageRoot = url.pathname.endsWith("/")
+    ? url.pathname
+    : `${url.pathname}/`;
   const audience =
     config.audience === undefined
       ? ["solid", baseUrl]
@@ -234,6 +245,7 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
   return {
     baseUrl,
     origin,
+    storageRoot,
     owners,
     issuer: config.issuer,
     audience,
