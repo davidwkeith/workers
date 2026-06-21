@@ -80,6 +80,7 @@ function internalRequest(
     JSON.stringify({
       owners: config.owners,
       allowAnonymousWrites: config.allowAnonymousWrites,
+      storageRoot: config.storageRoot,
       ...(config.maxInlineBytes !== undefined
         ? { maxInlineBytes: config.maxInlineBytes }
         : {}),

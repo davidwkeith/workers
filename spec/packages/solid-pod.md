@@ -17,6 +17,12 @@ Durable Object.
 
 - Support `GET / HEAD / OPTIONS / PUT / POST / PATCH / DELETE`.
 - Full LDP resource + container semantics.
+- **The storage root container is undeletable** (Solid
+  `#server-delete-protect-root-container`): a `DELETE` against it is refused
+  `405` ahead of any authorization check, and the advertised `Allow` (on
+  `OPTIONS` and successful responses) omits `DELETE` for that one container. The
+  storage root is the pod `baseUrl`'s pathname as a container (`/` for an
+  origin-root pod).
 
 ### RDF content negotiation
 

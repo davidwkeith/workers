@@ -87,6 +87,13 @@ interface ForwardedConfig {
   readonly owners?: readonly string[];
   /** Permit unauthenticated (proof-less) writes where WAC grants the public. */
   readonly allowAnonymousWrites?: boolean;
+  /**
+   * The storage root container's path (the pathname of the pod `baseUrl`,
+   * normalized to a trailing slash; `"/"` for an origin-root pod). This single
+   * container MUST NOT be deletable, so `DELETE` against it is refused and the
+   * advertised `Allow` omits it.
+   */
+  readonly storageRoot?: string;
 }
 
 /** A change to announce to notification subscribers. */
@@ -131,6 +138,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #owners: readonly string[] = [];
   /** Whether proof-less (anonymous) writes are permitted; see {@link JTI_TTL_SECONDS}. */
   #allowAnonymousWrites = false;
+  /** The storage root container's path; this container is undeletable. */
+  #storageRoot = "/";
 
   constructor(state: DurableObjectState, env: SolidPodEnv) {
     super(state, env);
@@ -155,6 +164,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return this.#store;
   }
 
+  /** The `Allow` method list for `path`, dropping DELETE on the storage root. */
+  #allow(path: string): string {
+    return allowFor(path, this.#storageRoot);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.#handleWebSocketUpgrade();
@@ -172,6 +186,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
     this.#owners = config.owners ?? [];
     this.#allowAnonymousWrites = config.allowAnonymousWrites ?? false;
+    this.#storageRoot = config.storageRoot ?? "/";
     const store = this.#getStore(config);
     const url = new URL(request.url);
     const origin = url.origin;
@@ -240,6 +255,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             requestOrigin,
           );
         case "DELETE":
+          // The storage root container is undeletable, ahead of any auth check.
+          if (path === this.#storageRoot) {
+            return text(405, "The storage root container cannot be deleted", {
+              allow: this.#allow(path),
+            });
+          }
           return await this.#authorizeThenAsync(
             store,
             origin,
@@ -250,7 +271,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             () => this.#delete(store, origin, path, request, jti),
           );
         default:
-          return text(405, "Method Not Allowed", { allow: ALLOW });
+          return text(405, "Method Not Allowed", { allow: this.#allow(path) });
       }
     } catch (error) {
       if (error instanceof PreconditionFailedError) {
@@ -491,7 +512,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   ): Promise<Response> {
     const blob = await store.readBlob(path);
     if (!blob) return text(404, "Not Found");
-    const headers = baseHeaders(path, etag, blob.contentType || contentType);
+    const headers = baseHeaders(
+      path,
+      etag,
+      blob.contentType || contentType,
+      this.#allow(path),
+    );
     headers.set("content-length", String(blob.size));
     headers.set("wac-allow", wacAllow);
     if (headOnly) {
@@ -515,7 +541,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       baseIRI: toIri(origin, path),
       prefixes: SERIALIZE_PREFIXES,
     });
-    const headers = baseHeaders(path, etag, negotiated.mediaType, inboxIris);
+    const headers = baseHeaders(
+      path,
+      etag,
+      negotiated.mediaType,
+      this.#allow(path),
+      inboxIris,
+    );
     headers.set("wac-allow", wacAllow);
     return new Response(headOnly ? null : body, { status: 200, headers });
   }
@@ -551,8 +583,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return new Response(null, {
       status: existed ? 204 : 201,
       headers: meta
-        ? { etag: meta.etag, location: toIri(origin, path), allow: ALLOW }
-        : { location: toIri(origin, path), allow: ALLOW },
+        ? {
+            etag: meta.etag,
+            location: toIri(origin, path),
+            allow: this.#allow(path),
+          }
+        : { location: toIri(origin, path), allow: this.#allow(path) },
     });
   }
 
@@ -566,7 +602,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     jti: string | undefined,
   ): Promise<Response> {
     if (!isContainer(path)) {
-      return text(405, "POST target must be a container", { allow: ALLOW });
+      return text(405, "POST target must be a container", {
+        allow: this.#allow(path),
+      });
     }
     const blocked = this.#denyAnonymousWrite(jti);
     if (blocked) return blocked;
@@ -594,8 +632,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return new Response(null, {
       status: 201,
       headers: meta
-        ? { location: childIri, etag: meta.etag, allow: ALLOW }
-        : { location: childIri, allow: ALLOW },
+        ? { location: childIri, etag: meta.etag, allow: this.#allow(key) }
+        : { location: childIri, allow: this.#allow(key) },
     });
   }
 
@@ -694,7 +732,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const meta = store.head(path);
     return new Response(null, {
       status: existed ? 204 : 201,
-      headers: meta ? { etag: meta.etag, allow: ALLOW } : { allow: ALLOW },
+      headers: meta
+        ? { etag: meta.etag, allow: this.#allow(path) }
+        : { allow: this.#allow(path) },
     });
   }
 
@@ -743,7 +783,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     this.#removeContainment(store, origin, path);
     await this.#drainOrphans(store);
     this.#broadcast(toIri(origin, path), "Delete");
-    return new Response(null, { status: 204, headers: { allow: ALLOW } });
+    return new Response(null, {
+      status: 204,
+      headers: { allow: this.#allow(path) },
+    });
   }
 
   // -- options ---------------------------------------------------------------
@@ -752,7 +795,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     return new Response(null, {
       status: 204,
       headers: {
-        allow: ALLOW,
+        allow: this.#allow(path),
         "accept-patch": "text/n3, application/sparql-update",
         ...(isContainer(path) ? { "accept-post": ACCEPT_POST } : {}),
       },
@@ -970,10 +1013,16 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
 const ALLOW = "GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE";
 
-// TODO(`#server-delete-protect-root-container`): the root storage/container
-// MUST NOT be deletable, so its advertised `Allow` should omit DELETE. We do
-// not yet model "is the storage root" here (paths reach the DO already
-// stripped of any mount prefix), so the method list is uniform for now.
+// `#server-delete-protect-root-container`: the storage root container MUST NOT
+// be deletable, so its advertised `Allow` omits DELETE (and a DELETE against it
+// is refused 405 — see the switch in `fetch`). Every other resource keeps the
+// full method set.
+const ALLOW_NO_DELETE = "GET, HEAD, OPTIONS, PUT, POST, PATCH";
+
+/** The `Allow` method list for `path`, dropping DELETE for the storage root. */
+function allowFor(path: string, storageRoot: string): string {
+  return path === storageRoot ? ALLOW_NO_DELETE : ALLOW;
+}
 
 /**
  * Concrete RDF media types a container `POST` accepts, advertised on `OPTIONS`.
@@ -1096,6 +1145,7 @@ function baseHeaders(
   path: string,
   etag: string,
   contentType: string,
+  allow: string,
   inboxIris: readonly string[] = [],
 ): Headers {
   const headers = new Headers({
@@ -1104,7 +1154,7 @@ function baseHeaders(
     "accept-patch": "text/n3, application/sparql-update",
     // Solid `#server-allow-methods`: successful responses advertise the methods
     // the resource supports, the same list used by OPTIONS and the 405 path.
-    allow: ALLOW,
+    allow,
   });
   const links = [
     isContainer(path)

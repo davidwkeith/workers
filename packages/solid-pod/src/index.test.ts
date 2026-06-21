@@ -1496,6 +1496,33 @@ describe("@dwk/solid-pod LDP", () => {
     expect(emptied.status).toBe(204);
   });
 
+  it("refuses to DELETE the storage root container (405, undeletable)", async () => {
+    const pod = freshPod();
+    const del = await pod.send("DELETE", "/", { webid: OWNER });
+    expect(del.status).toBe(405);
+    const allow = del.headers.get("allow") ?? "";
+    expect(allow).toContain("GET");
+    expect(allow).toContain("PUT");
+    expect(allow).not.toContain("DELETE");
+  });
+
+  it("OPTIONS on the storage root omits DELETE from Allow", async () => {
+    const pod = freshPod();
+    const res = await pod.send("OPTIONS", "/");
+    expect(res.status).toBe(204);
+    const allow = res.headers.get("allow") ?? "";
+    expect(allow).toContain("GET");
+    expect(allow).toContain("POST");
+    expect(allow).not.toContain("DELETE");
+  });
+
+  it("still advertises DELETE on a non-root container", async () => {
+    const pod = freshPod();
+    const res = await pod.send("OPTIONS", "/c/");
+    expect(res.status).toBe(204);
+    expect(res.headers.get("allow") ?? "").toContain("DELETE");
+  });
+
   it("OPTIONS advertises Accept-Patch", async () => {
     const pod = freshPod();
     const res = await pod.send("OPTIONS", "/anything");
