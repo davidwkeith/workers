@@ -8,6 +8,7 @@
     // closure of the mounted packages' workspace deps (e.g. `@dwk/dpop` via
     // indieauth/micropub). This config is `noEmit`, so rootDir is moot.
     "paths": {
+      "@dwk/calendar": ["../calendar/src/index.ts"],
       "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/host-meta": ["../host-meta/src/index.ts"],
       "@dwk/indieauth": ["../indieauth/src/index.ts"],
