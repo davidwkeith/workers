@@ -57,6 +57,8 @@ importers:
         specifier: workspace:*
         version: link:../log
 
+  packages/calendar: {}
+
   packages/dpop: {}
 
   packages/host-meta:
@@ -89,6 +91,9 @@ importers:
 
   packages/micropub:
     dependencies:
+      '@dwk/calendar':
+        specifier: workspace:*
+        version: link:../calendar
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop

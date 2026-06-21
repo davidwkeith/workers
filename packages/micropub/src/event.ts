@@ -15,6 +15,8 @@
  * @see https://microformats.org/wiki/h-event
  */
 
+import type { CalendarEvent, EventLink } from "@dwk/calendar";
+
 import type { Mf2Object } from "./mf2.js";
 
 /** The microformats2 type of an event. */
@@ -130,6 +132,100 @@ function renderValue(prefix: Mf2Prefix, key: string, value: unknown): string {
     return `<time class="${cls}" datetime="${escaped}">${escaped}</time>`;
   }
   return `<span class="${cls}">${escaped}</span>`;
+}
+
+/** First value of an mf2 property, coerced to display text, or `undefined`. */
+function firstText(event: Mf2Object, key: string): string | undefined {
+  const values = event.properties?.[key];
+  if (!Array.isArray(values)) {
+    return undefined;
+  }
+  for (const value of values) {
+    const text = valueToText(value);
+    if (text !== null) {
+      return text;
+    }
+  }
+  return undefined;
+}
+
+/** All values of an mf2 property coerced to text (skipping unprojectable ones). */
+function allText(event: Mf2Object, key: string): string[] {
+  const values = event.properties?.[key];
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const value of values) {
+    const text = valueToText(value);
+    if (text !== null) {
+      out.push(text);
+    }
+  }
+  return out;
+}
+
+/**
+ * Bridge a stored `h-event` microformats2 object to the canonical
+ * {@link CalendarEvent} model from `@dwk/calendar`, the shared record the `.ics`
+ * and JSCalendar serializers read. This adapter is the IndieWeb-specific seam
+ * that the cross-standard `@dwk/calendar` lib deliberately does not contain (it
+ * must stay free of IndieWeb assumptions), so the h-event vocabulary knowledge
+ * lives here, where the mf2 shape is already understood.
+ *
+ * The event's identity comes from its `uid`, falling back to its `url` — a
+ * calendar entry needs a stable id to be re-subscribable, so an event carrying
+ * neither is rejected. `name`→title, `summary`/`content`→description,
+ * `dt-start`/`dt-end`→start/end, `location`→locations, `category`→keywords, and
+ * `url`→a link are mapped; `published`/`updated` carry timestamps through. Pure:
+ * plain mf2 in, a plain `CalendarEvent` out.
+ */
+export function hEventToCalendarEvent(event: Mf2Object): CalendarEvent {
+  const uid = firstText(event, "uid") ?? firstText(event, "url");
+  if (!uid) {
+    throw new Error(
+      "cannot convert h-event to a calendar event: no `uid` or `url` for a stable identity",
+    );
+  }
+  const start = firstText(event, "start");
+  if (!start) {
+    throw new Error(
+      `cannot convert h-event ${uid} to a calendar event: no \`start\``,
+    );
+  }
+
+  const locations = allText(event, "location").map((name) => ({ name }));
+  const keywords = allText(event, "category");
+  const links: EventLink[] = allText(event, "url").map((href) => ({ href }));
+
+  return {
+    uid,
+    start,
+    ...(firstText(event, "name") !== undefined
+      ? { title: firstText(event, "name") }
+      : {}),
+    ...((firstText(event, "summary") ?? firstText(event, "content"))
+      ? {
+          description:
+            firstText(event, "summary") ?? firstText(event, "content"),
+        }
+      : {}),
+    ...(firstText(event, "end") !== undefined
+      ? { end: firstText(event, "end") }
+      : {}),
+    ...(firstText(event, "duration") !== undefined
+      ? { duration: firstText(event, "duration") }
+      : {}),
+    ...(locations.length ? { locations } : {}),
+    ...(keywords.length ? { keywords } : {}),
+    ...(links.length ? { links } : {}),
+    ...(firstText(event, "published") !== undefined
+      ? { created: firstText(event, "published") }
+      : {}),
+    ...(firstText(event, "updated") !== undefined
+      ? { updated: firstText(event, "updated") }
+      : {}),
+  };
 }
 
 /**

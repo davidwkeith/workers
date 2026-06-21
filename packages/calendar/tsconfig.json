@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No `rootDir`: this config is `noEmit` (typecheck only), and CI runs
+    // typecheck ahead of build, so rootDir containment is moot here.
+    "types": ["@cloudflare/workers-types"],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

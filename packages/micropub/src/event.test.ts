@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { H_EVENT, isEvent, renderHEvent } from "./event.js";
+import { toICalendar, toJSCalendar } from "@dwk/calendar";
+import {
+  H_EVENT,
+  isEvent,
+  renderHEvent,
+  hEventToCalendarEvent,
+} from "./event.js";
 import type { Mf2Object } from "./mf2.js";
 
 /**
@@ -143,5 +149,106 @@ describe("renderHEvent", () => {
       },
     });
     expect(await readProperty(html, "p-location")).toEqual(["The Hall"]);
+  });
+});
+
+describe("hEventToCalendarEvent", () => {
+  const stored: Mf2Object = {
+    type: [H_EVENT],
+    properties: {
+      uid: ["https://example.com/events/1"],
+      url: ["https://example.com/events/1"],
+      name: ["Park Cleanup"],
+      summary: ["Bring gloves."],
+      start: ["2026-07-01T18:00:00-07:00"],
+      end: ["2026-07-01T20:00:00-07:00"],
+      location: ["Civic Center"],
+      category: ["volunteering", "outdoors"],
+      published: ["2026-06-01T08:00:00Z"],
+    },
+  };
+
+  it("maps the core h-event properties to the canonical model", () => {
+    expect(hEventToCalendarEvent(stored)).toEqual({
+      uid: "https://example.com/events/1",
+      title: "Park Cleanup",
+      description: "Bring gloves.",
+      start: "2026-07-01T18:00:00-07:00",
+      end: "2026-07-01T20:00:00-07:00",
+      locations: [{ name: "Civic Center" }],
+      keywords: ["volunteering", "outdoors"],
+      links: [{ href: "https://example.com/events/1" }],
+      created: "2026-06-01T08:00:00Z",
+    });
+  });
+
+  it("falls back from uid to url for identity", () => {
+    const event = hEventToCalendarEvent({
+      type: [H_EVENT],
+      properties: {
+        url: ["https://example.com/events/9"],
+        start: ["2026-07-04"],
+      },
+    });
+    expect(event.uid).toBe("https://example.com/events/9");
+  });
+
+  it("uses content as the description when no summary is present", () => {
+    const event = hEventToCalendarEvent({
+      type: [H_EVENT],
+      properties: {
+        uid: ["u"],
+        start: ["2026-07-04"],
+        content: ["The long story."],
+      },
+    });
+    expect(event.description).toBe("The long story.");
+  });
+
+  it("reads a nested location h-card name", () => {
+    const event = hEventToCalendarEvent({
+      type: [H_EVENT],
+      properties: {
+        uid: ["u"],
+        start: ["2026-07-04"],
+        location: [{ type: ["h-card"], properties: { name: ["The Hall"] } }],
+      },
+    });
+    expect(event.locations).toEqual([{ name: "The Hall" }]);
+  });
+
+  it("throws when the event has neither uid nor url", () => {
+    expect(() =>
+      hEventToCalendarEvent({
+        type: [H_EVENT],
+        properties: { start: ["2026-07-04"] },
+      }),
+    ).toThrow(/stable identity/);
+  });
+
+  it("throws when the event has no start", () => {
+    expect(() =>
+      hEventToCalendarEvent({ type: [H_EVENT], properties: { uid: ["u"] } }),
+    ).toThrow(/start/);
+  });
+
+  it("round-trips h-event → canonical model → .ics preserving the core fields", () => {
+    const ics = toICalendar(hEventToCalendarEvent(stored), {
+      now: new Date("2026-06-21T12:00:00Z"),
+    });
+    expect(ics).toContain("UID:https://example.com/events/1");
+    expect(ics).toContain("SUMMARY:Park Cleanup");
+    // -07:00 instants normalise to UTC.
+    expect(ics).toContain("DTSTART:20260702T010000Z");
+    expect(ics).toContain("DTEND:20260702T030000Z");
+    expect(ics).toContain("LOCATION:Civic Center");
+    expect(ics).toContain("CATEGORIES:volunteering,outdoors");
+  });
+
+  it("round-trips into a JSCalendar object with a derived duration", () => {
+    const js = toJSCalendar(hEventToCalendarEvent(stored));
+    expect(js["@type"]).toBe("Event");
+    expect(js.uid).toBe("https://example.com/events/1");
+    expect(js.duration).toBe("PT2H");
   });
 });

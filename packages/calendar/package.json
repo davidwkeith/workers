@@ -1,22 +1,27 @@
 {
-  "name": "@dwk/micropub",
-  "version": "0.1.0-beta.2",
-  "description": "Micropub create/update/delete endpoint with R2 media endpoint. Consumes IndieAuth tokens.",
+  "name": "@dwk/calendar",
+  "version": "0.1.0-beta.0",
+  "description": "Canonical JSCalendar (RFC 8984) event model with an RFC 5545 iCalendar (.ics) serializer and a stateless text/calendar feed handler for webcal:// subscription.",
   "keywords": [
-    "micropub",
-    "indieweb",
-    "indieauth",
-    "media-endpoint",
+    "icalendar",
+    "ics",
+    "rfc5545",
+    "jscalendar",
+    "rfc8984",
+    "calendar",
+    "events",
+    "vevent",
+    "webcal",
     "cloudflare-workers"
   ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
-  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/micropub#readme",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/calendar#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/davidwkeith/workers.git",
-    "directory": "packages/micropub"
+    "directory": "packages/calendar"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -39,11 +44,5 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "dependencies": {
-    "@dwk/calendar": "workspace:*",
-    "@dwk/dpop": "workspace:*",
-    "@dwk/indieauth": "workspace:*",
-    "@dwk/log": "workspace:*"
   }
 }

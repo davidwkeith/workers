@@ -35,6 +35,19 @@ runtime-free (plain mf2 in, an HTML string out) and unit-tested for mf2
 round-trip; **micropub.rocks** remains the authoritative mf2-parser conformance
 gate.
 
+For the calendar-interop layer (issue #170), the package also exports
+`hEventToCalendarEvent(mf2)` — the **IndieWeb-specific adapter** from a stored
+`h-event` to the canonical `CalendarEvent` model in
+[`@dwk/calendar`](calendar.md), which then serializes to `.ics`/JSCalendar. This
+adapter lives here, not in `@dwk/calendar`, precisely because that lib is a
+cross-standard reusable lib and MUST stay free of IndieWeb assumptions (the hard
+constraint in [composition-contract.md](../composition-contract.md)); the
+h-event vocabulary knowledge belongs where the mf2 shape is already understood.
+It maps `uid` (falling back to `url`) → identity, `name` → title,
+`summary`/`content` → description, `dt-start`/`dt-end` → start/end, `location` →
+locations, `category` → keywords, and `published`/`updated` → timestamps; it is
+pure and unit-tested for the `h-event → CalendarEvent → .ics` round-trip.
+
 ## Auth / security
 
 - Authorize via an **IndieAuth access token + scope** (see
