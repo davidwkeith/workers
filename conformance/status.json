@@ -372,6 +372,14 @@
         "cases": []
       }
     },
+    "@dwk/calendar": {
+      "standard": "iCalendar / JSCalendar",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/dpop": {
       "standard": null,
       "suites": {},

@@ -12,14 +12,15 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **21 publishable packages** — the
+**Status: implemented, unreleased.** There are **22 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
-`@dwk/http-signatures`, `@dwk/oauth`, `@dwk/store`) and the endpoint/standard
-packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
-`@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-`@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`) —
-plus a 22nd, `@dwk/server`, the Node/Express self-hosting host, which is marked
-`"private": true` and is **never published** (it ships only as a Docker image).
+`@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/store`) and the
+endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
+`@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
+`@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
+`@dwk/solid-pod`, `@dwk/atproto-pds`) — plus a 23rd, `@dwk/server`, the
+Node/Express self-hosting host, which is marked `"private": true` and is **never
+published** (it ships only as a Docker image).
 Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. Versioning is via Changesets **pre mode**
 (`.changeset/pre.json`, tag `beta`); the packages are published to npm as
@@ -97,16 +98,20 @@ storage object the others build on).
   but shares neither `@dwk/store` nor `@dwk/rdf` (its repository is an MST of
   DAG-CBOR records), so its storage core is self-contained.
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
-  `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`. These MUST stay free of
-  IndieWeb/Solid assumptions so future `@dwk` standards adopt them unchanged.
-  This is a hard constraint, not a preference. `@dwk/log` is the injectable
-  structured-logging seam (see `spec/observability.md`). `@dwk/ldn` holds the
-  RDF-only Linked Data Notifications primitives (inbox discovery, notification
-  validation, listing) shared by `@dwk/solid-pod` and `@dwk/activitypub`; its
-  discovery helpers are reachable n3-free as `@dwk/ldn/discovery` for
-  Workers-runtime consumers. `@dwk/http-signatures` (RFC 9421 + draft-cavage)
-  and `@dwk/oauth` (RFC 8414/7662/7009/9126/7591 building blocks) are likewise
-  protocol-agnostic and Workers-runtime-free.
+  `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`. These MUST
+  stay free of IndieWeb/Solid assumptions so future `@dwk` standards adopt them
+  unchanged. This is a hard constraint, not a preference. `@dwk/log` is the
+  injectable structured-logging seam (see `spec/observability.md`). `@dwk/ldn`
+  holds the RDF-only Linked Data Notifications primitives (inbox discovery,
+  notification validation, listing) shared by `@dwk/solid-pod` and
+  `@dwk/activitypub`; its discovery helpers are reachable n3-free as
+  `@dwk/ldn/discovery` for Workers-runtime consumers. `@dwk/http-signatures`
+  (RFC 9421 + draft-cavage) and `@dwk/oauth` (RFC 8414/7662/7009/9126/7591
+  building blocks) are likewise protocol-agnostic and Workers-runtime-free.
+  `@dwk/calendar` holds the canonical JSCalendar (RFC 8984)-shaped event model
+  and the RFC 5545 iCalendar / JSCalendar serializers (the calendar/events epic,
+  #167); the per-standard adapters (e.g. `h-event → CalendarEvent`) live in the
+  endpoint packages, never in the lib.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 
@@ -189,8 +194,8 @@ when adding a package:
 
 - **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
   `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
-  `@dwk/webfinger`, `@dwk/host-meta`. They take plain-data inputs and need no
-  Workers runtime.
+  `@dwk/calendar`, `@dwk/webfinger`, `@dwk/host-meta`. They take plain-data
+  inputs and need no Workers runtime.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
