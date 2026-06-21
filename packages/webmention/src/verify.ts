@@ -26,6 +26,7 @@ import {
 } from "./html.js";
 import { readBodyCapped, type FetchLike } from "./fetch.js";
 import { WebmentionLogEvent } from "./log.js";
+import { extractRsvp, type RsvpValue } from "./rsvp.js";
 import { safeFetch } from "./safe-fetch.js";
 
 /** Elements whose `href` may constitute a link to the target. */
@@ -215,6 +216,9 @@ function recordVerifyOutcome(
     targetHost: hostFromUrl(target),
     links: result.links,
     status: result.status,
+    // The rsvp value (yes/no/maybe/interested) is a closed, non-sensitive set,
+    // so it is safe to surface for observability when a mention is an RSVP.
+    ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
   };
   logger.info(WebmentionLogEvent.VerifyCompleted, fields);
   metrics.count(WebmentionLogEvent.VerifyCompleted, fields);
@@ -227,6 +231,12 @@ export interface VerifyResult {
   readonly links: boolean;
   /** The source's HTTP status (`0` when the fetch threw). */
   readonly status: number;
+  /**
+   * The Indie RSVP value when the source is an RSVP to the target (a `p-rsvp`
+   * plus a `u-in-reply-to` aimed at the target); omitted otherwise. See
+   * {@link extractRsvp}.
+   */
+  readonly rsvp?: RsvpValue;
 }
 
 /**
@@ -287,8 +297,16 @@ export async function verifySource(
     });
   }
 
+  const links = await sourceLinksTo(body, target, base, contentType);
+  // Only an HTML source that genuinely links to the target can be an RSVP; a
+  // `u-in-reply-to` is itself a link, so RSVP detection presupposes `links`.
+  const rsvp =
+    links && isHtmlContentType(contentType)
+      ? await extractRsvp(body, base, target)
+      : null;
   return recordVerifyOutcome(logger, metrics, source, target, {
-    links: await sourceLinksTo(body, target, base, contentType),
+    links,
     status: response.status,
+    ...(rsvp !== null ? { rsvp } : {}),
   });
 }

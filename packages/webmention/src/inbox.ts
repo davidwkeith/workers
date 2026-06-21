@@ -14,12 +14,19 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 
+import { isRsvpValue, type RsvpValue } from "./rsvp.js";
+
 /** A verified Webmention: `source` links to `target`, confirmed at `verifiedAt`. */
 export interface VerifiedMention {
   readonly source: string;
   readonly target: string;
   /** Verification time, epoch milliseconds. */
   readonly verifiedAt: number;
+  /**
+   * The Indie RSVP value when this mention is an RSVP to the target; omitted for
+   * an ordinary mention. Lets a consumer surface attendee state on the event.
+   */
+  readonly rsvp?: RsvpValue;
 }
 
 /** Persistence surface for verified mentions. */
@@ -42,6 +49,7 @@ interface MentionRow {
   readonly source: string;
   readonly target: string;
   readonly verified_at: number;
+  readonly rsvp: string | null;
 }
 
 /**
@@ -67,10 +75,22 @@ export function createD1Inbox(
           `source TEXT NOT NULL, ` +
           `target TEXT NOT NULL, ` +
           `verified_at INTEGER NOT NULL, ` +
+          `rsvp TEXT, ` +
           `PRIMARY KEY (source, target))`,
       )
       .run()
-      .then(() => undefined);
+      // Add the `rsvp` column to inboxes created before RSVP support existed.
+      // `PRAGMA table_info` is consulted first so a fresh table — already created
+      // with the column — skips the `ALTER` rather than throwing a swallowed
+      // duplicate-column error on every init.
+      .then(async () => {
+        const { results } = await db
+          .prepare(`PRAGMA table_info(${table})`)
+          .all<{ name: string }>();
+        if (!results.some((col) => col.name === "rsvp")) {
+          await db.prepare(`ALTER TABLE ${table} ADD COLUMN rsvp TEXT`).run();
+        }
+      });
     return ready;
   };
 
@@ -79,12 +99,18 @@ export function createD1Inbox(
       await ensureSchema();
       await db
         .prepare(
-          `INSERT INTO ${table} (source, target, verified_at) ` +
-            `VALUES (?1, ?2, ?3) ` +
+          `INSERT INTO ${table} (source, target, verified_at, rsvp) ` +
+            `VALUES (?1, ?2, ?3, ?4) ` +
             `ON CONFLICT (source, target) ` +
-            `DO UPDATE SET verified_at = excluded.verified_at`,
+            `DO UPDATE SET verified_at = excluded.verified_at, ` +
+            `rsvp = excluded.rsvp`,
         )
-        .bind(mention.source, mention.target, mention.verifiedAt)
+        .bind(
+          mention.source,
+          mention.target,
+          mention.verifiedAt,
+          mention.rsvp ?? null,
+        )
         .run();
     },
 
@@ -101,12 +127,12 @@ export function createD1Inbox(
       const statement =
         target === undefined
           ? db.prepare(
-              `SELECT source, target, verified_at FROM ${table} ` +
+              `SELECT source, target, verified_at, rsvp FROM ${table} ` +
                 `ORDER BY verified_at DESC`,
             )
           : db
               .prepare(
-                `SELECT source, target, verified_at FROM ${table} ` +
+                `SELECT source, target, verified_at, rsvp FROM ${table} ` +
                   `WHERE target = ?1 ORDER BY verified_at DESC`,
               )
               .bind(target);
@@ -115,6 +141,9 @@ export function createD1Inbox(
         source: row.source,
         target: row.target,
         verifiedAt: row.verified_at,
+        ...(row.rsvp !== null && isRsvpValue(row.rsvp)
+          ? { rsvp: row.rsvp }
+          : {}),
       }));
     },
   };

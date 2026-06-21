@@ -15,6 +15,26 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
 - **Media endpoint** backed by **R2**.
 - Query support: `q=config` and `q=source`.
 
+## Event post type (`h=event`)
+
+The endpoint supports the Micropub **event** post type (`h=event`), the
+IndieWeb-native event primitive (see the calendar/events thread, issue #167).
+An event is created exactly like any other post — `h=event` with `name`,
+`start`, `end`, `location`, `category`, and `content` properties — and stored
+generically by the post store; no event-specific storage path is needed because
+the store is mf2-shaped, so `q=source` round-trips an event's properties
+unchanged.
+
+For publishing, the package exports a pure `renderHEvent(mf2)` helper that
+serializes a stored event's microformats2 object to canonical **`h-event`**
+markup (`p-name`, `dt-start`/`dt-end` as `<time datetime>`, `p-location`,
+`p-category`, `e-content`, `u-url`). Per the IndieWeb model the page *is* the
+event, so the consuming site embeds this markup; the same record then serializes
+outward to `.ics`, AS2 `Event`, and pod RDF (issues #170–#172). The renderer is
+runtime-free (plain mf2 in, an HTML string out) and unit-tested for mf2
+round-trip; **micropub.rocks** remains the authoritative mf2-parser conformance
+gate.
+
 ## Auth / security
 
 - Authorize via an **IndieAuth access token + scope** (see

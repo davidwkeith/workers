@@ -273,6 +273,46 @@ describe("@dwk/micropub create", () => {
     expect(body.properties["mp-slug"]).toBeUndefined();
   });
 
+  it("creates an h=event with start/end/location and returns it via q=source", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: new URLSearchParams([
+          ["h", "event"],
+          ["name", "Indie Web Meetup"],
+          ["start", "2026-07-01T18:00:00-07:00"],
+          ["end", "2026-07-01T20:00:00-07:00"],
+          ["location", "Portland, OR"],
+          ["mp-slug", "meetup"],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(res.headers.get("location")).toBe(`${BASE}/meetup`);
+
+    const source = await handler(
+      new Request(
+        `${MICROPUB}?q=source&url=${encodeURIComponent(`${BASE}/meetup`)}`,
+        { headers: await authHeaders(minted, "GET", MICROPUB) },
+      ),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      type: string[];
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.type).toEqual(["h-event"]);
+    expect(body.properties.name).toEqual(["Indie Web Meetup"]);
+    expect(body.properties.start).toEqual(["2026-07-01T18:00:00-07:00"]);
+    expect(body.properties.end).toEqual(["2026-07-01T20:00:00-07:00"]);
+    expect(body.properties.location).toEqual(["Portland, OR"]);
+  });
+
   it("filters q=source to the requested properties", async () => {
     const minted = await mintToken("create");
     const create = await handler(

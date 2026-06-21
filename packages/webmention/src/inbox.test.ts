@@ -78,6 +78,37 @@ describe("createD1Inbox", () => {
     await inbox.remove(mention.source, mention.target);
   });
 
+  it("persists and lists an rsvp value", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_rsvp" });
+    await inbox.store({
+      source: "https://a.example/rsvp",
+      target: "https://example.com/party",
+      verifiedAt: 5,
+      rsvp: "yes",
+    });
+    expect(await inbox.list()).toEqual([
+      {
+        source: "https://a.example/rsvp",
+        target: "https://example.com/party",
+        verifiedAt: 5,
+        rsvp: "yes",
+      },
+    ]);
+  });
+
+  it("clears the rsvp when a mention is re-stored without one", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_rsvp_clear" });
+    const mention = {
+      source: "https://a.example/p",
+      target: "https://example.com/party",
+    };
+    await inbox.store({ ...mention, verifiedAt: 1, rsvp: "maybe" });
+    await inbox.store({ ...mention, verifiedAt: 2 });
+    const all = await inbox.list();
+    expect(all).toHaveLength(1);
+    expect(all[0]?.rsvp).toBeUndefined();
+  });
+
   it("rejects an unsafe table name", () => {
     expect(() => createD1Inbox(db, { table: "bad name;" })).toThrow();
   });

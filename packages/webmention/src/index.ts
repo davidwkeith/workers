@@ -58,6 +58,12 @@ export {
   type VerifyResult,
 } from "./verify.js";
 export {
+  extractRsvp,
+  isRsvpValue,
+  RSVP_VALUES,
+  type RsvpValue,
+} from "./rsvp.js";
+export {
   createD1Inbox,
   type InboxStore,
   type VerifiedMention,
@@ -275,7 +281,12 @@ export function createWebmentionQueueConsumer(
           metrics,
         });
         if (result.links) {
-          await inbox.store({ source, target, verifiedAt: Date.now() });
+          await inbox.store({
+            source,
+            target,
+            verifiedAt: Date.now(),
+            ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+          });
         } else {
           await inbox.remove(source, target);
         }
