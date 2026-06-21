@@ -170,6 +170,32 @@ describe("verifySource", () => {
     });
   });
 
+  it("surfaces an Indie RSVP value when the source is an rsvp to the target", async () => {
+    const html =
+      `<div class="h-entry"><a class="u-in-reply-to" href="${target}">e</a>` +
+      '<data class="p-rsvp" value="yes">going</data></div>';
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({
+      links: true,
+      status: 200,
+      rsvp: "yes",
+    });
+  });
+
+  it("omits rsvp for an ordinary mention", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(`<a href="${target}">x</a>`, {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    const result = await verifySource(source, target, { fetch: fetchImpl });
+    expect(result.rsvp).toBeUndefined();
+  });
+
   it("returns links:false for a 404 source", async () => {
     const fetchImpl = vi.fn(async () => new Response("gone", { status: 404 }));
     expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({

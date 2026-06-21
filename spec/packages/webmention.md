@@ -22,6 +22,25 @@ Receives and sends Webmentions for the user's domain.
 - Store verified mentions to an **inbox** (D1, or the pod DO when composed with
   `@dwk/solid-pod`).
 
+### Indie RSVP
+
+- Recognize an **Indie RSVP**: a reply `h-entry` whose microformats2 carries
+  `p-rsvp` (`yes` / `no` / `maybe` / `interested`) plus a `u-in-reply-to` aimed
+  at the target, delivered as a Webmention (see the calendar/events thread,
+  issue #167). During the same asynchronous verification pass, the receiver
+  extracts the rsvp value when **both** halves are present — an unrecognized
+  rsvp token, a missing `p-rsvp`, or an `in-reply-to` pointing elsewhere is
+  stored as an ordinary mention — and persists it on the inbox record so a
+  consumer can surface attendee state on the event.
+- The `p-rsvp` value follows the mf2 `p-*` rule: a `value` attribute
+  (`<data class="p-rsvp" value="yes">`, the recommended markup) wins, otherwise
+  the element's text content is used.
+- This is a **bounded** mf2 read done with the runtime's streaming
+  `HTMLRewriter` — the two RSVP properties only — not a full Microformats2
+  parser, which the runtime budget (`spec/non-functional-requirements.md`) rules
+  out of the Worker bundle. The inbox schema gains a nullable `rsvp` column;
+  pre-existing inboxes are migrated with an additive `ALTER TABLE`.
+
 ### Sender
 
 - Discover Webmention endpoints for outbound links.

@@ -49,6 +49,8 @@ export {
   type ParsedBody,
 } from "./mf2.js";
 
+export { H_EVENT, isEvent, renderHEvent } from "./event.js";
+
 export {
   authorize,
   tokenFromHeader,
