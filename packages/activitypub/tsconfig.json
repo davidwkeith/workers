@@ -10,7 +10,8 @@
       // `@dwk/ldn/discovery` references `@dwk/rdf` types (erased at build); map it
       // to source too so typecheck-before-build resolves the transitive type.
       "@dwk/rdf": ["../rdf/src/index.ts"],
-      "@dwk/log": ["../log/src/index.ts"]
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/calendar": ["../calendar/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

@@ -58,6 +58,12 @@ export {
 } from "./as2.js";
 
 export {
+  calendarEventToActivityStreams,
+  participationTarget,
+  type ActivityStreamsEventOptions,
+} from "./events.js";
+
+export {
   buildNodeInfoDiscovery,
   buildNodeInfo20,
   buildNodeInfo21,

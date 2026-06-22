@@ -26,6 +26,7 @@ import {
   type JsonValue,
 } from "./as2.js";
 import { ApOutcome, OUTCOME_ACTIVITY_HEADER, OUTCOME_HEADER } from "./log.js";
+import { participationTarget } from "./events.js";
 import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
 import {
   assertPublicHttpsTarget,
@@ -94,6 +95,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `CREATE TABLE IF NOT EXISTS delivery (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, inbox TEXT NOT NULL, json TEXT NOT NULL,
          attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
+    );
+    // Event RSVPs (#171): one row per (event, participant). `status` is
+    // 'accepted' (auto-accepted, or after a manual Accept) or 'pending'
+    // (awaiting manual approval). A Leave deletes the row.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS attendees (
+         event TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
+         added_at INTEGER NOT NULL, PRIMARY KEY (event, actor))`,
     );
   }
 
@@ -187,6 +196,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         break;
       case "Undo":
         this.#onUndo(activity);
+        break;
+      case "Join":
+        await this.#onJoin(activity, config);
+        break;
+      case "Leave":
+        this.#onLeave(activity, config);
         break;
       case "Accept":
         this.#onAccept(activity);
@@ -288,6 +303,83 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const follower = actorIri(activity.actor);
     if (follower)
       this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, follower);
+  }
+
+  /**
+   * Handle an inbound `Join` — the ActivityPub mirror of an Indie RSVP (#171).
+   * Record the participant against the event it targets, but only when that
+   * event is one WE own (a local resource); a `Join` aimed at someone else's
+   * event is ignored so we are not used to amplify arbitrary RSVPs. Unless the
+   * owner manually approves joins, auto-`Accept` by recording `accepted` and
+   * enqueuing a signed `Accept` delivered to the participant's inbox — exactly
+   * the auto-`Accept`-on-`Follow` shape. The front door already rejected any
+   * activity whose `actor` is not the signer, so the participant is the signer.
+   */
+  async #onJoin(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const participant = actorIri(activity.actor);
+    const event = participationTarget(activity);
+    if (!participant || !event || !isLocalResource(event, config.iris)) return;
+
+    // Idempotent re-Join. A *distinct* Join activity (a fresh `id`, so not caught
+    // by the activity-`id` dedup) for an already-`accepted` participant must not
+    // (a) demote them back to `pending` via the upsert below, nor (b) re-run the
+    // outbound inbox resolution + `Accept` delivery on every replay — an
+    // amplification vector. Once accepted there is nothing more to do.
+    const existing = this.#sql
+      .exec<{
+        status: string;
+      }>(
+        `SELECT status FROM attendees WHERE event = ? AND actor = ?`,
+        event,
+        participant,
+      )
+      .toArray()[0];
+    if (existing?.status === "accepted") return;
+
+    const status = config.manuallyApprovesJoins ? "pending" : "accepted";
+    this.#sql.exec(
+      `INSERT INTO attendees (event, actor, status, added_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(event, actor) DO UPDATE SET status = excluded.status`,
+      event,
+      participant,
+      status,
+      Date.now(),
+    );
+
+    if (config.manuallyApprovesJoins) return;
+
+    const inbox = await this.#resolveInbox(participant);
+    if (!inbox) return;
+    const accept: Record<string, JsonValue> = {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: `${config.iris.id}#accepts/${crypto.randomUUID()}`,
+      type: "Accept",
+      actor: config.iris.id,
+      object: activityAsObject(activity),
+    };
+    this.#enqueueDelivery(inbox, JSON.stringify(accept));
+    // Deliver from the background alarm, never inline, so the participant's POST
+    // is not blocked on our outbound network.
+    await this.#armAlarm();
+  }
+
+  /**
+   * Handle an inbound `Leave` — withdraw an RSVP. Delete the participant's row
+   * for the targeted event. Because the front door enforces `actor === signer`,
+   * a participant can only withdraw their own RSVP, never someone else's.
+   */
+  #onLeave(activity: ActivityObject, config: ForwardedConfig): void {
+    const participant = actorIri(activity.actor);
+    const event = participationTarget(activity);
+    if (!participant || !event || !isLocalResource(event, config.iris)) return;
+    this.#sql.exec(
+      `DELETE FROM attendees WHERE event = ? AND actor = ?`,
+      event,
+      participant,
+    );
   }
 
   /** Handle a remote `Accept` of our `Follow`: mark that following confirmed. */
