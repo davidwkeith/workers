@@ -48,8 +48,13 @@ single, deliberate, scoped exception rather than a silent relaxation.
 
 - **App passwords.** A long (≥128-bit) random secret bound to
   `(WebID, label, scope, optional path-prefix, expiry)`. Presented as the
-  password half of HTTP **Basic** (`Authorization: Basic …`), with the username
-  carrying the WebID (or an opaque credential id).
+  password half of HTTP **Basic** (`Authorization: Basic …`).
+- **The username is an opaque credential id, never the raw WebID.** Basic auth
+  (RFC 7617) splits the decoded credential on the **first colon**, so a WebID URL
+  (`https://…`) as the username would be truncated at `https` and break auth. The
+  mint step therefore issues a colon-free credential id as the username; the
+  server resolves it to the bound WebID. (The WebID is bound server-side, not
+  carried on the wire.)
 - **Hashed at rest.** Stored in the pod's DO SQLite **only as a salted hash**
   (PBKDF2-HMAC-SHA-256 via WebCrypto, high iteration count — Argon2 is not
   available in `workerd`). The plaintext is shown **once** at mint time and never
@@ -85,11 +90,21 @@ the entire point of this package — need **Class 2** (`LOCK`/`UNLOCK`).
 - Advertise `DAV: 1, 2` on every `OPTIONS` response (Windows WebClient refuses to
   mount read-write without it) plus `MS-Author-Via: DAV`.
 - **Exclusive write locks** only (the kind Finder/Windows take); **shared locks
-  are deferred**. Support `Depth: 0` resource locks and `Depth: infinity`
-  collection locks.
+  are deferred**. `Depth: 0` resource locks are the primary case (sufficient for
+  Finder and Windows Explorer).
+- **`Depth: infinity` collection locks are bounded, not open-ended.** An
+  unrestricted infinity lock lets one credential lock an arbitrarily large
+  subtree — locking `/` would freeze the whole pod. So infinity locks are
+  **forbidden on the storage root** and rejected (`403`) above a configurable
+  depth/subtree-size boundary; within the bound they are permitted for the
+  collection-move case OS clients occasionally need.
 - A lock is `(resource path, depth, owner href, lock token, WebID, expiry)`. The
   token is an unguessable `opaquelocktoken:<uuid>` URI. A default timeout with a
   hard cap; `LOCK` with no body **refreshes** an existing lock.
+- **Expired locks are pruned opportunistically**, the same pattern as
+  `solid-pod`'s `jti` replay table: every `LOCK`/`UNLOCK`/write transaction also
+  drops rows whose `expiry` has passed (`DELETE … WHERE expiry < now`), so an
+  abandoned lock never wedges a resource and the table cannot grow unbounded.
 - **Lock state is net-new authoritative state → DO SQLite, never KV** (a lost or
   stale lock is a correctness bug). Because WebDAV locks the **same** resources
   Solid writes (see §3), the lock table MUST live in the **same per-pod DO** as
@@ -112,6 +127,13 @@ files you reach in Finder *are* your pod.
   R2 blob tier — **the exact size-routing and parse path `solid-pod` already
   uses on `PUT`** (so an `.ttl` written from Finder is a first-class Solid
   resource, and a JPEG is a streamed R2 blob).
+- **Content-type inference for OS clients.** Finder/Explorer routinely `PUT`
+  files with a generic `application/octet-stream`/`text/plain` or no
+  `Content-Type` at all — which would store a `.ttl` as an opaque blob instead of
+  parsing it into the quad store. So when the request type is missing or generic,
+  the façade **infers from the file extension** (`.ttl` → `text/turtle`, `.jsonld`
+  → `application/ld+json`, etc.) before handing off to the pod's `PUT` path; an
+  explicit, specific client `Content-Type` always wins.
 - **ETags / preconditions** reuse `@dwk/store`'s per-resource opaque validators
   and TOCTOU-free `If-Match`; WebDAV's `If:` header (`[etag]` and
   `<locktoken>` productions) maps onto them.
@@ -119,10 +141,12 @@ files you reach in Finder *are* your pod.
   pointer to the **same content-addressed R2 key** (dedup makes it nearly free);
   `MOVE` is copy-then-drop-pointer in one transaction. Collection `COPY`/`MOVE`
   honor `Depth`.
-- **Auxiliary resources are hidden.** `.acl` / `.meta` are Solid control-plane,
-  not files: they are **omitted from `PROPFIND` listings** and not writable as
-  WebDAV resources (WAC still governs everything underneath). Exposing them as
-  editable files invites foot-guns.
+- **Auxiliary resources are fully inaccessible over WebDAV.** `.acl` / `.meta`
+  are Solid control-plane, not files: every WebDAV verb against them (and they are
+  likewise omitted from `PROPFIND` listings) returns **`404 Not Found`** — not
+  just hidden-from-listing or read-only. Surfacing an ACL as a readable/movable
+  file risks leaking or corrupting access control; WAC remains the only way to
+  change permissions, and it still governs everything underneath.
 - **OS litter** (`.DS_Store`, `._*`, `Thumbs.db`, `desktop.ini`) is accepted as
   ordinary blob resources by default — silently dropping a `PUT` that returns
   `201` confuses clients. An **optional** configurable denylist MAY refuse or
@@ -144,6 +168,16 @@ and the N3 Patch parser.
   over the bound `400` (cf. the bounded N3 `solid:where` solver).
 - **XXE guard:** a `DOCTYPE` / external-entity declaration is **rejected
   outright** — no entity resolution, ever.
+- **UTF-8 only.** The hand-rolled parser assumes UTF-8; a request declaring any
+  other charset (in `Content-Type` or via a non-UTF-8 BOM / XML encoding
+  declaration) is rejected `415`, closing the encoding-bypass class (UTF-16/UTF-7
+  smuggling past the bounds/XXE checks) that a hand-rolled parser is prone to.
+- **The `If:` header is parsed as a strict, documented subset.** RFC 4918 §10.4's
+  full grammar (tagged + untagged lists, multiple state tokens, `Not`) is a
+  classic source of parser-differential bugs. The server supports only what the
+  precondition path needs — a single untagged list of one lock token and/or one
+  ETag — and answers a more complex `If:` with `400`/`501` rather than
+  best-effort guessing.
 - **Live properties** supported: `displayname`, `getcontentlength`,
   `getcontenttype`, `getlastmodified`, `getetag`, `resourcetype`,
   `lockdiscovery`, `supportedlock`, `creationdate`.
@@ -213,9 +247,12 @@ global environment.
 
 ## Security summary
 
-App passwords hashed at rest (PBKDF2-HMAC-SHA-256) and shown once; HTTPS-only;
-constant-time compare with per-credential throttling; unguessable lock tokens;
-`DOCTYPE`/external-entity rejection; scope ∩ WAC least privilege.
+App passwords hashed at rest (PBKDF2-HMAC-SHA-256) and shown once, keyed by a
+colon-free opaque credential id; HTTPS-only; constant-time compare with
+per-credential throttling; unguessable lock tokens with bounded `Depth: infinity`
+and opportunistic expiry pruning; auxiliary resources (`.acl`/`.meta`) `404` to
+all verbs; UTF-8-only, `DOCTYPE`/external-entity-rejecting XML and a strict-subset
+`If:` parser; scope ∩ WAC least privilege.
 
 ## Conformance / testing
 
