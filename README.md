@@ -43,6 +43,10 @@ their own.
 | [`@dwk/vc`](spec/packages/vc.md) | endpoint | `did:web` identity + Verifiable Credential (VCDM 2.0) issuance/verification with JCS Data Integrity proofs; Bitstring Status List revocation (D1). DID document is static. |
 | [`@dwk/solid-pod`](spec/packages/solid-pod.md) | endpoint + DO | Edge Solid Pod: LDP verbs, content negotiation, N3 Patch, WAC, notifications. Exports the per-pod **Durable Object** class. |
 | [`@dwk/webauthn`](spec/packages/webauthn.md) | endpoint + DO | WebAuthn / passkeys relying party: registration + authentication ceremonies; attestation (`none`/`packed` self) + assertion verification on Web Crypto. Per-RP **Durable Object** for challenge state + credential records. Exploratory. |
+| [`@dwk/activitypub`](spec/packages/activitypub.md) | endpoint + DO | ActivityPub server: per-actor inbox/outbox, signed (HTTP Signatures) server-to-server delivery with retry/backoff, Follow/Accept, owner publish fan-out. Per-actor **Durable Object**. |
+| [`@dwk/remotestorage`](spec/packages/remotestorage.md) | endpoint + DO | remoteStorage: OAuth-scoped document/folder PUT/GET/DELETE with ETags and TOCTOU-free conditional writes, public reads, descendant-sensitive folder listings. Per-account **Durable Object**. |
+| [`@dwk/atproto-pds`](spec/packages/atproto-pds.md) | endpoint + DO | AT Protocol Personal Data Server: MST/DAG-CBOR/CAR repository, `did:web` identity, P-256 commit signing, `com.atproto.*` XRPC. Per-account repository **Durable Object**. Exploratory; shares neither `@dwk/store` nor `@dwk/rdf`. |
+| [`@dwk/webdav`](spec/packages/webdav.md) | endpoint | WebDAV (RFC 4918, Class 2) façade over a Solid pod, so the pod mounts as a network drive in OS file managers. **In progress** — protocol core only (XXE-safe XML, scoped app passwords, header parsing). |
 | [`@dwk/wac`](spec/packages/wac.md) | lib | Web Access Control evaluation (effective-ACL walk, Append vs Write). Used by `solid-pod`. |
 | [`@dwk/dpop`](spec/packages/dpop.md) | lib | DPoP proof verification. Shared by `indieauth` token validation and `solid-pod` Resource Server. |
 | [`@dwk/http-signatures`](spec/packages/http-signatures.md) | lib | HTTP Message Signatures (RFC 9421) + legacy `draft-cavage` sign/verify. Cross-standard reusable; consumed by `activitypub` for server-to-server delivery. |
@@ -50,10 +54,15 @@ their own.
 | [`@dwk/rdf`](spec/packages/rdf.md) | lib | Thin Turtle/JSON-LD parse + serialize over N3.js; triple ↔ store helpers. Edge-budget-conscious. |
 | [`@dwk/log`](spec/packages/log.md) | lib | Injectable structured-logging seam (`Logger` + no-op/console loggers). Cross-standard reusable; protocol-agnostic. |
 | [`@dwk/store`](spec/packages/store.md) | lib | DO-SQLite quad store + R2 copy-on-write blob bodies behind one storage-agnostic interface. |
+| [`@dwk/ldn`](spec/packages/ldn.md) | lib | Linked Data Notifications primitives (inbox discovery, notification validation, listing). RDF-only; shared by `solid-pod` and `activitypub`. Discovery reachable n3-free as `@dwk/ldn/discovery`. |
+| [`@dwk/calendar`](spec/packages/calendar.md) | lib | Canonical JSCalendar (RFC 8984)-shaped event model + RFC 5545 iCalendar / JSCalendar serializers. Protocol-agnostic; per-standard adapters live in the endpoint packages. |
 
 **Mental model:** stateless Worker front door → per-pod Durable Object as the
-consistency / authz / notification authority → R2 for blob bodies. `solid-pod`
-is the only package that ships a Durable Object; the IndieWeb trio is stateless
+consistency / authz / notification authority → R2 for blob bodies. The packages
+that ship a **Durable Object** are `solid-pod` (per-pod), `activitypub`
+(per-actor), `remotestorage` (per-account), `webauthn` (per-RP), `atproto-pds`
+(per-account repository), and `store` (the DO-SQLite storage object the others
+build on); the IndieWeb trio (`indieauth`, `micropub`, `webmention`) is stateless
 handlers backed by D1 / R2.
 
 ## Composition model

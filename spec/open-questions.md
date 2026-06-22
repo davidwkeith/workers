@@ -42,16 +42,18 @@ its limitations are documented in
 [`packages/rdf/README.md`](https://github.com/davidwkeith/workers/blob/main/packages/rdf/README.md).
 Widening the subset later does not change the public API.
 
-## 5. WebDAV façade for OS-native pod access — PROPOSED
+## 5. WebDAV façade for OS-native pod access — IN PROGRESS
 
 OS file managers (Finder, Explorer, GNOME/KDE, iOS Files) speak **WebDAV
-(RFC 4918)** but not Solid/LDP, so a [`@dwk/webdav`](packages/webdav.md) façade
-would let a user mount their pod as a network drive with zero install. The verbs
-are a thin layer over `@dwk/store` + the `solid-pod` DO; the load-bearing
-decisions are the **auth bridge** (scoped, hashed-at-rest *app passwords* over
-Basic-HTTPS, since no OS client can do DPoP) and **Class 2 locking** (lock state
-in DO SQLite). Spec drafted for review in
-[`packages/webdav.md`](packages/webdav.md); **not yet implemented**. Tracked in
+(RFC 4918)** but not Solid/LDP, so the [`@dwk/webdav`](packages/webdav.md) façade
+lets a user mount their pod as a network drive with zero install. The verbs are a
+thin layer over `@dwk/store` + the `solid-pod` DO; the load-bearing decisions are
+the **auth bridge** (scoped, hashed-at-rest *app passwords* over Basic-HTTPS,
+since no OS client can do DPoP) and **Class 2 locking** (lock state in DO SQLite).
+The package now ships its pure **protocol core** (XXE-safe XML, scoped app
+passwords, `Content-Type`/`If` header parsing); the `createWebdav` handler,
+Class 2 locking, and the per-pod Durable Object integration remain to land. Spec
+in [`packages/webdav.md`](packages/webdav.md). Tracked in
 [#169](https://github.com/davidwkeith/workers/issues/169).
 
 ---
