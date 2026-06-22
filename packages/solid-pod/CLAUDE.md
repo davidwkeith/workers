@@ -66,6 +66,7 @@ src/ldp.ts            # LDP resource/container semantics
 src/patch.ts          # N3 Patch parsing and bounded where-clause solver
 src/negotiation.ts    # content negotiation (Turtle/JSON-LD)
 src/auth.ts           # DPoP token validation, AuthContext construction
+src/event.ts          # schema.org RDF ↔ @dwk/calendar CalendarEvent adapter (#172)
 src/notifications.ts  # WebSocket notification support
 src/test-harness.ts   # test-only DO class (not published)
 src/*.test.ts         # colocated tests
@@ -73,6 +74,7 @@ src/*.test.ts         # colocated tests
 
 ## Dependencies
 
+- `@dwk/calendar` — canonical `CalendarEvent` model for the RDF event adapter.
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/ldn` — inbox discovery and LDN primitives.
 - `@dwk/log` — structured logging.

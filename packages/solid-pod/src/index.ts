@@ -28,5 +28,7 @@ export {
   type Jwks,
 } from "./config.js";
 
+export { calendarEventToQuads, quadsToCalendarEvent } from "./event.js";
+
 export { SolidPodLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

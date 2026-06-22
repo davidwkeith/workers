@@ -31,6 +31,33 @@ Durable Object.
 - Resources are stored as **triples in the DO quad store** (via
   [`@dwk/store`](store.md)).
 
+### Calendar events as RDF ([#172](https://github.com/davidwkeith/workers/issues/172))
+
+- Events are stored as **ordinary WAC-gated LDP RDF resources** — there is no
+  event-specific storage or authorization path. The package adds only a
+  vocabulary **adapter** between the canonical [`@dwk/calendar`](calendar.md)
+  `CalendarEvent` model and RDF, the Solid sibling of `@dwk/micropub`'s
+  `hEventToCalendarEvent` (the cross-standard lib stays free of Solid/RDF
+  assumptions, so the adapter lives here).
+- **Vocabulary:** [schema.org](https://schema.org/Event) is **canonical**
+  (`schema:Event`, `startDate`/`endDate`/`location`/`keywords`/…) — JSON-LD-native
+  and what Solid clients expect. The W3C iCal RDF vocabulary is the documented
+  alternative; the adapter emits and reads schema.org only, keeping the stored
+  graph small and the round-trip unambiguous. On read it accepts both the
+  `http://schema.org/` and `https://schema.org/` schemes (folded onto the
+  canonical `http://`), since clients use either interchangeably.
+- `calendarEventToQuads(event, subjectIri)` / `quadsToCalendarEvent(quads,
+  subjectIri)` speak the flat `StoredQuad` shape `@dwk/rdf` and the DO quad store
+  use, so a client serializes with `@dwk/rdf` and PUTs Turtle/JSON-LD through the
+  existing LDP surface, then reads it back by parsing and reconstructing the
+  model. The same record round-trips to an `.ics` `VEVENT`, JSCalendar, an
+  `h-event`, and an AS2 `Event`.
+- **Round-trip fidelity:** `uid` is emitted as `schema:identifier` (falling back
+  to the resource IRI on read); `start`/`end` carry `xsd:date`/`xsd:dateTime`.
+  Repeated `keywords`/`location` triples are an unordered set (RDF), so their
+  order is not preserved. A `"tentative"` status and a floating `timeZone` have
+  no schema.org projection and are not emitted.
+
 ### N3 Patch / `application/sparql-update`
 
 - Parse the patch, then:

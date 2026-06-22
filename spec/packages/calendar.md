@@ -38,8 +38,9 @@ adopt it unchanged. Therefore:
     [`@dwk/micropub`](micropub.md).
   - (planned) ActivityStreams `Event` ↔ `CalendarEvent` in
     [`@dwk/activitypub`](activitypub.md) ([#171](https://github.com/davidwkeith/workers/issues/171)).
-  - (planned) `schema.org`/iCal-RDF ↔ `CalendarEvent` in
-    [`@dwk/solid-pod`](solid-pod.md) ([#172](https://github.com/davidwkeith/workers/issues/172)).
+  - `schema.org Event ↔ CalendarEvent` is `calendarEventToQuads` /
+    `quadsToCalendarEvent` in [`@dwk/solid-pod`](solid-pod.md)
+    ([#172](https://github.com/davidwkeith/workers/issues/172)).
 
 ## Functional requirements
 
