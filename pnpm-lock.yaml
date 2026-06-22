@@ -267,6 +267,8 @@ importers:
         specifier: workspace:*
         version: link:../log
 
+  packages/webdav: {}
+
   packages/webfinger:
     dependencies:
       '@dwk/log':

@@ -335,6 +335,32 @@
         }
       }
     },
+    "@dwk/webdav": {
+      "standard": "WebDAV (RFC 4918)",
+      "suites": {
+        "litmus": {
+          "status": "pending",
+          "report": null,
+          "lastRun": null,
+          "targets": {
+            "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            }
+          }
+        }
+      },
+      "integration": {
+        "status": "pending",
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "pending"
+          }
+        }
+      }
+    },
     "@dwk/ldn": {
       "standard": "Linked Data Notifications",
       "suites": {

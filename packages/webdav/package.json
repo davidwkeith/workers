@@ -1,0 +1,44 @@
+{
+  "name": "@dwk/webdav",
+  "version": "0.0.0",
+  "description": "WebDAV (RFC 4918, Class 2) façade over a Solid pod: mount your own storage as a native network drive. Protocol core — bounded XXE-safe XML, app-password auth, If-header parsing.",
+  "keywords": [
+    "webdav",
+    "rfc4918",
+    "solid",
+    "solid-pod",
+    "network-drive",
+    "cloudflare-workers"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/webdav#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/webdav"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
