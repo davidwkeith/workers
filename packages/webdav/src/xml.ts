@@ -249,6 +249,7 @@ export function parseXml(input: string, limits: XmlParseLimits): XmlElement {
     const qname = readName();
     const rawAttrs: [string, string][] = [];
     const scope = new Map(inherited);
+    const seenAttrs = new Set<string>();
 
     for (;;) {
       skipSpace();
@@ -266,6 +267,11 @@ export function parseXml(input: string, limits: XmlParseLimits): XmlElement {
       }
       if (pos >= src.length) error("unterminated start tag");
       const attrName = readName();
+      // XML 1.0 §3.1: an attribute name MUST NOT appear more than once on the
+      // same tag. Reject rather than silently overwrite (closes a
+      // parser-differential vector); the xmlns/xmlns: declarations count too.
+      if (seenAttrs.has(attrName)) error(`duplicate attribute "${attrName}"`);
+      seenAttrs.add(attrName);
       skipSpace();
       if (src.charCodeAt(pos) !== 0x3d /* = */) error("malformed attribute");
       pos++;

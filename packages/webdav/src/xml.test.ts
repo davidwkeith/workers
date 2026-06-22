@@ -161,6 +161,14 @@ describe("parseXml — well-formedness", () => {
     expect(() => parse(`<a/><b/>`)).toThrow(XmlError);
   });
 
+  it("rejects duplicate attributes on the same tag (XML 1.0 §3.1)", () => {
+    expect(() => parse(`<a x="1" x="2"/>`)).toThrow(/duplicate attribute/);
+    // namespace declarations count as attributes too
+    expect(() => parse(`<a xmlns:D="DAV:" xmlns:D="urn:other"/>`)).toThrow(
+      /duplicate attribute/,
+    );
+  });
+
   it("handles self-closing and empty elements", () => {
     const root = parse(
       `<D:propfind xmlns:D="DAV:"><D:propname></D:propname></D:propfind>`,
