@@ -12,27 +12,32 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **22 publishable packages** — the
+**Status: implemented, unreleased.** There are **23 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/store`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
-`@dwk/solid-pod`, `@dwk/atproto-pds`) — plus a 23rd, `@dwk/server`, the
-Node/Express self-hosting host, which is marked `"private": true` and is **never
-published** (it ships only as a Docker image).
+`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`) — plus a 24th, `@dwk/server`,
+the Node/Express self-hosting host, which is marked `"private": true` and is
+**never published** (it ships only as a Docker image).
 Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. Versioning is via Changesets **pre mode**
 (`.changeset/pre.json`, tag `beta`); the packages are published to npm as
-`0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds` is
-scaffolded but not yet published). Note that in pre mode, packages with no prior
+`0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds`,
+`@dwk/calendar`, and `@dwk/webdav` are the most recently added). Note that in pre
+mode, packages with no prior
 stable release publish to the **`latest`** dist-tag, not `beta`, so plain
 `npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
 full release runbook. The hosted conformance suites tracked in
-`conformance/status.json` are all `pending` (see the release gate below). `@dwk/atproto-pds` is the newest package — a Workers-native
+`conformance/status.json` are all `pending` (see the release gate below). `@dwk/atproto-pds` is a Workers-native
 AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
 P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
-neither `@dwk/store` nor `@dwk/rdf`. When changing behaviour, the authoritative
+neither `@dwk/store` nor `@dwk/rdf`. `@dwk/webdav` is the newest and is still
+**in progress** — it currently ships only its pure protocol core (XXE-safe XML,
+scoped app passwords, header parsing); the `createWebdav` handler, Class 2
+locking, and the per-pod Durable Object integration land in later increments.
+When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands

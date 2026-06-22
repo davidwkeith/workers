@@ -3,6 +3,8 @@
   "tag": "beta",
   "initialVersions": {
     "@dwk/activitypub": "0.0.0",
+    "@dwk/atproto-pds": "0.0.0",
+    "@dwk/calendar": "0.0.0",
     "@dwk/dpop": "0.0.0",
     "@dwk/host-meta": "0.0.0",
     "@dwk/http-signatures": "0.0.0",
@@ -20,6 +22,7 @@
     "@dwk/vc": "0.0.0",
     "@dwk/wac": "0.0.0",
     "@dwk/webauthn": "0.0.0",
+    "@dwk/webdav": "0.0.0",
     "@dwk/webfinger": "0.0.0",
     "@dwk/webmention": "0.0.0",
     "@dwk/websub": "0.0.0"
