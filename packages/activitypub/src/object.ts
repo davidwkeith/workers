@@ -323,6 +323,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const event = participationTarget(activity);
     if (!participant || !event || !isLocalResource(event, config.iris)) return;
 
+    // Idempotent re-Join. A *distinct* Join activity (a fresh `id`, so not caught
+    // by the activity-`id` dedup) for an already-`accepted` participant must not
+    // (a) demote them back to `pending` via the upsert below, nor (b) re-run the
+    // outbound inbox resolution + `Accept` delivery on every replay — an
+    // amplification vector. Once accepted there is nothing more to do.
+    const existing = this.#sql
+      .exec<{
+        status: string;
+      }>(
+        `SELECT status FROM attendees WHERE event = ? AND actor = ?`,
+        event,
+        participant,
+      )
+      .toArray()[0];
+    if (existing?.status === "accepted") return;
+
     const status = config.manuallyApprovesJoins ? "pending" : "accepted";
     this.#sql.exec(
       `INSERT INTO attendees (event, actor, status, added_at) VALUES (?, ?, ?, ?)

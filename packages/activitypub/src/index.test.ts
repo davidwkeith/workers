@@ -822,6 +822,82 @@ describe("Event RSVP (Join/Leave)", () => {
     });
   });
 
+  it("is idempotent for a re-Join: keeps accepted and does not re-deliver", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const event = `${iris.id}/events/picnic`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      let inboxLookups = 0;
+      globalThis.fetch = (async (url: string | URL) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (href === REMOTE) {
+          inboxLookups += 1;
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: {
+                id: `${REMOTE}#main-key`,
+                owner: REMOTE,
+                publicKeyPem,
+              },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+
+      const join = (id: string) =>
+        instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify({
+              id,
+              type: "Join",
+              actor: REMOTE,
+              object: event,
+            }),
+          }),
+        );
+
+      try {
+        // First Join: accepted, one Accept enqueued, one inbox lookup.
+        await join("https://remote.example/activities/join-a");
+        // A distinct Join activity (new id, bypasses activity-id dedup) for the
+        // same already-accepted participant must be a no-op.
+        await join("https://remote.example/activities/join-b");
+
+        const row = state.storage.sql
+          .exec<{
+            status: string;
+          }>(
+            "SELECT status FROM attendees WHERE event = ? AND actor = ?",
+            event,
+            REMOTE,
+          )
+          .toArray()[0];
+        expect(row?.status).toBe("accepted");
+
+        // No second Accept enqueued and no second inbox resolution on the replay.
+        const queued = state.storage.sql
+          .exec<{ n: number }>("SELECT COUNT(*) AS n FROM delivery")
+          .one().n;
+        expect(queued).toBe(1);
+        expect(inboxLookups).toBe(1);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
   it("holds a Join pending and delivers nothing when joins are manually approved", async () => {
     const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
     const iris = deriveIris(BASE, username);
