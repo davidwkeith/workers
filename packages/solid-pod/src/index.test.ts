@@ -1,7 +1,15 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { createSolidPod, type SolidPodEnv } from "./index.js";
+import type { CalendarEvent } from "@dwk/calendar";
+import { parseTurtle, quadToStored, serialize, storedToQuad } from "@dwk/rdf";
+
+import {
+  calendarEventToQuads,
+  createSolidPod,
+  quadsToCalendarEvent,
+  type SolidPodEnv,
+} from "./index.js";
 
 /**
  * End-to-end tests over the real Worker front door + per-pod Durable Object,
@@ -1606,5 +1614,124 @@ describe("@dwk/solid-pod LDN inbox discovery", () => {
 
     const get = await pod.send("GET", "/plain", { webid: OWNER });
     expect(get.headers.get("link") ?? "").not.toContain(LDP_INBOX);
+  });
+});
+
+describe("@dwk/solid-pod calendar events as RDF (issue #172)", () => {
+  const CAROL = "https://carol.example/profile#me";
+
+  const SAMPLE: CalendarEvent = {
+    uid: "urn:uuid:party-42",
+    title: "Launch Party",
+    description: "Come celebrate",
+    start: "2026-07-01T18:00:00Z",
+    end: "2026-07-01T21:00:00Z",
+    locations: [{ name: "Civic Center" }],
+    keywords: ["party", "launch"],
+    status: "confirmed",
+  };
+
+  /** Serialize an event to Turtle the way a client storing it in a pod would. */
+  async function eventTurtle(
+    event: CalendarEvent,
+    subject: string,
+  ): Promise<string> {
+    return serialize(
+      calendarEventToQuads(event, subject).map(storedToQuad),
+      TURTLE,
+    );
+  }
+
+  /**
+   * Normalize multi-valued properties for comparison: RDF triples are an
+   * unordered set, so the quad store does not preserve the order of repeated
+   * `keywords`/`location` triples. Sort them before asserting equality.
+   */
+  function normalize(event: CalendarEvent): CalendarEvent {
+    return {
+      ...event,
+      ...(event.keywords ? { keywords: [...event.keywords].sort() } : {}),
+      ...(event.locations
+        ? {
+            locations: [...event.locations].sort((a, b) =>
+              a.name.localeCompare(b.name),
+            ),
+          }
+        : {}),
+    };
+  }
+
+  it("creates, reads, and deletes an event as an RDF resource via LDP", async () => {
+    const pod = freshPod();
+    const subject = `${pod.base}/event`;
+
+    const put = await pod.send("PUT", "/event", {
+      webid: OWNER,
+      body: await eventTurtle(SAMPLE, subject),
+      headers: { "content-type": TURTLE },
+    });
+    expect(put.status).toBe(201);
+
+    // Read it back through content negotiation and reconstruct the model.
+    const get = await pod.send("GET", "/event", {
+      webid: OWNER,
+      headers: { accept: TURTLE },
+    });
+    expect(get.status).toBe(200);
+    const stored = (await parseTurtle(await get.text())).map(quadToStored);
+    expect(normalize(quadsToCalendarEvent(stored, subject))).toEqual(
+      normalize(SAMPLE),
+    );
+
+    const del = await pod.send("DELETE", "/event", { webid: OWNER });
+    expect(del.status).toBe(204);
+    const gone = await pod.send("GET", "/event", { webid: OWNER });
+    expect(gone.status).toBe(404);
+  });
+
+  it("round-trips an event as JSON-LD too", async () => {
+    const pod = freshPod();
+    const subject = `${pod.base}/event`;
+    await pod.send("PUT", "/event", {
+      webid: OWNER,
+      body: await eventTurtle(SAMPLE, subject),
+      headers: { "content-type": TURTLE },
+    });
+
+    const get = await pod.send("GET", "/event", {
+      webid: OWNER,
+      headers: { accept: "application/ld+json" },
+    });
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toContain("application/ld+json");
+  });
+
+  it("lets WAC gate read access to an event resource", async () => {
+    const pod = freshPod();
+    const subject = `${pod.base}/event`;
+    await pod.send("PUT", "/event", {
+      webid: OWNER,
+      body: await eventTurtle(SAMPLE, subject),
+      headers: { "content-type": TURTLE },
+    });
+    // Grant Bob (only) Read on the event resource.
+    await pod.send("PUT", "/event.acl", {
+      webid: OWNER,
+      body: `@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+<#r> a acl:Authorization ; acl:accessTo <${subject}> ;
+  acl:agent <${BOB}> ; acl:mode acl:Read .`,
+      headers: { "content-type": TURTLE },
+    });
+
+    const bob = await pod.send("GET", "/event", { webid: BOB });
+    expect(bob.status).toBe(200);
+    const stored = (await parseTurtle(await bob.text())).map(quadToStored);
+    expect(normalize(quadsToCalendarEvent(stored, subject))).toEqual(
+      normalize(SAMPLE),
+    );
+
+    // Carol is named by no ACL: denied.
+    const carol = await pod.send("GET", "/event", { webid: CAROL });
+    expect(carol.status).toBe(403);
   });
 });

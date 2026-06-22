@@ -45,6 +45,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@dwk/calendar": "workspace:*",
     "@dwk/dpop": "workspace:*",
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",

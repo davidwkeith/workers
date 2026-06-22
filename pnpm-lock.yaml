@@ -218,6 +218,9 @@ importers:
 
   packages/solid-pod:
     dependencies:
+      '@dwk/calendar':
+        specifier: workspace:*
+        version: link:../calendar
       '@dwk/dpop':
         specifier: workspace:*
         version: link:../dpop
