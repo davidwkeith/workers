@@ -172,6 +172,44 @@ describe("@dwk/solid-pod quadsToCalendarEvent", () => {
     expect(event.title).toBe("Mine");
   });
 
+  it("reads https://schema.org/ predicates and status IRIs", () => {
+    const HTTPS = "https://schema.org/";
+    const event = quadsToCalendarEvent(
+      [
+        {
+          subject: { termType: "NamedNode", value: SUBJECT },
+          predicate: { termType: "NamedNode", value: `${HTTPS}identifier` },
+          object: {
+            termType: "Literal",
+            value: "urn:uuid:https",
+            datatype: "http://www.w3.org/2001/XMLSchema#string",
+          },
+          graph: { termType: "DefaultGraph", value: "" },
+        },
+        {
+          subject: { termType: "NamedNode", value: SUBJECT },
+          predicate: { termType: "NamedNode", value: `${HTTPS}startDate` },
+          object: {
+            termType: "Literal",
+            value: "2026-07-01T09:00:00Z",
+            datatype: "http://www.w3.org/2001/XMLSchema#dateTime",
+          },
+          graph: { termType: "DefaultGraph", value: "" },
+        },
+        {
+          subject: { termType: "NamedNode", value: SUBJECT },
+          predicate: { termType: "NamedNode", value: `${HTTPS}eventStatus` },
+          object: { termType: "NamedNode", value: `${HTTPS}EventScheduled` },
+          graph: { termType: "DefaultGraph", value: "" },
+        },
+      ],
+      SUBJECT,
+    );
+    expect(event.uid).toBe("urn:uuid:https");
+    expect(event.start).toBe("2026-07-01T09:00:00Z");
+    expect(event.status).toBe("confirmed");
+  });
+
   it("throws when no startDate is present", () => {
     expect(() =>
       quadsToCalendarEvent(

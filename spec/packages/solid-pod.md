@@ -43,7 +43,9 @@ Durable Object.
   (`schema:Event`, `startDate`/`endDate`/`location`/`keywords`/…) — JSON-LD-native
   and what Solid clients expect. The W3C iCal RDF vocabulary is the documented
   alternative; the adapter emits and reads schema.org only, keeping the stored
-  graph small and the round-trip unambiguous.
+  graph small and the round-trip unambiguous. On read it accepts both the
+  `http://schema.org/` and `https://schema.org/` schemes (folded onto the
+  canonical `http://`), since clients use either interchangeably.
 - `calendarEventToQuads(event, subjectIri)` / `quadsToCalendarEvent(quads,
   subjectIri)` speak the flat `StoredQuad` shape `@dwk/rdf` and the DO quad store
   use, so a client serializes with `@dwk/rdf` and PUTs Turtle/JSON-LD through the

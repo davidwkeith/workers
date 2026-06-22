@@ -92,6 +92,21 @@ function dateLiteral(value: string): StoredTerm {
   return literal(value, isDateOnly(value) ? XSD_DATE : XSD_DATE_TIME);
 }
 
+const SCHEMA_HTTPS = "https://schema.org/";
+
+/**
+ * Fold a schema.org IRI onto its canonical `http://schema.org/` form. schema.org
+ * serves `http://` and `https://` as equivalent and clients use both, so the read
+ * path normalizes incoming predicate and status IRIs to the `http://` keys this
+ * adapter matches and emits — an event authored with `https://schema.org/` is read
+ * without silent loss. Non-schema.org IRIs pass through unchanged.
+ */
+function canonicalSchema(iri: string): string {
+  return iri.startsWith(SCHEMA_HTTPS)
+    ? `${SCHEMA}${iri.slice(SCHEMA_HTTPS.length)}`
+    : iri;
+}
+
 /**
  * Render a {@link CalendarEvent} as schema.org RDF triples about `subjectIri`
  * (the LDP resource URL the event is stored at). The event is validated with the
@@ -167,6 +182,10 @@ export function calendarEventToQuads(
  * identity. `end` takes precedence over `duration` when a graph carries both, to
  * honor the model's mutual exclusion. The result is validated with
  * {@link assertSerializable}, so a graph with no usable `startDate` is rejected.
+ *
+ * Predicate and status IRIs are matched after folding `https://schema.org/` onto
+ * the canonical `http://schema.org/` (see {@link canonicalSchema}), so an event
+ * authored with either scheme reads without loss.
  */
 export function quadsToCalendarEvent(
   quads: readonly StoredQuad[],
@@ -177,7 +196,7 @@ export function quadsToCalendarEvent(
       .filter(
         (q) =>
           q.subject.value === subjectIri &&
-          q.predicate.value === predicate &&
+          canonicalSchema(q.predicate.value) === predicate &&
           q.object.termType === termType,
       )
       .map((q) => q.object.value);
@@ -206,7 +225,9 @@ export function quadsToCalendarEvent(
   const links = objectsFor(SCHEMA_URL, "NamedNode").map((href) => ({ href }));
   const statusIri = objectsFor(SCHEMA_EVENT_STATUS, "NamedNode")[0];
   const status =
-    statusIri !== undefined ? SCHEMA_TO_STATUS[statusIri] : undefined;
+    statusIri !== undefined
+      ? SCHEMA_TO_STATUS[canonicalSchema(statusIri)]
+      : undefined;
 
   const event: CalendarEvent = {
     uid,
