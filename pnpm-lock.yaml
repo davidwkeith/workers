@@ -44,6 +44,9 @@ importers:
 
   packages/activitypub:
     dependencies:
+      '@dwk/calendar':
+        specifier: workspace:*
+        version: link:../calendar
       '@dwk/ldn':
         specifier: workspace:*
         version: link:../ldn

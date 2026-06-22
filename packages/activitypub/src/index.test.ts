@@ -589,12 +589,16 @@ describe("publish endpoint", () => {
 // ---------------------------------------------------------------------------
 
 /** The forwarded-config header the front door would set, for direct DO calls. */
-function forwardedHeader(username: string): string {
+function forwardedHeader(
+  username: string,
+  overrides: Partial<ForwardedConfig> = {},
+): string {
   const iris = deriveIris(BASE, username);
   const config: ForwardedConfig = {
     iris,
     actorName: username,
     manuallyApprovesFollowers: false,
+    manuallyApprovesJoins: overrides.manuallyApprovesJoins ?? false,
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
@@ -731,6 +735,219 @@ describe("Accept-on-Follow delivery", () => {
       } finally {
         globalThis.fetch = original;
       }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Event RSVPs (#171): inbound Join/Leave update participation, the AP mirror of
+// an Indie RSVP. Driven inside the DO with a stubbed outbound `fetch`.
+// ---------------------------------------------------------------------------
+
+describe("Event RSVP (Join/Leave)", () => {
+  it("records an accepted participant and delivers a signed Accept for a Join to a local event", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const event = `${iris.id}/events/picnic`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const seen: { url: string; init?: RequestInit }[] = [];
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = typeof url === "string" ? url : url.toString();
+        seen.push({ url: href, init });
+        if (href === REMOTE) {
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: {
+                id: `${REMOTE}#main-key`,
+                owner: REMOTE,
+                publicKeyPem,
+              },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+
+      try {
+        const res = await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify({
+              id: "https://remote.example/activities/join-1",
+              type: "Join",
+              actor: REMOTE,
+              object: event,
+            }),
+          }),
+        );
+        expect(res.status).toBe(202);
+
+        const row = state.storage.sql
+          .exec<{
+            status: string;
+          }>(
+            "SELECT status FROM attendees WHERE event = ? AND actor = ?",
+            event,
+            REMOTE,
+          )
+          .toArray()[0];
+        expect(row?.status).toBe("accepted");
+
+        await instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
+
+        const delivery = seen.find((s) => s.url === `${REMOTE}/inbox`);
+        expect(delivery?.init?.method).toBe("POST");
+        const raw = delivery?.init?.body as ArrayBufferView;
+        const body = JSON.parse(new TextDecoder().decode(raw));
+        expect(body.type).toBe("Accept");
+        expect(body.object.type).toBe("Join");
+        expect(body.object.id).toBe("https://remote.example/activities/join-1");
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("holds a Join pending and delivers nothing when joins are manually approved", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const event = `${iris.id}/events/gala`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      // Manual approval must not trigger any outbound network (inbox lookup).
+      globalThis.fetch = (async () => {
+        throw new Error(
+          "no outbound fetch expected for a manually-approved Join",
+        );
+      }) as unknown as typeof fetch;
+
+      try {
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+                manuallyApprovesJoins: true,
+              }),
+            },
+            body: JSON.stringify({
+              id: "https://remote.example/activities/join-2",
+              type: "Join",
+              actor: REMOTE,
+              object: event,
+            }),
+          }),
+        );
+
+        const row = state.storage.sql
+          .exec<{
+            status: string;
+          }>(
+            "SELECT status FROM attendees WHERE event = ? AND actor = ?",
+            event,
+            REMOTE,
+          )
+          .toArray()[0];
+        expect(row?.status).toBe("pending");
+
+        const queued = state.storage.sql
+          .exec<{ n: number }>("SELECT COUNT(*) AS n FROM delivery")
+          .one().n;
+        expect(queued).toBe(0);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("removes the participant on a Leave", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const event = `${iris.id}/events/standup`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const send = (activity: Record<string, unknown>) =>
+        instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+                manuallyApprovesJoins: true,
+              }),
+            },
+            body: JSON.stringify(activity),
+          }),
+        );
+      const count = () =>
+        state.storage.sql
+          .exec<{ n: number }>("SELECT COUNT(*) AS n FROM attendees")
+          .one().n;
+
+      await send({
+        id: "https://remote.example/activities/join-3",
+        type: "Join",
+        actor: REMOTE,
+        object: event,
+      });
+      expect(count()).toBe(1);
+
+      await send({
+        id: "https://remote.example/activities/leave-3",
+        type: "Leave",
+        actor: REMOTE,
+        object: event,
+      });
+      expect(count()).toBe(0);
+    });
+  });
+
+  it("ignores a Join targeting an event we do not own", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      await instance.fetch(
+        new Request(iris.inbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+              manuallyApprovesJoins: true,
+            }),
+          },
+          body: JSON.stringify({
+            id: "https://remote.example/activities/join-4",
+            type: "Join",
+            actor: REMOTE,
+            object: "https://other.example/events/not-ours",
+          }),
+        }),
+      );
+
+      const count = state.storage.sql
+        .exec<{ n: number }>("SELECT COUNT(*) AS n FROM attendees")
+        .one().n;
+      expect(count).toBe(0);
     });
   });
 });

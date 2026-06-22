@@ -83,6 +83,7 @@ function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     iris: config.iris,
     actorName: config.actor.name ?? config.actor.username,
     manuallyApprovesFollowers: config.actor.manuallyApprovesFollowers ?? false,
+    manuallyApprovesJoins: config.manuallyApprovesJoins,
     pageSize: config.pageSize,
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,

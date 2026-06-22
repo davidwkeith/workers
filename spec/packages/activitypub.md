@@ -62,6 +62,35 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request.
 
+### Events & RSVPs (calendar/events epic #167 / #171)
+
+The Fediverse layer of the calendar/events epic — the ActivityPub mirror of an
+Indie RSVP, kept semantically aligned with the `@dwk/webmention`/`@dwk/micropub`
+RSVP so an `h-event`, a `VEVENT`, and an AS2 `Event` are three serializations of
+one record.
+
+- **Emit `Event` objects.** `calendarEventToActivityStreams` (the
+  `CalendarEvent → AS2 Event` adapter) serializes the canonical
+  [`@dwk/calendar`](calendar.md) event to an ActivityStreams 2.0 `Event` (`name`,
+  `content`, `startTime`/`endTime`, `location` as `Place`, `url`, `tag`), which
+  the owner publishes through the existing `POST <actor>/outbox` seam — wrapped in
+  a `Create` and fanned out like any other object. The adapter lives **here** in
+  the endpoint, not in the cross-standard `@dwk/calendar` lib (the hard
+  cross-standard-lib rule); the lib carries no Fediverse imports.
+- **Inbound `Join` / `Leave`.** A `Join` targeting an event this actor owns
+  records the participant; a `Leave` withdraws the RSVP. Participation is
+  authoritative DO state (the `attendees` table), **never KV**. Only RSVPs to an
+  event we own (a local resource) are recorded, so the actor cannot be used to
+  amplify arbitrary RSVPs, and — because the front door enforces `actor ===
+  signer` — a participant can only act on their own RSVP.
+- **Optional `Accept`/`Reject` of joins.** Unless the owner sets
+  `manuallyApprovesJoins`, a `Join` is auto-`Accept`ed (recorded `accepted`, a
+  signed `Accept` delivered to the participant's inbox), mirroring the
+  auto-`Accept`-on-`Follow` path. With `manuallyApprovesJoins`, the participant
+  is recorded `pending` and no `Accept` is sent; emitting the eventual
+  `Accept`/`Reject` is a C2S concern (out of scope for v1, as with manual
+  follower approval).
+
 ### NodeInfo
 
 - The `/.well-known/nodeinfo` discovery document advertises both the
@@ -87,6 +116,8 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 - `baseUrl` / domain (the actor identity root).
 - Signing key material (secret binding) shared with the actor's published key.
 - Delivery retry / backoff policy.
+- `manuallyApprovesJoins` — hold inbound event RSVPs (`Join`) `pending` instead
+  of auto-`Accept`ing them. Defaults to `false`.
 
 ## Conformance
 

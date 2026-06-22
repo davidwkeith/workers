@@ -54,6 +54,7 @@ src/config.ts         # ActivityPubConfig type, Env fragment, IRI derivation
 src/handler.ts        # createActivityPub factory (actor/inbox/outbox/collection routes)
 src/object.ts         # ActivityPubObject Durable Object (inbox/outbox/followers/following)
 src/actor.ts          # actor document builder, collection/page builders, AS2 helpers
+src/events.ts         # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP helpers (#171)
 src/nodeinfo.ts       # NodeInfo 2.0/2.1 discovery and documents
 src/signatures.ts     # HTTP signature signing/verification wrappers
 src/delivery.ts       # outbound activity delivery with retry
@@ -63,6 +64,7 @@ src/*.test.ts         # colocated tests
 
 ## Dependencies
 
+- `@dwk/calendar` — canonical event model (the AS2 `Event` adapter reads it).
 - `@dwk/ldn` — inbox discovery and notification primitives.
 - `@dwk/log` — structured logging.
 

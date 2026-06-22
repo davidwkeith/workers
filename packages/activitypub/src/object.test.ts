@@ -74,6 +74,7 @@ function cfgHeader(
     iris,
     actorName: username,
     manuallyApprovesFollowers: false,
+    manuallyApprovesJoins: false,
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,

@@ -88,6 +88,17 @@ export interface ActivityPubConfig {
    */
   readonly sharedInbox?: boolean;
 
+  /**
+   * Whether inbound event RSVPs require manual approval. When `false` (the
+   * default) a `Join` targeting an event this actor owns is auto-`Accept`ed —
+   * the participant is recorded `accepted` and a signed `Accept` is delivered to
+   * their inbox, mirroring the auto-`Accept` of a `Follow`. When `true` the
+   * participant is recorded `pending` and no `Accept` is sent; emitting the
+   * eventual `Accept`/`Reject` is a C2S concern (out of scope for v1, like
+   * manual follower approval).
+   */
+  readonly manuallyApprovesJoins?: boolean;
+
   /** Members served per `OrderedCollection` page. Defaults to 50. */
   readonly pageSize?: number;
 
@@ -138,6 +149,8 @@ export interface ResolvedConfig {
   readonly webfinger: string;
   /** Instance-level shared inbox IRI, or `undefined` when not served. */
   readonly sharedInbox?: string;
+  /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
+  readonly manuallyApprovesJoins: boolean;
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -175,6 +188,8 @@ export interface ForwardedConfig {
   /** Shared inbox IRI the DO should also accept inbound `POST`s on, if served. */
   readonly sharedInbox?: string;
   readonly manuallyApprovesFollowers: boolean;
+  /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
+  readonly manuallyApprovesJoins: boolean;
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
   readonly deliveryBaseDelayMs: number;
@@ -291,6 +306,7 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     iris: deriveIris(baseUrl, config.actor.username),
     webfinger,
     sharedInbox,
+    manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
     publishToken: config.publishToken,
