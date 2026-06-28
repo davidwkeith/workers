@@ -12,6 +12,7 @@
  */
 
 import type { CborValue } from "./cbor.js";
+import type { SigningCurve } from "./crypto.js";
 
 /** Derive the `did:web` identifier for a hostname (optionally a port). */
 export function didWebFromHost(host: string): string {
@@ -25,16 +26,25 @@ export interface DidDocumentInput {
   readonly handle: string;
   readonly pdsEndpoint: string;
   readonly publicKeyMultibase: string;
+  /** The signing curve, so the `@context` advertises the right key suite. */
+  readonly curve: SigningCurve;
 }
 
 /** Build the `did:web` document advertising the handle, signing key, and PDS. */
 export function buildDidDocument(input: DidDocumentInput): CborValue {
+  // The verification method is a `Multikey` — self-describing via its multicodec
+  // prefix — so `multikey/v1` covers either curve. Advertise the legacy
+  // secp256k1-2019 suite context only for a secp256k1 key; a P-256 account (the
+  // default) must not claim it, as the prior unconditional context did.
+  const context = [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/multikey/v1",
+  ];
+  if (input.curve === "secp256k1") {
+    context.push("https://w3id.org/security/suites/secp256k1-2019/v1");
+  }
   return {
-    "@context": [
-      "https://www.w3.org/ns/did/v1",
-      "https://w3id.org/security/multikey/v1",
-      "https://w3id.org/security/suites/secp256k1-2019/v1",
-    ],
+    "@context": context,
     id: input.did,
     alsoKnownAs: [`at://${input.handle}`],
     verificationMethod: [

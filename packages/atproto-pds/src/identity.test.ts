@@ -19,6 +19,7 @@ describe("identity", () => {
       handle: "alice.example.com",
       pdsEndpoint: "https://alice.example.com",
       publicKeyMultibase: "zDnTEST",
+      curve: "p256",
     }) as Record<string, unknown>;
     expect(doc.id).toBe("did:web:alice.example.com");
     expect(doc.alsoKnownAs).toEqual(["at://alice.example.com"]);
@@ -28,6 +29,28 @@ describe("identity", () => {
     const service = (doc.service as Record<string, unknown>[])[0]!;
     expect(service.type).toBe("AtprotoPersonalDataServer");
     expect(service.serviceEndpoint).toBe("https://alice.example.com");
+  });
+
+  it("advertises the secp256k1 suite context only for a secp256k1 key", () => {
+    const base = {
+      did: "did:web:alice.example.com",
+      handle: "alice.example.com",
+      pdsEndpoint: "https://alice.example.com",
+      publicKeyMultibase: "zDnTEST",
+    };
+    const secpSuite = "https://w3id.org/security/suites/secp256k1-2019/v1";
+    const p256 = buildDidDocument({ ...base, curve: "p256" }) as Record<
+      string,
+      unknown
+    >;
+    const secp = buildDidDocument({ ...base, curve: "secp256k1" }) as Record<
+      string,
+      unknown
+    >;
+    // Both carry the Multikey context; only secp256k1 carries the legacy suite.
+    expect(p256["@context"]).toContain("https://w3id.org/security/multikey/v1");
+    expect(p256["@context"]).not.toContain(secpSuite);
+    expect(secp["@context"]).toContain(secpSuite);
   });
 
   it("validates handles as domain names", () => {

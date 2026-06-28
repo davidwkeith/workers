@@ -242,6 +242,34 @@ describe("AT Protocol PDS", () => {
     ).toBe(1);
   });
 
+  it("lists records in reverse rkey order when reverse=true", async () => {
+    const host = "reverse.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    for (const rkey of ["aaa", "bbb", "ccc"]) {
+      await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+        body: {
+          collection: "app.bsky.feed.post",
+          rkey,
+          record: { $type: "app.bsky.feed.post", text: rkey },
+        },
+        token,
+      });
+    }
+    const rkeys = async (query: string): Promise<(string | undefined)[]> => {
+      const res = await call(
+        handler,
+        host,
+        `/xrpc/com.atproto.repo.listRecords?collection=app.bsky.feed.post${query}`,
+        { token },
+      );
+      const body = (await res.json()) as { records: { uri: string }[] };
+      return body.records.map((r) => r.uri.split("/").pop());
+    };
+    expect(await rkeys("")).toEqual(["aaa", "bbb", "ccc"]);
+    expect(await rkeys("&reverse=true")).toEqual(["ccc", "bbb", "aaa"]);
+  });
+
   it("uploads and serves a blob addressed by its raw CID", async () => {
     const host = "blobs.example";
     const handler = pds(host);

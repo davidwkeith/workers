@@ -613,6 +613,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       handle: cfg.handle,
       pdsEndpoint: cfg.baseUrl,
       publicKeyMultibase: multibase,
+      curve: this.#signingCurve(),
     });
     return jsonResponse(doc as JsonValue);
   }
@@ -642,6 +643,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
           this.#publicKeyRaw(),
           this.#signingCurve(),
         ),
+        curve: this.#signingCurve(),
       }) as JsonValue,
       collections,
       handleIsCorrect: true,
@@ -817,11 +819,18 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       100,
     );
     const cursor = url.searchParams.get("cursor");
+    // `reverse=true` lists in descending rkey order; the cursor then pages
+    // *down* (rkey < cursor) instead of up. The comparator/order tokens come
+    // from a fixed two-value set, never from user input, so interpolating them
+    // into the SQL is safe.
+    const reverse = url.searchParams.get("reverse") === "true";
+    const comparator = reverse ? "<" : ">";
+    const order = reverse ? "DESC" : "ASC";
     const rows = this.#sql
       .exec(
         `SELECT rkey, cid, value FROM records
-           WHERE collection = ? AND (? IS NULL OR rkey > ?)
-           ORDER BY rkey LIMIT ?`,
+           WHERE collection = ? AND (? IS NULL OR rkey ${comparator} ?)
+           ORDER BY rkey ${order} LIMIT ?`,
         collection,
         cursor,
         cursor,
