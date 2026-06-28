@@ -18,6 +18,14 @@ nice-to-have.
   clients is the acceptance bar; the spec-derived requirements in
   [packages/solid-pod.md](packages/solid-pod.md) exist to reach it.
 
+## WebDAV conformance
+
+- [litmus](http://www.webdav.org/neon/litmus/) — the WebDAV (RFC 4918) test
+  suite (`basic`, `copymove`, `props`, `locks`) — plus real Finder / Windows
+  Explorer / davfs2 read-write mounts, against a deployed `@dwk/webdav` door
+  (`createSolidPodWebdav`). litmus is a CLI, so the conformance dispatcher runs
+  it directly (`run-suite.mjs webdav --target … `) given an app-password.
+
 ## Local testing
 
 - [`wrangler dev`](https://developers.cloudflare.com/workers/wrangler/) +

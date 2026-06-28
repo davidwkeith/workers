@@ -18,7 +18,7 @@ on:
         description: "Which hosted suite to run"
         required: true
         type: choice
-        options: [micropub, webmention, solid]
+        options: [micropub, webmention, solid, webdav]
       target_url:
         description: "Base URL of a deployed target to test"
         required: false
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        standard: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.standard)) || fromJSON('["micropub","webmention","solid"]') }}
+        standard: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.standard)) || fromJSON('["micropub","webmention","solid","webdav"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -87,7 +87,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # litmus is a real CLI the WebDAV dispatcher shells out to; the other
+      # suites are hosted web services that need no local tooling.
+      - name: Install litmus (WebDAV)
+        if: matrix.standard == 'webdav'
+        run: sudo apt-get update && sudo apt-get install -y litmus
       - name: Run hosted conformance suite
+        env:
+          # Basic credentials for the WebDAV mount (an app password minted via
+          # the owner-gated endpoint); unset for the other suites.
+          WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
+          WEBDAV_PASSWORD: ${{ secrets.WEBDAV_PASSWORD }}
         run: |
           node scripts/conformance/run-suite.mjs "${{ matrix.standard }}" \
             ${{ inputs.target_url && format('--target {0}', inputs.target_url) || '' }} \
