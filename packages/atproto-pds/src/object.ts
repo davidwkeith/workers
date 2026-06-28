@@ -26,6 +26,12 @@ import { writeCar, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 import {
+  encodeCommitFrame,
+  encodeErrorFrame,
+  encodeInfoFrame,
+  type FirehoseRepoOp,
+} from "./firehose.js";
+import {
   INTERNAL_CONFIG_HEADER,
   type AtprotoPdsEnv,
   type ForwardedConfig,
@@ -74,6 +80,12 @@ import {
 const ACCESS_SCOPE = "com.atproto.access";
 const REFRESH_SCOPE = "com.atproto.refresh";
 const CAR_CONTENT_TYPE = "application/vnd.ipld.car";
+
+// Firehose backfill retention: the most recent N `#commit` frames are buffered
+// in DO SQLite so a reconnecting consumer can replay from a `?cursor=` before
+// going live. Older frames are trimmed; a cursor older than the window receives
+// an `OutdatedCursor` info frame, then whatever remains in the buffer.
+const FIREHOSE_RETENTION = 1024;
 
 // PLC genesis submission retry schedule (alarm-driven exponential backoff).
 const PLC_SUBMIT_MAX_ATTEMPTS = 10;
@@ -145,6 +157,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
          collection TEXT NOT NULL, rkey TEXT NOT NULL, blob_cid TEXT NOT NULL,
          PRIMARY KEY (collection, rkey, blob_cid))`,
     );
+    // Bounded ring of recent firehose frames (base64 DAG-CBOR), keyed by their
+    // monotonic `seq`, for `?cursor=` backfill on (re)connect.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS firehose (
+         seq INTEGER PRIMARY KEY, frame TEXT NOT NULL)`,
+    );
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -169,7 +187,13 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       }
       const xrpc = url.pathname.match(/^\/xrpc\/([^/]+)$/);
       if (!xrpc) return jsonResponse({ error: "NotFound" }, 404);
-      return await this.#dispatch(xrpc[1] as string, request, url);
+      const nsid = xrpc[1] as string;
+      // The firehose is a WebSocket subscription, not a request/response XRPC
+      // call, so it is handled before the JSON dispatch table.
+      if (nsid === "com.atproto.sync.subscribeRepos") {
+        return this.#subscribeRepos(request, url);
+      }
+      return await this.#dispatch(nsid, request, url);
     } catch (error) {
       return errorResponse(error);
     }
@@ -669,7 +693,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (this.#recordExists(collection, rkey)) {
       throw namedError(400, "InvalidRequest", "Record already exists");
     }
-    const { cid, rev } = await this.#writeRecord(collection, rkey, body.record);
+    const { cid, rev } = await this.#writeRecord(
+      collection,
+      rkey,
+      body.record,
+      "create",
+    );
     return jsonResponse({
       uri: atUri(this.#accountDid(), collection, rkey),
       cid: cid.toString(),
@@ -694,7 +723,15 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (body.record == null || typeof body.record !== "object") {
       throw invalidRequest("`record` is required");
     }
-    const { cid, rev } = await this.#writeRecord(collection, rkey, body.record);
+    // putRecord upserts: the firehose op is a create or update depending on
+    // whether the record already existed.
+    const action = this.#recordExists(collection, rkey) ? "update" : "create";
+    const { cid, rev } = await this.#writeRecord(
+      collection,
+      rkey,
+      body.record,
+      action,
+    );
     return jsonResponse({
       uri: atUri(this.#accountDid(), collection, rkey),
       cid: cid.toString(),
@@ -722,17 +759,20 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         collection,
         rkey,
       );
-      const rev = await this.#commit();
+      const rev = await this.#commit([
+        { action: "delete", path: recordPath(collection, rkey), cid: null },
+      ]);
       return jsonResponse({ commit: { cid: this.#kvGet("head_cid"), rev } });
     }
     return jsonResponse({});
   }
 
-  /** Encode + store a record, then produce a new signed commit. */
+  /** Encode + store a record, then produce a new signed commit + firehose event. */
   async #writeRecord(
     collection: string,
     rkey: string,
     record: JsonValue,
+    action: "create" | "update",
   ): Promise<{ cid: CID; rev: string }> {
     const cborValue = jsonToCbor(record);
     const bytes = encodeCbor(cborValue);
@@ -749,7 +789,9 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       Date.now(),
     );
     this.#indexRecordBlobs(collection, rkey, extractBlobCids(cborValue));
-    const rev = await this.#commit();
+    const rev = await this.#commit([
+      { action, path: recordPath(collection, rkey), cid },
+    ]);
     return { cid, rev };
   }
 
@@ -1034,7 +1076,14 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       this.#kvSet("head_cid", imported.head.toString());
       this.#kvSet("head_rev", imported.rev);
     });
-    const rev = await this.#commit();
+    // Announce the migrated repository on the firehose so Relays pick it up: one
+    // `#commit` whose ops are the imported records (each a create).
+    const ops: FirehoseRepoOp[] = imported.records.map((record) => ({
+      action: "create",
+      path: recordPath(record.collection, record.rkey),
+      cid: record.cid,
+    }));
+    const rev = await this.#commit(ops);
     return jsonResponse({
       did,
       head: this.#kvGet("head_cid"),
@@ -1063,13 +1112,21 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     return { entries, blocks };
   }
 
-  /** Build the MST, sign a new commit chaining to the prior head, and store it. */
-  async #commit(): Promise<string> {
-    const { entries } = this.#entries();
-    const { root } = await buildMst(entries);
+  /**
+   * Build the MST, sign a new commit chaining to the prior head, and store it.
+   * When `ops` is given (a record write/delete or a migration import), a
+   * `#commit` event is appended to the firehose and broadcast to subscribers;
+   * the empty genesis commit passes none, so it does not appear on the stream.
+   */
+  async #commit(ops?: readonly FirehoseRepoOp[]): Promise<string> {
+    const { entries, blocks: recordBlocks } = this.#entries();
+    const { root, blocks: nodeBlocks } = await buildMst(entries);
     const rev = this.#tid.next();
     const prevCid = this.#kvGet("head_cid");
     const prev = prevCid ? CID.parse(prevCid) : null;
+    // The previous head's revision is this event's `since` — captured before the
+    // new head overwrites it.
+    const since = this.#kvGet("head_rev");
     const sign = await this.#signer();
     const { cid, bytes } = await formatCommit(
       { did: this.#accountDid(), version: 3, data: root, rev, prev },
@@ -1078,8 +1135,148 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     this.#kvSet("head_cid", cid.toString());
     this.#kvSet("head_rev", rev);
     this.#kvSet("head_bytes", base64(bytes));
+    if (ops && ops.length > 0) {
+      this.#emitCommit({
+        commitCid: cid,
+        commitBytes: bytes,
+        rev,
+        since,
+        ops,
+        nodeBlocks,
+        recordBlocks,
+      });
+    }
     return rev;
   }
+
+  // --- firehose (com.atproto.sync.subscribeRepos) ---------------------------
+
+  /** The next monotonic, persisted firehose sequence number. */
+  #nextSeq(): number {
+    const next = Number(this.#kvGet("firehose_seq") ?? "0") + 1;
+    this.#kvSet("firehose_seq", String(next));
+    return next;
+  }
+
+  /**
+   * Append a `#commit` event to the firehose: assemble the diff CAR (the signed
+   * commit block, the rebuilt MST node blocks, and the blocks of the records
+   * this commit created/updated), frame it, persist it for backfill, trim the
+   * retention window, and broadcast it to every connected subscriber. Following
+   * the package's "rebuild the whole MST each commit" stance, all node blocks are
+   * included rather than computing a minimal proof set; the CAR still lets a
+   * consumer apply the commit without a full `getRepo`.
+   */
+  #emitCommit(args: {
+    commitCid: CID;
+    commitBytes: Uint8Array;
+    rev: string;
+    since: string | null;
+    ops: readonly FirehoseRepoOp[];
+    nodeBlocks: Map<string, Uint8Array>;
+    recordBlocks: readonly CarBlock[];
+  }): void {
+    const seq = this.#nextSeq();
+    const recordByCid = new Map(
+      args.recordBlocks.map((block) => [block.cid.toString(), block.bytes]),
+    );
+    const carBlocks: CarBlock[] = [
+      { cid: args.commitCid, bytes: args.commitBytes },
+    ];
+    for (const [cidStr, bytes] of args.nodeBlocks) {
+      carBlocks.push({ cid: CID.parse(cidStr), bytes });
+    }
+    for (const op of args.ops) {
+      if (!op.cid) continue;
+      const bytes = recordByCid.get(op.cid.toString());
+      if (bytes) carBlocks.push({ cid: op.cid, bytes });
+    }
+    const frame = encodeCommitFrame({
+      seq,
+      repo: this.#accountDid(),
+      commit: args.commitCid,
+      rev: args.rev,
+      since: args.since,
+      blocks: writeCar([args.commitCid], carBlocks),
+      ops: args.ops,
+      time: new Date().toISOString(),
+    });
+    this.#sql.exec(
+      "INSERT INTO firehose (seq, frame) VALUES (?, ?)",
+      seq,
+      base64(frame),
+    );
+    this.#sql.exec(
+      "DELETE FROM firehose WHERE seq <= ?",
+      seq - FIREHOSE_RETENTION,
+    );
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(frame);
+      } catch {
+        // A socket gone mid-broadcast is harmless: the consumer reconnects with
+        // `?cursor=` and replays the gap from the buffer.
+      }
+    }
+  }
+
+  /**
+   * Open a firehose subscription (`com.atproto.sync.subscribeRepos`). The socket
+   * is accepted for **hibernation** so it survives the DO evicting from memory;
+   * an optional `?cursor=` replays buffered events before the live stream. The
+   * replay is synchronous, so no concurrent commit can interleave between it and
+   * going live.
+   */
+  #subscribeRepos(request: Request, url: URL): Response {
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      throw invalidRequest("subscribeRepos requires a WebSocket upgrade");
+    }
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.ctx.acceptWebSocket(server);
+    const cursor = url.searchParams.get("cursor");
+    if (cursor !== null) this.#backfill(server, cursor);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Replay buffered frames after `cursor`, signalling future/outdated cursors. */
+  #backfill(ws: WebSocket, cursorParam: string): void {
+    const cursor = Number.parseInt(cursorParam, 10);
+    if (!Number.isFinite(cursor)) {
+      ws.send(encodeErrorFrame("InvalidRequest", "cursor must be an integer"));
+      return;
+    }
+    const head = Number(this.#kvGet("firehose_seq") ?? "0");
+    if (cursor > head) {
+      ws.send(
+        encodeErrorFrame("FutureCursor", "cursor is ahead of the stream"),
+      );
+      return;
+    }
+    const oldest = (
+      this.#sql.exec("SELECT MIN(seq) AS seq FROM firehose").toArray()[0] as {
+        seq: number | null;
+      }
+    ).seq;
+    if (oldest !== null && cursor < oldest - 1) {
+      ws.send(
+        encodeInfoFrame(
+          "OutdatedCursor",
+          "requested cursor predates the backfill window",
+        ),
+      );
+    }
+    const rows = this.#sql
+      .exec("SELECT frame FROM firehose WHERE seq > ? ORDER BY seq", cursor)
+      .toArray();
+    for (const row of rows) ws.send(unbase64(row.frame as string));
+  }
+
+  override async webSocketMessage(): Promise<void> {
+    // The repo firehose is server-to-client only; inbound frames are ignored.
+  }
+  // No `webSocketClose` override: the runtime closes the hibernatable socket
+  // itself, and calling `ws.close()` on a reserved code throws.
 
   async #getRepo(): Promise<Response> {
     const headCid = this.#kvGet("head_cid");

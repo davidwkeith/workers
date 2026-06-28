@@ -114,6 +114,8 @@ export {
   encodeFrameHeader,
   encodeCommitBody,
   encodeCommitFrame,
+  encodeInfoFrame,
+  encodeErrorFrame,
   type FirehoseCommit,
   type FirehoseRepoOp,
 } from "./firehose.js";

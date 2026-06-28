@@ -92,7 +92,8 @@ src/plc.ts          # did:plc operation core (build/sign/derive-DID/CID/verify)
 src/plc-directory.ts # PLC directory client (submit/resolve, injectable fetch)
 src/migrate.ts      # inbound migration: CAR import core (verify + recover records)
 src/resolve.ts      # DID-document resolution → source signing key (did:web/did:plc)
-src/firehose.ts     # subscribeRepos frame encoder (#commit header + body)
+src/firehose.ts     # subscribeRepos frame encoders (#commit/#info/error)
+                    # (the DO endpoint, seq cursor + backfill live in object.ts)
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
 src/record.ts       # JSON ⇄ DAG-CBOR ($link/$bytes), at:// URIs

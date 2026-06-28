@@ -75,12 +75,14 @@ secp256k1 signing curve):
   neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
 - **Scope is a single-account PDS.** One account per `baseUrl`; sessions
   authenticate the one owner via a configured password → HS256 access/refresh
-  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) is in
-  progress (#184): the pure **frame encoder** (`firehose.ts` — the DAG-CBOR
-  header + `#commit` body framing) has landed; the Durable Object WebSocket
-  endpoint (hibernatable accept, the persisted `seq` cursor, per-commit broadcast,
-  and `?cursor=` backfill) is the next increment. `did:plc` (#182) and account
-  migration (#183) are complete.
+  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) is complete
+  (#184): the pure **frame encoder** (`firehose.ts` — the DAG-CBOR header +
+  `#commit`/`#info`/error body framing) plus the Durable Object WebSocket endpoint
+  — a hibernatable `acceptWebSocket`, a monotonic **persisted `seq`** cursor, a
+  per-commit broadcast on every write/delete/import, and a bounded `?cursor=`
+  backfill ring (an `OutdatedCursor` info frame past the window, a `FutureCursor`
+  error past the head). `did:plc` (#182) and account migration (#183) are
+  complete.
 
 ## Why it does not fit the way the others do
 
@@ -168,10 +170,10 @@ is **reach vs. fit**:
   endpoint, our rotation key for a minted account), and `buildRotationOperation`
   constructs the chained PLC op — the migrating client signs it with the rotation
   key it controls (we never hold a migrated account's rotation key) and submits
-  it. That completes the migration surface; the **firehose** (#184) is the last
-  parity gap. Until migration is complete, a user
-  who wants to **migrate an existing Bluesky account today** is better served by
-  Cirrus.
+  it. That completes the migration surface. The **firehose** (#184) is wired too:
+  `com.atproto.sync.subscribeRepos` streams a `#commit` event per write over a
+  hibernatable WebSocket, with a persisted `seq` cursor and bounded `?cursor=`
+  backfill — so the four Cirrus-parity gaps (#181–#184) are now all closed.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be
