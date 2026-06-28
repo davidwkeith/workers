@@ -771,23 +771,28 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     }
 
     // Replace the record set with the imported records, stored verbatim so their
-    // CIDs are preserved, then re-sign a fresh head over them.
-    this.#sql.exec("DELETE FROM records");
+    // CIDs are preserved, then re-sign a fresh head over them. The clear + inserts
+    // run in one transaction so the record set is never left half-replaced (and to
+    // avoid a per-statement fsync).
     const now = Date.now();
-    for (const record of imported.records) {
-      this.#sql.exec(
-        `INSERT INTO records (collection, rkey, cid, value, indexed_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        record.collection,
-        record.rkey,
-        record.cid.toString(),
-        base64(record.bytes),
-        now,
-      );
-    }
-    // Chain the next commit's `prev` to the imported head.
-    this.#kvSet("head_cid", imported.head.toString());
-    this.#kvSet("head_rev", imported.rev);
+    this.ctx.storage.transactionSync(() => {
+      this.#sql.exec("DELETE FROM records");
+      for (const record of imported.records) {
+        this.#sql.exec(
+          `INSERT INTO records (collection, rkey, cid, value, indexed_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          record.collection,
+          record.rkey,
+          record.cid.toString(),
+          base64(record.bytes),
+          now,
+        );
+      }
+      // Chain the next commit's `prev` to the imported head — atomic with the
+      // record replacement.
+      this.#kvSet("head_cid", imported.head.toString());
+      this.#kvSet("head_rev", imported.rev);
+    });
     const rev = await this.#commit();
     return jsonResponse({
       did,

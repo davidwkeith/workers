@@ -37,13 +37,17 @@ export async function resolveDidDocument(
 ): Promise<DidDocument> {
   const fetchImpl = options.fetchImpl ?? (fetch as FetchLike);
   if (did.startsWith("did:web:")) {
-    // did:web:host[%3Aport] → https://host[:port]/.well-known/did.json. Only the
-    // host form is supported (the form this PDS issues); path-based did:web is not.
-    const host = did
-      .slice("did:web:".length)
-      .split(":")[0]!
-      .replace(/%3A/gi, ":");
-    const res = await fetchImpl(`https://${host}/.well-known/did.json`);
+    // did:web per spec: colon-separated id, first segment is host[%3Aport], any
+    // further segments are a percent-decoded path. Host form →
+    // /.well-known/did.json; path form → /<path>/did.json. A source PDS may use
+    // either, so inbound migration must resolve both.
+    const segments = did.slice("did:web:".length).split(":");
+    const host = segments[0]!.replace(/%3A/gi, ":");
+    const path = segments.slice(1).map(decodeURIComponent).join("/");
+    const url = path
+      ? `https://${host}/${path}/did.json`
+      : `https://${host}/.well-known/did.json`;
+    const res = await fetchImpl(url);
     if (!res.ok) {
       throw new Error(
         `resolve: did:web document fetch failed for ${did} (${res.status})`,

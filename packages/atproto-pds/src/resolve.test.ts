@@ -38,6 +38,23 @@ describe("resolveSigningKey", () => {
     expect(key.publicKeyRaw).toEqual(kp.publicKeyRaw);
   });
 
+  it("resolves a path-based did:web from /<path>/did.json", async () => {
+    const kp = await createRepoKeypair("p256");
+    const did = "did:web:example.com:users:alice";
+    const multibase = publicKeyMultibase(kp.publicKeyRaw, "p256");
+    const calls: string[] = [];
+    const fetchImpl: FetchLike = async (url) => {
+      calls.push(url);
+      return new Response(JSON.stringify(didDoc(did, multibase)), {
+        status: 200,
+      });
+    };
+
+    const key = await resolveSigningKey(did, { fetchImpl });
+    expect(calls[0]).toBe("https://example.com/users/alice/did.json");
+    expect(key.publicKeyRaw).toEqual(kp.publicKeyRaw);
+  });
+
   it("resolves a did:plc key from the directory", async () => {
     const kp = await createRepoKeypair("secp256k1");
     const did = "did:plc:abc234abc234abc234abc234";
