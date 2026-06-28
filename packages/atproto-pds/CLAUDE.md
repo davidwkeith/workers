@@ -51,9 +51,10 @@ expression of "there are no instances in atproto".
   source of truth for it: the front door routes the DO by a stable host key (the
   did:plc isn't known until genesis), forwards `atproto-did` to the DO, and 404s
   `did.json` (a PLC doc lives in the directory). The account DID flows through
-  `#accountDid()`, not `cfg.did`. The PLC **directory client**
-  (submission/resolution) is the remaining piece — keep it injectable; the
-  external directory is never the default path.
+  `#accountDid()`, not `cfg.did`. The PLC **directory client** (`plc-directory.ts`,
+  injectable `fetch`) submits the genesis op and resolves DIDs; the DO submits
+  best-effort at genesis only when `plcDirectoryUrl` is configured (default unset —
+  the external directory is never the default path).
 
 ## Test environment
 
@@ -85,6 +86,7 @@ src/car.ts          # CARv1 read/write
 src/repo.ts         # commit format/sign/verify
 src/crypto.ts       # P-256 + secp256k1 keygen/sign/verify, did:key, low-S
 src/plc.ts          # did:plc operation core (build/sign/derive-DID/CID/verify)
+src/plc-directory.ts # PLC directory client (submit/resolve, injectable fetch)
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
 src/record.ts       # JSON ⇄ DAG-CBOR ($link/$bytes), at:// URIs

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { base58btcDecode } from "./bytes.js";
 import { readCar } from "./car.js";
@@ -464,6 +464,46 @@ describe("AT Protocol PDS", () => {
     const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
     expect(commit.did).toBe(did);
   });
+
+  it("submits the genesis op to the PLC directory when one is configured", async () => {
+    const seen: { url: string; method?: string; body?: string }[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("plc.test")) {
+        seen.push({ url, method: init?.method, body: init?.body as string });
+        return new Response(null, { status: 200 });
+      }
+      return realFetch(input as RequestInfo, init);
+    });
+
+    const host = "plc-submit.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc",
+      plcDirectoryUrl: "https://plc.test",
+    });
+    // First request triggers genesis (and thus submission).
+    const did = await (
+      await call(handler, host, "/.well-known/atproto-did")
+    ).text();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe(`https://plc.test/${did}`);
+    expect(seen[0]!.method).toBe("POST");
+    const op = JSON.parse(seen[0]!.body as string) as {
+      type: string;
+      alsoKnownAs: string[];
+    };
+    expect(op.type).toBe("plc_operation");
+    expect(op.alsoKnownAs).toContain(`at://${host}`);
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /** Decode a `zDn…` p256 Multikey back to the raw uncompressed public key. */

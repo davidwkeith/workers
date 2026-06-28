@@ -40,9 +40,11 @@ import {
   type Signer,
 } from "./crypto.js";
 import { buildDidDocument } from "./identity.js";
+import { submitPlcOperation } from "./plc-directory.js";
 import {
   didPlcFromGenesis,
   signPlcOperation,
+  type SignedPlcOperation,
   type UnsignedPlcOperation,
 } from "./plc.js";
 import { buildMst, type MstEntry } from "./mst.js";
@@ -188,6 +190,33 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // from migration, is taken as-is).
     this.#kvSet("account_did", await this.#resolveAccountDid(keypair));
     await this.#commit();
+    await this.#maybeSubmitPlcGenesis();
+  }
+
+  /**
+   * Register a freshly minted `did:plc` with the directory, once, best-effort.
+   * Only runs when a directory URL is configured and a genesis operation was
+   * minted here (not for `did:web`, nor for an adopted/migrated DID). A failure
+   * is swallowed — the account is locally self-consistent regardless, and the
+   * unset `plc_submitted` flag leaves room for an explicit re-submit later;
+   * registration is never the default path.
+   */
+  async #maybeSubmitPlcGenesis(): Promise<void> {
+    const directoryUrl = this.#cfg.plcDirectoryUrl;
+    const genesis = this.#kvGet("plc_genesis") as string | null;
+    if (!directoryUrl || !genesis || this.#kvGet("plc_submitted")) return;
+    try {
+      await submitPlcOperation(
+        this.#accountDid(),
+        JSON.parse(genesis) as SignedPlcOperation,
+        { directoryUrl },
+      );
+      this.#kvSet("plc_submitted", "1");
+    } catch (error) {
+      console.warn(
+        `@dwk/atproto-pds: PLC genesis submission failed (will require a manual re-submit): ${String(error)}`,
+      );
+    }
   }
 
   /** Determine and persist the account DID at genesis (see {@link #initRepo}). */
