@@ -181,6 +181,43 @@ describe("@dwk/solid-pod WebDAV app-password endpoint", () => {
       createExecutionContext(),
     );
     expect(badJson.status).toBe(400);
+    // A whitespace-only label is rejected.
+    const blankLabel = await admin(
+      new Request(`${baseUrl}/c`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ label: "   ", scope: { modes: ["read"] } }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(blankLabel.status).toBe(400);
+  });
+
+  it("normalizes a path-prefix scope and rejects a non-finite expiry", async () => {
+    const baseUrl = freshBase();
+    const admin = adminHandler(baseUrl, OWNER);
+    const res = await admin(
+      new Request(`${baseUrl}/c`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        // Raw JSON: `1e999` parses to Infinity (JSON.stringify can't carry it),
+        // exercising the safe-integer guard.
+        body: '{"label":"  Trimmed  ","scope":{"modes":["read"],"pathPrefix":"photos/"},"expiresAt":1e999}',
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(res.status).toBe(201);
+    const minted = (await res.json()) as {
+      label: string;
+      scope: { pathPrefix?: string };
+      expiresAt: number | null;
+    };
+    expect(minted.label).toBe("Trimmed");
+    expect(minted.scope.pathPrefix).toBe("/photos/");
+    // Infinity is not a safe integer, so it is dropped (no expiry).
+    expect(minted.expiresAt).toBeNull();
   });
 
   it("cannot revoke another owner's credential", async () => {

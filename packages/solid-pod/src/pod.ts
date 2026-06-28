@@ -901,8 +901,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             ? (parsed as Record<string, unknown>)
             : {};
         const label =
-          typeof body.label === "string" && body.label.length > 0
-            ? body.label
+          typeof body.label === "string" && body.label.trim().length > 0
+            ? body.label.trim()
             : null;
         const scopeInput =
           body.scope && typeof body.scope === "object"
@@ -916,19 +916,30 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         if (label === null || modes.length === 0) {
           return text(400, "label and a non-empty scope.modes are required");
         }
+        // A path-prefix scope is matched against absolute WebDAV paths, so
+        // normalize it to a leading slash.
+        const pathPrefix =
+          typeof scopeInput.pathPrefix === "string"
+            ? scopeInput.pathPrefix.startsWith("/")
+              ? scopeInput.pathPrefix
+              : `/${scopeInput.pathPrefix}`
+            : null;
         const scope = {
           modes,
-          ...(typeof scopeInput.pathPrefix === "string"
-            ? { pathPrefix: scopeInput.pathPrefix }
-            : {}),
+          ...(pathPrefix !== null ? { pathPrefix } : {}),
         };
+        // A positive safe integer epoch; reject NaN/Infinity/non-positive.
+        const expiresAt =
+          typeof body.expiresAt === "number" &&
+          Number.isSafeInteger(body.expiresAt) &&
+          body.expiresAt > 0
+            ? body.expiresAt
+            : null;
         const minted = await credentials.mint({
           webid: agent,
           label,
           scope,
-          ...(typeof body.expiresAt === "number"
-            ? { expiresAt: body.expiresAt }
-            : {}),
+          ...(expiresAt !== null ? { expiresAt } : {}),
         });
         // The plaintext secret and username are shown exactly once.
         return jsonResponse(201, {
