@@ -111,6 +111,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   #config: ForwardedConfig | null = null;
   #signerFn: Signer | null = null;
   #accountDidCache: string | null = null;
+  // The signing curve and raw public key are fixed at genesis, so cache them to
+  // avoid a SQLite read on every identity request (they are read several times).
+  #signingCurveCache: SigningCurve | null = null;
+  #publicKeyRawCache: Uint8Array | null = null;
   #initPromise: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: AtprotoPdsEnv) {
@@ -337,7 +341,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   /** The curve this repository was initialised with (authoritative, persisted). */
   #signingCurve(): SigningCurve {
-    return (this.#kvGet("signing_curve") as SigningCurve | null) ?? "p256";
+    if (this.#signingCurveCache === null) {
+      this.#signingCurveCache =
+        (this.#kvGet("signing_curve") as SigningCurve | null) ?? "p256";
+    }
+    return this.#signingCurveCache;
   }
 
   async #signer(): Promise<Signer> {
@@ -351,7 +359,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   #publicKeyRaw(): Uint8Array {
-    return unbase64(this.#kvGet("pubkey_raw") as string);
+    if (this.#publicKeyRawCache === null) {
+      this.#publicKeyRawCache = unbase64(this.#kvGet("pubkey_raw") as string);
+    }
+    return this.#publicKeyRawCache;
   }
 
   // --- XRPC dispatch --------------------------------------------------------

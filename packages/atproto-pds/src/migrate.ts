@@ -120,10 +120,19 @@ export async function importRepoFromCar(
   // block in a parsed CAR is CIDv1/SHA-256, so `CID.create` reproduces it).
   // Each recompute is an independent async SHA-256, so verify them concurrently
   // rather than serially — a large repo CAR carries thousands of blocks and a
-  // sequential `await` per block would dominate import latency.
+  // sequential `await` per block would dominate import latency. But verify with
+  // a *bounded* pool: `blocks.map(async …)` would create one pending promise per
+  // block at once (tens of thousands on a big repo), and that closure/promise
+  // overhead is itself a cost against the Worker's 128 MB ceiling. A small fixed
+  // set of workers pulling from a shared cursor caps in-flight work while still
+  // parallelising (single-threaded JS makes the `cursor++` race-free).
   const index = new Map<string, Uint8Array>();
-  await Promise.all(
-    blocks.map(async (block) => {
+  const VERIFY_CONCURRENCY = 64;
+  let cursor = 0;
+  const verifyWorker = async (): Promise<void> => {
+    while (cursor < blocks.length) {
+      const block = blocks[cursor++];
+      if (!block) break;
       const computed = await CID.create(block.cid.codec, block.bytes);
       if (!computed.equals(block.cid)) {
         throw new Error(
@@ -131,7 +140,12 @@ export async function importRepoFromCar(
         );
       }
       index.set(block.cid.toString(), block.bytes);
-    }),
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(VERIFY_CONCURRENCY, blocks.length) }, () =>
+      verifyWorker(),
+    ),
   );
   const getBlock = (cid: CID): Uint8Array | undefined =>
     index.get(cid.toString());
