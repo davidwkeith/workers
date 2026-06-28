@@ -96,14 +96,6 @@ const SERIALIZE_PREFIXES: Record<string, string> = {
 
 const DEFAULT_GRAPH: StoredTerm = { termType: "DefaultGraph", value: "" };
 
-/**
- * Stable `getlastmodified` stand-in for the WebDAV door until the store tracks a
- * per-resource mtime. A *constant* (the Unix epoch) is deliberate: a moving
- * value would make OS clients believe every file changes on each poll, breaking
- * their caching. Correctness rides on ETags, not this.
- */
-const WEBDAV_FALLBACK_MTIME = 0;
-
 /** Config the front door forwards to the DO (everything else is per-request). */
 interface ForwardedConfig {
   readonly maxInlineBytes?: number;
@@ -1021,38 +1013,26 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     // so the seam reaches the pod's private write/containment helpers directly.
     const toPath = (iri: string): string => iri.slice(origin.length);
 
-    const statOf = async (path: string): Promise<ResourceStat | null> => {
+    const statOf = (path: string): ResourceStat | null => {
       const meta = store.head(path);
       if (!meta) return null;
       const collection = isContainer(path);
-      let contentLength = 0;
-      let contentType = collection ? "text/turtle" : meta.contentType;
-      if (!collection && meta.kind === "blob") {
-        // The store exposes blob byte-size only via `readBlob`; take it and
-        // cancel the stream without buffering the body.
-        const blob = await store.readBlob(path);
-        if (blob) {
-          contentLength = blob.size;
-          contentType = blob.contentType || meta.contentType;
-          await blob.stream.cancel();
-        }
-      }
       return {
         path,
         collection,
         etag: meta.etag,
-        contentType,
-        contentLength,
-        // The store does not yet track a per-resource modified time. A *stable*
-        // stand-in (not `Date.now()`) is deliberate: a moving mtime makes OS
-        // clients think the file changes every poll, breaking their caching.
-        // ETags drive correctness; mtime is cosmetic until a column lands.
-        lastModified: WEBDAV_FALLBACK_MTIME,
+        contentType: collection ? "text/turtle" : meta.contentType,
+        // The store tracks a per-resource byte size and mtime, so no extra R2
+        // read is needed for a blob's size. Size is `0` for collections (the
+        // router omits `getcontentlength` for them) and approximate for RDF (the
+        // stored upload bytes; a GET re-serializes and sets its own length).
+        contentLength: collection ? 0 : meta.size,
+        lastModified: meta.modifiedAt,
       };
     };
 
     return {
-      stat: statOf,
+      stat: async (path: string) => statOf(path),
 
       listChildren: async (path: string): Promise<readonly ResourceStat[]> => {
         const containerIri = toIri(origin, path);
@@ -1061,11 +1041,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
           .filter((q) => isContainsQuad(q, containerIri))
           .map((q) => q.object.value);
         // Stat children concurrently: a blob's stat costs an R2 round-trip, so a
-        // sequential loop would serialize a whole Depth: 1 listing.
-        const stats = await Promise.all(
-          children.map((iri) => statOf(toPath(iri))),
-        );
-        return stats.filter((child): child is ResourceStat => child !== null);
+        // `statOf` is a synchronous SQLite lookup now (no per-child R2 read), so
+        // a plain map suffices.
+        return children
+          .map((iri) => statOf(toPath(iri)))
+          .filter((child): child is ResourceStat => child !== null);
       },
 
       read: async (path: string): Promise<ResourceBody | null> => {
@@ -1082,12 +1062,14 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             collection: false,
             etag: meta.etag,
             contentType: blob.contentType || meta.contentType,
+            // `readBlob` already has the object, so use its R2 size — correct
+            // even for a blob written before the store tracked `size`.
             contentLength: blob.size,
-            lastModified: WEBDAV_FALLBACK_MTIME,
+            lastModified: meta.modifiedAt,
           };
           return { stat, body: blob.stream };
         }
-        const stat = await statOf(path);
+        const stat = statOf(path);
         if (!stat) return null;
         // An RDF resource is serialized to Turtle on the way out so OS clients
         // see a concrete file, mirroring the Solid GET default serialization.

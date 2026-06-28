@@ -146,6 +146,23 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  it("reports real getcontentlength and getlastmodified in PROPFIND", async () => {
+    await withPod(RW, async ({ call }) => {
+      await call("PUT", "/sized.bin", {
+        body: "12345",
+        headers: { "content-type": "application/octet-stream" },
+      });
+      const res = await call("PROPFIND", "/sized.bin", {
+        headers: { depth: "0" },
+      });
+      const body = await res.text();
+      // The store now tracks byte size + mtime, so these are real, not stand-ins.
+      expect(body).toContain("<D:getcontentlength>5</D:getcontentlength>");
+      expect(body).toContain("<D:getlastmodified>");
+      expect(body).not.toContain("01 Jan 1970");
+    });
+  });
+
   it("creates a collection with MKCOL and refuses a duplicate", async () => {
     await withPod(RW, async ({ call }) => {
       expect((await call("MKCOL", "/docs")).status).toBe(201);

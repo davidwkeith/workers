@@ -199,6 +199,31 @@ describe("@dwk/store quad store", () => {
       contentType: "text/plain",
     });
   });
+
+  it("records byte size and last-modified time on the pointer", async () => {
+    const out = await withStore(async ({ store }) => {
+      const before = Date.now();
+      await store.putBlob("/b.bin", new Uint8Array([1, 2, 3, 4, 5]), {
+        contentType: "application/octet-stream",
+      });
+      const ttl = new TextEncoder().encode("<a> <b> <c> .");
+      await store.putResource("/r.ttl", ttl, {
+        quads: QUADS,
+        contentType: "text/turtle",
+      });
+      return {
+        before,
+        blob: store.head("/b.bin"),
+        rdf: store.head("/r.ttl"),
+        ttlLen: ttl.byteLength,
+      };
+    });
+    // Blobs record their real R2 byte size; inline RDF records the source bytes.
+    expect(out.blob?.size).toBe(5);
+    expect(out.rdf?.size).toBe(out.ttlLen);
+    expect(out.blob?.modifiedAt).toBeGreaterThanOrEqual(out.before);
+    expect(out.rdf?.modifiedAt).toBeGreaterThanOrEqual(out.before);
+  });
 });
 
 describe("@dwk/store blob copy-on-write", () => {

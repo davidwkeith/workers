@@ -5,7 +5,7 @@
 | **Type** | endpoint (façade over the `solid-pod` Durable Object) |
 | **Ships a DO?** | **no** — reuses the per-pod [`SolidPodObject`](solid-pod.md) (lock + write state live there) |
 | **Standard** | [WebDAV (RFC 4918)](https://www.rfc-editor.org/rfc/rfc4918), Class 2 |
-| **Status** | **in progress.** The protocol core, the Class 2 verb router (`createWebdav`), the lock + app-password DO-SQLite stores, the concrete `SolidPodObject` adapter + front door (`@dwk/solid-pod`'s `createSolidPodWebdav`), `COPY`/`MOVE` (resource + collection), **and the owner-gated app-password mint/list/revoke endpoint** (`createSolidPodWebdavCredentials`) are implemented. Per-resource size/mtime in the store and the hosted litmus run are the remaining increment. Tracked in [#169](https://github.com/davidwkeith/workers/issues/169) |
+| **Status** | **in progress.** The protocol core, the Class 2 verb router (`createWebdav`), the lock + app-password DO-SQLite stores, the concrete `SolidPodObject` adapter + front door (`@dwk/solid-pod`'s `createSolidPodWebdav`), `COPY`/`MOVE` (resource + collection), **and the owner-gated app-password mint/list/revoke endpoint** (`createSolidPodWebdavCredentials`) are implemented, and `@dwk/store` now tracks per-resource byte size + mtime so `getcontentlength`/`getlastmodified` are real. The hosted litmus run is the remaining increment. Tracked in [#169](https://github.com/davidwkeith/workers/issues/169) |
 
 > **This spec is authoritative and was reviewed before implementation.** The four
 > load-bearing decisions below — the auth bridge and the compliance class
