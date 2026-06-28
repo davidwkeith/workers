@@ -92,7 +92,10 @@ const SUITES = {
 /** Read a `--flag value` from `rest`, falling back to an env var. */
 function flagOrEnv(rest, flag, envVar) {
   const i = rest.indexOf(flag);
-  if (i !== -1 && rest[i + 1] !== undefined) return rest[i + 1];
+  // Guard against an omitted value swallowing the next flag (`--username
+  // --password p` must not read the username as "--password").
+  const value = i !== -1 ? rest[i + 1] : undefined;
+  if (value !== undefined && !value.startsWith("--")) return value;
   return env[envVar];
 }
 
