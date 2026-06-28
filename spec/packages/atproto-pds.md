@@ -154,8 +154,12 @@ is **reach vs. fit**:
   store). The **account-status cutover** is also wired —
   `activateAccount`/`deactivateAccount` toggle the home, and
   `getRepoStatus`/`checkAccountStatus` report it, which is how a Relay learns
-  which PDS is the live home. **Blob import** and **PLC rotation** follow — and the
-  **firehose** (#184) is still to come. Until migration is complete, a user
+  which PDS is the live home. **Blob accounting** is wired too —
+  `com.atproto.sync.listBlobs` enumerates held blobs and
+  `com.atproto.repo.listMissingBlobs` lists blobs referenced by records but not
+  yet uploaded, so a migrating client knows exactly which blobs to transfer (via
+  the existing `uploadBlob`) to finish the move. **PLC key rotation** is the last
+  migration piece — and the **firehose** (#184) is still to come. Until migration is complete, a user
   who wants to **migrate an existing Bluesky account today** is better served by
   Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not

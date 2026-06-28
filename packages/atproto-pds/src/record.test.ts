@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC } from "./cid.js";
-import { atUri, cborToJson, jsonToCbor, recordPath } from "./record.js";
+import {
+  atUri,
+  cborToJson,
+  extractBlobCids,
+  jsonToCbor,
+  recordPath,
+} from "./record.js";
 
 describe("record JSON ⇄ DAG-CBOR", () => {
   it("round-trips a plain lexicon record", () => {
@@ -41,5 +47,40 @@ describe("record JSON ⇄ DAG-CBOR", () => {
     expect(atUri("did:web:a", "app.bsky.feed.post", "abc")).toBe(
       "at://did:web:a/app.bsky.feed.post/abc",
     );
+  });
+
+  it("extracts blob ref CIDs from a record (and ignores non-blobs)", async () => {
+    const blobCid = await CID.create(DAG_CBOR_CODEC, encodeCbor({ b: 1 }));
+    const otherCid = await CID.create(DAG_CBOR_CODEC, encodeCbor({ o: 2 }));
+    const record = jsonToCbor({
+      $type: "app.bsky.actor.profile",
+      displayName: "Alice",
+      avatar: {
+        $type: "blob",
+        ref: { $link: blobCid.toString() },
+        mimeType: "image/png",
+        size: 1234,
+      },
+      // A nested blob, plus a plain CID link that is NOT a blob ref.
+      pinned: { subject: { $link: otherCid.toString() } },
+      banners: [
+        {
+          $type: "blob",
+          ref: { $link: blobCid.toString() },
+          mimeType: "image/png",
+          size: 1,
+        },
+      ],
+    });
+    const cids = extractBlobCids(record);
+    expect(cids).toContain(blobCid.toString());
+    expect(cids).not.toContain(otherCid.toString());
+    expect(cids).toHaveLength(2); // one in avatar, one in banners[]
+  });
+
+  it("returns no blob CIDs for a record without blobs", () => {
+    expect(
+      extractBlobCids(jsonToCbor({ $type: "app.bsky.feed.post", text: "hi" })),
+    ).toEqual([]);
   });
 });
