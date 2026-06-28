@@ -88,6 +88,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   readonly #tid = new TidClock();
   #config: ForwardedConfig | null = null;
   #signerFn: Signer | null = null;
+  #accountDidCache: string | null = null;
   #initPromise: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: AtprotoPdsEnv) {
@@ -233,9 +234,20 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     return didPlcFromGenesis(signed);
   }
 
-  /** The authoritative account DID (derived at genesis), falling back to config. */
+  /**
+   * The authoritative account DID (derived at genesis), falling back to config.
+   * Memoised: `account_did` is immutable once written, so a single SQLite read
+   * per DO instance suffices even though this is called several times per request
+   * (auth, commit signing, `at://` URIs).
+   */
   #accountDid(): string {
-    return (this.#kvGet("account_did") as string | null) ?? this.#cfg.did;
+    if (this.#accountDidCache !== null) return this.#accountDidCache;
+    const stored = this.#kvGet("account_did") as string | null;
+    if (stored !== null) {
+      this.#accountDidCache = stored;
+      return stored;
+    }
+    return this.#cfg.did;
   }
 
   /** The curve this repository was initialised with (authoritative, persisted). */
