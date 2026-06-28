@@ -118,16 +118,21 @@ export async function importRepoFromCar(
   // expected CIDs and the root-commit signature would still "verify" while the
   // recovered records are forged. Recompute and compare each block's CID (every
   // block in a parsed CAR is CIDv1/SHA-256, so `CID.create` reproduces it).
+  // Each recompute is an independent async SHA-256, so verify them concurrently
+  // rather than serially — a large repo CAR carries thousands of blocks and a
+  // sequential `await` per block would dominate import latency.
   const index = new Map<string, Uint8Array>();
-  for (const block of blocks) {
-    const computed = await CID.create(block.cid.codec, block.bytes);
-    if (!computed.equals(block.cid)) {
-      throw new Error(
-        `migrate: CAR block ${block.cid.toString()} does not match its content (expected ${computed.toString()})`,
-      );
-    }
-    index.set(block.cid.toString(), block.bytes);
-  }
+  await Promise.all(
+    blocks.map(async (block) => {
+      const computed = await CID.create(block.cid.codec, block.bytes);
+      if (!computed.equals(block.cid)) {
+        throw new Error(
+          `migrate: CAR block ${block.cid.toString()} does not match its content (expected ${computed.toString()})`,
+        );
+      }
+      index.set(block.cid.toString(), block.bytes);
+    }),
+  );
   const getBlock = (cid: CID): Uint8Array | undefined =>
     index.get(cid.toString());
 
