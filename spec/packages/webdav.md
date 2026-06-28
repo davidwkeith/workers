@@ -277,5 +277,10 @@ all verbs; UTF-8-only, `DOCTYPE`/external-entity-rejecting XML and a strict-subs
   WebDAV here is plain file access, not calendar collections.
 - **Shared locks**, **Digest** auth, a general **dead-property** store, **quota**
   (`{DAV:}quota-*`) reporting, and **DeltaV** versioning.
+- **Per-member `207 Multi-Status` failure reporting** for collection
+  `DELETE`/`COPY`/`MOVE` (RFC 4918 §9.6.1). A collection operation that fails
+  collapses to a single representative status (e.g. `423`/`409`) rather than
+  enumerating each blocked member; sufficient for the OS-client target, revisited
+  only if the litmus `copymove`/`locks` suites require it.
 
 See [open-questions.md](../open-questions.md).

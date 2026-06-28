@@ -130,8 +130,29 @@ function xml(
   });
 }
 
-function problem(status: number, message: string): Response {
-  return dav(message, status, { "Content-Type": "text/plain; charset=utf-8" });
+function problem(
+  status: number,
+  message: string,
+  headers: Record<string, string> = {},
+): Response {
+  return dav(message, status, {
+    "Content-Type": "text/plain; charset=utf-8",
+    ...headers,
+  });
+}
+
+/** The `Allow` set advertised for `path` (the root is undeletable). */
+function allowFor(path: string, resolved: Resolved): string {
+  return path === resolved.storageRoot ? ROOT_METHODS : ALL_METHODS;
+}
+
+/** A `405 Method Not Allowed` with the mandatory `Allow` header (RFC 7231). */
+function methodNotAllowed(
+  message: string,
+  resolved: Resolved,
+  path: string,
+): Response {
+  return problem(405, message, { Allow: allowFor(path, resolved) });
 }
 
 /** A `401` that prompts the OS client for Basic credentials. */
@@ -180,6 +201,16 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
     // against `.acl`/`.meta` is 404 (spec §3) — not merely hidden.
     if (isAuxiliary(path)) return problem(404, "Not found");
 
+    // The `If:` header is a strict, documented subset (spec §4): a single
+    // untagged list of one lock token and/or one ETag. Anything richer (tagged
+    // lists, `Not`, multiple state tokens) is answered `400` rather than parsed
+    // best-effort — guessing here is a classic parser-differential hazard, and
+    // silently dropping a conditional the client asked for would fail *open*.
+    const ifHeader = request.headers.get("if");
+    if (ifHeader !== null && parseIfHeader(ifHeader).kind === "unsupported") {
+      return problem(400, "Unsupported If: header");
+    }
+
     const ctx: RequestContext = { request, url, backend, principal, path };
     switch (method) {
       case "PROPFIND":
@@ -192,9 +223,9 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
       case "PUT":
         return put(ctx, resolved);
       case "DELETE":
-        return remove(ctx);
+        return remove(ctx, resolved);
       case "MKCOL":
-        return mkcol(ctx);
+        return mkcol(ctx, resolved);
       case "COPY":
       case "MOVE":
         return copyMove(ctx, resolved, method);
@@ -203,7 +234,7 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
       case "UNLOCK":
         return unlock(ctx);
       default:
-        return problem(405, "Method not allowed");
+        return methodNotAllowed("Method not allowed", resolved, path);
     }
   };
 }
@@ -344,7 +375,11 @@ async function read(ctx: RequestContext, headOnly: boolean): Promise<Response> {
 
 async function put(ctx: RequestContext, resolved: Resolved): Promise<Response> {
   if (isCollectionPath(ctx.path)) {
-    return problem(405, "Cannot PUT a collection; use MKCOL");
+    return methodNotAllowed(
+      "Cannot PUT a collection; use MKCOL",
+      resolved,
+      ctx.path,
+    );
   }
   if (resolved.litter && isOsLitter(ctx.path, resolved.litter)) {
     return problem(403, "Resource name refused by the OS-litter policy");
@@ -379,13 +414,16 @@ async function put(ctx: RequestContext, resolved: Resolved): Promise<Response> {
 // DELETE
 // ---------------------------------------------------------------------------
 
-async function remove(ctx: RequestContext): Promise<Response> {
+async function remove(
+  ctx: RequestContext,
+  resolved: Resolved,
+): Promise<Response> {
   if (!(await authorize(ctx, "write"))) return problem(403, "Forbidden");
   const blocking = ctx.backend.locks.blockingLock(
     ctx.path,
     presentedToken(ctx.request),
   );
-  if (blocking) return problem(423, "Locked");
+  if (blocking) return lockedResponse(blocking, resolved);
   try {
     await ctx.backend.remove(ctx.path, preconditionsOf(ctx.request));
     return dav(null, 204);
@@ -398,7 +436,10 @@ async function remove(ctx: RequestContext): Promise<Response> {
 // MKCOL
 // ---------------------------------------------------------------------------
 
-async function mkcol(ctx: RequestContext): Promise<Response> {
+async function mkcol(
+  ctx: RequestContext,
+  resolved: Resolved,
+): Promise<Response> {
   // RFC 4918 §9.3: MKCOL with a request body is unsupported media (415).
   if (
     ctx.request.body !== null &&
@@ -410,7 +451,11 @@ async function mkcol(ctx: RequestContext): Promise<Response> {
   const mkctx = { ...ctx, path: collectionPath };
   if (!(await authorize(mkctx, "write"))) return problem(403, "Forbidden");
   if ((await ctx.backend.stat(collectionPath)) !== null) {
-    return problem(405, "Collection already exists");
+    return methodNotAllowed(
+      "Collection already exists",
+      resolved,
+      collectionPath,
+    );
   }
   try {
     await ctx.backend.makeCollection(collectionPath);
@@ -430,6 +475,8 @@ async function copyMove(
   method: "COPY" | "MOVE",
 ): Promise<Response> {
   let destination = destinationOf(ctx.request, ctx.url, resolved);
+  if (destination === "foreign")
+    return problem(502, "Destination is on a different server");
   if (destination === null)
     return problem(400, "Missing or invalid Destination");
   // A collection's destination must be a collection path; without this a client
@@ -461,10 +508,10 @@ async function copyMove(
   const token = presentedToken(ctx.request);
   if (method === "MOVE") {
     const srcLock = ctx.backend.locks.blockingLock(ctx.path, token);
-    if (srcLock) return problem(423, "Locked");
+    if (srcLock) return lockedResponse(srcLock, resolved);
   }
   const dstLock = ctx.backend.locks.blockingLock(destination, token);
-  if (dstLock) return problem(423, "Locked");
+  if (dstLock) return lockedResponse(dstLock, resolved);
 
   const okSource =
     method === "MOVE"
@@ -503,7 +550,12 @@ async function propfind(
   ).toLowerCase();
   if (depthHeader === "infinity") {
     // A `Depth: infinity` PROPFIND can enumerate the whole pod; refuse it (§4).
-    return problem(403, "Depth: infinity PROPFIND is not supported");
+    // RFC 4918 §9.1 defines the `propfind-finite-depth` precondition marker so
+    // the client knows to retry with a finite depth.
+    return xml(
+      403,
+      `<D:error xmlns:D="DAV:"><D:propfind-finite-depth/></D:error>`,
+    );
   }
   if (depthHeader !== "0" && depthHeader !== "1") {
     return problem(400, "Invalid Depth");
@@ -691,7 +743,7 @@ async function proppatch(
     ctx.path,
     presentedToken(ctx.request),
   );
-  if (blocking) return problem(423, "Locked");
+  if (blocking) return lockedResponse(blocking, resolved);
   const stat = await ctx.backend.stat(ctx.path);
   if (stat === null) return problem(404, "Not found");
 
@@ -916,8 +968,18 @@ function preconditionsOf(request: Request): {
 } {
   const ifMatch = request.headers.get("if-match");
   const ifNoneMatch = request.headers.get("if-none-match");
+  // The `If:` header's `[etag]` production is a state condition the request must
+  // satisfy (RFC 4918 §10.4.2); map it onto `If-Match` so the TOCTOU-free write
+  // path enforces it. An explicit `If-Match` header takes precedence.
+  const parsed = parseIfHeader(request.headers.get("if"));
+  const ifEtag =
+    parsed.kind === "supported" ? parsed.condition.etag : undefined;
   return {
-    ...(ifMatch !== null ? { ifMatch: ifMatch.trim() } : {}),
+    ...(ifMatch !== null
+      ? { ifMatch: ifMatch.trim() }
+      : ifEtag !== undefined
+        ? { ifMatch: ifEtag }
+        : {}),
     ...(ifNoneMatch !== null ? { ifNoneMatch: ifNoneMatch.trim() } : {}),
   };
 }
@@ -943,12 +1005,16 @@ function depthOf(
   return "bad";
 }
 
-/** Resolve a COPY/MOVE `Destination` to a pod path under the mount, or `null`. */
+/**
+ * Resolve a COPY/MOVE `Destination` to a pod path under the mount. `null` is a
+ * missing/invalid/out-of-mount header (`400`); `"foreign"` is a syntactically
+ * valid URL on another origin, which RFC 4918 §9.8.5/§9.9 answers `502`.
+ */
 function destinationOf(
   request: Request,
   url: URL,
   resolved: Resolved,
-): string | null {
+): string | null | "foreign" {
   const raw = request.headers.get("destination");
   if (!raw) return null;
   let target: URL;
@@ -957,6 +1023,6 @@ function destinationOf(
   } catch {
     return null;
   }
-  if (target.origin !== url.origin) return null;
+  if (target.origin !== url.origin) return "foreign";
   return pathOf(target, resolved);
 }

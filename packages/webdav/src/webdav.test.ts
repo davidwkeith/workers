@@ -739,3 +739,98 @@ describe("createWebdav — lock/verb edge cases", () => {
     });
   });
 });
+
+describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
+  it("rejects an If: header outside the supported subset with 400 (§10.4)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/c.txt", { body: "x" });
+      // A tagged list is outside the strict subset (spec §4): fail closed with
+      // 400 rather than silently dropping the conditional.
+      const res = await call("PUT", "/c.txt", {
+        body: "y",
+        headers: { if: "<https://pod.example/c.txt> (<opaquelocktoken:z>)" },
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  it("enforces the If: header [etag] production as a precondition (§10.4.2)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/e.txt", { body: "x" });
+      const stale = await call("PUT", "/e.txt", {
+        body: "y",
+        headers: { if: '(["nope"])' },
+      });
+      expect(stale.status).toBe(412);
+
+      const etag = (await call("HEAD", "/e.txt")).headers.get("ETag");
+      const fresh = await call("PUT", "/e.txt", {
+        body: "z",
+        headers: { if: `([${etag}])` },
+      });
+      expect(fresh.status).toBe(204);
+    });
+  });
+
+  it("includes an Allow header on every 405 (§9.3, RFC 7231 §6.5.5)", async () => {
+    await withHandler(async ({ call }) => {
+      const unknown = await call("PATCH", "/", { body: "x" });
+      expect(unknown.status).toBe(405);
+      expect(unknown.headers.get("Allow")).toContain("PROPFIND");
+
+      await call("MKCOL", "/dir");
+      const putCol = await call("PUT", "/dir/", { body: "x" });
+      expect(putCol.status).toBe(405);
+      expect(putCol.headers.get("Allow")).toContain("MKCOL");
+
+      const dup = await call("MKCOL", "/dir");
+      expect(dup.status).toBe(405);
+      expect(dup.headers.get("Allow")).toBeTruthy();
+    });
+  });
+
+  it("answers a Depth: infinity PROPFIND with the propfind-finite-depth marker (§9.1)", async () => {
+    await withHandler(async ({ call }) => {
+      const res = await call("PROPFIND", "/", {
+        headers: { depth: "infinity" },
+      });
+      expect(res.status).toBe(403);
+      expect(res.headers.get("Content-Type")).toContain("xml");
+      expect(await res.text()).toContain("<D:propfind-finite-depth/>");
+    });
+  });
+
+  it("carries the lock-token-submitted precondition on a 423 DELETE/MOVE (§16)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/l.txt", { body: "x" });
+      expect(
+        (
+          await call("LOCK", "/l.txt", {
+            headers: { depth: "0" },
+            body: LOCKINFO,
+          })
+        ).status,
+      ).toBe(200);
+
+      const del = await call("DELETE", "/l.txt");
+      expect(del.status).toBe(423);
+      expect(await del.text()).toContain("<D:lock-token-submitted>");
+
+      const move = await call("MOVE", "/l.txt", {
+        headers: { destination: "https://pod.example/m.txt" },
+      });
+      expect(move.status).toBe(423);
+      expect(await move.text()).toContain("<D:lock-token-submitted>");
+    });
+  });
+
+  it("answers a COPY/MOVE to a foreign origin with 502 (§9.8.5)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/f.txt", { body: "x" });
+      const res = await call("COPY", "/f.txt", {
+        headers: { destination: "https://other.example/f.txt" },
+      });
+      expect(res.status).toBe(502);
+    });
+  });
+});
