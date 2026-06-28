@@ -611,8 +611,9 @@ export function createStore(
           etag,
           options.contentType ?? current?.contentType ?? "text/turtle",
           // A patch rewrites quads with no new byte representation; keep the
-          // last known size rather than resetting it.
-          options.size ?? current?.size ?? 0,
+          // last known size — but only when the predecessor was itself RDF, so a
+          // blob→RDF transition does not inherit the blob's unrelated size.
+          options.size ?? (current?.kind === "rdf" ? current.size : 0),
         );
       });
       return etag;

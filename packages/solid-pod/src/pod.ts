@@ -1062,7 +1062,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             collection: false,
             etag: meta.etag,
             contentType: blob.contentType || meta.contentType,
-            contentLength: meta.size,
+            // `readBlob` already has the object, so use its R2 size — correct
+            // even for a blob written before the store tracked `size`.
+            contentLength: blob.size,
             lastModified: meta.modifiedAt,
           };
           return { stat, body: blob.stream };
