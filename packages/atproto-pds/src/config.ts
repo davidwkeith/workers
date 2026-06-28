@@ -12,6 +12,7 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
+import type { SigningCurve } from "./crypto.js";
 import { didWebFromHost, isValidHandle } from "./identity.js";
 import type { AtprotoRepoObject } from "./object.js";
 
@@ -49,6 +50,15 @@ export interface AtprotoPdsConfig {
   readonly did?: string;
 
   /**
+   * The repository commit-signing curve. Defaults to `"p256"` — the
+   * dependency-free, self-hosted-friendly default. Set `"secp256k1"` for the
+   * AT Protocol network-preferred curve (required to be a drop-in for an
+   * existing account; see account migration). The curve is fixed at repository
+   * genesis and cannot change for an already-initialised account.
+   */
+  readonly signingCurve?: SigningCurve;
+
+  /**
    * The account password (a secret binding's value) accepted by
    * `com.atproto.server.createSession`. Required to issue sessions; omit it for
    * a read-only deployment that serves the repository but accepts no writes.
@@ -82,6 +92,7 @@ export interface ResolvedConfig {
   readonly host: string;
   readonly handle: string;
   readonly did: string;
+  readonly signingCurve: SigningCurve;
   readonly password?: string;
   readonly jwtSecret?: string;
   readonly accessTokenTtlSeconds: number;
@@ -104,6 +115,7 @@ export interface ForwardedConfig {
   readonly did: string;
   readonly handle: string;
   readonly baseUrl: string;
+  readonly signingCurve: SigningCurve;
   readonly password?: string;
   readonly jwtSecret?: string;
   readonly accessTokenTtlSeconds: number;
@@ -140,6 +152,7 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
     host,
     handle,
     did: config.did ?? didWebFromHost(host),
+    signingCurve: config.signingCurve ?? "p256",
     password: config.password,
     jwtSecret: config.jwtSecret,
     accessTokenTtlSeconds: config.accessTokenTtlSeconds ?? DEFAULT_ACCESS_TTL,
@@ -158,6 +171,7 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     did: config.did,
     handle: config.handle,
     baseUrl: config.baseUrl,
+    signingCurve: config.signingCurve,
     ...(config.password ? { password: config.password } : {}),
     ...(config.jwtSecret ? { jwtSecret: config.jwtSecret } : {}),
     accessTokenTtlSeconds: config.accessTokenTtlSeconds,

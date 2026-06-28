@@ -41,16 +41,19 @@ self-contained and built directly on WebCrypto.
   - `com.atproto.identity.resolveHandle`.
 - **A signed, portable repository** — records are DAG-CBOR blocks in a
   deterministic Merkle Search Tree; each write produces a new commit signed with
-  the account's P-256 repository key (compact, low-S) and chained through `prev`.
+  the account's repository key (compact, low-S) and chained through `prev`.
   `getRepo` exports the whole thing as a CARv1 whose root commit verifies against
   the key in the DID document.
 - **Blobs** stream to R2, addressed by their raw-codec CID.
 
 ## Design decisions
 
-- **P-256 signing, not K-256.** Both are valid per AT Protocol's cryptography
-  spec; WebCrypto supports P-256 natively, so the PDS uses it to stay
-  dependency-free. The repo key is published as a `did:key` (multicodec 0x1200).
+- **P-256 signing by default, secp256k1 (K-256) opt-in.** Both are valid per AT
+  Protocol's cryptography spec. WebCrypto supports P-256 natively, so it is the
+  dependency-free default (published as a `did:key`, multicodec 0x1200). Set
+  `signingCurve: "secp256k1"` for the network-preferred curve real Bluesky
+  accounts use — signed via `@noble/curves` (deterministic, low-S) and published
+  with multicodec 0xe7. The curve is fixed at repository genesis.
 - **`did:web`, not `did:plc`.** Identity stays on the user's own origin — no
   external PLC directory.
 - **Single-account scope.** One account per `baseUrl`, authenticated by a

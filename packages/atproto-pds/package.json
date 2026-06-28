@@ -45,6 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@dwk/log": "workspace:*"
+    "@dwk/log": "workspace:*",
+    "@noble/curves": "2.2.0"
   }
 }

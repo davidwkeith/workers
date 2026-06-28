@@ -22,13 +22,22 @@ before extending it.
 ## Implementation notes (as built)
 
 The package is built and tested, with deliberate, documented divergences from a
-hosted reference PDS to stay Workers-native and dependency-free:
+hosted reference PDS to stay Workers-native and dependency-minimal (the one
+vendored runtime dependency is `@noble/curves`, pulled in only for the opt-in
+secp256k1 signing curve):
 
-- **Signing curve is P-256, not K-256.** AT Protocol's cryptography spec admits
-  both; WebCrypto supports P-256 (`p256`, multicodec 0x1200) natively but not
-  secp256k1, so the PDS standardises on P-256 to avoid shipping an elliptic-curve
-  dependency. Signatures are emitted compact (64-byte `r‖s`) and **low-S
-  normalised**. K-256 would need a vendored curve and is deferred.
+- **Signing curve is P-256 by default; secp256k1 (K-256) is opt-in.** AT
+  Protocol's cryptography spec admits both. WebCrypto supports P-256 (`p256`,
+  multicodec 0x1200) natively but not secp256k1, so P-256 remains the
+  dependency-free **default**. Because real Bluesky accounts sign with K-256
+  (multicodec 0xe7) — and being a drop-in for a migrated account therefore
+  requires it — the package also supports secp256k1 via the audited
+  `@noble/curves` `secp256k1` (the one vendored elliptic-curve dependency;
+  measured ≈35 KB minified, negligible against the Worker script budget). The
+  curve is **per-account config** (`signingCurve`), fixed at repository genesis
+  and persisted alongside the key so verification never infers it from raw key
+  bytes. Both curves emit compact (64-byte `r‖s`), **low-S normalised**
+  signatures over the SHA-256 digest; K-256 signing is deterministic (RFC 6979).
 - **Identity is `did:web`, not `did:plc`.** The account DID, handle binding
   (`/.well-known/atproto-did`), and DID document (`/.well-known/did.json`) all
   live under the user's own origin — no external PLC directory. This is the
@@ -104,11 +113,14 @@ is **reach vs. fit**:
 
 - **Cirrus is further along on real-network interop.** It supports `did:plc` as
   well as `did:web`, has tested **account migration** from an existing PDS, and
-  ships the **firehose** (`subscribeRepos`). `@dwk/atproto-pds` deliberately does
-  none of these yet (P-256 + `did:web` only; see the parity tracker
-  [#180](https://github.com/davidwkeith/workers/issues/180) and its children
-  #181–#184). So for a user who wants to **migrate an existing Bluesky account
-  today**, Cirrus is the more complete answer.
+  ships the **firehose** (`subscribeRepos`). Closing that gap is now in progress
+  here per the parity tracker
+  [#180](https://github.com/davidwkeith/workers/issues/180): **secp256k1 commit
+  signing ([#181](https://github.com/davidwkeith/workers/issues/181)) has landed**
+  (the network-preferred curve, opt-in via `signingCurve`), with `did:plc`
+  (#182), account migration (#183), and the firehose (#184) still to follow.
+  Until those land, a user who wants to **migrate an existing Bluesky account
+  today** is better served by Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be
