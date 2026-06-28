@@ -385,7 +385,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       case "com.atproto.sync.getBlob":
         return this.#getBlob(url);
       case "com.atproto.sync.getRepoStatus":
-        return this.#getRepoStatus();
+        return this.#getRepoStatus(url);
       case "com.atproto.sync.listRepos":
         return jsonResponse({
           repos: [
@@ -448,7 +448,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   /** Public repository status (`getRepoStatus`) — what Relays poll at cutover. */
-  #getRepoStatus(): Response {
+  #getRepoStatus(url: URL): Response {
+    const did = url.searchParams.get("did");
+    if (!did) throw invalidRequest("`did` is required");
+    if (did !== this.#accountDid()) {
+      throw namedError(404, "RepoNotFound", "Repo not hosted on this server");
+    }
     const active = this.#isActive();
     return jsonResponse({
       did: this.#accountDid(),

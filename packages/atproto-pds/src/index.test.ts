@@ -567,7 +567,11 @@ describe("AT Protocol PDS", () => {
 
     const status = async () =>
       (await (
-        await call(handler, host, "/xrpc/com.atproto.sync.getRepoStatus")
+        await call(
+          handler,
+          host,
+          `/xrpc/com.atproto.sync.getRepoStatus?did=did:web:${host}`,
+        )
       ).json()) as { active: boolean; status?: string };
 
     // Active by default.
@@ -611,6 +615,21 @@ describe("AT Protocol PDS", () => {
       { body: {} },
     );
     expect(noauth.status).toBe(401);
+
+    // getRepoStatus validates the required `did` param.
+    expect(
+      (await call(handler, host, "/xrpc/com.atproto.sync.getRepoStatus"))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          handler,
+          host,
+          "/xrpc/com.atproto.sync.getRepoStatus?did=did:web:someone.else",
+        )
+      ).status,
+    ).toBe(404);
   });
 
   it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
