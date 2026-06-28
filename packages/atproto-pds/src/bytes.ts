@@ -131,6 +131,31 @@ export function base58btcDecode(input: string): Uint8Array {
   return out;
 }
 
+/**
+ * URL-safe base64 **without padding** (RFC 4648 §5) — the encoding `did:plc`
+ * operations use for their `sig` field.
+ */
+export function base64urlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/** Decode a URL-safe base64 string (padded or not) back to bytes. */
+export function base64urlDecode(input: string): Uint8Array {
+  const b64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  // Restore `=` padding to a multiple of 4 so strict `atob` implementations
+  // accept the (normally unpadded) base64url our encoder emits.
+  const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
 /** Lowercase hex encoding. */
 export function toHex(bytes: Uint8Array): string {
   let out = "";

@@ -43,8 +43,13 @@ expression of "there are no instances in atproto".
 - **Key custody in the DO.** The repository signing key is generated inside the
   Durable Object and never leaves it — not in config, not in the forwarded
   header. The front door never sees it.
-- **`did:web` identity.** No `did:plc`/PLC directory. The DID document and the
-  `atproto-did` handle binding are served from the account's own origin.
+- **`did:web` identity by default; `did:plc` opt-in (in progress).** For
+  `did:web` the DID document and the `atproto-did` handle binding are served from
+  the account's own origin — no PLC directory. `did:plc` support is being added
+  for network interop (#182): `plc.ts` is the pure operation core (build/sign
+  genesis & rotation ops, derive the `did:plc:` id, chain via `prev`); it depends
+  on the external PLC directory, so keep that dependency injectable and never the
+  default.
 
 ## Test environment
 
@@ -75,6 +80,7 @@ src/mst.ts          # Merkle Search Tree build/walk
 src/car.ts          # CARv1 read/write
 src/repo.ts         # commit format/sign/verify
 src/crypto.ts       # P-256 + secp256k1 keygen/sign/verify, did:key, low-S
+src/plc.ts          # did:plc operation core (build/sign/derive-DID/CID/verify)
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
 src/record.ts       # JSON ⇄ DAG-CBOR ($link/$bytes), at:// URIs
