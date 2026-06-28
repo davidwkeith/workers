@@ -141,11 +141,15 @@ export function toHex(bytes: Uint8Array): string {
 /** Decode a lowercase/uppercase hex string back to bytes. */
 export function fromHex(input: string): Uint8Array {
   if (input.length % 2 !== 0) throw new Error("hex: odd-length string");
+  // Validate the whole string up front: Number.parseInt is permissive (it parses
+  // leading hex digits and silently ignores trailing junk, e.g. "1g" → 1), so a
+  // per-slice NaN check would let malformed input through.
+  if (!/^[0-9a-fA-F]*$/.test(input)) {
+    throw new Error("hex: invalid character");
+  }
   const out = new Uint8Array(input.length / 2);
   for (let i = 0; i < out.length; i++) {
-    const byte = Number.parseInt(input.slice(i * 2, i * 2 + 2), 16);
-    if (Number.isNaN(byte)) throw new Error("hex: invalid character");
-    out[i] = byte;
+    out[i] = Number.parseInt(input.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
 }
