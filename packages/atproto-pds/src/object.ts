@@ -377,6 +377,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         });
       case "com.atproto.identity.resolveHandle":
         return this.#resolveHandle(url);
+      case "com.atproto.identity.getRecommendedDidCredentials":
+        return this.#getRecommendedDidCredentials(request);
       case "com.atproto.repo.describeRepo":
         return this.#describeRepo();
       case "com.atproto.repo.createRecord":
@@ -467,6 +469,39 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       indexedRecords: count,
       expectedBlobs: referenced.size,
       importedBlobs,
+    });
+  }
+
+  /**
+   * Recommend the DID credentials that point this account at *this* PDS
+   * (`com.atproto.identity.getRecommendedDidCredentials`). During migration the
+   * client builds a PLC operation from these — our signing key, our endpoint, and
+   * our rotation key (for a `did:plc` we minted) — and signs it with a rotation
+   * key it controls, completing the move. We never hold a migrated account's
+   * rotation key, so we recommend, not sign.
+   */
+  async #getRecommendedDidCredentials(request: Request): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    const cfg = this.#cfg;
+    const genesis = this.#kvGet("plc_genesis");
+    const rotationKeys = genesis
+      ? [...(JSON.parse(genesis) as SignedPlcOperation).rotationKeys]
+      : [];
+    return jsonResponse({
+      rotationKeys,
+      alsoKnownAs: [`at://${cfg.handle}`],
+      verificationMethods: {
+        atproto: didKeyFromPublicKey(
+          this.#publicKeyRaw(),
+          this.#signingCurve(),
+        ),
+      },
+      services: {
+        atproto_pds: {
+          type: "AtprotoPersonalDataServer",
+          endpoint: cfg.baseUrl,
+        },
+      },
     });
   }
 

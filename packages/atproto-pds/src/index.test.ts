@@ -743,6 +743,40 @@ describe("AT Protocol PDS", () => {
     expect(page1.cids).not.toContain(page2.cids[0]);
   });
 
+  it("recommends DID credentials pointing at this PDS", async () => {
+    const host = "rotate.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc", // minted did:plc → has a DO-custodied rotation key
+    });
+    const token = await login(handler, host);
+
+    const creds = (await (
+      await call(
+        handler,
+        host,
+        "/xrpc/com.atproto.identity.getRecommendedDidCredentials",
+        { token },
+      )
+    ).json()) as {
+      rotationKeys: string[];
+      alsoKnownAs: string[];
+      verificationMethods: { atproto: string };
+      services: { atproto_pds: { type: string; endpoint: string } };
+    };
+
+    expect(creds.services.atproto_pds.endpoint).toBe(`https://${host}`);
+    expect(creds.alsoKnownAs).toContain(`at://${host}`);
+    expect(creds.verificationMethods.atproto.startsWith("did:key:z")).toBe(
+      true,
+    );
+    // A minted did:plc account recommends its rotation key (secp256k1 → zQ3sh).
+    expect(creds.rotationKeys.length).toBeGreaterThan(0);
+    expect(creds.rotationKeys[0]!.startsWith("did:key:zQ3sh")).toBe(true);
+  });
+
   it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
     const did = "did:plc:src234src234src234src234";
     const host = "migrated.example";

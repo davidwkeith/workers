@@ -79,6 +79,7 @@ export {
 } from "./identity.js";
 export {
   signPlcOperation,
+  buildRotationOperation,
   unsignedPlcBytes,
   signedPlcBytes,
   didPlcFromGenesis,
@@ -87,6 +88,7 @@ export {
   type UnsignedPlcOperation,
   type SignedPlcOperation,
   type PlcService,
+  type PlcOperationUpdates,
 } from "./plc.js";
 export {
   submitPlcOperation,

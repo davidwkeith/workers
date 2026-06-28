@@ -158,8 +158,14 @@ is **reach vs. fit**:
   `com.atproto.sync.listBlobs` enumerates held blobs and
   `com.atproto.repo.listMissingBlobs` lists blobs referenced by records but not
   yet uploaded, so a migrating client knows exactly which blobs to transfer (via
-  the existing `uploadBlob`) to finish the move. **PLC key rotation** is the last
-  migration piece — and the **firehose** (#184) is still to come. Until migration is complete, a user
+  the existing `uploadBlob`) to finish the move. **PLC key rotation** is wired on
+  the PDS's side: `com.atproto.identity.getRecommendedDidCredentials` recommends
+  the credentials that re-point the DID at this PDS (our signing key, our
+  endpoint, our rotation key for a minted account), and `buildRotationOperation`
+  constructs the chained PLC op — the migrating client signs it with the rotation
+  key it controls (we never hold a migrated account's rotation key) and submits
+  it. That completes the migration surface; the **firehose** (#184) is the last
+  parity gap. Until migration is complete, a user
   who wants to **migrate an existing Bluesky account today** is better served by
   Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
