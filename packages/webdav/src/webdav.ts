@@ -435,6 +435,14 @@ async function copyMove(
   if (isAuxiliary(destination)) return problem(403, "Forbidden destination");
   if (destination === ctx.path)
     return problem(403, "Source and destination are equal");
+  if ((await ctx.backend.stat(ctx.path)) === null) {
+    return problem(404, "Not found");
+  }
+  // A collection cannot be copied/moved into its own subtree (RFC 4918 §9.8.5 /
+  // §9.9.4) — and it would otherwise recurse without end.
+  if (isCollectionPath(ctx.path) && destination.startsWith(ctx.path)) {
+    return problem(409, "Cannot copy or move a collection into itself");
+  }
 
   const depth =
     method === "COPY" ? depthOf(ctx.request, "infinity") : "infinity";
