@@ -18,11 +18,20 @@
  * - {@link inferContentType} / {@link isOsLitter} — OS-client quirk handling
  *   (§3).
  *
- * The `createWebdav` request handler, Class 2 locking, and the per-pod
- * Durable Object integration (lock table + app-password store inside
- * `SolidPodObject`) land in subsequent increments; the lock state and credential
- * hashes are net-new authoritative state and MUST live in the same per-pod DO as
- * the Solid write path (spec §2).
+ * This entry point now also exposes the **Class 2 verb router** and the
+ * authoritative DO-SQLite state it drives:
+ *
+ * - {@link createWebdav} — the RFC 4918 Class 2 request handler, translating
+ *   WebDAV verbs into the injected {@link WebdavBackend} seam (spec "Verb
+ *   surface").
+ * - {@link LockStore} — exclusive write locks in DO SQLite (spec §2).
+ * - {@link CredentialStore} — app-password persistence + throttled verification
+ *   (spec §1).
+ *
+ * The concrete adapter that resolves {@link WebdavBackend} onto the per-pod
+ * `SolidPodObject` (hosting the lock + app-password tables alongside the Solid
+ * write path) is supplied by the composing Worker; keeping the seam injectable
+ * is what lets the router unit-test without standing up the whole pod DO.
  *
  * @see spec/packages/webdav.md
  * @packageDocumentation
@@ -64,3 +73,40 @@ export {
 export { inferContentType } from "./content-type.js";
 
 export { DEFAULT_OS_LITTER, isOsLitter } from "./litter.js";
+
+export {
+  resolveLockPolicy,
+  CollectionNotEmpty,
+  PreconditionFailed,
+  ResourceConflict,
+  type AppPasswordPolicy,
+  type CredentialApi,
+  type LockApi,
+  type LockPolicy,
+  type ResolvedLockPolicy,
+  type ResourceBody,
+  type ResourceStat,
+  type WebdavBackend,
+  type WebdavConfig,
+  type WebdavEnv,
+  type WebdavMode,
+  type WriteOutcome,
+  type WritePreconditions,
+} from "./config.js";
+
+export {
+  LockStore,
+  effectiveTimeout,
+  parseTimeoutHeader,
+  type AcquireParams,
+  type AcquireResult,
+  type LockRecord,
+} from "./locks.js";
+
+export {
+  CredentialStore,
+  type ThrottlePolicy,
+  type VerifyResult,
+} from "./credential-store.js";
+
+export { createWebdav, type WebdavHandler } from "./webdav.js";

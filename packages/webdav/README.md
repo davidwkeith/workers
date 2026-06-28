@@ -11,12 +11,41 @@ _are_ your pod. Solid gives the pod meaning (RDF, LDP, WAC, N3 Patch); WebDAV
 gives the user a way to touch their files from hardware they already own.
 
 > **Status: in progress.** This package is being built bottom-up from
-> [`spec/packages/webdav.md`](../../spec/packages/webdav.md). The current entry
-> point ships the pure **protocol core**; the `createWebdav` request handler,
-> Class 2 locking, and the per-pod Durable Object integration land in subsequent
-> increments. See the spec for the four load-bearing decisions.
+> [`spec/packages/webdav.md`](../../spec/packages/webdav.md). It now ships the
+> protocol core **and** the Class 2 verb router (`createWebdav`) plus the lock
+> and app-password DO-SQLite stores; the concrete `SolidPodObject` backend
+> adapter that resolves the `WebdavBackend` seam onto the per-pod Durable Object
+> is the remaining increment. See the spec for the four load-bearing decisions.
 
-## What's implemented today (protocol core)
+## What's implemented today
+
+### Class 2 verb router
+
+- **`createWebdav(config)`** — the RFC 4918 Class 2 request handler:
+  `OPTIONS` (advertising `DAV: 1, 2`), `PROPFIND` (`Depth: 0`/`1`),
+  `PROPPATCH` (live/known-only), `MKCOL`, `GET`/`HEAD`, `PUT`, `DELETE`,
+  `COPY`/`MOVE`, and `LOCK`/`UNLOCK`. It generates the `multistatus` /
+  `lockdiscovery` XML, infers content types, applies the optional OS-litter
+  denylist, and maps backend errors to `412`/`409`/`423`. Auxiliary `.acl` /
+  `.meta` resources are `404` to every verb and omitted from listings. (spec §3)
+- **Auth bridge** — HTTPS-only HTTP Basic resolving an app password to a WebID,
+  with `scope ∩ WAC` least privilege. (spec §1)
+
+### Authoritative DO-SQLite state
+
+- **`LockStore`** — exclusive write locks in DO SQLite: `opaquelocktoken:<uuid>`
+  tokens, `Depth: 0` resource and **bounded** `Depth: infinity` collection locks
+  (forbidden on the storage root and above a configurable depth),
+  refresh/unlock, and opportunistic expiry pruning. (spec §2)
+- **`CredentialStore`** — app-password persistence (hash-only) with
+  per-credential failed-attempt throttling and constant-time verification.
+  (spec §1)
+
+The router runs over an injected **`WebdavBackend`** seam (the explicit Durable
+Object boundary), so it unit-tests at full DO-SQLite fidelity without standing up
+the whole pod.
+
+### Protocol core
 
 All pure, Workers-runtime-free, and unit-tested:
 

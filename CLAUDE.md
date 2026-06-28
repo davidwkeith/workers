@@ -34,9 +34,11 @@ full release runbook. The hosted conformance suites tracked in
 AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
 P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
 neither `@dwk/store` nor `@dwk/rdf`. `@dwk/webdav` is the newest and is still
-**in progress** — it currently ships only its pure protocol core (XXE-safe XML,
-scoped app passwords, header parsing); the `createWebdav` handler, Class 2
-locking, and the per-pod Durable Object integration land in later increments.
+**in progress** — it now ships the pure protocol core (XXE-safe XML, scoped app
+passwords, header parsing), the Class 2 verb router (`createWebdav`), and the
+lock + app-password DO-SQLite stores (`LockStore`, `CredentialStore`), all driven
+over an injected `WebdavBackend` seam; the concrete `SolidPodObject` backend
+adapter that resolves that seam onto the per-pod DO lands in a later increment.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 

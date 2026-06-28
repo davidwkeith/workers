@@ -353,7 +353,13 @@
       },
       "integration": {
         "status": "pending",
-        "cases": [],
+        "cases": [
+          "app-password Basic auth (HTTPS-only) resolves to a WebID; scope ∩ WAC narrows access",
+          "Class 2 LOCK blocks an unkeyed write/DELETE/MOVE (423) and admits the keyed one",
+          "PROPFIND Depth 0/1 projects live properties; .acl/.meta are 404 and omitted",
+          "PUT/GET round-trip with extension-based content-type inference",
+          "COPY/MOVE honour Depth and Overwrite"
+        ],
         "targets": {
           "node": {
             "status": "pending"
