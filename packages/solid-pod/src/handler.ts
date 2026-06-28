@@ -272,3 +272,66 @@ export function createSolidPodWebdav(config: SolidPodConfig): SolidPodHandler {
     return logPodOutcome(resolved, request, response);
   };
 }
+
+/**
+ * Build the internal DO request for the owner-gated WebDAV app-password endpoint.
+ * Unlike the data door this authenticates with the pod's normal DPoP-bound owner
+ * token at the edge, then forwards only the verified WebID plus the
+ * `x-solid-webdav-admin` marker; the DO re-checks ownership.
+ */
+function internalCredentialsRequest(
+  request: Request,
+  config: ResolvedConfig,
+  webid: string,
+): Request {
+  const headers = new Headers();
+  for (const name of ["content-type", "content-length"] as const) {
+    const value = request.headers.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  headers.set(INTERNAL_HEADERS.webid, webid);
+  headers.set(INTERNAL_HEADERS.config, forwardedConfig(config));
+  headers.set(INTERNAL_HEADERS.webdavAdmin, "1");
+
+  const method = request.method.toUpperCase();
+  const hasBody = method !== "GET" && method !== "HEAD";
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    ...(hasBody ? { body: request.body } : {}),
+  });
+}
+
+/**
+ * Create the owner-gated WebDAV **app-password management** front-door handler
+ * (`@dwk/webdav` §1): `POST` mints a credential (the plaintext is returned once),
+ * `GET` lists the owner's credentials (metadata only), and `DELETE ?id=…` revokes
+ * one. It is guarded by the pod's existing DPoP-bound owner token — minting a
+ * resource-server credential is an owner action, distinct from the Basic-auth
+ * data door. Mount it under a distinct admin path.
+ */
+export function createSolidPodWebdavCredentials(
+  config: SolidPodConfig,
+): SolidPodHandler {
+  const resolved = resolveConfig(config);
+
+  return async (request, env, _ctx) => {
+    assertBindings(env);
+    const result = await authenticate(request, resolved);
+    if (result.kind === "rejected") {
+      emit(resolved, "warn", SolidPodLogEvent.AuthRejected, {
+        reason: result.reason,
+      });
+      return unauthorized(result.reason);
+    }
+    // This endpoint always requires an authenticated owner; an anonymous request
+    // never reaches the DO.
+    const auth = result.kind === "authenticated" ? result.context : null;
+    if (!auth) return unauthorized("authentication_required");
+
+    const forwarded = internalCredentialsRequest(request, resolved, auth.webid);
+    const id = env.POD.idFromName(resolved.baseUrl);
+    const response = await env.POD.get(id).fetch(forwarded);
+    return logPodOutcome(resolved, request, response);
+  };
+}

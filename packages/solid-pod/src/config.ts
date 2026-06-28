@@ -210,6 +210,13 @@ export const INTERNAL_HEADERS = {
    */
   webdav: "x-solid-webdav",
   /**
+   * Front-door→DO: marks the owner-gated WebDAV app-password management endpoint
+   * (mint / list / revoke). Reached only after the Solid front door has verified
+   * a DPoP-bound owner token; the DO re-checks ownership. Set only by the
+   * credentials front door, never passed through from the client.
+   */
+  webdavAdmin: "x-solid-webdav-admin",
+  /**
    * DO→front-door: a machine-readable authorization outcome (see `PodOutcome`)
    * the composition boundary logs via the injected seams, then strips before the
    * response reaches the client.

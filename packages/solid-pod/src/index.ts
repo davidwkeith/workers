@@ -19,6 +19,7 @@
 export {
   createSolidPod,
   createSolidPodWebdav,
+  createSolidPodWebdavCredentials,
   type SolidPodHandler,
 } from "./handler.js";
 export { createSolidPodGc, type SolidPodGcHandler } from "./gc.js";

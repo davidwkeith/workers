@@ -231,6 +231,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
     const method = request.method.toUpperCase();
 
+    // The owner-gated WebDAV app-password management endpoint (mint/list/revoke).
+    if (request.headers.get(INTERNAL_HEADERS.webdavAdmin) === "1") {
+      return this.#webdavCredentialsAdmin(request, agent);
+    }
+
     // The WebDAV "second door": when the front door marks a request, route it
     // through the Class 2 verb router over this same pod's store + lock /
     // app-password SQLite, instead of the Solid LDP path (spec `@dwk/webdav`).
@@ -854,6 +859,104 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   /** The app-password store over this pod's SQLite (built once). */
   #webdavCredentials(): CredentialStore {
     return (this.#credentials ??= new CredentialStore(this.#sql));
+  }
+
+  /**
+   * The owner-gated app-password endpoint (spec §1). The Solid front door has
+   * already verified a DPoP-bound token; here we re-check ownership, then
+   * mint (`POST`), list (`GET`), or revoke (`DELETE ?id=…`). Credentials bind to
+   * the authenticated owner's WebID, and an owner only ever sees / revokes their
+   * own. The minted plaintext secret is returned exactly once.
+   */
+  async #webdavCredentialsAdmin(
+    request: Request,
+    agent: string | undefined,
+  ): Promise<Response> {
+    if (agent === undefined) return text(401, "Unauthorized");
+    if (!this.#owners.includes(agent)) return text(403, "Forbidden");
+
+    const credentials = this.#webdavCredentials();
+    switch (request.method.toUpperCase()) {
+      case "GET":
+        return jsonResponse(
+          200,
+          credentials.list(agent).map((record) => ({
+            credentialId: record.credentialId,
+            label: record.label,
+            scope: record.scope,
+            createdAt: record.createdAt,
+            expiresAt: record.expiresAt,
+          })),
+        );
+
+      case "POST": {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(await request.text());
+        } catch {
+          return text(400, "Invalid JSON body");
+        }
+        const body =
+          parsed && typeof parsed === "object"
+            ? (parsed as Record<string, unknown>)
+            : {};
+        const label =
+          typeof body.label === "string" && body.label.length > 0
+            ? body.label
+            : null;
+        const scopeInput =
+          body.scope && typeof body.scope === "object"
+            ? (body.scope as Record<string, unknown>)
+            : {};
+        const modes = Array.isArray(scopeInput.modes)
+          ? scopeInput.modes.filter(
+              (m): m is "read" | "write" => m === "read" || m === "write",
+            )
+          : [];
+        if (label === null || modes.length === 0) {
+          return text(400, "label and a non-empty scope.modes are required");
+        }
+        const scope = {
+          modes,
+          ...(typeof scopeInput.pathPrefix === "string"
+            ? { pathPrefix: scopeInput.pathPrefix }
+            : {}),
+        };
+        const minted = await credentials.mint({
+          webid: agent,
+          label,
+          scope,
+          ...(typeof body.expiresAt === "number"
+            ? { expiresAt: body.expiresAt }
+            : {}),
+        });
+        // The plaintext secret and username are shown exactly once.
+        return jsonResponse(201, {
+          username: minted.username,
+          secret: minted.secret,
+          credentialId: minted.record.credentialId,
+          label: minted.record.label,
+          scope: minted.record.scope,
+          createdAt: minted.record.createdAt,
+          expiresAt: minted.record.expiresAt,
+        });
+      }
+
+      case "DELETE": {
+        const id = new URL(request.url).searchParams.get("id");
+        if (!id) return text(400, "Missing credential id (?id=…)");
+        const record = credentials.get(id);
+        // An owner may only revoke a credential bound to their own WebID.
+        if (!record || record.webid !== agent) return text(404, "Not Found");
+        credentials.revoke(id);
+        return new Response(null, { status: 204 });
+      }
+
+      default:
+        return text(405, "Method Not Allowed", {
+          allow: "GET, POST, DELETE",
+        });
+    }
   }
 
   /**
@@ -1537,6 +1640,14 @@ function mapStoreError(error: unknown): Error {
     return new WebdavCollectionNotEmpty();
   }
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** A JSON response body with the right content type. */
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
 /** A collection's COPY/MOVE destination must itself be a collection path. */
