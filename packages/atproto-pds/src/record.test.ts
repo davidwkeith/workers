@@ -40,6 +40,17 @@ describe("record JSON ⇄ DAG-CBOR", () => {
     expect(cborToJson(cbor)).toEqual(json);
   });
 
+  it("stores a __proto__ key as data without polluting the prototype", () => {
+    // JSON.parse creates `__proto__` as an own property (no setter), matching
+    // the hostile shape an XRPC client could send as a record.
+    const json = JSON.parse('{"__proto__": { "polluted": true }, "ok": 1}');
+    const cbor = jsonToCbor(json);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // The result keeps the standard prototype; `__proto__` is an own data key.
+    expect(Object.getPrototypeOf(cbor)).toBe(Object.prototype);
+    expect(cborToJson(cbor)).toHaveProperty("ok", 1);
+  });
+
   it("builds repository paths and at:// URIs", () => {
     expect(recordPath("app.bsky.feed.post", "abc")).toBe(
       "app.bsky.feed.post/abc",

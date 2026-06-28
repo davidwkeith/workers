@@ -82,6 +82,17 @@ describe("DAG-CBOR", () => {
     expect(() => decodeCbor(bytes)).toThrow(/out of order or duplicated/);
   });
 
+  it("decodes a __proto__ map key as data without polluting the prototype", () => {
+    // Computed key → an own `__proto__` property (the hostile shape a block
+    // could carry), distinct from the literal `__proto__:` that sets a prototype.
+    const evil: CborValue = { ["__proto__"]: { polluted: true } };
+    const decoded = decodeCbor(encodeCbor(evil)) as Record<string, CborValue>;
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // The result keeps the standard prototype; `__proto__` is an own data key.
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+    expect(decoded["__proto__"]).toEqual({ polluted: true });
+  });
+
   it("rejects trailing bytes", () => {
     const bytes = new Uint8Array([0x01, 0x02]);
     expect(() => decodeCbor(bytes)).toThrow();

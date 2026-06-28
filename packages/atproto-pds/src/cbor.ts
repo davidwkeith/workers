@@ -87,6 +87,31 @@ function compareKeyBytes(a: Uint8Array, b: Uint8Array): number {
   return 0;
 }
 
+/**
+ * Assign a key parsed from untrusted input onto a plain object, guarding the one
+ * key — `__proto__` — whose plain assignment would invoke the inherited setter
+ * and poison the prototype chain instead of storing an own property. A data
+ * descriptor sidesteps the setter; every other key uses ordinary assignment, so
+ * the object keeps the standard `Object.prototype` (and methods like
+ * `hasOwnProperty`) that consumers of this value model expect.
+ */
+export function assignKey<T>(
+  target: { [key: string]: T },
+  key: string,
+  value: T,
+): void {
+  if (key === "__proto__") {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  } else {
+    target[key] = value;
+  }
+}
+
 function encodeValue(value: CborValue, out: Uint8Array[]): void {
   if (value === null) {
     out.push(Uint8Array.from([(MAJOR.simple << 5) | 22]));
@@ -278,7 +303,9 @@ function readValue(reader: Reader): CborValue {
           throw new Error("dag-cbor: map keys out of order or duplicated");
         }
         prevKey = keyBytes;
-        obj[textDecoder.decode(keyBytes)] = readValue(reader);
+        // Decoded blocks are untrusted; guard the `__proto__` key so it becomes
+        // an own property rather than poisoning the prototype chain.
+        assignKey(obj, textDecoder.decode(keyBytes), readValue(reader));
       }
       return obj;
     }
