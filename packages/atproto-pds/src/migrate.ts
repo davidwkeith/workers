@@ -111,8 +111,23 @@ export async function importRepoFromCar(
   }
   const head = roots[0] as CID;
 
+  // A CAR is untrusted external input: its records are only as trustworthy as
+  // the chain from the *signed* root commit down to each block. That chain is
+  // by content address, so every block must hash to the CID it is filed under —
+  // otherwise a tampered CAR could swap MST-node or record bytes under the
+  // expected CIDs and the root-commit signature would still "verify" while the
+  // recovered records are forged. Recompute and compare each block's CID (every
+  // block in a parsed CAR is CIDv1/SHA-256, so `CID.create` reproduces it).
   const index = new Map<string, Uint8Array>();
-  for (const block of blocks) index.set(block.cid.toString(), block.bytes);
+  for (const block of blocks) {
+    const computed = await CID.create(block.cid.codec, block.bytes);
+    if (!computed.equals(block.cid)) {
+      throw new Error(
+        `migrate: CAR block ${block.cid.toString()} does not match its content (expected ${computed.toString()})`,
+      );
+    }
+    index.set(block.cid.toString(), block.bytes);
+  }
   const getBlock = (cid: CID): Uint8Array | undefined =>
     index.get(cid.toString());
 

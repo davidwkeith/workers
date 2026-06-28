@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { writeCar, type CarBlock } from "./car.js";
+import { readCar, writeCar, type CarBlock } from "./car.js";
 import { encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC } from "./cid.js";
 import { createRepoKeypair, loadSigner } from "./crypto.js";
@@ -115,6 +115,37 @@ describe("importRepoFromCar", () => {
         verifyKey: { publicKeyRaw: wrong.publicKeyRaw, curve: "p256" },
       }),
     ).rejects.toThrow(/signature failed to verify/);
+  });
+
+  it("rejects a CAR whose block content does not match its CID (tamper detection)", async () => {
+    const did = "did:plc:abc234abc234abc234abc234";
+    const { car, keypair } = await buildRepoCar(did, "p256", [
+      {
+        collection: "app.bsky.feed.post",
+        rkey: "x",
+        value: { $type: "app.bsky.feed.post", text: "real" },
+      },
+    ]);
+    // Swap the record block's bytes while keeping its declared CID. The root
+    // commit is untouched, so its signature still verifies with the real key —
+    // this forgery is caught only by the block content-address check.
+    const parsed = readCar(car);
+    const tampered = parsed.blocks.map((block, i) =>
+      i === 0
+        ? {
+            cid: block.cid,
+            bytes: encodeCbor(
+              jsonToCbor({ $type: "app.bsky.feed.post", text: "forged" }),
+            ),
+          }
+        : block,
+    );
+    const forgedCar = writeCar(parsed.roots, tampered);
+    await expect(
+      importRepoFromCar(forgedCar, {
+        verifyKey: { publicKeyRaw: keypair.publicKeyRaw, curve: keypair.curve },
+      }),
+    ).rejects.toThrow(/does not match its content/);
   });
 
   it("throws on a CAR with no root commit", async () => {
