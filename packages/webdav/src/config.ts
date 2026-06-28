@@ -94,12 +94,18 @@ export interface WebdavBackend {
   listChildren(path: string): Promise<readonly ResourceStat[]>;
   /** Stream a resource body; `null` when absent or a collection. */
   read(path: string): Promise<ResourceBody | null>;
-  /** Create or replace a resource. */
+  /**
+   * Create or replace a resource. `contentLength` is the client's declared
+   * `Content-Length` (or `null` when absent); a backend that size-routes a body
+   * (inline vs. streamed) needs it so a large, correctly-sized `PUT` is not
+   * rejected for want of a length.
+   */
   write(
     path: string,
     body: ReadableStream<Uint8Array> | null,
     contentType: string,
     preconditions: WritePreconditions,
+    contentLength?: number | null,
   ): Promise<WriteOutcome>;
   /** Create a collection (`MKCOL`). */
   makeCollection(path: string): Promise<WriteOutcome>;

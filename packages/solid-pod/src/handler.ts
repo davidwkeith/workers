@@ -89,6 +89,9 @@ const WEBDAV_FORWARDED_HEADERS = [
   "timeout",
   "lock-token",
   "origin",
+  // OS WebDAV clients have distinct quirks; forward their UA for client-specific
+  // handling and diagnostics.
+  "user-agent",
 ] as const;
 
 /** Build the internal DO request, stripping any client-supplied auth headers. */

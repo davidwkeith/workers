@@ -97,6 +97,14 @@ const SERIALIZE_PREFIXES: Record<string, string> = {
 
 const DEFAULT_GRAPH: StoredTerm = { termType: "DefaultGraph", value: "" };
 
+/**
+ * Stable `getlastmodified` stand-in for the WebDAV door until the store tracks a
+ * per-resource mtime. A *constant* (the Unix epoch) is deliberate: a moving
+ * value would make OS clients believe every file changes on each poll, breaking
+ * their caching. Correctness rides on ETags, not this.
+ */
+const WEBDAV_FALLBACK_MTIME = 0;
+
 /** Config the front door forwards to the DO (everything else is per-request). */
 interface ForwardedConfig {
   readonly maxInlineBytes?: number;
@@ -866,7 +874,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       return text(501, "COPY/MOVE are not yet implemented over WebDAV");
     }
     if (method === "DELETE" && path === this.#storageRoot) {
-      return text(405, "The storage root container cannot be deleted");
+      return text(405, "The storage root container cannot be deleted", {
+        allow: this.#allow(path),
+      });
     }
     if (this.#webdavHandler === null) {
       const baseUrl =
@@ -915,9 +925,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         etag: meta.etag,
         contentType,
         contentLength,
-        // The store does not yet track a per-resource modified time; surface a
-        // stand-in until a size/mtime column lands (documented limitation).
-        lastModified: Date.now(),
+        // The store does not yet track a per-resource modified time. A *stable*
+        // stand-in (not `Date.now()`) is deliberate: a moving mtime makes OS
+        // clients think the file changes every poll, breaking their caching.
+        // ETags drive correctness; mtime is cosmetic until a column lands.
+        lastModified: WEBDAV_FALLBACK_MTIME,
       };
     };
 
@@ -930,24 +942,35 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
           .readQuads(path)
           .filter((q) => isContainsQuad(q, containerIri))
           .map((q) => q.object.value);
-        const out: ResourceStat[] = [];
-        for (const iri of children) {
-          const child = await statOf(toPath(iri));
-          if (child) out.push(child);
-        }
-        return out;
+        // Stat children concurrently: a blob's stat costs an R2 round-trip, so a
+        // sequential loop would serialize a whole Depth: 1 listing.
+        const stats = await Promise.all(
+          children.map((iri) => statOf(toPath(iri))),
+        );
+        return stats.filter((child): child is ResourceStat => child !== null);
       },
 
       read: async (path: string): Promise<ResourceBody | null> => {
         const meta = store.head(path);
         if (!meta || isContainer(path)) return null;
-        const stat = await statOf(path);
-        if (!stat) return null;
         if (meta.kind === "blob") {
+          // One R2 read: build the stat from the blob's own metadata rather than
+          // calling `statOf` (which would itself read + cancel the blob — two
+          // R2 gets per WebDAV GET).
           const blob = await store.readBlob(path);
           if (!blob) return null;
+          const stat: ResourceStat = {
+            path,
+            collection: false,
+            etag: meta.etag,
+            contentType: blob.contentType || meta.contentType,
+            contentLength: blob.size,
+            lastModified: WEBDAV_FALLBACK_MTIME,
+          };
           return { stat, body: blob.stream };
         }
+        const stat = await statOf(path);
+        if (!stat) return null;
         // An RDF resource is serialized to Turtle on the way out so OS clients
         // see a concrete file, mirroring the Solid GET default serialization.
         const quads = store.readQuads(path).map(storedToQuad);
@@ -971,6 +994,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         body: ReadableStream<Uint8Array> | null,
         contentType: string,
         preconditions: WritePreconditions,
+        contentLength: number | null = null,
       ): Promise<WriteOutcome> => {
         const existed = store.head(path) !== null;
         try {
@@ -980,7 +1004,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
             path,
             body,
             contentType,
-            null,
+            contentLength,
             webdavPreconditions(preconditions),
           );
         } catch (error) {

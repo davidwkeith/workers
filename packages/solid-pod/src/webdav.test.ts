@@ -200,6 +200,43 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  it("streams a PUT larger than the inline ceiling instead of failing 411", async () => {
+    const baseUrl = freshBase();
+    const cred = await mintCredential(baseUrl, RW);
+    const basic = `Basic ${btoa(`${cred.username}:${cred.secret}`)}`;
+    // A tiny inline ceiling forces the size-routing path; the declared
+    // Content-Length must let the body stream to R2 rather than 411.
+    const handler = createSolidPodWebdav({
+      baseUrl,
+      owner: OWNER,
+      maxInlineBytes: 8,
+    });
+    const body = "x".repeat(64);
+    const put = await handler(
+      new Request(`${baseUrl}/big.bin`, {
+        method: "PUT",
+        headers: {
+          authorization: basic,
+          "content-type": "application/octet-stream",
+          "content-length": "64",
+        },
+        body,
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(put.status).toBe(201);
+    const get = await handler(
+      new Request(`${baseUrl}/big.bin`, {
+        method: "GET",
+        headers: { authorization: basic },
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(await get.text()).toBe(body);
+  });
+
   it("returns 501 for COPY/MOVE (deferred to a later increment)", async () => {
     await withPod(RW, async ({ call }) => {
       await call("PUT", "/src.txt", { body: "x" });
