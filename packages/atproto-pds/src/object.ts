@@ -40,7 +40,9 @@ import {
   type Signer,
 } from "./crypto.js";
 import { buildDidDocument } from "./identity.js";
+import { importRepoFromCar } from "./migrate.js";
 import { submitPlcOperation } from "./plc-directory.js";
+import { resolveSigningKey } from "./resolve.js";
 import {
   didPlcFromGenesis,
   signPlcOperation,
@@ -362,6 +364,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#putRecord(request);
       case "com.atproto.repo.deleteRecord":
         return this.#deleteRecord(request);
+      case "com.atproto.repo.importRepo":
+        return this.#importRepo(request);
       case "com.atproto.repo.getRecord":
         return this.#getRecord(url);
       case "com.atproto.repo.listRecords":
@@ -738,6 +742,64 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   #blobKey(cid: CID): string {
     return `blob/${this.#accountDid()}/${cid.toString()}`;
+  }
+
+  // --- migration ------------------------------------------------------------
+
+  /**
+   * Import a repository CAR export from a source PDS (`com.atproto.repo.importRepo`).
+   *
+   * The CAR is verified against the source account's signing key — resolved from
+   * its DID document (the directory for `did:plc`, the origin for `did:web`),
+   * which still points at the source until cutover — then its record set replaces
+   * ours and a fresh head commit is signed with *our* key, chaining `prev` to the
+   * imported head (the agreed "re-sign on top" model). The current-state store
+   * keeps the imported records, not the source's deeper commit history.
+   */
+  async #importRepo(request: Request): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    const did = this.#accountDid();
+    const verifyKey = await resolveSigningKey(did, {
+      plcDirectoryUrl: this.#cfg.plcDirectoryUrl,
+    });
+    const carBytes = new Uint8Array(await request.arrayBuffer());
+    const imported = await importRepoFromCar(carBytes, { verifyKey });
+    if (imported.did !== did) {
+      throw invalidRequest(
+        `importRepo: CAR is for ${imported.did}, not this account (${did})`,
+      );
+    }
+
+    // Replace the record set with the imported records, stored verbatim so their
+    // CIDs are preserved, then re-sign a fresh head over them. The clear + inserts
+    // run in one transaction so the record set is never left half-replaced (and to
+    // avoid a per-statement fsync).
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      this.#sql.exec("DELETE FROM records");
+      for (const record of imported.records) {
+        this.#sql.exec(
+          `INSERT INTO records (collection, rkey, cid, value, indexed_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          record.collection,
+          record.rkey,
+          record.cid.toString(),
+          base64(record.bytes),
+          now,
+        );
+      }
+      // Chain the next commit's `prev` to the imported head — atomic with the
+      // record replacement.
+      this.#kvSet("head_cid", imported.head.toString());
+      this.#kvSet("head_rev", imported.rev);
+    });
+    const rev = await this.#commit();
+    return jsonResponse({
+      did,
+      head: this.#kvGet("head_cid"),
+      rev,
+      importedRecords: imported.records.length,
+    });
   }
 
   // --- commit + sync --------------------------------------------------------

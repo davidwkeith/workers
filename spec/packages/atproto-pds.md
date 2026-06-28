@@ -143,12 +143,18 @@ is **reach vs. fit**:
   support** ([#182](https://github.com/davidwkeith/workers/issues/182) — operation
   core, account wiring, and the directory client) have landed; **account
   migration** ([#183](https://github.com/davidwkeith/workers/issues/183)) is in
-  progress — the CAR **import core** (`migrate.ts`: parse a repo export, verify
-  the root commit signature, and recover its records) has landed, with the
-  `importRepo` XRPC + `createAccount`-with-existing-DID, blob import, the
-  activate/deactivate cutover, and PLC rotation to follow — and the **firehose**
-  (#184) is still to come. Until migration is complete, a user who wants to
-  **migrate an existing Bluesky account today** is better served by Cirrus.
+  progress — the CAR **import core** (`migrate.ts`) and the
+  **`com.atproto.repo.importRepo`** handler have landed: an authenticated import
+  resolves the source account's signing key from its DID document
+  (`resolve.ts` — the directory for `did:plc`, the origin for `did:web`, decoding
+  the `Multikey` via `decodeMultikey`), **verifies** the CAR's root commit against
+  it, replaces the record set with the imported records, and **re-signs a fresh
+  head** with our key chaining `prev` to the imported head (the agreed model;
+  pre-migration history beyond that boundary is not retained by the current-state
+  store). Blob import, the activate/deactivate cutover, and PLC rotation follow —
+  and the **firehose** (#184) is still to come. Until migration is complete, a user
+  who wants to **migrate an existing Bluesky account today** is better served by
+  Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be

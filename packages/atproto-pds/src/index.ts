@@ -65,9 +65,11 @@ export {
   exportPublicKeyRaw,
   createRepoKeypair,
   loadSigner,
+  decodeMultikey,
   type SigningCurve,
   type RepoKeypair,
   type Signer,
+  type DecodedMultikey,
 } from "./crypto.js";
 export {
   buildDidDocument,
@@ -101,6 +103,11 @@ export {
   type ImportRepoOptions,
   type ImportVerifyKey,
 } from "./migrate.js";
+export {
+  resolveDidDocument,
+  resolveSigningKey,
+  type ResolveOptions,
+} from "./resolve.js";
 export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,

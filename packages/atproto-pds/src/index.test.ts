@@ -2,10 +2,15 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { base58btcDecode } from "./bytes.js";
-import { readCar } from "./car.js";
-import { decodeCbor } from "./cbor.js";
+import { readCar, writeCar, type CarBlock } from "./car.js";
+import { decodeCbor, encodeCbor } from "./cbor.js";
+import { CID, DAG_CBOR_CODEC } from "./cid.js";
+import { createRepoKeypair, loadSigner, publicKeyMultibase } from "./crypto.js";
+import { buildMst, type MstEntry } from "./mst.js";
 import { plcRetryDelayMs } from "./object.js";
-import { verifyCommit, type SignedCommit } from "./repo.js";
+import { jsonToCbor, recordPath, type JsonValue } from "./record.js";
+import { formatCommit, verifyCommit, type SignedCommit } from "./repo.js";
+import { TidClock } from "./tid.js";
 import { createAtprotoPds, type AtprotoPdsEnv } from "./index.js";
 
 /**
@@ -553,6 +558,113 @@ describe("AT Protocol PDS", () => {
     expect(plcRetryDelayMs(2)).toBe(20_000);
     expect(plcRetryDelayMs(3)).toBe(40_000);
     expect(plcRetryDelayMs(50)).toBe(3_600_000); // capped at 1h
+  });
+
+  it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
+    const did = "did:plc:src234src234src234src234";
+    const host = "migrated.example";
+
+    // A source repository, signed by the *source* account's key.
+    const source = await createRepoKeypair("secp256k1");
+    const sourceSign = await loadSigner(source.curve, source.privateKeyExport);
+    const recordValue: JsonValue = {
+      $type: "app.bsky.feed.post",
+      text: "migrated post",
+    };
+    const recordBytes = encodeCbor(jsonToCbor(recordValue));
+    const recordCid = await CID.create(DAG_CBOR_CODEC, recordBytes);
+    const entries: MstEntry[] = [
+      { key: recordPath("app.bsky.feed.post", "aaa"), value: recordCid },
+    ];
+    const mst = await buildMst(entries);
+    const carBlocks: CarBlock[] = [{ cid: recordCid, bytes: recordBytes }];
+    for (const [cidStr, bytes] of mst.blocks) {
+      carBlocks.push({ cid: CID.parse(cidStr), bytes });
+    }
+    const formatted = await formatCommit(
+      {
+        did,
+        version: 3,
+        data: mst.root,
+        rev: new TidClock().next(),
+        prev: null,
+      },
+      sourceSign,
+    );
+    carBlocks.push({ cid: formatted.cid, bytes: formatted.bytes });
+    const car = writeCar([formatted.cid], carBlocks);
+    const importedHead = formatted.cid.toString();
+
+    // The DID (still pointing at the source pre-cutover) advertises the source key.
+    const realFetch = globalThis.fetch;
+    const sourceMultibase = publicKeyMultibase(
+      source.publicKeyRaw,
+      source.curve,
+    );
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url === `https://plc.test/${did}`) {
+        return new Response(
+          JSON.stringify({
+            id: did,
+            verificationMethod: [
+              {
+                id: `${did}#atproto`,
+                type: "Multikey",
+                publicKeyMultibase: sourceMultibase,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return realFetch(input as RequestInfo, init);
+    });
+
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc",
+      did, // adopt the existing did:plc (migration)
+      plcDirectoryUrl: "https://plc.test",
+    });
+    const token = await login(handler, host);
+
+    const res = await call(handler, host, "/xrpc/com.atproto.repo.importRepo", {
+      raw: car,
+      contentType: "application/vnd.ipld.car",
+      token,
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { importedRecords: number }).toMatchObject({
+      importedRecords: 1,
+    });
+
+    // The imported record is served from our store.
+    const got = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.repo.getRecord?collection=app.bsky.feed.post&rkey=aaa",
+      { token },
+    );
+    expect(((await got.json()) as { value: JsonValue }).value).toMatchObject({
+      text: "migrated post",
+    });
+
+    // The new head is signed afresh and chains `prev` to the imported head.
+    const carRes = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.sync.getRepo?did=" + host,
+    );
+    const parsed = readCar(new Uint8Array(await carRes.arrayBuffer()));
+    const rootBlock = parsed.blocks.find((b) =>
+      b.cid.equals(parsed.roots[0]!),
+    )!;
+    const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
+    expect(commit.did).toBe(did);
+    expect(commit.prev?.toString()).toBe(importedHead);
   });
 });
 
