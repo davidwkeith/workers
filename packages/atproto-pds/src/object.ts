@@ -190,7 +190,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // from migration, is taken as-is).
     this.#kvSet("account_did", await this.#resolveAccountDid(keypair));
     await this.#commit();
-    await this.#maybeSubmitPlcGenesis();
+    // Register with the PLC directory in the background: it is best-effort and
+    // non-fatal, so it must not block repo init (and thus the first request) on
+    // an external network call. `waitUntil` keeps the DO alive until it settles.
+    this.ctx.waitUntil(this.#maybeSubmitPlcGenesis());
   }
 
   /**

@@ -485,12 +485,13 @@ describe("AT Protocol PDS", () => {
       didMethod: "plc",
       plcDirectoryUrl: "https://plc.test",
     });
-    // First request triggers genesis (and thus submission).
+    // First request triggers genesis; submission runs in the background via
+    // waitUntil, so poll for it rather than asserting synchronously.
     const did = await (
       await call(handler, host, "/.well-known/atproto-did")
     ).text();
 
-    expect(seen).toHaveLength(1);
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
     expect(seen[0]!.url).toBe(`https://plc.test/${did}`);
     expect(seen[0]!.method).toBe("POST");
     const op = JSON.parse(seen[0]!.body as string) as {
