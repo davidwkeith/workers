@@ -41,9 +41,10 @@ over an injected `WebdavBackend` seam. `@dwk/solid-pod` now resolves that seam
 onto the live per-pod `SolidPodObject` (via `createSolidPodWebdav` + an in-DO
 adapter over `@dwk/store`/WAC), so the pod is mountable as a network drive, with
 `COPY`/`MOVE` (resource + collection) and the owner-gated app-password
-mint/list/revoke endpoint (`createSolidPodWebdavCredentials`) now implemented;
-per-resource size/mtime in the store and the litmus run are the remaining
-increment.
+mint/list/revoke endpoint (`createSolidPodWebdavCredentials`) now implemented,
+and `@dwk/store` tracking per-resource byte size + mtime (so PROPFIND
+`getcontentlength`/`getlastmodified` are real); the hosted litmus run is the
+remaining increment.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 

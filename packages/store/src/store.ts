@@ -39,6 +39,15 @@ export interface ResourceMeta {
   readonly kind: ResourceKind;
   readonly etag: string;
   readonly contentType: string;
+  /**
+   * Byte size of the resource's stored representation: the blob body for a
+   * `blob`, or the byte length passed to {@link Store.putResource} for inline
+   * RDF. `0` for resources with no canonical byte body (e.g. containers) or
+   * those written before size tracking.
+   */
+  readonly size: number;
+  /** Last-modified time (epoch ms), refreshed on every write. */
+  readonly modifiedAt: number;
 }
 
 /** A streamed blob body. The `stream` is read straight from R2, never buffered. */
@@ -80,6 +89,14 @@ export interface WriteOptions {
   readonly ifNoneMatch?: string;
   /** Content type recorded on the pointer. */
   readonly contentType?: string;
+  /**
+   * Byte size of the representation, recorded on the pointer for metadata (e.g.
+   * WebDAV `getcontentlength`). The blob write path measures this itself; supply
+   * it for inline RDF where the byte length is known but the store sees only
+   * quads. Defaults to `0` (resources with no canonical byte body, e.g.
+   * containers).
+   */
+  readonly size?: number;
   /**
    * Invariant or side effect run inside the write transaction, after the
    * `ifMatch` / `ifNoneMatch` checks pass and before any mutation. Throw to
@@ -256,6 +273,8 @@ interface ResourceRow {
   readonly etag: string;
   readonly contentType: string;
   readonly blobKey: string | null;
+  readonly size: number;
+  readonly modifiedAt: number;
 }
 
 /**
@@ -276,6 +295,18 @@ export function createStore(
 
   const sql = state.storage.sql;
   for (const ddl of SCHEMA) sql.exec(ddl);
+  // Migration: pods created before per-resource `size` tracking predate the
+  // column. Add it idempotently (CREATE TABLE IF NOT EXISTS won't alter an
+  // existing table). Existing rows default to 0, which is the right "unknown
+  // size" for already-stored resources.
+  const resourceColumns = sql
+    .exec<{ name: string }>("PRAGMA table_info(resources)")
+    .toArray();
+  if (!resourceColumns.some((column) => column.name === "size")) {
+    sql.exec(
+      "ALTER TABLE resources ADD COLUMN size INTEGER NOT NULL DEFAULT 0",
+    );
+  }
 
   const maxInlineBytes = config.maxInlineBytes ?? DEFAULT_MAX_INLINE_BYTES;
   const blobPrefix = `${state.id.toString()}/blobs`;
@@ -287,8 +318,10 @@ export function createStore(
         etag: string;
         content_type: string;
         blob_key: string | null;
+        size: number;
+        updated_at: number;
       }>(
-        "SELECT kind, etag, content_type, blob_key FROM resources WHERE key = ?",
+        "SELECT kind, etag, content_type, blob_key, size, updated_at FROM resources WHERE key = ?",
         key,
       )
       .toArray();
@@ -299,6 +332,8 @@ export function createStore(
       etag: row.etag,
       contentType: row.content_type,
       blobKey: row.blob_key,
+      size: row.size,
+      modifiedAt: row.updated_at,
     };
   }
 
@@ -349,7 +384,9 @@ export function createStore(
    * corrupting a direct-bucket read of another resource. The authoritative
    * content type lives on the per-resource pointer; reads go through the Worker.
    */
-  async function stageAndHash(stream: ReadableStream): Promise<string> {
+  async function stageAndHash(
+    stream: ReadableStream,
+  ): Promise<{ hash: string; size: number }> {
     const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
     try {
       // 1. Stream to staging. A single consumer (R2) means upload backpressure
@@ -360,6 +397,8 @@ export function createStore(
       if (!staged) {
         throw new Error("@dwk/store: staged blob disappeared before hashing");
       }
+      // R2 reports the staged object's byte size without buffering it here.
+      const size = staged.size;
       const digest = new crypto.DigestStream("SHA-256");
       await staged.body.pipeTo(digest);
       const hash = toHex(await digest.digest);
@@ -374,15 +413,17 @@ export function createStore(
         }
         await env.BLOBS.put(blobKey, toCopy.body);
       }
-      return hash;
+      return { hash, size };
     } finally {
       // The staged object is transient regardless of outcome.
       await env.BLOBS.delete(stagingKey);
     }
   }
 
-  /** Write a blob body to its content-addressed R2 key, returning its hash. */
-  async function writeBlobObject(body: BlobBodyInit): Promise<string> {
+  /** Write a blob body to its content-addressed R2 key, returning hash + size. */
+  async function writeBlobObject(
+    body: BlobBodyInit,
+  ): Promise<{ hash: string; size: number }> {
     if (body instanceof ReadableStream || body instanceof Blob) {
       const stream = body instanceof Blob ? body.stream() : body;
       return stageAndHash(stream);
@@ -391,7 +432,7 @@ export function createStore(
     const bytes = toBytes(body);
     const hash = await sha256Hex(bytes);
     await env.BLOBS.put(`${blobPrefix}/sha256-${hash}`, bytes);
-    return hash;
+    return { hash, size: bytes.byteLength };
   }
 
   /** Outbox a blob key iff no surviving resource still points at it. */
@@ -452,18 +493,24 @@ export function createStore(
     );
   }
 
-  function upsertRdfPointer(key: string, etag: string, contentType: string) {
+  function upsertRdfPointer(
+    key: string,
+    etag: string,
+    contentType: string,
+    size: number,
+  ) {
     sql.exec(
-      `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
-       VALUES (?, 'rdf', ?, ?, NULL, ?)
+      `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at, size)
+       VALUES (?, 'rdf', ?, ?, NULL, ?, ?)
        ON CONFLICT(key) DO UPDATE SET
          kind = 'rdf', etag = excluded.etag,
          content_type = excluded.content_type, blob_key = NULL,
-         updated_at = excluded.updated_at`,
+         updated_at = excluded.updated_at, size = excluded.size`,
       key,
       etag,
       contentType,
       Date.now(),
+      size,
     );
   }
 
@@ -482,6 +529,8 @@ export function createStore(
         kind: row.kind,
         etag: row.etag,
         contentType: row.contentType,
+        size: row.size,
+        modifiedAt: row.modifiedAt,
       };
     },
 
@@ -495,8 +544,10 @@ export function createStore(
           kind: string;
           etag: string;
           content_type: string;
+          size: number;
+          updated_at: number;
         }>(
-          `SELECT key, kind, etag, content_type FROM resources
+          `SELECT key, kind, etag, content_type, size, updated_at FROM resources
            WHERE key LIKE ? ESCAPE '\\' ORDER BY key`,
           `${escaped}%`,
         )
@@ -506,6 +557,8 @@ export function createStore(
           kind: row.kind as ResourceKind,
           etag: row.etag,
           contentType: row.content_type,
+          size: row.size,
+          modifiedAt: row.updated_at,
         }));
     },
 
@@ -534,7 +587,7 @@ export function createStore(
           outboxIfUnreferenced(current.blobKey);
         }
         sql.exec("DELETE FROM quads WHERE resource = ?", key);
-        upsertRdfPointer(key, etag, contentType);
+        upsertRdfPointer(key, etag, contentType, options.size ?? 0);
         insertQuads(key, quads);
       });
       return etag;
@@ -557,6 +610,9 @@ export function createStore(
           key,
           etag,
           options.contentType ?? current?.contentType ?? "text/turtle",
+          // A patch rewrites quads with no new byte representation; keep the
+          // last known size rather than resetting it.
+          options.size ?? current?.size ?? 0,
         );
       });
       return etag;
@@ -578,7 +634,7 @@ export function createStore(
       //    fresh per-write opaque validator — a content-addressed ETag would
       //    collide across distinct resources sharing the same bytes, so an
       //    `If-Match` against one could be satisfied by an unrelated other.
-      const hash = await writeBlobObject(body);
+      const { hash, size } = await writeBlobObject(body);
       const blobKey = `${blobPrefix}/sha256-${hash}`;
       const etag = randomEtag();
 
@@ -590,17 +646,18 @@ export function createStore(
           options.guard?.();
           sql.exec("DELETE FROM quads WHERE resource = ?", key);
           sql.exec(
-            `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at)
-             VALUES (?, 'blob', ?, ?, ?, ?)
+            `INSERT INTO resources (key, kind, etag, content_type, blob_key, updated_at, size)
+             VALUES (?, 'blob', ?, ?, ?, ?, ?)
              ON CONFLICT(key) DO UPDATE SET
                kind = 'blob', etag = excluded.etag,
                content_type = excluded.content_type, blob_key = excluded.blob_key,
-               updated_at = excluded.updated_at`,
+               updated_at = excluded.updated_at, size = excluded.size`,
             key,
             etag,
             contentType,
             blobKey,
             Date.now(),
+            size,
           );
           // Resurrection guard: this content-addressed key is referenced again.
           // Cancel its orphan record so GC cannot reclaim a now-live object.
@@ -664,7 +721,12 @@ export function createStore(
     async putResource(key, body, options) {
       const bytes = toBytes(body);
       if (options.quads && store.route(bytes.byteLength) === "sqlite") {
-        const etag = store.writeQuads(key, options.quads, options);
+        // Record the source byte length so `getcontentlength`-style metadata is
+        // available for inline RDF (the store otherwise sees only quads).
+        const etag = store.writeQuads(key, options.quads, {
+          ...options,
+          size: bytes.byteLength,
+        });
         return { etag, tier: "sqlite" };
       }
       const etag = await store.putBlob(key, bytes, options);

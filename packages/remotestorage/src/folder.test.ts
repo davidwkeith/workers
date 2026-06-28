@@ -14,7 +14,7 @@ function meta(
   etag: string,
   contentType = "text/plain",
 ): ResourceMeta {
-  return { key, etag, contentType, kind: "blob" };
+  return { key, etag, contentType, kind: "blob", size: 0, modifiedAt: 0 };
 }
 
 describe("buildFolderModel", () => {
