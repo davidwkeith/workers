@@ -106,6 +106,22 @@ describe("did:plc operations", () => {
     ).toBe(true);
   });
 
+  it("refuses to derive a DID from a non-genesis operation", async () => {
+    const { op, sign } = await genesis();
+    const rotationOp = { ...op, prev: "bafytestcid" };
+    const signed = await signPlcOperation(rotationOp, sign);
+    await expect(didPlcFromGenesis(signed)).rejects.toThrow(/genesis/);
+  });
+
+  it("returns false (not throws) for a malformed signature", async () => {
+    const { op, rotation, sign } = await genesis();
+    const signed = await signPlcOperation(op, sign);
+    const bad = { ...signed, sig: "not valid base64url!!" };
+    expect(
+      await verifyPlcOperation(bad, rotation.publicKeyRaw, "secp256k1"),
+    ).toBe(false);
+  });
+
   it("chains a rotation operation to the genesis op via its CID", async () => {
     const { op, rotation, sign } = await genesis();
     const signedGenesis = await signPlcOperation(op, sign);

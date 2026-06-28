@@ -99,6 +99,11 @@ export async function signPlcOperation(
 export async function didPlcFromGenesis(
   op: SignedPlcOperation,
 ): Promise<string> {
+  if (op.prev !== null) {
+    throw new Error(
+      "plc: a did:plc is derived only from the genesis operation (prev must be null)",
+    );
+  }
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", signedPlcBytes(op) as BufferSource),
   );
@@ -119,10 +124,16 @@ export async function verifyPlcOperation(
   rotationKeyRaw: Uint8Array,
   curve: SigningCurve,
 ): Promise<boolean> {
-  return verifyData(
-    rotationKeyRaw,
-    unsignedPlcBytes(op),
-    base64urlDecode(op.sig),
-    curve,
-  );
+  // A verification predicate should return false on malformed input (e.g. a
+  // non-base64url `sig` or a wrong-length key) rather than throw.
+  try {
+    return await verifyData(
+      rotationKeyRaw,
+      unsignedPlcBytes(op),
+      base64urlDecode(op.sig),
+      curve,
+    );
+  } catch {
+    return false;
+  }
 }
