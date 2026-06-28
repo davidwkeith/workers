@@ -85,6 +85,13 @@ export function plcRetryDelayMs(attempt: number): number {
   return Math.min(PLC_SUBMIT_BASE_MS * 2 ** (attempt - 1), PLC_SUBMIT_CAP_MS);
 }
 
+/** Parse a `limit` query param, applying a default and clamping to [1, max]. */
+function clampLimit(raw: string | null, fallback: number, max: number): number {
+  const n = raw ? Number.parseInt(raw, 10) : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(max, n));
+}
+
 function base64(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -130,6 +137,13 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       `CREATE TABLE IF NOT EXISTS blobs (
          cid TEXT PRIMARY KEY, mime TEXT NOT NULL, size INTEGER NOT NULL,
          created_at INTEGER NOT NULL)`,
+    );
+    // Index of blob CIDs each record references, so the referenced-blob set is a
+    // cheap `SELECT DISTINCT` rather than a scan-and-decode of every record.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS record_blobs (
+         collection TEXT NOT NULL, rkey TEXT NOT NULL, blob_cid TEXT NOT NULL,
+         PRIMARY KEY (collection, rkey, blob_cid))`,
     );
   }
 
@@ -668,6 +682,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         collection,
         rkey,
       );
+      this.#sql.exec(
+        "DELETE FROM record_blobs WHERE collection = ? AND rkey = ?",
+        collection,
+        rkey,
+      );
       const rev = await this.#commit();
       return jsonResponse({ commit: { cid: this.#kvGet("head_cid"), rev } });
     }
@@ -680,7 +699,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     rkey: string,
     record: JsonValue,
   ): Promise<{ cid: CID; rev: string }> {
-    const bytes = encodeCbor(jsonToCbor(record));
+    const cborValue = jsonToCbor(record);
+    const bytes = encodeCbor(cborValue);
     const cid = await CID.create(DAG_CBOR_CODEC, bytes);
     this.#sql.exec(
       `INSERT INTO records (collection, rkey, cid, value, indexed_at)
@@ -693,8 +713,30 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       base64(bytes),
       Date.now(),
     );
+    this.#indexRecordBlobs(collection, rkey, extractBlobCids(cborValue));
     const rev = await this.#commit();
     return { cid, rev };
+  }
+
+  /** Replace the blob-reference index rows for one record. */
+  #indexRecordBlobs(
+    collection: string,
+    rkey: string,
+    blobCids: readonly string[],
+  ): void {
+    this.#sql.exec(
+      "DELETE FROM record_blobs WHERE collection = ? AND rkey = ?",
+      collection,
+      rkey,
+    );
+    for (const blobCid of new Set(blobCids)) {
+      this.#sql.exec(
+        "INSERT INTO record_blobs (collection, rkey, blob_cid) VALUES (?, ?, ?)",
+        collection,
+        rkey,
+        blobCid,
+      );
+    }
   }
 
   #recordExists(collection: string, rkey: string): boolean {
@@ -827,24 +869,37 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (did !== this.#accountDid()) {
       throw namedError(404, "RepoNotFound", "Repo not hosted on this server");
     }
-    const cids = this.#sql
-      .exec("SELECT cid FROM blobs ORDER BY cid")
+    const limit = clampLimit(url.searchParams.get("limit"), 500, 1000);
+    const cursor = url.searchParams.get("cursor");
+    // Fetch limit+1 to detect whether a further page exists; cursor is the last
+    // CID returned (the blobs table is ordered by CID).
+    const rows = (
+      cursor
+        ? this.#sql.exec(
+            "SELECT cid FROM blobs WHERE cid > ? ORDER BY cid LIMIT ?",
+            cursor,
+            limit + 1,
+          )
+        : this.#sql.exec(
+            "SELECT cid FROM blobs ORDER BY cid LIMIT ?",
+            limit + 1,
+          )
+    )
       .toArray()
       .map((row) => row.cid as string);
-    return jsonResponse({ cids });
+    const cids = rows.slice(0, limit);
+    const next = rows.length > limit ? cids[cids.length - 1] : undefined;
+    return jsonResponse({ cids, ...(next ? { cursor: next } : {}) });
   }
 
-  /** The set of blob CIDs referenced by the current record set. */
+  /** The set of blob CIDs referenced by the current record set (indexed). */
   #referencedBlobCids(): Set<string> {
-    const refs = new Set<string>();
-    for (const row of this.#sql.exec("SELECT value FROM records").toArray()) {
-      for (const cid of extractBlobCids(
-        decodeCbor(unbase64(row.value as string)),
-      )) {
-        refs.add(cid);
-      }
-    }
-    return refs;
+    return new Set(
+      this.#sql
+        .exec("SELECT DISTINCT blob_cid FROM record_blobs")
+        .toArray()
+        .map((row) => row.blob_cid as string),
+    );
   }
 
   /** The held blob CIDs as a set. */
@@ -864,11 +919,20 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
    */
   async #listMissingBlobs(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
+    const url = new URL(request.url);
+    const limit = clampLimit(url.searchParams.get("limit"), 500, 1000);
+    const cursor = url.searchParams.get("cursor");
     const held = this.#heldBlobCids();
-    const missing = [...this.#referencedBlobCids()].filter(
-      (cid) => !held.has(cid),
-    );
-    return jsonResponse({ blobs: missing.map((cid) => ({ cid })) });
+    const missing = [...this.#referencedBlobCids()]
+      .filter((cid) => !held.has(cid))
+      .sort();
+    const after = cursor ? missing.filter((cid) => cid > cursor) : missing;
+    const page = after.slice(0, limit);
+    const next = after.length > limit ? page[page.length - 1] : undefined;
+    return jsonResponse({
+      blobs: page.map((cid) => ({ cid })),
+      ...(next ? { cursor: next } : {}),
+    });
   }
 
   // --- migration ------------------------------------------------------------
@@ -901,10 +965,17 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // CIDs are preserved, then re-sign a fresh head over them. The clear + inserts
     // run in one transaction so the record set is never left half-replaced (and to
     // avoid a per-statement fsync).
+    // Pre-decode blob references per record outside the transaction (CPU work,
+    // no storage), then write records + the blob-ref index together.
+    const withBlobs = imported.records.map((record) => ({
+      record,
+      blobCids: extractBlobCids(decodeCbor(record.bytes)),
+    }));
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.#sql.exec("DELETE FROM records");
-      for (const record of imported.records) {
+      this.#sql.exec("DELETE FROM record_blobs");
+      for (const { record, blobCids } of withBlobs) {
         this.#sql.exec(
           `INSERT INTO records (collection, rkey, cid, value, indexed_at)
            VALUES (?, ?, ?, ?, ?)`,
@@ -914,6 +985,14 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
           base64(record.bytes),
           now,
         );
+        for (const blobCid of new Set(blobCids)) {
+          this.#sql.exec(
+            "INSERT INTO record_blobs (collection, rkey, blob_cid) VALUES (?, ?, ?)",
+            record.collection,
+            record.rkey,
+            blobCid,
+          );
+        }
       }
       // Chain the next commit's `prev` to the imported head — atomic with the
       // record replacement.

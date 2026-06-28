@@ -705,6 +705,44 @@ describe("AT Protocol PDS", () => {
     expect(cs.importedBlobs).toBe(1);
   });
 
+  it("paginates listBlobs with limit and cursor", async () => {
+    const host = "blob-page.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const did = `did:web:${host}`;
+
+    // Upload three distinct blobs.
+    for (const n of [1, 2, 3]) {
+      await call(handler, host, "/xrpc/com.atproto.repo.uploadBlob", {
+        raw: new Uint8Array([n, n, n]),
+        contentType: "application/octet-stream",
+        token,
+      });
+    }
+
+    const page1 = (await (
+      await call(
+        handler,
+        host,
+        `/xrpc/com.atproto.sync.listBlobs?did=${did}&limit=2`,
+      )
+    ).json()) as { cids: string[]; cursor?: string };
+    expect(page1.cids).toHaveLength(2);
+    expect(page1.cursor).toBe(page1.cids[1]);
+
+    const page2 = (await (
+      await call(
+        handler,
+        host,
+        `/xrpc/com.atproto.sync.listBlobs?did=${did}&limit=2&cursor=${page1.cursor}`,
+      )
+    ).json()) as { cids: string[]; cursor?: string };
+    expect(page2.cids).toHaveLength(1);
+    expect(page2.cursor).toBeUndefined(); // last page
+    // No overlap between pages.
+    expect(page1.cids).not.toContain(page2.cids[0]);
+  });
+
   it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
     const did = "did:plc:src234src234src234src234";
     const host = "migrated.example";
