@@ -5,12 +5,13 @@
 | **Type** | endpoint (façade over the `solid-pod` Durable Object) |
 | **Ships a DO?** | **no** — reuses the per-pod [`SolidPodObject`](solid-pod.md) (lock + write state live there) |
 | **Standard** | [WebDAV (RFC 4918)](https://www.rfc-editor.org/rfc/rfc4918), Class 2 |
-| **Status** | **proposed — spec only, not implemented.** Tracked in [#169](https://github.com/davidwkeith/workers/issues/169) |
+| **Status** | **in progress.** The protocol core, the Class 2 verb router (`createWebdav`), and the lock + app-password DO-SQLite stores are implemented; the concrete `SolidPodObject` backend adapter (§"Composition") is the remaining increment. Tracked in [#169](https://github.com/davidwkeith/workers/issues/169) |
 
-> **This document is a design spec for review, not a description of shipped code.**
-> Per repo convention the spec is authoritative and reviewed *before*
-> implementation. The four load-bearing decisions below — the auth bridge and the
-> compliance class especially — should be agreed here first.
+> **This spec is authoritative and was reviewed before implementation.** The four
+> load-bearing decisions below — the auth bridge and the compliance class
+> especially — were agreed here first. The verb router enforces them over the
+> injected `WebdavBackend` seam; what remains is the adapter that resolves that
+> seam onto the per-pod `SolidPodObject`.
 
 A WebDAV (RFC 4918) façade over a pod, so the storage a user already owns can be
 **mounted as a network drive by the file managers built into every major OS** —
