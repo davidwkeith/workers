@@ -46,6 +46,23 @@ import {
   resourceForAcl,
   toIri,
 } from "./ldp.js";
+import {
+  createWebdav,
+  resolveLockPolicy,
+  CollectionNotEmpty as WebdavCollectionNotEmpty,
+  PreconditionFailed as WebdavPreconditionFailed,
+  ResourceConflict as WebdavResourceConflict,
+  CredentialStore,
+  LockStore,
+  type ResourceBody,
+  type ResourceStat,
+  type WebdavBackend,
+  type WebdavHandler,
+  type WebdavMode,
+  type WritePreconditions,
+  type WriteOutcome,
+} from "@dwk/webdav";
+
 import { negotiateMediaType, type Negotiated } from "./negotiation.js";
 import {
   parsePatch,
@@ -140,6 +157,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #allowAnonymousWrites = false;
   /** The storage root container's path; this container is undeletable. */
   #storageRoot = "/";
+  /** Class 2 WebDAV lock store, lazily built over this DO's SQLite (spec §2). */
+  #locks: LockStore | null = null;
+  /** WebDAV app-password store, lazily built over this DO's SQLite (spec §1). */
+  #credentials: CredentialStore | null = null;
+  /** The WebDAV Class 2 verb router, built once over the in-DO backend. */
+  #webdavHandler: WebdavHandler | null = null;
 
   constructor(state: DurableObjectState, env: SolidPodEnv) {
     super(state, env);
@@ -200,6 +223,14 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const requestOrigin = request.headers.get("origin") ?? undefined;
 
     const method = request.method.toUpperCase();
+
+    // The WebDAV "second door": when the front door marks a request, route it
+    // through the Class 2 verb router over this same pod's store + lock /
+    // app-password SQLite, instead of the Solid LDP path (spec `@dwk/webdav`).
+    if (request.headers.get(INTERNAL_HEADERS.webdav) === "1") {
+      return this.#webdav(request, store, origin);
+    }
+
     if (method === "OPTIONS") return this.#options(path);
 
     try {
@@ -802,6 +833,241 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     });
   }
 
+  // -- webdav (the "second door") --------------------------------------------
+
+  /** The Class 2 lock store over this pod's SQLite (built once). */
+  #webdavLocks(): LockStore {
+    return (this.#locks ??= new LockStore(
+      this.#sql,
+      resolveLockPolicy(),
+      this.#storageRoot,
+    ));
+  }
+
+  /** The app-password store over this pod's SQLite (built once). */
+  #webdavCredentials(): CredentialStore {
+    return (this.#credentials ??= new CredentialStore(this.#sql));
+  }
+
+  /**
+   * Route a WebDAV request through the Class 2 verb router (`@dwk/webdav`) over
+   * this pod's store, WAC, and lock / app-password SQLite. `COPY`/`MOVE` and the
+   * owner-gated app-password mint endpoint land in a later increment; the
+   * storage root stays undeletable as on the Solid door.
+   */
+  async #webdav(
+    request: Request,
+    store: Store,
+    origin: string,
+  ): Promise<Response> {
+    const method = request.method.toUpperCase();
+    const path = new URL(request.url).pathname;
+    if (method === "COPY" || method === "MOVE") {
+      return text(501, "COPY/MOVE are not yet implemented over WebDAV");
+    }
+    if (method === "DELETE" && path === this.#storageRoot) {
+      return text(405, "The storage root container cannot be deleted");
+    }
+    if (this.#webdavHandler === null) {
+      const baseUrl =
+        this.#storageRoot === "/"
+          ? origin
+          : `${origin}${this.#storageRoot.replace(/\/$/, "")}`;
+      this.#webdavHandler = createWebdav({
+        baseUrl,
+        backend: () => this.#webdavBackend(store, origin),
+      });
+    }
+    // The router never touches `ctx`; the DO has no `ExecutionContext`, so a cast
+    // satisfies the shared handler signature without inventing a fake one.
+    return this.#webdavHandler(
+      request,
+      this.env,
+      this.ctx as unknown as ExecutionContext,
+    );
+  }
+
+  /** The in-DO storage seam the WebDAV router translates verbs onto. */
+  #webdavBackend(store: Store, origin: string): WebdavBackend {
+    // Arrow-function properties below capture this DO as their lexical `this`,
+    // so the seam reaches the pod's private write/containment helpers directly.
+    const toPath = (iri: string): string => iri.slice(origin.length);
+
+    const statOf = async (path: string): Promise<ResourceStat | null> => {
+      const meta = store.head(path);
+      if (!meta) return null;
+      const collection = isContainer(path);
+      let contentLength = 0;
+      let contentType = collection ? "text/turtle" : meta.contentType;
+      if (!collection && meta.kind === "blob") {
+        // The store exposes blob byte-size only via `readBlob`; take it and
+        // cancel the stream without buffering the body.
+        const blob = await store.readBlob(path);
+        if (blob) {
+          contentLength = blob.size;
+          contentType = blob.contentType || meta.contentType;
+          await blob.stream.cancel();
+        }
+      }
+      return {
+        path,
+        collection,
+        etag: meta.etag,
+        contentType,
+        contentLength,
+        // The store does not yet track a per-resource modified time; surface a
+        // stand-in until a size/mtime column lands (documented limitation).
+        lastModified: Date.now(),
+      };
+    };
+
+    return {
+      stat: statOf,
+
+      listChildren: async (path: string): Promise<readonly ResourceStat[]> => {
+        const containerIri = toIri(origin, path);
+        const children = store
+          .readQuads(path)
+          .filter((q) => isContainsQuad(q, containerIri))
+          .map((q) => q.object.value);
+        const out: ResourceStat[] = [];
+        for (const iri of children) {
+          const child = await statOf(toPath(iri));
+          if (child) out.push(child);
+        }
+        return out;
+      },
+
+      read: async (path: string): Promise<ResourceBody | null> => {
+        const meta = store.head(path);
+        if (!meta || isContainer(path)) return null;
+        const stat = await statOf(path);
+        if (!stat) return null;
+        if (meta.kind === "blob") {
+          const blob = await store.readBlob(path);
+          if (!blob) return null;
+          return { stat, body: blob.stream };
+        }
+        // An RDF resource is serialized to Turtle on the way out so OS clients
+        // see a concrete file, mirroring the Solid GET default serialization.
+        const quads = store.readQuads(path).map(storedToQuad);
+        const turtle = await serializeRdf(quads, "text/turtle", {
+          baseIRI: toIri(origin, path),
+          prefixes: SERIALIZE_PREFIXES,
+        });
+        const bytes = new TextEncoder().encode(turtle);
+        return {
+          stat: {
+            ...stat,
+            contentType: "text/turtle",
+            contentLength: bytes.byteLength,
+          },
+          body: new Response(bytes).body as ReadableStream<Uint8Array>,
+        };
+      },
+
+      write: async (
+        path: string,
+        body: ReadableStream<Uint8Array> | null,
+        contentType: string,
+        preconditions: WritePreconditions,
+      ): Promise<WriteOutcome> => {
+        const existed = store.head(path) !== null;
+        try {
+          await this.#writeResolvedBody(
+            store,
+            origin,
+            path,
+            body,
+            contentType,
+            null,
+            webdavPreconditions(preconditions),
+          );
+        } catch (error) {
+          throw mapStoreError(error);
+        }
+        this.#ensureContainerChain(store, origin, path);
+        await this.#drainOrphans(store);
+        this.#broadcast(toIri(origin, path), existed ? "Update" : "Create");
+        const meta = store.head(path);
+        return { created: !existed, ...(meta ? { etag: meta.etag } : {}) };
+      },
+
+      makeCollection: async (path: string): Promise<WriteOutcome> => {
+        try {
+          store.writeQuads(path, containerTypeQuads(toIri(origin, path)), {
+            contentType: "text/turtle",
+          });
+        } catch (error) {
+          throw mapStoreError(error);
+        }
+        this.#ensureContainerChain(store, origin, path);
+        await this.#drainOrphans(store);
+        this.#broadcast(toIri(origin, path), "Create");
+        const meta = store.head(path);
+        return { created: true, ...(meta ? { etag: meta.etag } : {}) };
+      },
+
+      remove: async (
+        path: string,
+        preconditions: WritePreconditions,
+      ): Promise<void> => {
+        try {
+          store.delete(path, {
+            ...(preconditions.ifMatch !== undefined
+              ? { ifMatch: preconditions.ifMatch }
+              : {}),
+            // Re-check container emptiness inside the delete transaction, as the
+            // Solid door does — a non-empty container MUST NOT be deleted.
+            guard: () => {
+              if (
+                isContainer(path) &&
+                store
+                  .readQuads(path)
+                  .some((q) => isContainsQuad(q, toIri(origin, path)))
+              ) {
+                throw new ContainerNotEmptyError();
+              }
+            },
+          });
+        } catch (error) {
+          throw mapStoreError(error);
+        }
+        this.#removeContainment(store, origin, path);
+        await this.#drainOrphans(store);
+        this.#broadcast(toIri(origin, path), "Delete");
+      },
+
+      // COPY/MOVE are intercepted with 501 in `#webdav` until the next
+      // increment; these satisfy the interface but are never reached.
+      copy: (): Promise<WriteOutcome> => {
+        throw new WebdavResourceConflict("COPY not implemented");
+      },
+      move: (): Promise<WriteOutcome> => {
+        throw new WebdavResourceConflict("MOVE not implemented");
+      },
+
+      authorize: async (
+        webid: string,
+        path: string,
+        mode: WebdavMode,
+      ): Promise<boolean> => {
+        // The pod owner always has full access; otherwise the app-password's
+        // resolved WebID is evaluated by WAC exactly as a Solid request would
+        // be (effective access = app-password scope ∩ WAC).
+        if (this.#owners.includes(webid)) return true;
+        const decision = authorize(store, origin, path, {
+          mode: mode === "write" ? "write" : "read",
+          agent: webid,
+        });
+        return decision.granted;
+      },
+
+      locks: this.#webdavLocks(),
+      credentials: this.#webdavCredentials(),
+    };
+  }
+
   // -- write helpers ---------------------------------------------------------
 
   #replayed(): Response {
@@ -829,11 +1095,38 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     request: Request,
     preconditions: Pick<WriteOptions, "ifMatch" | "ifNoneMatch" | "guard">,
   ): Promise<void> {
+    await this.#writeResolvedBody(
+      store,
+      origin,
+      path,
+      request.body,
+      request.headers.get("content-type"),
+      parseContentLength(request.headers.get("content-length")),
+      preconditions,
+    );
+  }
+
+  /**
+   * The request-independent core of {@link #writeBody}: route a body (already a
+   * stream + declared content type/length) into the quad store or R2, with
+   * identical RDF/blob classification and container-containment preservation.
+   * The Solid `PUT`/`POST` path and the WebDAV façade share this so a `.ttl`
+   * written over either door lands as a first-class quad resource and a JPEG
+   * streams to R2 the same way.
+   */
+  async #writeResolvedBody(
+    store: Store,
+    origin: string,
+    path: string,
+    body: ReadableStream<Uint8Array> | null,
+    contentTypeHeader: string | null,
+    declared: number | null,
+    preconditions: Pick<WriteOptions, "ifMatch" | "ifNoneMatch" | "guard">,
+  ): Promise<void> {
     const contentType =
-      request.headers.get("content-type")?.split(";")[0]?.trim() ||
+      contentTypeHeader?.split(";")[0]?.trim() ||
       (isContainer(path) ? "text/turtle" : "application/octet-stream");
     const rdfFormat = formatForMediaType(contentType);
-    const declared = parseContentLength(request.headers.get("content-length"));
 
     // Resolve the bytes to keep in memory (small bodies only) versus a body to
     // stream straight to R2. The declared length only fast-paths the
@@ -846,7 +1139,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       inlineBytes = null;
     } else {
       // Small or undeclared: probe up to the ceiling, trusting nothing.
-      const peeked = await readUpToLimit(request.body, store.maxInlineBytes);
+      const peeked = await readUpToLimit(body, store.maxInlineBytes);
       if (peeked.kind === "overflow") {
         // Too big to hold and unsized to stream — demand a Content-Length.
         throw new LengthRequiredError();
@@ -856,7 +1149,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
     if (inlineBytes === null) {
       // Oversized (binary or RDF): stream the body straight through to R2.
-      await store.putBlob(path, request.body ?? new Blob([]), {
+      await store.putBlob(path, body ?? new Blob([]), {
         contentType,
         ...preconditions,
       });
@@ -1109,6 +1402,31 @@ async function readUpToLimit(
 
 /** Thrown from a delete guard to abort the transaction for a non-empty LDP container. */
 class ContainerNotEmptyError extends Error {}
+
+/** Translate a store/guard error into the WebDAV router's error vocabulary. */
+function mapStoreError(error: unknown): Error {
+  if (error instanceof PreconditionFailedError) {
+    return new WebdavPreconditionFailed();
+  }
+  if (error instanceof ContainerNotEmptyError) {
+    return new WebdavCollectionNotEmpty();
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/** Narrow WebDAV write preconditions to the store's write options. */
+function webdavPreconditions(
+  preconditions: WritePreconditions,
+): Pick<WriteOptions, "ifMatch" | "ifNoneMatch"> {
+  return {
+    ...(preconditions.ifMatch !== undefined
+      ? { ifMatch: preconditions.ifMatch }
+      : {}),
+    ...(preconditions.ifNoneMatch !== undefined
+      ? { ifNoneMatch: preconditions.ifNoneMatch }
+      : {}),
+  };
+}
 
 /** Thrown by `#writeBody` when an unsized body is too large to buffer or stream (→ 411). */
 class LengthRequiredError extends Error {}

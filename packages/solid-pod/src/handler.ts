@@ -57,6 +57,40 @@ function assertBindings(env: SolidPodEnv): void {
   }
 }
 
+/** The JSON-encoded config subset the DO needs, for the internal config header. */
+function forwardedConfig(config: ResolvedConfig): string {
+  return JSON.stringify({
+    owners: config.owners,
+    allowAnonymousWrites: config.allowAnonymousWrites,
+    storageRoot: config.storageRoot,
+    ...(config.maxInlineBytes !== undefined
+      ? { maxInlineBytes: config.maxInlineBytes }
+      : {}),
+  });
+}
+
+/**
+ * Client headers the WebDAV door forwards verbatim. Unlike the Solid door this
+ * includes `authorization`: the WebDAV auth bridge is HTTP Basic (an
+ * app-password), and verification happens *in the DO* against the per-pod
+ * `CredentialStore`, so the header is passed through rather than consumed here.
+ */
+const WEBDAV_FORWARDED_HEADERS = [
+  "authorization",
+  "accept",
+  "content-type",
+  "content-length",
+  "if",
+  "if-match",
+  "if-none-match",
+  "depth",
+  "destination",
+  "overwrite",
+  "timeout",
+  "lock-token",
+  "origin",
+] as const;
+
 /** Build the internal DO request, stripping any client-supplied auth headers. */
 function internalRequest(
   request: Request,
@@ -75,17 +109,7 @@ function internalRequest(
     headers.set(INTERNAL_HEADERS.jti, auth.jti);
     headers.set(INTERNAL_HEADERS.jkt, auth.jkt);
   }
-  headers.set(
-    INTERNAL_HEADERS.config,
-    JSON.stringify({
-      owners: config.owners,
-      allowAnonymousWrites: config.allowAnonymousWrites,
-      storageRoot: config.storageRoot,
-      ...(config.maxInlineBytes !== undefined
-        ? { maxInlineBytes: config.maxInlineBytes }
-        : {}),
-    }),
-  );
+  headers.set(INTERNAL_HEADERS.config, forwardedConfig(config));
 
   const method = request.method.toUpperCase();
   const hasBody = method !== "GET" && method !== "HEAD";
@@ -193,6 +217,53 @@ export function createSolidPod(config: SolidPodConfig): SolidPodHandler {
     const forwarded = internalRequest(request, resolved, auth);
 
     // One Durable Object per pod, keyed by the identity root (no sharding).
+    const id = env.POD.idFromName(resolved.baseUrl);
+    const response = await env.POD.get(id).fetch(forwarded);
+    return logPodOutcome(resolved, request, response);
+  };
+}
+
+/**
+ * Build the internal DO request for the WebDAV "second door". No DPoP edge auth:
+ * the front door forwards the raw `Authorization` (Basic) header and the DO
+ * resolves the app-password to a WebID against its own `CredentialStore` before
+ * routing the verb. The `x-solid-webdav` marker tells the DO to take the WebDAV
+ * path rather than the Solid LDP path.
+ */
+function internalWebdavRequest(
+  request: Request,
+  config: ResolvedConfig,
+): Request {
+  const headers = new Headers();
+  for (const name of WEBDAV_FORWARDED_HEADERS) {
+    const value = request.headers.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  headers.set(INTERNAL_HEADERS.config, forwardedConfig(config));
+  headers.set(INTERNAL_HEADERS.webdav, "1");
+
+  const method = request.method.toUpperCase();
+  const hasBody = method !== "GET" && method !== "HEAD";
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    ...(hasBody ? { body: request.body } : {}),
+  });
+}
+
+/**
+ * Create the WebDAV "second door" front-door handler (`@dwk/webdav`): the same
+ * pod's storage, reachable as a network drive by OS file managers over HTTP
+ * Basic app-passwords. It shares the per-pod {@link SolidPodObject} with
+ * {@link createSolidPod}, so locks and writes live in one consistency domain.
+ * Mount it under a distinct path/subdomain from the Solid door.
+ */
+export function createSolidPodWebdav(config: SolidPodConfig): SolidPodHandler {
+  const resolved = resolveConfig(config);
+
+  return async (request, env, _ctx) => {
+    assertBindings(env);
+    const forwarded = internalWebdavRequest(request, resolved);
     const id = env.POD.idFromName(resolved.baseUrl);
     const response = await env.POD.get(id).fetch(forwarded);
     return logPodOutcome(resolved, request, response);

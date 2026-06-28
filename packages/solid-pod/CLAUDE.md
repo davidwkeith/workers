@@ -81,3 +81,5 @@ src/*.test.ts         # colocated tests
 - `@dwk/rdf` — RDF parsing/serialization.
 - `@dwk/store` — DO SQLite + R2 storage layer.
 - `@dwk/wac` — Web Access Control evaluation.
+- `@dwk/webdav` — Class 2 WebDAV router + lock/app-password stores, wired onto
+  this DO by `createSolidPodWebdav` (the "second door").

@@ -16,7 +16,11 @@
  * @packageDocumentation
  */
 
-export { createSolidPod, type SolidPodHandler } from "./handler.js";
+export {
+  createSolidPod,
+  createSolidPodWebdav,
+  type SolidPodHandler,
+} from "./handler.js";
 export { createSolidPodGc, type SolidPodGcHandler } from "./gc.js";
 export { SolidPodObject } from "./pod.js";
 
