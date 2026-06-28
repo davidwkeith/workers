@@ -6,6 +6,7 @@ import {
   loadSigner,
 } from "./crypto.js";
 import {
+  buildRotationOperation,
   didPlcFromGenesis,
   plcOperationCid,
   signPlcOperation,
@@ -120,6 +121,37 @@ describe("did:plc operations", () => {
     expect(
       await verifyPlcOperation(bad, rotation.publicKeyRaw, "secp256k1"),
     ).toBe(false);
+  });
+
+  it("builds a rotation op re-pointing the PDS, chained and verifiable", async () => {
+    const { op, rotation, sign } = await genesis();
+    const signedGenesis = await signPlcOperation(op, sign);
+    const prevCid = await plcOperationCid(signedGenesis);
+
+    // Re-point at a new PDS endpoint, keeping the rotation/verification keys.
+    const rotationOp = buildRotationOperation(op, prevCid, {
+      services: {
+        atproto_pds: {
+          type: "AtprotoPersonalDataServer",
+          endpoint: "https://new.example.com",
+        },
+      },
+    });
+    expect(rotationOp.prev).toBe(prevCid);
+    expect(rotationOp.verificationMethods).toEqual(op.verificationMethods);
+    expect(rotationOp.services.atproto_pds!.endpoint).toBe(
+      "https://new.example.com",
+    );
+
+    // The current rotation key signs the next op.
+    const signedRotation = await signPlcOperation(rotationOp, sign);
+    expect(
+      await verifyPlcOperation(
+        signedRotation,
+        rotation.publicKeyRaw,
+        "secp256k1",
+      ),
+    ).toBe(true);
   });
 
   it("chains a rotation operation to the genesis op via its CID", async () => {

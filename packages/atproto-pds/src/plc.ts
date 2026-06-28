@@ -70,6 +70,38 @@ function opToCbor(op: UnsignedPlcOperation, sig?: string): CborValue {
   return value;
 }
 
+/** Fields a rotation operation may override; unset fields carry over. */
+export interface PlcOperationUpdates {
+  readonly rotationKeys?: readonly string[];
+  readonly verificationMethods?: Readonly<Record<string, string>>;
+  readonly alsoKnownAs?: readonly string[];
+  readonly services?: Readonly<Record<string, PlcService>>;
+}
+
+/**
+ * Build the **next** (rotation/update) operation from the previous signed one:
+ * apply {@link updates} over its fields and chain `prev` to the previous op's
+ * CID. Used to re-point a `did:plc` at a new PDS (services) and signing key
+ * (verificationMethods) during migration. The result still needs signing with a
+ * current rotation key ({@link signPlcOperation}).
+ */
+export function buildRotationOperation(
+  previous: UnsignedPlcOperation,
+  prevCid: string,
+  updates: PlcOperationUpdates = {},
+): UnsignedPlcOperation {
+  return {
+    type: "plc_operation",
+    rotationKeys: [...(updates.rotationKeys ?? previous.rotationKeys)],
+    verificationMethods: {
+      ...(updates.verificationMethods ?? previous.verificationMethods),
+    },
+    alsoKnownAs: [...(updates.alsoKnownAs ?? previous.alsoKnownAs)],
+    services: { ...(updates.services ?? previous.services) },
+    prev: prevCid,
+  };
+}
+
 /** The canonical bytes signed for an operation: DAG-CBOR without `sig`. */
 export function unsignedPlcBytes(op: UnsignedPlcOperation): Uint8Array {
   return encodeCbor(opToCbor(op));
