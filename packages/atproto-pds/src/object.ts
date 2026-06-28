@@ -1241,16 +1241,26 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   /** Replay buffered frames after `cursor`, signalling future/outdated cursors. */
   #backfill(ws: WebSocket, cursorParam: string): void {
-    const cursor = Number.parseInt(cursorParam, 10);
-    if (!Number.isFinite(cursor)) {
-      ws.send(encodeErrorFrame("InvalidRequest", "cursor must be an integer"));
+    // A cursor is a non-negative integer seq. Validate strictly:
+    // `Number.parseInt` would silently accept "1abc"/"1.5", and a negative value
+    // would match every buffered row. A terminal error closes the socket.
+    if (!/^\d+$/.test(cursorParam)) {
+      ws.send(
+        encodeErrorFrame(
+          "InvalidRequest",
+          "cursor must be a non-negative integer",
+        ),
+      );
+      this.#closeAfterError(ws, "Invalid cursor");
       return;
     }
+    const cursor = Number.parseInt(cursorParam, 10);
     const head = Number(this.#kvGet("firehose_seq") ?? "0");
     if (cursor > head) {
       ws.send(
         encodeErrorFrame("FutureCursor", "cursor is ahead of the stream"),
       );
+      this.#closeAfterError(ws, "Future cursor");
       return;
     }
     const oldest = (
@@ -1270,6 +1280,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       .exec("SELECT frame FROM firehose WHERE seq > ? ORDER BY seq", cursor)
       .toArray();
     for (const row of rows) ws.send(unbase64(row.frame as string));
+  }
+
+  /**
+   * Close a subscription after a terminal error frame, using an application
+   * close code (4000) so the client can tell a rejected cursor from a normal
+   * close. The buffered error frame flushes before the close.
+   */
+  #closeAfterError(ws: WebSocket, reason: string): void {
+    try {
+      ws.close(4000, reason);
+    } catch {
+      // Closing an already-closing socket throws; nothing left to do.
+    }
   }
 
   override async webSocketMessage(): Promise<void> {

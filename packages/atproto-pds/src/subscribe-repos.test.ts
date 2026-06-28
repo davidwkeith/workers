@@ -256,4 +256,17 @@ describe("subscribeRepos firehose", () => {
       ...encodeErrorFrame("FutureCursor", "cursor is ahead of the stream"),
     ]);
   });
+
+  it("rejects a non-integer cursor with an InvalidRequest error frame", async () => {
+    const host = "fh-badcursor.example";
+    const handler = pds(host);
+    const { reader } = await subscribe(handler, host, "?cursor=1abc");
+    const frame = await reader.next();
+    expect([...frame]).toEqual([
+      ...encodeErrorFrame(
+        "InvalidRequest",
+        "cursor must be a non-negative integer",
+      ),
+    ]);
+  });
 });
