@@ -49,12 +49,22 @@ secp256k1 signing curve):
   `did:plc:` DID, and serves it consistently (the front door routes the DO by a
   stable host key, forwards `/.well-known/atproto-did` to the DO, and returns 404
   for `/.well-known/did.json` since a PLC account's document lives in the
-  directory). The remaining piece is the (injectable) PLC **directory client** for
-  submitting the genesis operation and resolving foreign DIDs, which migration
-  (#183) also needs. `did:plc` necessarily depends on the external PLC directory —
-  a trade-off accepted only to interoperate with the existing network, never made
-  the default. **Rotation-key custody:** the key is generated inside and never
-  leaves the DO, exactly like the repository signing key.
+  directory). The (injectable) PLC **directory client** has also landed
+  (`plc-directory.ts`): submit an operation (`POST /:did`), resolve a DID
+  (`GET /:did`), and read its data state (`GET /:did/data`), with `fetch`
+  injected so it unit-tests with a fake transport. When `plcDirectoryUrl` is
+  configured, a freshly minted account registers its genesis operation with the
+  directory **via a Durable Object alarm** — repo init (and the first request)
+  never blocks on the external call, and the alarm **retries with exponential
+  backoff** (10 s → capped at 1 h, up to 10 attempts) until the directory accepts
+  it, surviving hibernation. The persisted directory URL lets the alarm run
+  without a request; the `plc_submitted` flag stops it once registered. The
+  default is unset, so nothing reaches the network unless asked. `did:plc` necessarily depends on the external
+  PLC directory — a trade-off accepted only to interoperate with the existing
+  network, never made the default. **Rotation-key custody:** the key is generated
+  inside and never leaves the DO, exactly like the repository signing key. The
+  resolve/data helpers are what inbound migration (#183) reads to learn a foreign
+  account's keys and services.
 - **The MST is rebuilt from the full entry set on each commit.** Because an MST's
   shape is a pure function of its `{key → value}` entries (a key's layer is fixed
   by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
@@ -128,13 +138,13 @@ is **reach vs. fit**:
   well as `did:web`, has tested **account migration** from an existing PDS, and
   ships the **firehose** (`subscribeRepos`). Closing that gap is now in progress
   here per the parity tracker
-  [#180](https://github.com/davidwkeith/workers/issues/180): **secp256k1 commit
-  signing ([#181](https://github.com/davidwkeith/workers/issues/181)) has landed**
-  (the network-preferred curve, opt-in via `signingCurve`) and the **`did:plc`
-  operation core** ([#182](https://github.com/davidwkeith/workers/issues/182)) is
-  in progress, with account migration (#183) and the firehose (#184) still to
-  follow. Until those land, a user who wants to **migrate an existing Bluesky
-  account today** is better served by Cirrus.
+  [#180](https://github.com/davidwkeith/workers/issues/180): **secp256k1 signing**
+  ([#181](https://github.com/davidwkeith/workers/issues/181)) and **`did:plc`
+  support** ([#182](https://github.com/davidwkeith/workers/issues/182) — operation
+  core, account wiring, and the directory client) have landed, with **account
+  migration** (#183) and the **firehose** (#184) still to follow. Until those
+  land, a user who wants to **migrate an existing Bluesky account today** is better
+  served by Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be

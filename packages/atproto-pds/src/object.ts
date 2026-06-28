@@ -40,9 +40,11 @@ import {
   type Signer,
 } from "./crypto.js";
 import { buildDidDocument } from "./identity.js";
+import { submitPlcOperation } from "./plc-directory.js";
 import {
   didPlcFromGenesis,
   signPlcOperation,
+  type SignedPlcOperation,
   type UnsignedPlcOperation,
 } from "./plc.js";
 import { buildMst, type MstEntry } from "./mst.js";
@@ -69,6 +71,16 @@ import {
 const ACCESS_SCOPE = "com.atproto.access";
 const REFRESH_SCOPE = "com.atproto.refresh";
 const CAR_CONTENT_TYPE = "application/vnd.ipld.car";
+
+// PLC genesis submission retry schedule (alarm-driven exponential backoff).
+const PLC_SUBMIT_MAX_ATTEMPTS = 10;
+const PLC_SUBMIT_BASE_MS = 10_000; // 10s
+const PLC_SUBMIT_CAP_MS = 3_600_000; // 1h
+
+/** Backoff delay before the Nth PLC-submission retry (1-based), capped. */
+export function plcRetryDelayMs(attempt: number): number {
+  return Math.min(PLC_SUBMIT_BASE_MS * 2 ** (attempt - 1), PLC_SUBMIT_CAP_MS);
+}
 
 function base64(bytes: Uint8Array): string {
   let binary = "";
@@ -188,6 +200,62 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // from migration, is taken as-is).
     this.#kvSet("account_did", await this.#resolveAccountDid(keypair));
     await this.#commit();
+    await this.#schedulePlcSubmission();
+  }
+
+  /**
+   * Arm the alarm-driven registration of a freshly minted `did:plc` with the
+   * directory. Only when a directory URL is configured and a genesis operation
+   * was minted here (not for `did:web`, nor an adopted/migrated DID). The URL is
+   * persisted so the alarm — which runs without a request, hence without config —
+   * can submit independently. Registration is never on the request path.
+   */
+  async #schedulePlcSubmission(): Promise<void> {
+    const directoryUrl = this.#cfg.plcDirectoryUrl;
+    if (
+      !directoryUrl ||
+      !this.#kvGet("plc_genesis") ||
+      this.#kvGet("plc_submitted")
+    ) {
+      return;
+    }
+    this.#kvSet("plc_directory_url", directoryUrl);
+    // Fire as soon as possible; failures reschedule with backoff in alarm().
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  /**
+   * Alarm handler: drives PLC genesis submission with exponential backoff until
+   * the directory accepts it (or {@link PLC_SUBMIT_MAX_ATTEMPTS} is exhausted).
+   * Runs without request config, so it reads everything it needs from storage.
+   */
+  override async alarm(): Promise<void> {
+    await this.#runPlcSubmission();
+  }
+
+  async #runPlcSubmission(): Promise<void> {
+    const directoryUrl = this.#kvGet("plc_directory_url") as string | null;
+    const genesis = this.#kvGet("plc_genesis") as string | null;
+    const did = this.#kvGet("account_did") as string | null;
+    if (!directoryUrl || !genesis || !did || this.#kvGet("plc_submitted")) {
+      return;
+    }
+    try {
+      await submitPlcOperation(did, JSON.parse(genesis) as SignedPlcOperation, {
+        directoryUrl,
+      });
+      this.#kvSet("plc_submitted", "1");
+    } catch (error) {
+      const attempts = Number(this.#kvGet("plc_attempts") ?? "0") + 1;
+      this.#kvSet("plc_attempts", String(attempts));
+      if (attempts >= PLC_SUBMIT_MAX_ATTEMPTS) {
+        console.warn(
+          `@dwk/atproto-pds: PLC genesis submission gave up after ${attempts} attempts (needs a manual re-submit): ${String(error)}`,
+        );
+        return;
+      }
+      await this.ctx.storage.setAlarm(Date.now() + plcRetryDelayMs(attempts));
+    }
   }
 
   /** Determine and persist the account DID at genesis (see {@link #initRepo}). */

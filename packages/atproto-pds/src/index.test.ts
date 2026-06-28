@@ -1,9 +1,10 @@
-import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { env, runInDurableObject } from "cloudflare:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { base58btcDecode } from "./bytes.js";
 import { readCar } from "./car.js";
 import { decodeCbor } from "./cbor.js";
+import { plcRetryDelayMs } from "./object.js";
 import { verifyCommit, type SignedCommit } from "./repo.js";
 import { createAtprotoPds, type AtprotoPdsEnv } from "./index.js";
 
@@ -464,6 +465,99 @@ describe("AT Protocol PDS", () => {
     const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
     expect(commit.did).toBe(did);
   });
+
+  it("submits the genesis op to the PLC directory when one is configured", async () => {
+    const seen: { url: string; method?: string; body?: string }[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("plc.test")) {
+        seen.push({ url, method: init?.method, body: init?.body as string });
+        return new Response(null, { status: 200 });
+      }
+      return realFetch(input as RequestInfo, init);
+    });
+
+    const host = "plc-submit.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc",
+      plcDirectoryUrl: "https://plc.test",
+    });
+    // First request triggers genesis; submission runs in the background via
+    // waitUntil, so poll for it rather than asserting synchronously.
+    const did = await (
+      await call(handler, host, "/.well-known/atproto-did")
+    ).text();
+
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0]!.url).toBe(`https://plc.test/${did}`);
+    expect(seen[0]!.method).toBe("POST");
+    const op = JSON.parse(seen[0]!.body as string) as {
+      type: string;
+      alsoKnownAs: string[];
+    };
+    expect(op.type).toBe("plc_operation");
+    expect(op.alsoKnownAs).toContain(`at://${host}`);
+  });
+
+  it("retries via the alarm when the directory rejects the genesis op", async () => {
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("plc.fail"))
+        return new Response("down", { status: 503 });
+      return realFetch(input as RequestInfo, init);
+    });
+
+    const host = "plc-retry.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc",
+      plcDirectoryUrl: "https://plc.fail",
+    });
+    await call(handler, host, "/.well-known/atproto-did");
+
+    const stub = testEnv.REPO.get(testEnv.REPO.idFromName(host));
+    // The first alarm fires, the submission fails, and the DO records the failed
+    // attempt and re-arms a future alarm rather than giving up.
+    await vi.waitFor(async () => {
+      const attempts = await runInDurableObject(stub, (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT v FROM kv WHERE k = 'plc_attempts'")
+          .toArray()[0] as { v: string } | undefined;
+        return row?.v ?? null;
+      });
+      expect(attempts).toBe("1");
+    });
+    const [submitted, alarm] = await runInDurableObject(
+      stub,
+      async (_instance, state) => {
+        const row = state.storage.sql
+          .exec("SELECT v FROM kv WHERE k = 'plc_submitted'")
+          .toArray()[0] as { v: string } | undefined;
+        return [row?.v ?? null, await state.storage.getAlarm()] as const;
+      },
+    );
+    expect(submitted).toBeNull(); // not marked submitted after a failure
+    expect(typeof alarm).toBe("number");
+    expect(alarm as number).toBeGreaterThan(Date.now());
+  });
+
+  it("plcRetryDelayMs backs off exponentially with a cap", () => {
+    expect(plcRetryDelayMs(1)).toBe(10_000);
+    expect(plcRetryDelayMs(2)).toBe(20_000);
+    expect(plcRetryDelayMs(3)).toBe(40_000);
+    expect(plcRetryDelayMs(50)).toBe(3_600_000); // capped at 1h
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 /** Decode a `zDn…` p256 Multikey back to the raw uncompressed public key. */

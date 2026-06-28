@@ -86,6 +86,14 @@ export {
   type SignedPlcOperation,
   type PlcService,
 } from "./plc.js";
+export {
+  submitPlcOperation,
+  resolvePlcDid,
+  fetchPlcData,
+  DEFAULT_PLC_DIRECTORY,
+  type FetchLike,
+  type PlcDirectoryOptions,
+} from "./plc-directory.js";
 export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,

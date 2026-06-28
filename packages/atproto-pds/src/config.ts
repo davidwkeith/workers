@@ -60,6 +60,16 @@ export interface AtprotoPdsConfig {
   readonly didMethod?: "web" | "plc";
 
   /**
+   * PLC directory base URL. When set **and** {@link didMethod} is `"plc"`, the
+   * Durable Object submits its freshly minted genesis operation here at creation,
+   * registering the account on the network. Defaults to **undefined** — no
+   * automatic submission, so the account is locally self-consistent and can be
+   * registered later (and so tests never reach the network). Set to
+   * `"https://plc.directory"` to register against the public directory.
+   */
+  readonly plcDirectoryUrl?: string;
+
+  /**
    * The repository commit-signing curve. Defaults to `"p256"` — the
    * dependency-free, self-hosted-friendly default. Set `"secp256k1"` for the
    * AT Protocol network-preferred curve (required to be a drop-in for an
@@ -109,6 +119,7 @@ export interface ResolvedConfig {
    */
   readonly did: string;
   readonly didMethod: "web" | "plc";
+  readonly plcDirectoryUrl?: string;
   /** Stable per-account routing key for the DO (the host), method-independent. */
   readonly accountKey: string;
   readonly signingCurve: SigningCurve;
@@ -133,6 +144,7 @@ export const INTERNAL_CONFIG_HEADER = "x-atproto-config";
 export interface ForwardedConfig {
   readonly did: string;
   readonly didMethod: "web" | "plc";
+  readonly plcDirectoryUrl?: string;
   readonly handle: string;
   readonly baseUrl: string;
   readonly signingCurve: SigningCurve;
@@ -185,6 +197,9 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
     handle,
     did,
     didMethod,
+    ...(config.plcDirectoryUrl
+      ? { plcDirectoryUrl: config.plcDirectoryUrl }
+      : {}),
     accountKey: host,
     signingCurve: config.signingCurve ?? "p256",
     password: config.password,
@@ -204,6 +219,9 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
   return {
     did: config.did,
     didMethod: config.didMethod,
+    ...(config.plcDirectoryUrl
+      ? { plcDirectoryUrl: config.plcDirectoryUrl }
+      : {}),
     handle: config.handle,
     baseUrl: config.baseUrl,
     signingCurve: config.signingCurve,
