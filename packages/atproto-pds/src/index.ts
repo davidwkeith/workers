@@ -94,6 +94,13 @@ export {
   type FetchLike,
   type PlcDirectoryOptions,
 } from "./plc-directory.js";
+export {
+  importRepoFromCar,
+  type ImportedRepo,
+  type ImportedRecord,
+  type ImportRepoOptions,
+  type ImportVerifyKey,
+} from "./migrate.js";
 export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,
