@@ -75,8 +75,12 @@ secp256k1 signing curve):
   neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
 - **Scope is a single-account PDS.** One account per `baseUrl`; sessions
   authenticate the one owner via a configured password → HS256 access/refresh
-  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) remains
-  future work; `did:plc` is in progress (#182, see the identity note above).
+  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) is in
+  progress (#184): the pure **frame encoder** (`firehose.ts` — the DAG-CBOR
+  header + `#commit` body framing) has landed; the Durable Object WebSocket
+  endpoint (hibernatable accept, the persisted `seq` cursor, per-commit broadcast,
+  and `?cursor=` backfill) is the next increment. `did:plc` (#182) and account
+  migration (#183) are complete.
 
 ## Why it does not fit the way the others do
 

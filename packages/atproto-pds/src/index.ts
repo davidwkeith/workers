@@ -110,6 +110,13 @@ export {
   resolveSigningKey,
   type ResolveOptions,
 } from "./resolve.js";
+export {
+  encodeFrameHeader,
+  encodeCommitBody,
+  encodeCommitFrame,
+  type FirehoseCommit,
+  type FirehoseRepoOp,
+} from "./firehose.js";
 export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,

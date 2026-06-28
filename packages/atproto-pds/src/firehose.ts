@@ -1,0 +1,91 @@
+/**
+ * The AT Protocol repository firehose frame format
+ * (`com.atproto.sync.subscribeRepos`).
+ *
+ * Each event on the stream is a binary message: two concatenated **DAG-CBOR**
+ * objects — a header `{ op: 1, t: "#commit" }` (or `t: "#sync"`, `"#identity"`,
+ * `"#account"`; `op: -1` for an error) followed by the message body. This module
+ * is the pure, Workers-runtime-free encoder for those frames; the Durable Object
+ * (which owns the sequence cursor and the hibernatable sockets) assembles a
+ * {@link FirehoseCommit} per repo commit and broadcasts the encoded frame.
+ *
+ * Relays subscribe to this stream to crawl the repository in real time — without
+ * it, records written here are not discoverable by the network.
+ */
+
+import { concatBytes } from "./bytes.js";
+import { encodeCbor, type CborValue } from "./cbor.js";
+import type { CID } from "./cid.js";
+
+/** A single repository mutation in a `#commit` event. */
+export interface FirehoseRepoOp {
+  readonly action: "create" | "update" | "delete";
+  /** The record path (`collection/rkey`). */
+  readonly path: string;
+  /** The new record CID (create/update), or `null` for a delete. */
+  readonly cid: CID | null;
+  /** The previous record CID, for updates and deletes (optional). */
+  readonly prev?: CID | null;
+}
+
+/** A `#commit` event: a repository commit ready to be framed onto the stream. */
+export interface FirehoseCommit {
+  /** Monotonic stream sequence number. */
+  readonly seq: number;
+  /** The repo DID this event comes from. */
+  readonly repo: string;
+  /** The signed commit's CID. */
+  readonly commit: CID;
+  /** This commit's revision. */
+  readonly rev: string;
+  /** The previous emitted commit's revision, or `null`. */
+  readonly since: string | null;
+  /** CAR of the blocks needed to apply this commit (a diff since `since`). */
+  readonly blocks: Uint8Array;
+  /** The mutations in this commit. */
+  readonly ops: readonly FirehoseRepoOp[];
+  /** ISO timestamp this event was broadcast. */
+  readonly time: string;
+  /** Root CID of the previous commit's MST tree (optional). */
+  readonly prevData?: CID | null;
+}
+
+/** Encode an event-stream frame **header** (`{ op: 1, t }`) as DAG-CBOR. */
+export function encodeFrameHeader(t: string): Uint8Array {
+  return encodeCbor({ op: 1, t });
+}
+
+/** The DAG-CBOR body of a `#commit` message (without the frame header). */
+export function encodeCommitBody(commit: FirehoseCommit): Uint8Array {
+  const body: { [key: string]: CborValue } = {
+    seq: commit.seq,
+    // Deprecated-but-required by the lexicon; emit stable defaults.
+    rebase: false,
+    tooBig: false,
+    repo: commit.repo,
+    commit: commit.commit,
+    rev: commit.rev,
+    since: commit.since,
+    blocks: commit.blocks,
+    ops: commit.ops.map((op) => {
+      const out: { [key: string]: CborValue } = {
+        action: op.action,
+        path: op.path,
+        cid: op.cid,
+      };
+      if (op.prev !== undefined) out.prev = op.prev;
+      return out;
+    }),
+    blobs: [],
+    time: commit.time,
+  };
+  if (commit.prevData !== undefined && commit.prevData !== null) {
+    body.prevData = commit.prevData;
+  }
+  return encodeCbor(body);
+}
+
+/** Encode a full `#commit` frame: the header followed by the body. */
+export function encodeCommitFrame(commit: FirehoseCommit): Uint8Array {
+  return concatBytes([encodeFrameHeader("#commit"), encodeCommitBody(commit)]);
+}
