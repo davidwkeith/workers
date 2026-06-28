@@ -44,10 +44,20 @@ export interface AtprotoPdsConfig {
   readonly handle?: string;
 
   /**
-   * The account DID. Defaults to the `did:web` derived from {@link baseUrl}'s
-   * host, keeping identity at the user's own domain (no PLC directory).
+   * The account DID. For `did:web` (the default method) it defaults to the
+   * `did:web` derived from {@link baseUrl}'s host. For `did:plc` it is normally
+   * **omitted** and derived by the Durable Object from the signed genesis
+   * operation; supply it only to adopt an existing `did:plc` (e.g. migration).
    */
   readonly did?: string;
+
+  /**
+   * The DID method for this account. `"web"` (default) keeps identity at the
+   * user's own origin with no external directory. `"plc"` anchors the DID in the
+   * public PLC directory — required to interoperate with the bulk of the existing
+   * network, at the cost of a dependency on that directory. Fixed at genesis.
+   */
+  readonly didMethod?: "web" | "plc";
 
   /**
    * The repository commit-signing curve. Defaults to `"p256"` — the
@@ -91,7 +101,16 @@ export interface ResolvedConfig {
   readonly baseUrl: string;
   readonly host: string;
   readonly handle: string;
+  /**
+   * The account DID. For `did:web` it is always known up front. For a fresh
+   * `did:plc` account it is the empty string here — the DID is only known after
+   * the DO signs its genesis operation, so the front door routes by
+   * {@link accountKey} and forwards identity queries to the DO.
+   */
   readonly did: string;
+  readonly didMethod: "web" | "plc";
+  /** Stable per-account routing key for the DO (the host), method-independent. */
+  readonly accountKey: string;
   readonly signingCurve: SigningCurve;
   readonly password?: string;
   readonly jwtSecret?: string;
@@ -113,6 +132,7 @@ export const INTERNAL_CONFIG_HEADER = "x-atproto-config";
 /** The config subset forwarded to the DO. */
 export interface ForwardedConfig {
   readonly did: string;
+  readonly didMethod: "web" | "plc";
   readonly handle: string;
   readonly baseUrl: string;
   readonly signingCurve: SigningCurve;
@@ -147,11 +167,25 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
       "@dwk/atproto-pds: `jwtSecret` is required when `password` is set",
     );
   }
+  const didMethod = config.didMethod ?? "web";
+  if (config.did) {
+    const expected = didMethod === "plc" ? "did:plc:" : "did:web:";
+    if (!config.did.startsWith(expected)) {
+      throw new Error(
+        `@dwk/atproto-pds: \`did\` \`${config.did}\` does not match didMethod \`${didMethod}\` (expected a \`${expected}…\` DID)`,
+      );
+    }
+  }
+  // did:web is always known up front; a fresh did:plc DID is derived by the DO
+  // from its genesis operation, so it is empty here unless explicitly adopted.
+  const did = config.did ?? (didMethod === "web" ? didWebFromHost(host) : "");
   return {
     baseUrl,
     host,
     handle,
-    did: config.did ?? didWebFromHost(host),
+    did,
+    didMethod,
+    accountKey: host,
     signingCurve: config.signingCurve ?? "p256",
     password: config.password,
     jwtSecret: config.jwtSecret,
@@ -169,6 +203,7 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
 export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
   return {
     did: config.did,
+    didMethod: config.didMethod,
     handle: config.handle,
     baseUrl: config.baseUrl,
     signingCurve: config.signingCurve,

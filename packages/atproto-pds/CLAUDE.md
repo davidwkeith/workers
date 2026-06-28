@@ -45,11 +45,15 @@ expression of "there are no instances in atproto".
   header. The front door never sees it.
 - **`did:web` identity by default; `did:plc` opt-in (in progress).** For
   `did:web` the DID document and the `atproto-did` handle binding are served from
-  the account's own origin — no PLC directory. `did:plc` support is being added
-  for network interop (#182): `plc.ts` is the pure operation core (build/sign
-  genesis & rotation ops, derive the `did:plc:` id, chain via `prev`); it depends
-  on the external PLC directory, so keep that dependency injectable and never the
-  default.
+  the account's own origin — no PLC directory. For `did:plc` (#182,
+  `didMethod: "plc"`) the DO mints a DO-custodied secp256k1 rotation key,
+  self-signs a genesis op (`plc.ts`), derives the account's `did:plc`, and is the
+  source of truth for it: the front door routes the DO by a stable host key (the
+  did:plc isn't known until genesis), forwards `atproto-did` to the DO, and 404s
+  `did.json` (a PLC doc lives in the directory). The account DID flows through
+  `#accountDid()`, not `cfg.did`. The PLC **directory client**
+  (submission/resolution) is the remaining piece — keep it injectable; the
+  external directory is never the default path.
 
 ## Test environment
 
