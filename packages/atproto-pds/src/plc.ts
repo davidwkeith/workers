@@ -92,12 +92,15 @@ export function buildRotationOperation(
 ): UnsignedPlcOperation {
   return {
     type: "plc_operation",
+    // Arrays are the full set, so replace; maps merge so an update to one
+    // named key/service never drops the others the previous op carried.
     rotationKeys: [...(updates.rotationKeys ?? previous.rotationKeys)],
     verificationMethods: {
-      ...(updates.verificationMethods ?? previous.verificationMethods),
+      ...previous.verificationMethods,
+      ...updates.verificationMethods,
     },
     alsoKnownAs: [...(updates.alsoKnownAs ?? previous.alsoKnownAs)],
-    services: { ...(updates.services ?? previous.services) },
+    services: { ...previous.services, ...updates.services },
     prev: prevCid,
   };
 }

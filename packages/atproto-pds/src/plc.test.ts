@@ -154,6 +154,46 @@ describe("did:plc operations", () => {
     ).toBe(true);
   });
 
+  it("merges verificationMethods/services on rotation without dropping others", async () => {
+    const rotation = await createRepoKeypair("secp256k1");
+    const op: UnsignedPlcOperation = {
+      type: "plc_operation",
+      rotationKeys: [didKeyFromPublicKey(rotation.publicKeyRaw, "secp256k1")],
+      verificationMethods: {
+        atproto: "did:key:zDnOld",
+        extra: "did:key:zDnExtra",
+      },
+      alsoKnownAs: ["at://alice.example.com"],
+      services: {
+        atproto_pds: {
+          type: "AtprotoPersonalDataServer",
+          endpoint: "https://old.example",
+        },
+        custom: { type: "CustomService", endpoint: "https://custom.example" },
+      },
+      prev: null,
+    };
+    const rotated = buildRotationOperation(op, "bafyprevcid", {
+      verificationMethods: { atproto: "did:key:zDnNew" },
+      services: {
+        atproto_pds: {
+          type: "AtprotoPersonalDataServer",
+          endpoint: "https://new.example",
+        },
+      },
+    });
+    // Named entries are overridden; the others survive.
+    expect(rotated.verificationMethods).toEqual({
+      atproto: "did:key:zDnNew",
+      extra: "did:key:zDnExtra",
+    });
+    expect(rotated.services.atproto_pds!.endpoint).toBe("https://new.example");
+    expect(rotated.services.custom).toEqual({
+      type: "CustomService",
+      endpoint: "https://custom.example",
+    });
+  });
+
   it("chains a rotation operation to the genesis op via its CID", async () => {
     const { op, rotation, sign } = await genesis();
     const signedGenesis = await signPlcOperation(op, sign);
