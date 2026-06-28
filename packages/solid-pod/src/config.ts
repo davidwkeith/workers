@@ -203,6 +203,13 @@ export const INTERNAL_HEADERS = {
   /** JSON-encoded subset of config the DO needs (offload threshold, etc.). */
   config: "x-solid-config",
   /**
+   * Front-door→DO: marks a request as the WebDAV "second door" (`@dwk/webdav`).
+   * When set, the DO routes the request through the Class 2 verb router over the
+   * per-pod store + lock/app-password SQLite, rather than the Solid LDP path.
+   * Set only by the WebDAV front door, never passed through from the client.
+   */
+  webdav: "x-solid-webdav",
+  /**
    * DO→front-door: a machine-readable authorization outcome (see `PodOutcome`)
    * the composition boundary logs via the injected seams, then strips before the
    * response reaches the client.

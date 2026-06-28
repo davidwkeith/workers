@@ -12,7 +12,8 @@
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/rdf": ["../rdf/src/index.ts"],
       "@dwk/wac": ["../wac/src/index.ts"],
-      "@dwk/store": ["../store/src/index.ts"]
+      "@dwk/store": ["../store/src/index.ts"],
+      "@dwk/webdav": ["../webdav/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

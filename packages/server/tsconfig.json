@@ -23,6 +23,7 @@
       "@dwk/vc": ["../vc/src/index.ts"],
       "@dwk/wac": ["../wac/src/index.ts"],
       "@dwk/webauthn": ["../webauthn/src/index.ts"],
+      "@dwk/webdav": ["../webdav/src/index.ts"],
       "@dwk/webfinger": ["../webfinger/src/index.ts"],
       "@dwk/webmention": ["../webmention/src/index.ts"],
       "@dwk/websub": ["../websub/src/index.ts"]

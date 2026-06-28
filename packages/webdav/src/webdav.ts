@@ -367,6 +367,7 @@ async function put(ctx: RequestContext, resolved: Resolved): Promise<Response> {
       ctx.request.body,
       contentType,
       preconditionsOf(ctx.request),
+      contentLengthOf(ctx.request),
     );
     return dav(null, outcome.created ? 201 : 204, etagHeader(outcome.etag));
   } catch (error) {
@@ -884,6 +885,14 @@ function lockedResponse(lock: LockRecord, resolved: Resolved): Response {
 
 function etagHeader(etag: string | undefined): Record<string, string> {
   return etag === undefined ? {} : { ETag: etag };
+}
+
+/** The request's declared `Content-Length` as a non-negative integer, or `null`. */
+function contentLengthOf(request: Request): number | null {
+  const raw = request.headers.get("content-length");
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 function preconditionsOf(request: Request): {

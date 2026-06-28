@@ -245,6 +245,9 @@ importers:
       '@dwk/wac':
         specifier: workspace:*
         version: link:../wac
+      '@dwk/webdav':
+        specifier: workspace:*
+        version: link:../webdav
 
   packages/store:
     dependencies:
