@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRepoKeypair,
+  decodeMultikey,
   didKeyFromPublicKey,
   exportPublicKeyRaw,
   generateSigningKey,
@@ -138,6 +139,23 @@ describe("repository signing key (secp256k1 / k-256)", () => {
       () => false,
     );
     expect(verified).toBe(false);
+  });
+});
+
+describe("decodeMultikey", () => {
+  it("round-trips publicKeyMultibase for both curves", async () => {
+    for (const curve of ["p256", "secp256k1"] as const) {
+      const kp = await createRepoKeypair(curve);
+      const decoded = decodeMultikey(
+        publicKeyMultibase(kp.publicKeyRaw, curve),
+      );
+      expect(decoded.curve).toBe(curve);
+      expect(decoded.publicKeyRaw).toEqual(kp.publicKeyRaw);
+    }
+  });
+
+  it("rejects a non-multibase or unknown-codec key", () => {
+    expect(() => decodeMultikey("Qnotz")).toThrow(/multibase/);
   });
 });
 

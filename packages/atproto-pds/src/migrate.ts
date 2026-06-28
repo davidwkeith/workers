@@ -55,6 +55,9 @@ export interface ImportedRecord {
   readonly collection: string;
   readonly rkey: string;
   readonly cid: CID;
+  /** The record's canonical DAG-CBOR block, stored verbatim to preserve its CID. */
+  readonly bytes: Uint8Array;
+  /** The record decoded to JSON, for inspection. */
   readonly value: JsonValue;
 }
 
@@ -159,6 +162,7 @@ export async function importRepoFromCar(
       collection,
       rkey,
       cid: entry.value,
+      bytes: recordBytes,
       value: cborToJson(decodeCbor(recordBytes)),
     };
   });

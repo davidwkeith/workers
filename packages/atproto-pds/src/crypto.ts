@@ -17,9 +17,16 @@
  * multicodec-tagged `did:key`/Multikey, never inferred from raw key bytes.
  */
 
+import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
-import { base58btcEncode, concatBytes, fromHex, toHex } from "./bytes.js";
+import {
+  base58btcDecode,
+  base58btcEncode,
+  concatBytes,
+  fromHex,
+  toHex,
+} from "./bytes.js";
 
 /** The signing curves AT Protocol admits; P-256 is this package's default. */
 export type SigningCurve = "p256" | "secp256k1";
@@ -187,6 +194,38 @@ export function didKeyFromPublicKey(
   curve: SigningCurve = "p256",
 ): string {
   return "did:key:" + publicKeyMultibase(raw, curve);
+}
+
+/** A public key recovered from a Multikey: its raw bytes and curve. */
+export interface DecodedMultikey {
+  /** 65-byte uncompressed public key (`0x04 ‖ x ‖ y`). */
+  readonly publicKeyRaw: Uint8Array;
+  readonly curve: SigningCurve;
+}
+
+/**
+ * Decode a `z…` Multikey (the inverse of {@link publicKeyMultibase}) back to a
+ * raw public key and its curve, reading the multicodec prefix and decompressing
+ * the SEC1 point. Used to recover a foreign account's signing key from its DID
+ * document — e.g. to verify a migrating repository's commits.
+ */
+export function decodeMultikey(multibase: string): DecodedMultikey {
+  if (!multibase.startsWith("z")) {
+    throw new Error(
+      "crypto: Multikey must be a 'z' base58btc multibase string",
+    );
+  }
+  const bytes = base58btcDecode(multibase.slice(1));
+  if (bytes.length < 3) throw new Error("crypto: Multikey is too short");
+  let curve: SigningCurve;
+  if (bytes[0] === 0x80 && bytes[1] === 0x24) curve = "p256";
+  else if (bytes[0] === 0xe7 && bytes[1] === 0x01) curve = "secp256k1";
+  else throw new Error("crypto: unsupported Multikey codec");
+  const compressed = bytes.slice(2);
+  const point = (curve === "secp256k1" ? secp256k1 : p256).Point.fromBytes(
+    compressed,
+  );
+  return { publicKeyRaw: point.toBytes(false), curve };
 }
 
 // --- verification -----------------------------------------------------------
