@@ -53,6 +53,7 @@ import { buildMst, type MstEntry } from "./mst.js";
 import {
   atUri,
   cborToJson,
+  extractBlobCids,
   jsonToCbor,
   recordPath,
   type JsonValue,
@@ -378,6 +379,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#listRecords(url);
       case "com.atproto.repo.uploadBlob":
         return this.#uploadBlob(request);
+      case "com.atproto.repo.listMissingBlobs":
+        return this.#listMissingBlobs(request);
       case "com.atproto.sync.getRepo":
         return this.#getRepo();
       case "com.atproto.sync.getLatestCommit":
@@ -386,6 +389,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#getBlob(url);
       case "com.atproto.sync.getRepoStatus":
         return this.#getRepoStatus(url);
+      case "com.atproto.sync.listBlobs":
+        return this.#listBlobs(url);
       case "com.atproto.sync.listRepos":
         return jsonResponse({
           repos: [
@@ -436,14 +441,18 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         n: number;
       }
     ).n;
+    const referenced = this.#referencedBlobCids();
+    const held = this.#heldBlobCids();
+    let importedBlobs = 0;
+    for (const cid of referenced) if (held.has(cid)) importedBlobs++;
     return jsonResponse({
       activated: this.#isActive(),
       validDid: true,
       repoCommit: this.#kvGet("head_cid"),
       repoRev: this.#kvGet("head_rev"),
       indexedRecords: count,
-      expectedBlobs: 0,
-      importedBlobs: 0,
+      expectedBlobs: referenced.size,
+      importedBlobs,
     });
   }
 
@@ -809,6 +818,57 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   #blobKey(cid: CID): string {
     return `blob/${this.#accountDid()}/${cid.toString()}`;
+  }
+
+  /** List the CIDs of blobs this account holds (`com.atproto.sync.listBlobs`). */
+  #listBlobs(url: URL): Response {
+    const did = url.searchParams.get("did");
+    if (!did) throw invalidRequest("`did` is required");
+    if (did !== this.#accountDid()) {
+      throw namedError(404, "RepoNotFound", "Repo not hosted on this server");
+    }
+    const cids = this.#sql
+      .exec("SELECT cid FROM blobs ORDER BY cid")
+      .toArray()
+      .map((row) => row.cid as string);
+    return jsonResponse({ cids });
+  }
+
+  /** The set of blob CIDs referenced by the current record set. */
+  #referencedBlobCids(): Set<string> {
+    const refs = new Set<string>();
+    for (const row of this.#sql.exec("SELECT value FROM records").toArray()) {
+      for (const cid of extractBlobCids(
+        decodeCbor(unbase64(row.value as string)),
+      )) {
+        refs.add(cid);
+      }
+    }
+    return refs;
+  }
+
+  /** The held blob CIDs as a set. */
+  #heldBlobCids(): Set<string> {
+    return new Set(
+      this.#sql
+        .exec("SELECT cid FROM blobs")
+        .toArray()
+        .map((row) => row.cid as string),
+    );
+  }
+
+  /**
+   * Blobs referenced by records but not yet uploaded (`listMissingBlobs`). After
+   * a migration import, the migrating client uploads exactly these (via
+   * `uploadBlob`) to complete the move; the gap is how it knows it is done.
+   */
+  async #listMissingBlobs(request: Request): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    const held = this.#heldBlobCids();
+    const missing = [...this.#referencedBlobCids()].filter(
+      (cid) => !held.has(cid),
+    );
+    return jsonResponse({ blobs: missing.map((cid) => ({ cid })) });
   }
 
   // --- migration ------------------------------------------------------------

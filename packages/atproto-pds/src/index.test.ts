@@ -632,6 +632,79 @@ describe("AT Protocol PDS", () => {
     ).toBe(404);
   });
 
+  it("reports held and missing blobs (listBlobs / listMissingBlobs)", async () => {
+    const host = "blobs-migration.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const did = `did:web:${host}`;
+
+    // Upload one blob and reference it from a record.
+    const up = await call(handler, host, "/xrpc/com.atproto.repo.uploadBlob", {
+      raw: new Uint8Array([1, 2, 3, 4, 5]),
+      contentType: "image/png",
+      token,
+    });
+    const uploaded = (await up.json()) as {
+      blob: { ref: { $link: string } };
+    };
+    const heldCid = uploaded.blob.ref.$link;
+    await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+      body: {
+        collection: "app.bsky.actor.profile",
+        rkey: "self",
+        record: { $type: "app.bsky.actor.profile", avatar: uploaded.blob },
+      },
+      token,
+    });
+
+    // A record referencing a blob we never uploaded.
+    const missingCid = (
+      await CID.create(DAG_CBOR_CODEC, encodeCbor({ missing: true }))
+    ).toString();
+    await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+      body: {
+        collection: "app.bsky.feed.post",
+        rkey: "p",
+        record: {
+          $type: "app.bsky.feed.post",
+          text: "x",
+          embed: {
+            $type: "blob",
+            ref: { $link: missingCid },
+            mimeType: "image/png",
+            size: 9,
+          },
+        },
+      },
+      token,
+    });
+
+    // listBlobs reports the held blob.
+    const lb = (await (
+      await call(handler, host, `/xrpc/com.atproto.sync.listBlobs?did=${did}`)
+    ).json()) as { cids: string[] };
+    expect(lb.cids).toContain(heldCid);
+
+    // listMissingBlobs reports the referenced-but-unheld blob, not the held one.
+    const lm = (await (
+      await call(handler, host, "/xrpc/com.atproto.repo.listMissingBlobs", {
+        token,
+      })
+    ).json()) as { blobs: { cid: string }[] };
+    const missingList = lm.blobs.map((b) => b.cid);
+    expect(missingList).toContain(missingCid);
+    expect(missingList).not.toContain(heldCid);
+
+    // checkAccountStatus blob counts reflect referenced vs held.
+    const cs = (await (
+      await call(handler, host, "/xrpc/com.atproto.server.checkAccountStatus", {
+        token,
+      })
+    ).json()) as { expectedBlobs: number; importedBlobs: number };
+    expect(cs.expectedBlobs).toBe(2);
+    expect(cs.importedBlobs).toBe(1);
+  });
+
   it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
     const did = "did:plc:src234src234src234src234";
     const host = "migrated.example";

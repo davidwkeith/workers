@@ -112,6 +112,7 @@ export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,
   cborToJson,
+  extractBlobCids,
   atUri,
   recordPath,
   type JsonValue,

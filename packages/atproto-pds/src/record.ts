@@ -72,6 +72,32 @@ export function cborToJson(value: CborValue): JsonValue {
   return value;
 }
 
+/**
+ * Collect the CIDs of every blob a record references. A blob is the IPLD object
+ * `{ $type: "blob", ref: <CID>, mimeType, size }`; this walks the record's
+ * DAG-CBOR value and returns each `ref` CID as a string. Used to tell which blobs
+ * a repository still needs (e.g. after a migration import).
+ */
+export function extractBlobCids(value: CborValue): string[] {
+  const out: string[] = [];
+  const visit = (v: CborValue): void => {
+    if (v instanceof CID || v instanceof Uint8Array) return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    if (v !== null && typeof v === "object") {
+      const obj = v as { [k: string]: CborValue };
+      if (obj["$type"] === "blob" && obj["ref"] instanceof CID) {
+        out.push(obj["ref"].toString());
+      }
+      for (const key of Object.keys(obj)) visit(obj[key] as CborValue);
+    }
+  };
+  visit(value);
+  return out;
+}
+
 /** The repository path (`collection/rkey`) used as an MST key. */
 export function recordPath(collection: string, rkey: string): string {
   return `${collection}/${rkey}`;
