@@ -22,3 +22,8 @@ this wires the live stream onto the per-account repository Durable Object.
 - New `encodeInfoFrame` / `encodeErrorFrame` encoders (`op: 1` `#info` and the
   `op: -1` error header) join the existing `#commit` framing on the public
   surface.
+- **Write serialization:** the four commit-chain mutations (`createRecord`,
+  `putRecord`, `deleteRecord`, `importRepo`) now run through a Durable Object
+  write queue, so concurrent writes cannot interleave at `await` points and fork
+  the linear commit chain (each used to read the same `prev` head). This upholds
+  the package's single-writer invariant.

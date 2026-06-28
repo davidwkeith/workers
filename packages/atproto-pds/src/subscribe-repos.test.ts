@@ -257,6 +257,42 @@ describe("subscribeRepos firehose", () => {
     ]);
   });
 
+  it("serializes concurrent writes into an ordered, gap-free stream", async () => {
+    const host = "fh-concurrent.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const { reader } = await subscribe(handler, host);
+
+    // Fire several writes at once: the DO write queue must serialize them so the
+    // commit chain stays linear (no two reading the same `prev` head).
+    const n = 6;
+    await Promise.all(
+      Array.from({ length: n }, (_, i) =>
+        createRecord(handler, host, token, `r${i}`, `text ${i}`),
+      ),
+    );
+
+    // Exactly n frames, with strictly increasing seqs 1..n — no gaps, no dupes.
+    const seqs: number[] = [];
+    for (let i = 0; i < n; i++) {
+      seqs.push(decodeCommit(await reader.next()).body.seq);
+    }
+    expect(seqs).toEqual([1, 2, 3, 4, 5, 6]);
+
+    // Every record landed; nothing was lost to a forked/overwritten commit.
+    const listed = await handler(
+      new Request(
+        `https://${host}/xrpc/com.atproto.repo.listRecords?collection=app.bsky.feed.post`,
+        { headers: { authorization: `Bearer ${token}` } },
+      ),
+      testEnv,
+      ctx,
+    );
+    expect(
+      ((await listed.json()) as { records: unknown[] }).records,
+    ).toHaveLength(n);
+  });
+
   it("rejects a non-integer cursor with an InvalidRequest error frame", async () => {
     const host = "fh-badcursor.example";
     const handler = pds(host);

@@ -124,6 +124,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   #signerFn: Signer | null = null;
   #accountDidCache: string | null = null;
   #initPromise: Promise<void> | null = null;
+  #writeChain: Promise<unknown> = Promise.resolve();
 
   constructor(state: DurableObjectState, env: AtprotoPdsEnv) {
     super(state, env);
@@ -405,14 +406,17 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#getRecommendedDidCredentials(request);
       case "com.atproto.repo.describeRepo":
         return this.#describeRepo();
+      // The four commit-chain mutations are serialized through the write queue:
+      // each reads the prior head and chains a new commit onto it, so they must
+      // not interleave at `await` points (which would fork the chain).
       case "com.atproto.repo.createRecord":
-        return this.#createRecord(request);
+        return this.#enqueueWrite(() => this.#createRecord(request));
       case "com.atproto.repo.putRecord":
-        return this.#putRecord(request);
+        return this.#enqueueWrite(() => this.#putRecord(request));
       case "com.atproto.repo.deleteRecord":
-        return this.#deleteRecord(request);
+        return this.#enqueueWrite(() => this.#deleteRecord(request));
       case "com.atproto.repo.importRepo":
-        return this.#importRepo(request);
+        return this.#enqueueWrite(() => this.#importRepo(request));
       case "com.atproto.repo.getRecord":
         return this.#getRecord(url);
       case "com.atproto.repo.listRecords":
@@ -670,6 +674,23 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       collections,
       handleIsCorrect: true,
     });
+  }
+
+  // --- write serialization --------------------------------------------------
+
+  /**
+   * Run a commit-chain mutation after every previously enqueued one settles.
+   * Durable Objects interleave concurrent requests at `await` points, so without
+   * this two writes could each read the same `prev` head and sign forking commits
+   * — silently corrupting the linear chain a Relay expects. The chain is a single
+   * `Promise` tail; a failed op is isolated (its rejection is swallowed for the
+   * chain but still surfaced to its own caller) so one bad write cannot wedge the
+   * next. Reads are unaffected; only the four mutating endpoints enqueue here.
+   */
+  #enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.#writeChain.then(op);
+    this.#writeChain = result.catch(() => undefined);
+    return result;
   }
 
   // --- record writes --------------------------------------------------------
