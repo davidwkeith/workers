@@ -39,9 +39,10 @@ passwords, header parsing), the Class 2 verb router (`createWebdav`), and the
 lock + app-password DO-SQLite stores (`LockStore`, `CredentialStore`), all driven
 over an injected `WebdavBackend` seam. `@dwk/solid-pod` now resolves that seam
 onto the live per-pod `SolidPodObject` (via `createSolidPodWebdav` + an in-DO
-adapter over `@dwk/store`/WAC), so the pod is mountable as a network drive;
-`COPY`/`MOVE`, the owner-gated app-password mint endpoint, and the litmus run are
-the remaining increment.
+adapter over `@dwk/store`/WAC), so the pod is mountable as a network drive, with
+`COPY`/`MOVE` (resource + collection) now implemented; the owner-gated
+app-password mint endpoint, per-resource size/mtime in the store, and the litmus
+run are the remaining increment.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 

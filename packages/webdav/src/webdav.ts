@@ -429,12 +429,27 @@ async function copyMove(
   resolved: Resolved,
   method: "COPY" | "MOVE",
 ): Promise<Response> {
-  const destination = destinationOf(ctx.request, ctx.url, resolved);
+  let destination = destinationOf(ctx.request, ctx.url, resolved);
   if (destination === null)
     return problem(400, "Missing or invalid Destination");
+  // A collection's destination must be a collection path; without this a client
+  // that drops the trailing slash (`/dir` for `/dir/`) would slip past the
+  // equality, into-itself, and lock guards below and corrupt child paths in the
+  // backend copy. Normalize once, up front.
+  if (isCollectionPath(ctx.path) && !destination.endsWith("/")) {
+    destination = `${destination}/`;
+  }
   if (isAuxiliary(destination)) return problem(403, "Forbidden destination");
   if (destination === ctx.path)
     return problem(403, "Source and destination are equal");
+  if ((await ctx.backend.stat(ctx.path)) === null) {
+    return problem(404, "Not found");
+  }
+  // A collection cannot be copied/moved into its own subtree (RFC 4918 §9.8.5 /
+  // §9.9.4) — and it would otherwise recurse without end.
+  if (isCollectionPath(ctx.path) && destination.startsWith(ctx.path)) {
+    return problem(409, "Cannot copy or move a collection into itself");
+  }
 
   const depth =
     method === "COPY" ? depthOf(ctx.request, "infinity") : "infinity";

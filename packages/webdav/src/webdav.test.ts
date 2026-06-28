@@ -472,6 +472,25 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  it("404s a COPY of a missing source", async () => {
+    await withHandler(async ({ call }) => {
+      const res = await call("COPY", "/ghost.txt", {
+        headers: { destination: "https://pod.example/dst.txt" },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("409s a COPY of a collection into its own subtree", async () => {
+    await withHandler(async ({ call }) => {
+      await call("MKCOL", "/dir");
+      const res = await call("COPY", "/dir/", {
+        headers: { destination: "https://pod.example/dir/sub/" },
+      });
+      expect(res.status).toBe(409);
+    });
+  });
+
   it("deletes a resource and refuses to delete a non-empty collection", async () => {
     await withHandler(async ({ call }) => {
       await call("MKCOL", "/full");

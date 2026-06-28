@@ -50,6 +50,7 @@ interface Caller {
     path: string,
     init?: { headers?: Record<string, string>; body?: string; auth?: boolean },
   ) => Promise<Response>;
+  baseUrl: string;
 }
 
 async function withPod(
@@ -71,7 +72,7 @@ async function withPod(
       createExecutionContext(),
     );
   };
-  await fn({ call });
+  await fn({ call, baseUrl });
 }
 
 // The pod drains displaced/deleted blobs into the shared D1 GC table; create
@@ -237,13 +238,89 @@ describe("@dwk/solid-pod WebDAV door", () => {
     expect(await get.text()).toBe(body);
   });
 
-  it("returns 501 for COPY/MOVE (deferred to a later increment)", async () => {
-    await withPod(RW, async ({ call }) => {
-      await call("PUT", "/src.txt", { body: "x" });
-      const res = await call("COPY", "/src.txt", {
-        headers: { destination: "https://pod.example/dst.txt" },
+  it("COPYs a resource, leaving the source, and MOVEs another, dropping it", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/src.txt", { body: "data" });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: `${baseUrl}/copy.txt` },
       });
-      expect(res.status).toBe(501);
+      expect(copy.status).toBe(201);
+      expect((await call("GET", "/src.txt")).status).toBe(200);
+      expect(await (await call("GET", "/copy.txt")).text()).toBe("data");
+
+      const move = await call("MOVE", "/src.txt", {
+        headers: { destination: `${baseUrl}/moved.txt` },
+      });
+      expect(move.status).toBe(201);
+      expect((await call("GET", "/src.txt")).status).toBe(404);
+      expect(await (await call("GET", "/moved.txt")).text()).toBe("data");
+    });
+  });
+
+  it("COPYs a collection and its children (Depth: infinity)", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("MKCOL", "/box");
+      await call("PUT", "/box/a.txt", { body: "alpha" });
+      await call("PUT", "/box/b.txt", { body: "beta" });
+      const copy = await call("COPY", "/box/", {
+        headers: { destination: `${baseUrl}/clone/` },
+      });
+      expect(copy.status).toBe(201);
+      expect(await (await call("GET", "/clone/a.txt")).text()).toBe("alpha");
+      expect(await (await call("GET", "/clone/b.txt")).text()).toBe("beta");
+      // The source collection is untouched by a COPY.
+      expect(await (await call("GET", "/box/a.txt")).text()).toBe("alpha");
+      // The copied container lists its own (new) members.
+      const propfind = await call("PROPFIND", "/clone/", {
+        headers: { depth: "1" },
+      });
+      const body = await propfind.text();
+      expect(body).toContain("/clone/a.txt");
+      expect(body).toContain("/clone/b.txt");
+    });
+  });
+
+  it("normalizes a collection destination that omits the trailing slash", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("MKCOL", "/box");
+      await call("PUT", "/box/a.txt", { body: "alpha" });
+      // Destination `/clone` (no slash) for a collection source must be treated
+      // as `/clone/` so child keys are not corrupted into `/clonea.txt`.
+      const copy = await call("COPY", "/box/", {
+        headers: { destination: `${baseUrl}/clone` },
+      });
+      expect(copy.status).toBe(201);
+      expect(await (await call("GET", "/clone/a.txt")).text()).toBe("alpha");
+      expect((await call("GET", "/clonea.txt")).status).toBe(404);
+    });
+  });
+
+  it("MOVEs a collection subtree and drops the source", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("MKCOL", "/old");
+      await call("PUT", "/old/file.txt", { body: "x" });
+      const move = await call("MOVE", "/old/", {
+        headers: { destination: `${baseUrl}/new/` },
+      });
+      expect(move.status).toBe(201);
+      expect(await (await call("GET", "/new/file.txt")).text()).toBe("x");
+      expect((await call("GET", "/old/file.txt")).status).toBe(404);
+    });
+  });
+
+  it("refuses to overwrite without Overwrite, and refuses MOVE of the root", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/one.txt", { body: "1" });
+      await call("PUT", "/two.txt", { body: "2" });
+      const noOverwrite = await call("COPY", "/one.txt", {
+        headers: { destination: `${baseUrl}/two.txt`, overwrite: "F" },
+      });
+      expect(noOverwrite.status).toBe(412);
+      // The storage root is immovable.
+      expect(
+        (await call("MOVE", "/", { headers: { destination: `${baseUrl}/x/` } }))
+          .status,
+      ).toBe(405);
     });
   });
 });
