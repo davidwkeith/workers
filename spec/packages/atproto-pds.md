@@ -95,11 +95,42 @@ core**:
 - **Identity:** prefer `did:web` (reuses the [`@dwk/vc`](vc.md) DID surface);
   treat `did:plc` as an opt-in that introduces an external dependency.
 
+## Related work / when to use Cirrus instead
+
+[Cirrus](https://github.com/ascorbic/cirrus) (`@getcirrus/pds`, MIT) is a
+single-user AT Protocol PDS on the same Cloudflare primitives (Worker + Durable
+Object + R2) — effectively the same scope as this package. The honest difference
+is **reach vs. fit**:
+
+- **Cirrus is further along on real-network interop.** It supports `did:plc` as
+  well as `did:web`, has tested **account migration** from an existing PDS, and
+  ships the **firehose** (`subscribeRepos`). `@dwk/atproto-pds` deliberately does
+  none of these yet (P-256 + `did:web` only; see the parity tracker
+  [#180](https://github.com/davidwkeith/workers/issues/180) and its children
+  #181–#184). So for a user who wants to **migrate an existing Bluesky account
+  today**, Cirrus is the more complete answer.
+- **Cirrus is a standalone deployable app, not a composable library.** It does not
+  export the `createX(config)` handler shape the
+  [composition contract](../composition-contract.md) requires, so it cannot be
+  mounted alongside `@dwk/solid-pod`, `@dwk/activitypub`, etc. behind one Worker /
+  one domain — it is a second Worker. `@dwk/atproto-pds` exists precisely to be
+  that mountable, on-thesis (`did:web`, dependency-minimal) member of the cohort.
+
+**Guidance:** if you want full-network parity (PLC accounts, migration, firehose)
+and are content running a dedicated Worker, prefer Cirrus. Use `@dwk/atproto-pds`
+when you want the PDS composed into a single multi-standard Worker on the cohort's
+terms. Whether to close the parity gap here at all is the open scope question
+below, now tracked with concrete cost in
+[#180](https://github.com/davidwkeith/workers/issues/180).
+
 ## Open questions (must resolve before committing)
 
 - **Scope fit.** Does a non-W3C, key-custodial, MST-based server belong in `@dwk`
   at all, or is it a separate project? (Mirrors the [`@dwk/webauthn`](webauthn.md)
-  "does this belong in scope" open question, but larger.)
+  "does this belong in scope" open question, but larger.) The cost of reaching
+  network parity with a standalone server like Cirrus is now itemised in the
+  parity tracker [#180](https://github.com/davidwkeith/workers/issues/180)
+  (K-256 #181, `did:plc` #182, migration #183, firehose #184).
 - **Spec churn.** AT Protocol is still evolving faster than the frozen W3C/IETF
   specs the rest of the cohort targets; conformance is a moving target.
 - **No reuse dividend.** Because it shares neither the store nor `@dwk/rdf`, the
