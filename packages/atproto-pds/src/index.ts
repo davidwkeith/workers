@@ -63,6 +63,11 @@ export {
   didKeyFromPublicKey,
   publicKeyMultibase,
   exportPublicKeyRaw,
+  createRepoKeypair,
+  loadSigner,
+  type SigningCurve,
+  type RepoKeypair,
+  type Signer,
 } from "./crypto.js";
 export {
   buildDidDocument,

@@ -137,3 +137,15 @@ export function toHex(bytes: Uint8Array): string {
   for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
   return out;
 }
+
+/** Decode a lowercase/uppercase hex string back to bytes. */
+export function fromHex(input: string): Uint8Array {
+  if (input.length % 2 !== 0) throw new Error("hex: odd-length string");
+  const out = new Uint8Array(input.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    const byte = Number.parseInt(input.slice(i * 2, i * 2 + 2), 16);
+    if (Number.isNaN(byte)) throw new Error("hex: invalid character");
+    out[i] = byte;
+  }
+  return out;
+}

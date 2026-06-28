@@ -29,12 +29,11 @@ import {
   type ForwardedConfig,
 } from "./config.js";
 import {
-  exportPrivateJwk,
-  exportPublicKeyRaw,
-  generateSigningKey,
-  importPrivateJwk,
+  createRepoKeypair,
+  loadSigner,
   publicKeyMultibase,
-  signData,
+  type SigningCurve,
+  type Signer,
 } from "./crypto.js";
 import { buildDidDocument } from "./identity.js";
 import { buildMst, type MstEntry } from "./mst.js";
@@ -79,7 +78,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   readonly #sql: SqlStorage;
   readonly #tid = new TidClock();
   #config: ForwardedConfig | null = null;
-  #privateKey: CryptoKey | null = null;
+  #signerFn: Signer | null = null;
   #initPromise: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: AtprotoPdsEnv) {
@@ -157,26 +156,32 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   async #initRepo(): Promise<void> {
-    const existing = this.#kvGet("signing_jwk");
+    const existing = this.#kvGet("signing_key");
     if (existing) return;
-    const pair = await generateSigningKey();
-    const jwk = await exportPrivateJwk(pair.privateKey);
-    const raw = await exportPublicKeyRaw(pair.publicKey);
-    this.#kvSet("signing_jwk", JSON.stringify(jwk));
-    this.#kvSet("pubkey_raw", base64(raw));
-    this.#privateKey = pair.privateKey;
+    // The curve is chosen at genesis from config and then fixed: it is recorded
+    // alongside the key so verification and the DID document never have to guess
+    // it from raw key bytes (P-256 and secp256k1 keys are both 65 bytes raw).
+    const keypair = await createRepoKeypair(this.#cfg.signingCurve);
+    this.#kvSet("signing_curve", keypair.curve);
+    this.#kvSet("signing_key", keypair.privateKeyExport);
+    this.#kvSet("pubkey_raw", base64(keypair.publicKeyRaw));
+    this.#signerFn = await loadSigner(keypair.curve, keypair.privateKeyExport);
     await this.#commit();
   }
 
-  async #signer(): Promise<(data: Uint8Array) => Promise<Uint8Array>> {
-    if (!this.#privateKey) {
-      const jwk = JSON.parse(
-        this.#kvGet("signing_jwk") as string,
-      ) as JsonWebKey;
-      this.#privateKey = await importPrivateJwk(jwk);
+  /** The curve this repository was initialised with (authoritative, persisted). */
+  #signingCurve(): SigningCurve {
+    return (this.#kvGet("signing_curve") as SigningCurve | null) ?? "p256";
+  }
+
+  async #signer(): Promise<Signer> {
+    if (!this.#signerFn) {
+      this.#signerFn = await loadSigner(
+        this.#signingCurve(),
+        this.#kvGet("signing_key") as string,
+      );
     }
-    const key = this.#privateKey;
-    return (data) => signData(key, data);
+    return this.#signerFn;
   }
 
   #publicKeyRaw(): Uint8Array {
@@ -317,7 +322,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   #serveDidDocument(): Response {
     const cfg = this.#cfg;
-    const multibase = publicKeyMultibase(this.#publicKeyRaw());
+    const multibase = publicKeyMultibase(
+      this.#publicKeyRaw(),
+      this.#signingCurve(),
+    );
     const doc = buildDidDocument({
       did: cfg.did,
       handle: cfg.handle,
@@ -348,7 +356,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         did: cfg.did,
         handle: cfg.handle,
         pdsEndpoint: cfg.baseUrl,
-        publicKeyMultibase: publicKeyMultibase(this.#publicKeyRaw()),
+        publicKeyMultibase: publicKeyMultibase(
+          this.#publicKeyRaw(),
+          this.#signingCurve(),
+        ),
       }) as JsonValue,
       collections,
       handleIsCorrect: true,

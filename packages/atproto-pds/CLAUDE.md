@@ -22,7 +22,9 @@ expression of "there are no instances in atproto".
 
 - **Self-contained storage core.** Shares neither `@dwk/store` nor `@dwk/rdf`.
   DAG-CBOR, CIDv1, the MST, CAR, and commit signing are implemented in-package on
-  WebCrypto. Keep it dependency-free.
+  WebCrypto. Keep it dependency-minimal — the only vendored runtime dependency is
+  `@noble/curves`, used solely for the opt-in secp256k1 signing curve (WebCrypto
+  cannot do K-256); do not reach for libraries where WebCrypto suffices.
 - **Deterministic MST.** A key's layer is `SHA-256(key)` leading zero bit-pairs,
   so the tree is a pure function of its entries. The MST is **rebuilt from the
   full record set** on each commit and CAR export — do not add incremental
@@ -31,9 +33,13 @@ expression of "there are no instances in atproto".
 - **DAG-CBOR is canonical.** Deterministic encoding (minimal ints, length-first
   then bytewise map-key sort, tag-42 CID links). The bytes are content-addressed,
   so any nondeterminism is a correctness bug.
-- **P-256, low-S.** Commit signatures are compact 64-byte `r‖s`, low-S
-  normalised. WebCrypto does not guarantee low-S, so the normalisation in
-  `crypto.ts` is load-bearing. K-256 is deferred (no WebCrypto support).
+- **P-256 default, secp256k1 opt-in, low-S.** Commit signatures are compact
+  64-byte `r‖s`, low-S normalised, over the SHA-256 digest. P-256 is the default
+  (WebCrypto, and WebCrypto does not guarantee low-S, so the normalisation in
+  `crypto.ts` is load-bearing). secp256k1 (`signingCurve: "secp256k1"`) signs via
+  `@noble/curves` (deterministic RFC 6979, low-S). The curve is fixed at genesis
+  and persisted (`signing_curve`) so verification never infers it from raw key
+  bytes — both curves are 65 bytes uncompressed.
 - **Key custody in the DO.** The repository signing key is generated inside the
   Durable Object and never leaves it — not in config, not in the forwarded
   header. The front door never sees it.
@@ -68,7 +74,7 @@ src/cid.ts          # CIDv1 (dag-cbor + raw codecs, base32)
 src/mst.ts          # Merkle Search Tree build/walk
 src/car.ts          # CARv1 read/write
 src/repo.ts         # commit format/sign/verify
-src/crypto.ts       # P-256 keygen/sign/verify, did:key, low-S
+src/crypto.ts       # P-256 + secp256k1 keygen/sign/verify, did:key, low-S
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
 src/record.ts       # JSON ⇄ DAG-CBOR ($link/$bytes), at:// URIs
@@ -83,3 +89,4 @@ src/*.test.ts       # colocated tests
 ## Dependencies
 
 - `@dwk/log` — structured logging.
+- `@noble/curves` — audited secp256k1, only for the opt-in K-256 signing curve.

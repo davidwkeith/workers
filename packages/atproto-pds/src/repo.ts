@@ -12,7 +12,7 @@
 
 import { encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC } from "./cid.js";
-import { verifyData } from "./crypto.js";
+import { verifyData, type SigningCurve } from "./crypto.js";
 
 /** The current AT Protocol repository commit version. */
 export const COMMIT_VERSION = 3;
@@ -72,10 +72,19 @@ export async function formatCommit(
   return { commit, bytes, cid };
 }
 
-/** Verify a signed commit against the repository's raw public key. */
+/**
+ * Verify a signed commit against the repository's raw public key on the given
+ * curve (defaults to P-256, this package's default signing curve).
+ */
 export async function verifyCommit(
   commit: SignedCommit,
   publicKeyRaw: Uint8Array,
+  curve: SigningCurve = "p256",
 ): Promise<boolean> {
-  return verifyData(publicKeyRaw, unsignedCommitBytes(commit), commit.sig);
+  return verifyData(
+    publicKeyRaw,
+    unsignedCommitBytes(commit),
+    commit.sig,
+    curve,
+  );
 }

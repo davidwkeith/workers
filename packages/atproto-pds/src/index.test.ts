@@ -27,6 +27,15 @@ function pds(host: string) {
   });
 }
 
+function pdsK256(host: string) {
+  return createAtprotoPds({
+    baseUrl: `https://${host}`,
+    password: PASSWORD,
+    jwtSecret: SECRET,
+    signingCurve: "secp256k1",
+  });
+}
+
 interface CallOptions {
   method?: string;
   body?: unknown;
@@ -357,6 +366,41 @@ describe("AT Protocol PDS", () => {
 
     // Every block the commit references is present in the CAR (self-contained).
     expect(car.blocks.some((b) => b.cid.equals(commit.data))).toBe(true);
+  });
+
+  it("signs commits with secp256k1 when configured, advertising a k-256 key", async () => {
+    const host = "k256.example";
+    const handler = pdsK256(host);
+    const token = await login(handler, host);
+    await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+      body: {
+        collection: "app.bsky.feed.post",
+        rkey: "x",
+        record: { $type: "app.bsky.feed.post", text: "signed with k-256" },
+      },
+      token,
+    });
+
+    // The published key is a secp256k1 Multikey (`zQ3sh…`), not a P-256 one.
+    const didDoc = (await (
+      await call(handler, host, "/.well-known/did.json")
+    ).json()) as { verificationMethod: { publicKeyMultibase: string }[] };
+    const pubMultibase = didDoc.verificationMethod[0]!.publicKeyMultibase;
+    expect(pubMultibase.startsWith("zQ3sh")).toBe(true);
+
+    // The root commit verifies under the secp256k1 curve against the published
+    // key. The compressed key (multicodec 0xe7 0x01 prefix stripped) is accepted
+    // by the verifier directly.
+    const carRes = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.sync.getRepo?did=" + host,
+    );
+    const car = readCar(new Uint8Array(await carRes.arrayBuffer()));
+    const rootBlock = car.blocks.find((b) => b.cid.equals(car.roots[0]!))!;
+    const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
+    const compressed = base58btcDecode(pubMultibase.slice(1)).slice(2);
+    expect(await verifyCommit(commit, compressed, "secp256k1")).toBe(true);
   });
 });
 
