@@ -25,6 +25,30 @@ import type { SigningCurve } from "./crypto.js";
 import { walkEntries } from "./mst.js";
 import { cborToJson, type JsonValue } from "./record.js";
 import { COMMIT_VERSION, verifyCommit, type SignedCommit } from "./repo.js";
+import { isValidNsid, isValidRecordKey } from "./xrpc.js";
+
+/**
+ * Validate that a decoded CBOR value is a structurally well-formed signed commit
+ * before trusting it. A CAR is untrusted external input, so a malformed root must
+ * fail with a clear error rather than a downstream `TypeError`.
+ */
+function assertSignedCommit(value: unknown): asserts value is SignedCommit {
+  const c = value as Record<string, unknown> | null;
+  if (
+    !c ||
+    typeof c !== "object" ||
+    typeof c.did !== "string" ||
+    typeof c.version !== "number" ||
+    !(c.data instanceof CID) ||
+    typeof c.rev !== "string" ||
+    !(c.prev === null || c.prev instanceof CID) ||
+    !(c.sig instanceof Uint8Array)
+  ) {
+    throw new Error(
+      "migrate: root commit is malformed or missing required fields",
+    );
+  }
+}
 
 /** A single record recovered from an imported repository. */
 export interface ImportedRecord {
@@ -93,7 +117,8 @@ export async function importRepoFromCar(
   if (!commitBytes) {
     throw new Error("migrate: root commit block is missing from the CAR");
   }
-  const commit = decodeCbor(commitBytes) as unknown as SignedCommit;
+  const commit = decodeCbor(commitBytes);
+  assertSignedCommit(commit);
   if (commit.version !== COMMIT_VERSION) {
     throw new Error(
       `migrate: unsupported commit version ${commit.version} (expected ${COMMIT_VERSION})`,
@@ -118,6 +143,12 @@ export async function importRepoFromCar(
     if (slash <= 0 || slash === entry.key.length - 1) {
       throw new Error(`migrate: invalid record key \`${entry.key}\``);
     }
+    const collection = entry.key.slice(0, slash);
+    const rkey = entry.key.slice(slash + 1);
+    // The CAR is untrusted: only import syntactically valid AT Protocol paths.
+    if (!isValidNsid(collection) || !isValidRecordKey(rkey)) {
+      throw new Error(`migrate: invalid record path \`${entry.key}\``);
+    }
     const recordBytes = getBlock(entry.value);
     if (!recordBytes) {
       throw new Error(
@@ -125,8 +156,8 @@ export async function importRepoFromCar(
       );
     }
     return {
-      collection: entry.key.slice(0, slash),
-      rkey: entry.key.slice(slash + 1),
+      collection,
+      rkey,
       cid: entry.value,
       value: cborToJson(decodeCbor(recordBytes)),
     };

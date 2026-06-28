@@ -122,4 +122,23 @@ describe("importRepoFromCar", () => {
       /no root commit/,
     );
   });
+
+  it("rejects a CAR whose root block is not a well-formed commit", async () => {
+    const bytes = encodeCbor({ not: "a commit" });
+    const cid = await CID.create(DAG_CBOR_CODEC, bytes);
+    const car = writeCar([cid], [{ cid, bytes }]);
+    await expect(importRepoFromCar(car)).rejects.toThrow(
+      /malformed or missing required fields/,
+    );
+  });
+
+  it("rejects a CAR containing an invalid record path (untrusted input)", async () => {
+    const { car } = await buildRepoCar(
+      "did:plc:abc234abc234abc234abc234",
+      "p256",
+      // "nodot" is not a valid NSID (no dotted segments).
+      [{ collection: "nodot", rkey: "x", value: { $type: "x", text: "hi" } }],
+    );
+    await expect(importRepoFromCar(car)).rejects.toThrow(/invalid record path/);
+  });
 });
