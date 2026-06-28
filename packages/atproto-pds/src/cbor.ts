@@ -258,20 +258,27 @@ function readValue(reader: Reader): CborValue {
       const obj: { [key: string]: CborValue } = {};
       let prevKey: Uint8Array | null = null;
       for (let i = 0; i < len; i++) {
-        const key = readValue(reader);
-        if (typeof key !== "string") {
+        // Read the key's string header directly and take its raw UTF-8 bytes as
+        // a view, so the canonical-order check needs neither a decode-to-string
+        // nor a re-encode-back — only the eventual key is decoded, once.
+        need(reader, 1);
+        const keyInitial = reader.bytes[reader.pos++] as number;
+        if (keyInitial >> 5 !== MAJOR.string) {
           throw new Error("dag-cbor: map keys must be strings");
         }
+        const keyLen = readUint(reader, keyInitial & 0x1f);
+        need(reader, keyLen);
+        const keyBytes = reader.bytes.subarray(reader.pos, reader.pos + keyLen);
+        reader.pos += keyLen;
         // Canonical DAG-CBOR requires map keys in length-first-then-bytewise
         // order with no duplicates; an out-of-order (or repeated) key is a
         // non-canonical encoding of the same map and must be rejected, since it
         // would re-encode to a different CID than the one it arrived under.
-        const keyBytes = textEncoder.encode(key);
         if (prevKey !== null && compareKeyBytes(prevKey, keyBytes) >= 0) {
           throw new Error("dag-cbor: map keys out of order or duplicated");
         }
         prevKey = keyBytes;
-        obj[key] = readValue(reader);
+        obj[textDecoder.decode(keyBytes)] = readValue(reader);
       }
       return obj;
     }
