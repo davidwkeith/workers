@@ -52,10 +52,12 @@ expression of "there are no instances in atproto".
   did:plc isn't known until genesis), forwards `atproto-did` to the DO, and 404s
   `did.json` (a PLC doc lives in the directory). The account DID flows through
   `#accountDid()`, not `cfg.did`. The PLC **directory client** (`plc-directory.ts`,
-  injectable `fetch`) submits the genesis op and resolves DIDs; the DO submits in
-  the background (`ctx.waitUntil`, never blocking init), best-effort, only when
-  `plcDirectoryUrl` is configured (default unset — the external directory is never
-  the default path).
+  injectable `fetch`) submits the genesis op and resolves DIDs; the DO registers
+  via a **Durable Object alarm** with exponential-backoff retry (never blocking
+  init), only when `plcDirectoryUrl` is configured (default unset — the external
+  directory is never the default path). The alarm reads its state from storage
+  (`plc_directory_url`, `plc_genesis`, `account_did`, `plc_submitted`,
+  `plc_attempts`) since it runs without request config.
 
 ## Test environment
 

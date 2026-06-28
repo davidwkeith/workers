@@ -53,12 +53,13 @@ secp256k1 signing curve):
   (`plc-directory.ts`): submit an operation (`POST /:did`), resolve a DID
   (`GET /:did`), and read its data state (`GET /:did/data`), with `fetch`
   injected so it unit-tests with a fake transport. When `plcDirectoryUrl` is
-  configured, a freshly minted account submits its genesis operation to the
-  directory at creation — **in the background via `ctx.waitUntil`**, so repo init
-  (and the first request) never blocks on the external call — best-effort and
-  one-shot; the default is unset, so nothing reaches the network unless asked.
-  Robust retry (e.g. an alarm-driven re-submit) is a future enhancement; the
-  `plc_submitted` flag is persisted to support it. `did:plc` necessarily depends on the external
+  configured, a freshly minted account registers its genesis operation with the
+  directory **via a Durable Object alarm** — repo init (and the first request)
+  never blocks on the external call, and the alarm **retries with exponential
+  backoff** (10 s → capped at 1 h, up to 10 attempts) until the directory accepts
+  it, surviving hibernation. The persisted directory URL lets the alarm run
+  without a request; the `plc_submitted` flag stops it once registered. The
+  default is unset, so nothing reaches the network unless asked. `did:plc` necessarily depends on the external
   PLC directory — a trade-off accepted only to interoperate with the existing
   network, never made the default. **Rotation-key custody:** the key is generated
   inside and never leaves the DO, exactly like the repository signing key. The

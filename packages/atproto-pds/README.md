@@ -60,7 +60,8 @@ self-contained and built directly on WebCrypto.
   rotation key, self-signs a genesis operation, derives its `did:plc`, and serves
   it consistently. The PLC **directory client** (`plc-directory.ts`) submits the
   genesis op (`POST /:did`) and resolves DIDs (`GET /:did`); set
-  `plcDirectoryUrl` to register a fresh account on the network at creation
+  `plcDirectoryUrl` to register a fresh account on the network at creation — done
+  via a Durable Object alarm with exponential-backoff retry, never blocking init
   (default unset — nothing reaches the network unless asked).
 - **Single-account scope.** One account per `baseUrl`, authenticated by a
   configured password. The firehose is future work.
