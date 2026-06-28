@@ -51,6 +51,37 @@ describe("DAG-CBOR", () => {
     expect(() => encodeCbor(Number.MAX_SAFE_INTEGER + 1)).toThrow();
   });
 
+  it("rejects floats on encode (the atproto data model forbids them)", () => {
+    expect(() => encodeCbor(1.5)).toThrow(/floats are not supported/);
+    expect(() => encodeCbor(Infinity)).toThrow(/floats are not supported/);
+    expect(() => encodeCbor(NaN)).toThrow(/floats are not supported/);
+  });
+
+  it("rejects a float64 head on decode", () => {
+    // 0xfb = major 7 / additional info 27 (float64); 1.5 = 3ff8000000000000.
+    const bytes = new Uint8Array([0xfb, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0]);
+    expect(() => decodeCbor(bytes)).toThrow(/floats are not supported/);
+  });
+
+  it("rejects a non-minimally-encoded integer", () => {
+    // 0x18 0x05 encodes 5 with a one-byte follow; 5 < 24 must be inline (0x05).
+    expect(() => decodeCbor(new Uint8Array([0x18, 0x05]))).toThrow(
+      /not minimally encoded/,
+    );
+  });
+
+  it("rejects out-of-order map keys", () => {
+    // { b: 1, a: 2 } in wire order b-then-a — a2 (61 62) 01 (61 61) 02.
+    const bytes = new Uint8Array([0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02]);
+    expect(() => decodeCbor(bytes)).toThrow(/out of order or duplicated/);
+  });
+
+  it("rejects duplicate map keys", () => {
+    // key "a" twice — a2 (61 61) 01 (61 61) 02.
+    const bytes = new Uint8Array([0xa2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02]);
+    expect(() => decodeCbor(bytes)).toThrow(/out of order or duplicated/);
+  });
+
   it("rejects trailing bytes", () => {
     const bytes = new Uint8Array([0x01, 0x02]);
     expect(() => decodeCbor(bytes)).toThrow();

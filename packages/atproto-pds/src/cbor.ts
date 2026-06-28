@@ -8,11 +8,16 @@
  *   their UTF-8 bytes (RFC 7049 §3.9 canonical ordering);
  * - {@link CID} links are encoded as tag 42 wrapping a byte string with a
  *   leading 0x00 multibase-identity prefix;
- * - only `null`, booleans, and float64 inhabit major type 7.
+ * - only `null` and booleans inhabit major type 7 — the atproto data model
+ *   **forbids floats**, so a non-integer number is rejected on encode and a
+ *   float head (major 7, additional info 25/26/27) is rejected on decode.
  *
  * Determinism is the whole point: the same data must always produce the same
- * bytes, because those bytes are hashed into the content address. Pure — no
- * Workers runtime needed.
+ * bytes, because those bytes are hashed into the content address. Decoding is
+ * **strict** for the same reason — non-minimal integers and out-of-order or
+ * duplicate map keys are non-canonical encodings of the same data, so they would
+ * carry a different CID than a re-encode and must be rejected, not silently
+ * accepted. Pure — no Workers runtime needed.
  */
 
 import { CID } from "./cid.js";
@@ -100,12 +105,9 @@ function encodeValue(value: CborValue, out: Uint8Array[]): void {
       else out.push(encodeHead(MAJOR.negint, -1 - value));
       return;
     }
-    // float64 (major 7, additional info 27).
-    const buf = new Uint8Array(9);
-    buf[0] = (MAJOR.simple << 5) | 27;
-    new DataView(buf.buffer).setFloat64(1, value);
-    out.push(buf);
-    return;
+    // The atproto data model forbids floats; a non-integer (or non-finite)
+    // number has no canonical DAG-CBOR encoding here.
+    throw new Error(`dag-cbor: floats are not supported (${value})`);
   }
   if (typeof value === "string") {
     const bytes = utf8(value);
@@ -171,18 +173,28 @@ function need(reader: Reader, n: number): void {
   }
 }
 
+/** The argument is non-minimally encoded if it would fit in a shorter form. */
+function assertMinimal(value: number | bigint, min: number | bigint): void {
+  if (value < min) {
+    throw new Error("dag-cbor: integer is not minimally encoded");
+  }
+}
+
 function readUint(reader: Reader, info: number): number {
   if (info < 24) return info;
   const { bytes } = reader;
   if (info === 24) {
     need(reader, 1);
-    return bytes[reader.pos++] as number;
+    const v = bytes[reader.pos++] as number;
+    assertMinimal(v, 24);
+    return v;
   }
   if (info === 25) {
     need(reader, 2);
     const v =
       ((bytes[reader.pos] as number) << 8) | (bytes[reader.pos + 1] as number);
     reader.pos += 2;
+    assertMinimal(v, 0x100);
     return v;
   }
   if (info === 26) {
@@ -193,6 +205,7 @@ function readUint(reader: Reader, info: number): number {
       ((bytes[reader.pos + 2] as number) << 8) +
       (bytes[reader.pos + 3] as number);
     reader.pos += 4;
+    assertMinimal(v, 0x10000);
     return v;
   }
   if (info === 27) {
@@ -201,6 +214,7 @@ function readUint(reader: Reader, info: number): number {
     for (let i = 0; i < 8; i++)
       v = (v << 8n) | BigInt(bytes[reader.pos + i] as number);
     reader.pos += 8;
+    assertMinimal(v, 0x100000000n);
     if (v > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new Error("dag-cbor: integer exceeds MAX_SAFE_INTEGER");
     }
@@ -242,12 +256,29 @@ function readValue(reader: Reader): CborValue {
     case MAJOR.map: {
       const len = readUint(reader, info);
       const obj: { [key: string]: CborValue } = {};
+      let prevKey: Uint8Array | null = null;
       for (let i = 0; i < len; i++) {
-        const key = readValue(reader);
-        if (typeof key !== "string") {
+        // Read the key's string header directly and take its raw UTF-8 bytes as
+        // a view, so the canonical-order check needs neither a decode-to-string
+        // nor a re-encode-back — only the eventual key is decoded, once.
+        need(reader, 1);
+        const keyInitial = reader.bytes[reader.pos++] as number;
+        if (keyInitial >> 5 !== MAJOR.string) {
           throw new Error("dag-cbor: map keys must be strings");
         }
-        obj[key] = readValue(reader);
+        const keyLen = readUint(reader, keyInitial & 0x1f);
+        need(reader, keyLen);
+        const keyBytes = reader.bytes.subarray(reader.pos, reader.pos + keyLen);
+        reader.pos += keyLen;
+        // Canonical DAG-CBOR requires map keys in length-first-then-bytewise
+        // order with no duplicates; an out-of-order (or repeated) key is a
+        // non-canonical encoding of the same map and must be rejected, since it
+        // would re-encode to a different CID than the one it arrived under.
+        if (prevKey !== null && compareKeyBytes(prevKey, keyBytes) >= 0) {
+          throw new Error("dag-cbor: map keys out of order or duplicated");
+        }
+        prevKey = keyBytes;
+        obj[textDecoder.decode(keyBytes)] = readValue(reader);
       }
       return obj;
     }
@@ -264,15 +295,10 @@ function readValue(reader: Reader): CborValue {
       if (info === 20) return false;
       if (info === 21) return true;
       if (info === 22) return null;
-      if (info === 27) {
-        need(reader, 8);
-        const view = new DataView(
-          reader.bytes.buffer,
-          reader.bytes.byteOffset + reader.pos,
-          8,
-        );
-        reader.pos += 8;
-        return view.getFloat64(0);
+      // Major-7 additional info 25/26/27 are half/single/double floats. The
+      // atproto data model forbids floats, so reject them rather than decode.
+      if (info === 25 || info === 26 || info === 27) {
+        throw new Error("dag-cbor: floats are not supported");
       }
       throw new Error(`dag-cbor: unsupported simple value ${info}`);
     }
