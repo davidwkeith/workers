@@ -76,15 +76,20 @@ function rowToRecord(row: LockRow): LockRecord {
   };
 }
 
+/** A path's subtree prefix — the path itself when it ends in `/`, else `path/`. */
+function subtreePrefix(path: string): string {
+  return path.endsWith("/") ? path : `${path}/`;
+}
+
 /**
  * Whether `lock` governs `path`: an exact match, or an ancestor `Depth:
- * infinity` collection lock whose subtree contains `path`. Collection paths end
- * in `/`, so a prefix test captures the subtree without matching sibling
- * prefixes (`/a/` does not cover `/ab`).
+ * infinity` lock whose subtree contains `path`. The subtree test is anchored on
+ * a trailing-slash prefix so a sibling that merely shares a name prefix is not
+ * captured (`/dir` does not cover `/dirty`; `/dir/` covers `/dir/x`).
  */
 function covers(lock: LockRecord, path: string): boolean {
   if (lock.path === path) return true;
-  return lock.depth === "infinity" && path.startsWith(lock.path);
+  return lock.depth === "infinity" && path.startsWith(subtreePrefix(lock.path));
 }
 
 /** Path-segment depth, e.g. `/a/b.txt` → 2, `/a/b/` → 2, `/` → 0. */
@@ -162,9 +167,11 @@ export class LockStore {
   }
 
   /**
-   * Whether a mutation of `path` is blocked: a lock governs it whose token was
-   * not presented in the request's `If:` header. Under exclusive-only locking
-   * at most one lock can govern a path, so a single matching token suffices.
+   * Whether a mutation of `path` is blocked: a lock governs `path` (itself or an
+   * ancestor infinity lock) — **or** a lock sits on a descendant of `path` —
+   * whose token was not presented in the request's `If:` header. The descendant
+   * check is RFC 4918 §9.6.1: a `DELETE`/overwriting `MOVE` of a collection must
+   * fail if any member is locked without the member's token submitted.
    */
   blockingLock(
     path: string,
@@ -172,6 +179,12 @@ export class LockStore {
   ): LockRecord | null {
     for (const lock of this.locksOn(path)) {
       if (lock.token !== providedToken) return lock;
+    }
+    const prefix = subtreePrefix(path);
+    for (const lock of this.#liveLocks()) {
+      if (lock.path.startsWith(prefix) && lock.token !== providedToken) {
+        return lock;
+      }
     }
     return null;
   }
@@ -198,8 +211,12 @@ export class LockStore {
         return { ok: false, reason: "conflict", lock };
       }
       // Taking an infinity lock fails if any existing lock sits inside the
-      // subtree we are trying to lock.
-      if (params.depth === "infinity" && lock.path.startsWith(params.path)) {
+      // subtree we are trying to lock (anchored on the trailing-slash prefix so
+      // a name-prefix sibling does not falsely conflict).
+      if (
+        params.depth === "infinity" &&
+        lock.path.startsWith(subtreePrefix(params.path))
+      ) {
         return { ok: false, reason: "conflict", lock };
       }
     }

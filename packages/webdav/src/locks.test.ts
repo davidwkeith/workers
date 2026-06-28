@@ -223,6 +223,44 @@ describe("LockStore", () => {
     });
   });
 
+  it("blocks a collection mutation when a descendant is locked (RFC 4918 §9.6.1)", async () => {
+    await withSql((sql) => {
+      const locks = new LockStore(sql, policy, "/", () => 0);
+      const child = locks.acquire({
+        path: "/dir/child.txt",
+        depth: "0",
+        ownerHref: "",
+        webid: "w",
+        timeoutSeconds: 60,
+      });
+      expect(child.ok).toBe(true);
+      if (!child.ok) return;
+      // A DELETE/MOVE of the parent collection without the descendant's token is
+      // blocked; submitting that token clears it.
+      expect(locks.blockingLock("/dir/", undefined)?.token).toBe(
+        child.lock.token,
+      );
+      expect(locks.blockingLock("/dir/", child.lock.token)).toBeNull();
+    });
+  });
+
+  it("does not treat a name-prefix sibling as inside an infinity lock", async () => {
+    await withSql((sql) => {
+      const locks = new LockStore(sql, policy, "/", () => 0);
+      const taken = locks.acquire({
+        path: "/dir",
+        depth: "infinity",
+        ownerHref: "",
+        webid: "w",
+        timeoutSeconds: 60,
+      });
+      expect(taken.ok).toBe(true);
+      // `/dirty` shares a name prefix with `/dir` but is not in its subtree.
+      expect(locks.blockingLock("/dirty", undefined)).toBeNull();
+      expect(locks.blockingLock("/dir/inside", undefined)).not.toBeNull();
+    });
+  });
+
   it("prunes expired locks opportunistically so they stop blocking", async () => {
     await withSql((sql) => {
       const clock = { t: 0 };

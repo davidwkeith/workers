@@ -116,6 +116,39 @@ describe("CredentialStore", () => {
     });
   });
 
+  it("re-anchors the throttle window after a decay so fresh failures re-throttle", async () => {
+    await withSql(async (sql) => {
+      const clock = { t: 0 };
+      const store = new CredentialStore(
+        sql,
+        { maxFailedAttempts: 3, windowMs: 1000 },
+        () => clock.t,
+      );
+      const minted = await store.mint({
+        webid: WEBID,
+        label: "l",
+        scope: { modes: ["read"] },
+        iterations: ITER,
+      });
+      // Exhaust the window once.
+      for (let i = 0; i < 3; i++) await store.verify(minted.username, "wrong");
+      // Past the window: the next failure decays the old run and starts a fresh
+      // one anchored on `now` (the bug set failed_since to the stale timestamp,
+      // so the window never re-accumulated).
+      clock.t = 2000;
+      await store.verify(minted.username, "wrong");
+      clock.t = 2100;
+      await store.verify(minted.username, "wrong");
+      clock.t = 2200;
+      await store.verify(minted.username, "wrong");
+      clock.t = 2300;
+      expect(await store.verify(minted.username, minted.secret)).toEqual({
+        ok: false,
+        reason: "throttled",
+      });
+    });
+  });
+
   it("throttles after repeated failures, then a success resets the counter", async () => {
     await withSql(async (sql) => {
       const clock = { t: 0 };

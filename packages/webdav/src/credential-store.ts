@@ -193,16 +193,19 @@ export class CredentialStore {
     if (row === undefined) return { ok: false, reason: "mismatch" };
 
     const now = this.#now();
-    // Decay a stale failure run before evaluating the throttle.
-    if (
-      row.failed_count > 0 &&
-      now - row.failed_since >= this.#throttle.windowMs
-    ) {
+    // Decay a stale failure run before evaluating the throttle. Track the
+    // post-decay counters locally so a subsequent failure anchors `failed_since`
+    // on `now` rather than the stale (decayed) timestamp.
+    let failedCount = row.failed_count;
+    let failedSince = row.failed_since;
+    if (failedCount > 0 && now - failedSince >= this.#throttle.windowMs) {
       this.#sql.exec(
         "UPDATE webdav_credentials SET failed_count = 0, failed_since = 0 WHERE credential_id = ?",
         credentialId,
       );
-    } else if (row.failed_count >= this.#throttle.maxFailedAttempts) {
+      failedCount = 0;
+      failedSince = 0;
+    } else if (failedCount >= this.#throttle.maxFailedAttempts) {
       return { ok: false, reason: "throttled" };
     }
 
@@ -216,10 +219,10 @@ export class CredentialStore {
       return { ok: true, record };
     }
 
-    const failedSince = row.failed_count === 0 ? now : row.failed_since;
+    const nextFailedSince = failedCount === 0 ? now : failedSince;
     this.#sql.exec(
       "UPDATE webdav_credentials SET failed_count = failed_count + 1, failed_since = ? WHERE credential_id = ?",
-      failedSince,
+      nextFailedSince,
       credentialId,
     );
     return { ok: false, reason: "mismatch" };

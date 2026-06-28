@@ -773,8 +773,15 @@ async function lock(
   }
 
   // A LOCK on an unmapped URL creates an empty locked resource (RFC 4918 §7.3).
+  // RFC 4918 defines no lock-null *collection*, so a LOCK of a non-existent
+  // collection is rejected `409` and the just-acquired lock is rolled back —
+  // rather than falsely reporting `201 Created` with nothing created.
   const created = (await ctx.backend.stat(ctx.path)) === null;
-  if (created && !isCollectionPath(ctx.path)) {
+  if (created) {
+    if (isCollectionPath(ctx.path)) {
+      ctx.backend.locks.unlock(result.lock.token);
+      return problem(409, "Cannot lock a non-existent collection");
+    }
     try {
       await ctx.backend.write(ctx.path, null, "application/octet-stream", {});
     } catch {

@@ -600,3 +600,123 @@ describe("createWebdav — OS-litter policy (spec §3)", () => {
     });
   });
 });
+
+const LOCKINFO =
+  '<D:lockinfo xmlns:D="DAV:"><D:lockscope><D:exclusive/></D:lockscope>' +
+  "<D:locktype><D:write/></D:locktype></D:lockinfo>";
+
+describe("createWebdav — PROPPATCH & named PROPFIND (spec §4)", () => {
+  it("accepts a dead property (200) and refuses a protected live one (403)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/p.txt", { body: "x" });
+      const res = await call("PROPPATCH", "/p.txt", {
+        headers: { "content-type": 'application/xml; charset="utf-8"' },
+        body:
+          '<?xml version="1.0"?><D:propertyupdate xmlns:D="DAV:" xmlns:Z="urn:example">' +
+          "<D:set><D:prop><Z:author>me</Z:author></D:prop></D:set>" +
+          "<D:set><D:prop><D:getetag>nope</D:getetag></D:prop></D:set>" +
+          "</D:propertyupdate>",
+      });
+      expect(res.status).toBe(207);
+      const body = await res.text();
+      expect(body).toContain("HTTP/1.1 200 OK"); // dead prop accepted-and-ignored
+      expect(body).toContain("HTTP/1.1 403 Forbidden"); // protected live prop
+      expect(body).toContain('xmlns:x="urn:example"');
+    });
+  });
+
+  it("reports unknown props in a named PROPFIND as 404", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/n.txt", { body: "x" });
+      const res = await call("PROPFIND", "/n.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body:
+          '<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop>' +
+          "<D:getetag/><D:getcontentlength/><D:unknownprop/>" +
+          "</D:prop></D:propfind>",
+      });
+      expect(res.status).toBe(207);
+      const body = await res.text();
+      expect(body).toContain("<D:getetag>");
+      expect(body).toContain("HTTP/1.1 200 OK");
+      expect(body).toContain("HTTP/1.1 404 Not Found");
+      expect(body).toContain("<D:unknownprop/>");
+    });
+  });
+
+  it("rejects a non-UTF-8 request charset with 415", async () => {
+    await withHandler(async ({ call }) => {
+      const res = await call("PROPFIND", "/", {
+        headers: {
+          depth: "0",
+          "content-type": 'application/xml; charset="utf-16"',
+        },
+        body: '<D:propfind xmlns:D="DAV:"><D:allprop/></D:propfind>',
+      });
+      expect(res.status).toBe(415);
+    });
+  });
+});
+
+describe("createWebdav — lock/verb edge cases", () => {
+  it("refuses to LOCK a non-existent collection with 409", async () => {
+    await withHandler(async ({ call }) => {
+      const res = await call("LOCK", "/ghost/", {
+        headers: { depth: "0" },
+        body: LOCKINFO,
+      });
+      expect(res.status).toBe(409);
+    });
+  });
+
+  it("blocks MOVE of a collection containing a locked descendant (423)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("MKCOL", "/box");
+      await call("PUT", "/box/item.txt", { body: "x" });
+      expect(
+        (
+          await call("LOCK", "/box/item.txt", {
+            headers: { depth: "0" },
+            body: LOCKINFO,
+          })
+        ).status,
+      ).toBe(200);
+      const move = await call("MOVE", "/box/", {
+        headers: { destination: "https://pod.example/moved/" },
+      });
+      expect(move.status).toBe(423);
+    });
+  });
+
+  it("UNLOCK requires a token and 409s an unknown one", async () => {
+    await withHandler(async ({ call }) => {
+      expect((await call("UNLOCK", "/x")).status).toBe(400);
+      expect(
+        (
+          await call("UNLOCK", "/x", {
+            headers: { "lock-token": "<opaquelocktoken:ghost>" },
+          })
+        ).status,
+      ).toBe(409);
+    });
+  });
+
+  it("rejects a MKCOL request body with 415", async () => {
+    await withHandler(async ({ call }) => {
+      const res = await call("MKCOL", "/withbody", {
+        body: "junk",
+        headers: { "content-length": "4" },
+      });
+      expect(res.status).toBe(415);
+    });
+  });
+
+  it("reports collection metadata with 204 on a bare GET", async () => {
+    await withHandler(async ({ call }) => {
+      await call("MKCOL", "/col");
+      const res = await call("GET", "/col/");
+      expect(res.status).toBe(204);
+      expect(res.headers.get("ETag")).toBeTruthy();
+    });
+  });
+});
