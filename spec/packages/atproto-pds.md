@@ -141,10 +141,14 @@ is **reach vs. fit**:
   [#180](https://github.com/davidwkeith/workers/issues/180): **secp256k1 signing**
   ([#181](https://github.com/davidwkeith/workers/issues/181)) and **`did:plc`
   support** ([#182](https://github.com/davidwkeith/workers/issues/182) — operation
-  core, account wiring, and the directory client) have landed, with **account
-  migration** (#183) and the **firehose** (#184) still to follow. Until those
-  land, a user who wants to **migrate an existing Bluesky account today** is better
-  served by Cirrus.
+  core, account wiring, and the directory client) have landed; **account
+  migration** ([#183](https://github.com/davidwkeith/workers/issues/183)) is in
+  progress — the CAR **import core** (`migrate.ts`: parse a repo export, verify
+  the root commit signature, and recover its records) has landed, with the
+  `importRepo` XRPC + `createAccount`-with-existing-DID, blob import, the
+  activate/deactivate cutover, and PLC rotation to follow — and the **firehose**
+  (#184) is still to come. Until migration is complete, a user who wants to
+  **migrate an existing Bluesky account today** is better served by Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be

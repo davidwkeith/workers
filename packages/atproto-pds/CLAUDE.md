@@ -90,6 +90,7 @@ src/repo.ts         # commit format/sign/verify
 src/crypto.ts       # P-256 + secp256k1 keygen/sign/verify, did:key, low-S
 src/plc.ts          # did:plc operation core (build/sign/derive-DID/CID/verify)
 src/plc-directory.ts # PLC directory client (submit/resolve, injectable fetch)
+src/migrate.ts      # inbound migration: CAR import core (verify + recover records)
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
 src/record.ts       # JSON ⇄ DAG-CBOR ($link/$bytes), at:// URIs
