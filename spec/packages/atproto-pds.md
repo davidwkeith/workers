@@ -120,7 +120,8 @@ is **reach vs. fit**:
 and are content running a dedicated Worker, prefer Cirrus. Use `@dwk/atproto-pds`
 when you want the PDS composed into a single multi-standard Worker on the cohort's
 terms. Whether to close the parity gap here at all is the open scope question
-below, now tracked with concrete cost in #180.
+below, now tracked with concrete cost in
+[#180](https://github.com/davidwkeith/workers/issues/180).
 
 ## Open questions (must resolve before committing)
 
@@ -129,7 +130,7 @@ below, now tracked with concrete cost in #180.
   "does this belong in scope" open question, but larger.) The cost of reaching
   network parity with a standalone server like Cirrus is now itemised in the
   parity tracker [#180](https://github.com/davidwkeith/workers/issues/180)
-  (k-256 #181, `did:plc` #182, migration #183, firehose #184).
+  (K-256 #181, `did:plc` #182, migration #183, firehose #184).
 - **Spec churn.** AT Protocol is still evolving faster than the frozen W3C/IETF
   specs the rest of the cohort targets; conformance is a moving target.
 - **No reuse dividend.** Because it shares neither the store nor `@dwk/rdf`, the
