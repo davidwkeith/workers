@@ -268,6 +268,8 @@ describe("AT Protocol PDS", () => {
     };
     expect(await rkeys("")).toEqual(["aaa", "bbb", "ccc"]);
     expect(await rkeys("&reverse=true")).toEqual(["ccc", "bbb", "aaa"]);
+    // An empty cursor must behave like no cursor (not `rkey < ''` → []).
+    expect(await rkeys("&reverse=true&cursor=")).toEqual(["ccc", "bbb", "aaa"]);
   });
 
   it("uploads and serves a blob addressed by its raw CID", async () => {

@@ -818,7 +818,9 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       Math.max(Number(url.searchParams.get("limit") ?? "50") || 50, 1),
       100,
     );
-    const cursor = url.searchParams.get("cursor");
+    // Normalise an empty `cursor` param to null (treat it as "no cursor"):
+    // otherwise reverse paging would filter on `rkey < ''` and return nothing.
+    const cursor = url.searchParams.get("cursor") || null;
     // `reverse=true` lists in descending rkey order; the cursor then pages
     // *down* (rkey < cursor) instead of up. The comparator/order tokens come
     // from a fixed two-value set, never from user input, so interpolating them
