@@ -38,10 +38,17 @@ secp256k1 signing curve):
   and persisted alongside the key so verification never infers it from raw key
   bytes. Both curves emit compact (64-byte `r‖s`), **low-S normalised**
   signatures over the SHA-256 digest; K-256 signing is deterministic (RFC 6979).
-- **Identity is `did:web`, not `did:plc`.** The account DID, handle binding
-  (`/.well-known/atproto-did`), and DID document (`/.well-known/did.json`) all
-  live under the user's own origin — no external PLC directory. This is the
-  decision that keeps the package on-thesis.
+- **Identity defaults to `did:web`; `did:plc` is opt-in and being added.** For a
+  `did:web` account the DID, handle binding (`/.well-known/atproto-did`), and DID
+  document (`/.well-known/did.json`) all live under the user's own origin — no
+  external PLC directory, which keeps the default on-thesis. Because most real
+  Bluesky accounts are PLC-rooted, `did:plc` support is being added as an opt-in
+  (#182): the pure **operation core** (`plc.ts` — build/sign genesis & rotation
+  operations, derive the `did:plc:` identifier, chain via `prev`) has landed; the
+  Durable Object wiring and the (injectable) PLC **directory client** for
+  submission/resolution follow in the next increment. `did:plc` necessarily
+  depends on the external PLC directory — a trade-off accepted only to interoperate
+  with the existing network, never made the default.
 - **The MST is rebuilt from the full entry set on each commit.** Because an MST's
   shape is a pure function of its `{key → value}` entries (a key's layer is fixed
   by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
@@ -52,8 +59,8 @@ secp256k1 signing curve):
   neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
 - **Scope is a single-account PDS.** One account per `baseUrl`; sessions
   authenticate the one owner via a configured password → HS256 access/refresh
-  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) and `did:plc`
-  remain future work.
+  JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) remains
+  future work; `did:plc` is in progress (#182, see the identity note above).
 
 ## Why it does not fit the way the others do
 
@@ -117,10 +124,11 @@ is **reach vs. fit**:
   here per the parity tracker
   [#180](https://github.com/davidwkeith/workers/issues/180): **secp256k1 commit
   signing ([#181](https://github.com/davidwkeith/workers/issues/181)) has landed**
-  (the network-preferred curve, opt-in via `signingCurve`), with `did:plc`
-  (#182), account migration (#183), and the firehose (#184) still to follow.
-  Until those land, a user who wants to **migrate an existing Bluesky account
-  today** is better served by Cirrus.
+  (the network-preferred curve, opt-in via `signingCurve`) and the **`did:plc`
+  operation core** ([#182](https://github.com/davidwkeith/workers/issues/182)) is
+  in progress, with account migration (#183) and the firehose (#184) still to
+  follow. Until those land, a user who wants to **migrate an existing Bluesky
+  account today** is better served by Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not
   export the `createX(config)` handler shape the
   [composition contract](../composition-contract.md) requires, so it cannot be

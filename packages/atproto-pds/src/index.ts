@@ -75,6 +75,17 @@ export {
   isValidHandle,
   type DidDocumentInput,
 } from "./identity.js";
+export {
+  signPlcOperation,
+  unsignedPlcBytes,
+  signedPlcBytes,
+  didPlcFromGenesis,
+  plcOperationCid,
+  verifyPlcOperation,
+  type UnsignedPlcOperation,
+  type SignedPlcOperation,
+  type PlcService,
+} from "./plc.js";
 export { TidClock, encodeTid, isValidTid } from "./tid.js";
 export {
   jsonToCbor,

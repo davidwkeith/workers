@@ -54,10 +54,13 @@ self-contained and built directly on WebCrypto.
   `signingCurve: "secp256k1"` for the network-preferred curve real Bluesky
   accounts use — signed via `@noble/curves` (deterministic, low-S) and published
   with multicodec 0xe7. The curve is fixed at repository genesis.
-- **`did:web`, not `did:plc`.** Identity stays on the user's own origin — no
-  external PLC directory.
+- **`did:web` by default, `did:plc` opt-in (in progress).** `did:web` keeps
+  identity on the user's own origin with no external PLC directory. `did:plc`
+  support is being added for network interop: the operation core (genesis/rotation
+  signing, `did:plc:` derivation) has landed, with the Durable Object + directory
+  client to follow.
 - **Single-account scope.** One account per `baseUrl`, authenticated by a
-  configured password. The firehose and `did:plc` are future work.
+  configured password. The firehose is future work.
 
 ## Usage
 
