@@ -151,8 +151,11 @@ is **reach vs. fit**:
   it, replaces the record set with the imported records, and **re-signs a fresh
   head** with our key chaining `prev` to the imported head (the agreed model;
   pre-migration history beyond that boundary is not retained by the current-state
-  store). Blob import, the activate/deactivate cutover, and PLC rotation follow —
-  and the **firehose** (#184) is still to come. Until migration is complete, a user
+  store). The **account-status cutover** is also wired —
+  `activateAccount`/`deactivateAccount` toggle the home, and
+  `getRepoStatus`/`checkAccountStatus` report it, which is how a Relay learns
+  which PDS is the live home. **Blob import** and **PLC rotation** follow — and the
+  **firehose** (#184) is still to come. Until migration is complete, a user
   who wants to **migrate an existing Bluesky account today** is better served by
   Cirrus.
 - **Cirrus is a standalone deployable app, not a composable library.** It does not

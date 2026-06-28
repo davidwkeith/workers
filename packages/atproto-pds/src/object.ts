@@ -349,6 +349,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#getSession(request);
       case "com.atproto.server.refreshSession":
         return this.#refreshSession(request);
+      case "com.atproto.server.activateAccount":
+        return this.#setAccountActive(request, true);
+      case "com.atproto.server.deactivateAccount":
+        return this.#setAccountActive(request, false);
+      case "com.atproto.server.checkAccountStatus":
+        return this.#checkAccountStatus(request);
       case "com.atproto.server.describeServer":
         return jsonResponse({
           did: this.#accountDid(),
@@ -378,6 +384,8 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#getLatestCommit();
       case "com.atproto.sync.getBlob":
         return this.#getBlob(url);
+      case "com.atproto.sync.getRepoStatus":
+        return this.#getRepoStatus();
       case "com.atproto.sync.listRepos":
         return jsonResponse({
           repos: [
@@ -385,6 +393,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
               did: this.#accountDid(),
               head: this.#kvGet("head_cid"),
               rev: this.#kvGet("head_rev"),
+              active: this.#isActive(),
             },
           ],
         });
@@ -394,6 +403,59 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
           501,
         );
     }
+  }
+
+  // --- account status (migration cutover) -----------------------------------
+
+  /** Whether the account is active here (the default), or deactivated. */
+  #isActive(): boolean {
+    return this.#kvGet("deactivated") !== "1";
+  }
+
+  /**
+   * Toggle the account's active state (`activateAccount` / `deactivateAccount`).
+   * This is the network-coordination switch for migration: a Relay reads
+   * `getRepoStatus` to decide whether to crawl this PDS, so the cutover
+   * deactivates the old home and activates the new one.
+   */
+  async #setAccountActive(
+    request: Request,
+    active: boolean,
+  ): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    if (active) this.#kvSet("deactivated", "0");
+    else this.#kvSet("deactivated", "1");
+    return jsonResponse({ did: this.#accountDid(), active });
+  }
+
+  /** Report the account's status to its owner (`checkAccountStatus`). */
+  async #checkAccountStatus(request: Request): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    const count = (
+      this.#sql.exec("SELECT COUNT(*) AS n FROM records").toArray()[0] as {
+        n: number;
+      }
+    ).n;
+    return jsonResponse({
+      activated: this.#isActive(),
+      validDid: true,
+      repoCommit: this.#kvGet("head_cid"),
+      repoRev: this.#kvGet("head_rev"),
+      indexedRecords: count,
+      expectedBlobs: 0,
+      importedBlobs: 0,
+    });
+  }
+
+  /** Public repository status (`getRepoStatus`) — what Relays poll at cutover. */
+  #getRepoStatus(): Response {
+    const active = this.#isActive();
+    return jsonResponse({
+      did: this.#accountDid(),
+      active,
+      ...(active ? {} : { status: "deactivated" }),
+      rev: this.#kvGet("head_rev"),
+    });
   }
 
   // --- sessions -------------------------------------------------------------

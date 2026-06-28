@@ -560,6 +560,59 @@ describe("AT Protocol PDS", () => {
     expect(plcRetryDelayMs(50)).toBe(3_600_000); // capped at 1h
   });
 
+  it("toggles account status for the migration cutover", async () => {
+    const host = "status.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+
+    const status = async () =>
+      (await (
+        await call(handler, host, "/xrpc/com.atproto.sync.getRepoStatus")
+      ).json()) as { active: boolean; status?: string };
+
+    // Active by default.
+    expect(await status()).toMatchObject({ active: true });
+    expect((await status()).status).toBeUndefined();
+
+    // Deactivate (authenticated).
+    const deact = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.server.deactivateAccount",
+      { body: {}, token },
+    );
+    expect(deact.status).toBe(200);
+    expect(await status()).toMatchObject({
+      active: false,
+      status: "deactivated",
+    });
+
+    // checkAccountStatus reflects it.
+    const checked = (await (
+      await call(handler, host, "/xrpc/com.atproto.server.checkAccountStatus", {
+        token,
+      })
+    ).json()) as { activated: boolean; indexedRecords: number };
+    expect(checked.activated).toBe(false);
+    expect(typeof checked.indexedRecords).toBe("number");
+
+    // Reactivate.
+    await call(handler, host, "/xrpc/com.atproto.server.activateAccount", {
+      body: {},
+      token,
+    });
+    expect(await status()).toMatchObject({ active: true });
+
+    // Toggling requires auth.
+    const noauth = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.server.deactivateAccount",
+      { body: {} },
+    );
+    expect(noauth.status).toBe(401);
+  });
+
   it("imports a repo (importRepo) and re-signs the head onto our key", async () => {
     const did = "did:plc:src234src234src234src234";
     const host = "migrated.example";
