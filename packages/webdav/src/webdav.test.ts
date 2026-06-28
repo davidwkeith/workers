@@ -824,6 +824,29 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
     });
   });
 
+  it("never advertises DELETE on the mount root reached via a trailing slash", async () => {
+    // A sub-path baseUrl makes storageRoot `/dav/`, and `pathOf` resolves the
+    // trailing-slash mount root down to a bare `/`; the Allow set must still omit
+    // DELETE for it (the root is undeletable).
+    await runInDurableObject(
+      harness.WEBDAV_DO.get(harness.WEBDAV_DO.idFromName(crypto.randomUUID())),
+      async () => {
+        const handler = createWebdav({
+          baseUrl: "https://pod.example/dav/",
+          mountPath: "/dav",
+          backend: () => ({}) as never,
+        });
+        const res = await handler(
+          new Request("https://pod.example/dav/", { method: "OPTIONS" }),
+          {} as never,
+          createExecutionContext(),
+        );
+        expect(res.status).toBe(204);
+        expect(res.headers.get("Allow")).not.toContain("DELETE");
+      },
+    );
+  });
+
   it("answers a COPY/MOVE to a foreign origin with 502 (§9.8.5)", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/f.txt", { body: "x" });

@@ -141,9 +141,17 @@ function problem(
   });
 }
 
-/** The `Allow` set advertised for `path` (the root is undeletable). */
+/**
+ * The `Allow` set advertised for `path` (the root is undeletable). The mount
+ * root can surface either as `resolved.storageRoot` or — when `pathOf` strips a
+ * trailing-slash mount prefix down to nothing — as a bare `/`; treat both as the
+ * root so its advertised methods never include `DELETE`. (Actual root-delete
+ * protection is enforced in the backend; this only keeps the header honest.)
+ */
 function allowFor(path: string, resolved: Resolved): string {
-  return path === resolved.storageRoot ? ROOT_METHODS : ALL_METHODS;
+  return path === resolved.storageRoot || path === "/"
+    ? ROOT_METHODS
+    : ALL_METHODS;
 }
 
 /** A `405 Method Not Allowed` with the mandatory `Allow` header (RFC 7231). */
@@ -187,8 +195,7 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
     // can discover Class 2 support before it has credentials.
     if (method === "OPTIONS") {
       const path = pathOf(url, resolved);
-      const allow = path === resolved.storageRoot ? ROOT_METHODS : ALL_METHODS;
-      return dav(null, 204, { Allow: allow });
+      return dav(null, 204, { Allow: allowFor(path ?? "", resolved) });
     }
 
     const principal = await authenticate(request, backend, resolved.origin);
