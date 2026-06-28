@@ -68,6 +68,7 @@ conformance green will fail.
 | `@dwk/micropub`   | Micropub  | [micropub.rocks](https://micropub.rocks/)            |
 | `@dwk/webmention` | Webmention| [webmention.rocks](https://webmention.rocks/) (recv + send) |
 | `@dwk/solid-pod`  | Solid     | Solid conformance test harness + real-client interop |
+| `@dwk/webdav`     | WebDAV    | [litmus](http://www.webdav.org/neon/litmus/) (basic, copymove, props, locks) |
 | `@dwk/indieauth`  | IndieAuth | integration + interop (no hosted "rocks" suite)      |
 | libraries         | —         | unit/integration only                                |
 
@@ -85,6 +86,19 @@ no-op, so ordinary CI stays green). After a suite passes, record the result —
 including the published implementation-report URL for Micropub — by setting the
 relevant entry in `status.json` to `passing`. The next release gate run will
 then allow that package to go stable.
+
+**WebDAV/litmus is executable, not just documented.** litmus is a real CLI, so
+the dispatcher actually runs it when given a target and Basic credentials (an app
+password minted via the owner-gated endpoint), exiting with litmus's status:
+
+```bash
+WEBDAV_USERNAME=… WEBDAV_PASSWORD=… \
+  node scripts/conformance/run-suite.mjs webdav --target https://pod.example
+```
+
+The `hosted-suite` workflow installs litmus and supplies the credentials from the
+`WEBDAV_USERNAME` / `WEBDAV_PASSWORD` repo secrets on manual dispatch or the
+weekly schedule.
 
 ## Integration lifecycle tests
 
