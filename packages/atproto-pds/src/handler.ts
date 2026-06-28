@@ -44,9 +44,12 @@ function text(status: number, body: string): Response {
   });
 }
 
-/** Reach the per-account repository DO (one per account DID; no sharding). */
+/** Reach the per-account repository DO (one per account; no sharding). */
 function repoStub(config: ResolvedConfig, env: AtprotoPdsEnv) {
-  const id = env.REPO.idFromName(config.did);
+  // Route by a stable, method-independent key (the host): a fresh did:plc
+  // account's DID is not known until the DO signs its genesis operation, so the
+  // DID cannot be the routing name.
+  const id = env.REPO.idFromName(config.accountKey);
   return env.REPO.get(id);
 }
 
@@ -84,11 +87,14 @@ export function createAtprotoPds(config: AtprotoPdsConfig): AtprotoPdsHandler {
     const path = url.pathname;
     const method = request.method.toUpperCase();
 
-    // The handle → DID binding, served from the account's own domain. This is
-    // what lets any app resolve `at://<handle>` without a central directory.
+    // The handle → DID binding. For did:web the DID is known here; for did:plc
+    // the DO is the source of truth (it derived the DID at genesis), so forward.
     if (path === "/.well-known/atproto-did") {
       if (method !== "GET" && method !== "HEAD") {
         return text(405, "Method Not Allowed");
+      }
+      if (resolved.didMethod === "plc") {
+        return forwardToDo(resolved, env, request);
       }
       return new Response(method === "HEAD" ? null : resolved.did, {
         status: 200,
@@ -96,11 +102,14 @@ export function createAtprotoPds(config: AtprotoPdsConfig): AtprotoPdsHandler {
       });
     }
 
-    // The DID document carries the repository signing key and the PDS service
-    // endpoint; the DO builds it because only the DO holds the key.
+    // The DID document is served from the origin only for did:web; a did:plc
+    // account's document lives in the PLC directory, not here.
     if (path === "/.well-known/did.json") {
       if (method !== "GET" && method !== "HEAD") {
         return text(405, "Method Not Allowed");
+      }
+      if (resolved.didMethod === "plc") {
+        return text(404, "Not Found");
       }
       return forwardToDo(resolved, env, request);
     }

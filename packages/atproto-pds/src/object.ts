@@ -3,10 +3,12 @@
  * one AT Protocol repository.
  *
  * The stateless front door (`handler.ts`) routes the XRPC surface and the
- * `did:web` document here; everything that must be strongly consistent lives in
+ * identity documents here; everything that must be strongly consistent lives in
  * this object, where Cloudflare guarantees one writer per account: the repository
  * **signing key** (generated here, never emitted), the record set, the
- * deterministic **MST**, and the signed **commit chain**. Records are kept in
+ * deterministic **MST**, and the signed **commit chain**. For a `did:plc`
+ * account it also holds a DO-custodied rotation key and derives the account's
+ * `did:plc` from a self-signed genesis operation at init. Records are kept in
  * SQLite and the MST is rebuilt deterministically on each commit and each CAR
  * export. Blob bodies stream to R2. Consumers bind this class as a Durable
  * Object namespace.
@@ -30,12 +32,19 @@ import {
 } from "./config.js";
 import {
   createRepoKeypair,
+  didKeyFromPublicKey,
   loadSigner,
   publicKeyMultibase,
+  type RepoKeypair,
   type SigningCurve,
   type Signer,
 } from "./crypto.js";
 import { buildDidDocument } from "./identity.js";
+import {
+  didPlcFromGenesis,
+  signPlcOperation,
+  type UnsignedPlcOperation,
+} from "./plc.js";
 import { buildMst, type MstEntry } from "./mst.js";
 import {
   atUri,
@@ -119,6 +128,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       this.#config = JSON.parse(header) as ForwardedConfig;
       await this.#ensureRepo();
       const url = new URL(request.url);
+      if (url.pathname === "/.well-known/atproto-did") {
+        return new Response(this.#accountDid(), {
+          status: 200,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+      }
       if (url.pathname === "/.well-known/did.json") {
         return this.#serveDidDocument();
       }
@@ -166,7 +181,61 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     this.#kvSet("signing_key", keypair.privateKeyExport);
     this.#kvSet("pubkey_raw", base64(keypair.publicKeyRaw));
     this.#signerFn = await loadSigner(keypair.curve, keypair.privateKeyExport);
+    // Resolve the account DID before the genesis commit, since the commit is
+    // signed over it. did:web is known from config; a fresh did:plc is derived
+    // here from a self-signed genesis operation (and an adopted did:plc, e.g.
+    // from migration, is taken as-is).
+    this.#kvSet("account_did", await this.#resolveAccountDid(keypair));
     await this.#commit();
+  }
+
+  /** Determine and persist the account DID at genesis (see {@link #initRepo}). */
+  async #resolveAccountDid(signing: RepoKeypair): Promise<string> {
+    const cfg = this.#cfg;
+    if (cfg.didMethod !== "plc") return cfg.did;
+    // Adopt a pre-existing did:plc (migration) rather than minting a new one.
+    if (cfg.did) return cfg.did;
+    return this.#createPlcGenesis(signing);
+  }
+
+  /**
+   * Mint a fresh `did:plc`: generate a DO-custodied secp256k1 rotation key, sign
+   * a genesis operation with it, derive the DID, and persist both. The rotation
+   * key never leaves the DO — like the signing key, custody stays as tight as
+   * possible. Directory submission is a separate concern (not yet wired).
+   */
+  async #createPlcGenesis(signing: RepoKeypair): Promise<string> {
+    const cfg = this.#cfg;
+    const rotation = await createRepoKeypair("secp256k1");
+    const op: UnsignedPlcOperation = {
+      type: "plc_operation",
+      rotationKeys: [didKeyFromPublicKey(rotation.publicKeyRaw, "secp256k1")],
+      verificationMethods: {
+        atproto: didKeyFromPublicKey(signing.publicKeyRaw, signing.curve),
+      },
+      alsoKnownAs: [`at://${cfg.handle}`],
+      services: {
+        atproto_pds: {
+          type: "AtprotoPersonalDataServer",
+          endpoint: cfg.baseUrl,
+        },
+      },
+      prev: null,
+    };
+    const rotationSigner = await loadSigner(
+      "secp256k1",
+      rotation.privateKeyExport,
+    );
+    const signed = await signPlcOperation(op, rotationSigner);
+    this.#kvSet("rotation_curve", "secp256k1");
+    this.#kvSet("rotation_key", rotation.privateKeyExport);
+    this.#kvSet("plc_genesis", JSON.stringify(signed));
+    return didPlcFromGenesis(signed);
+  }
+
+  /** The authoritative account DID (derived at genesis), falling back to config. */
+  #accountDid(): string {
+    return (this.#kvGet("account_did") as string | null) ?? this.#cfg.did;
   }
 
   /** The curve this repository was initialised with (authoritative, persisted). */
@@ -200,7 +269,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return this.#refreshSession(request);
       case "com.atproto.server.describeServer":
         return jsonResponse({
-          did: this.#cfg.did,
+          did: this.#accountDid(),
           availableUserDomains: [],
         });
       case "com.atproto.identity.resolveHandle":
@@ -229,7 +298,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         return jsonResponse({
           repos: [
             {
-              did: this.#cfg.did,
+              did: this.#accountDid(),
               head: this.#kvGet("head_cid"),
               rev: this.#kvGet("head_rev"),
             },
@@ -264,7 +333,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     }
     const tokens = await this.#issueTokens();
     return jsonResponse({
-      did: cfg.did,
+      did: this.#accountDid(),
       handle: cfg.handle,
       accessJwt: tokens.access,
       refreshJwt: tokens.refresh,
@@ -275,7 +344,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const cfg = this.#cfg;
     const secret = cfg.jwtSecret as string;
     const nowSec = Math.floor(Date.now() / 1000);
-    const base = { sub: cfg.did, iat: nowSec };
+    const base = { sub: this.#accountDid(), iat: nowSec };
     const access = await signJwt(secret, {
       ...base,
       scope: ACCESS_SCOPE,
@@ -291,14 +360,14 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #getSession(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    return jsonResponse({ did: this.#cfg.did, handle: this.#cfg.handle });
+    return jsonResponse({ did: this.#accountDid(), handle: this.#cfg.handle });
   }
 
   async #refreshSession(request: Request): Promise<Response> {
     await this.#requireAuth(request, REFRESH_SCOPE);
     const tokens = await this.#issueTokens();
     return jsonResponse({
-      did: this.#cfg.did,
+      did: this.#accountDid(),
       handle: this.#cfg.handle,
       accessJwt: tokens.access,
       refreshJwt: tokens.refresh,
@@ -312,7 +381,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const match = header ? /^Bearer\s+(.+)$/i.exec(header) : null;
     if (!match) throw authRequired();
     const claims = await verifyJwt(cfg.jwtSecret, match[1] as string);
-    if (!claims || claims.scope !== scope || claims.sub !== cfg.did) {
+    if (
+      !claims ||
+      claims.scope !== scope ||
+      claims.sub !== this.#accountDid()
+    ) {
       throw authRequired("Invalid or expired token");
     }
     return claims;
@@ -327,7 +400,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       this.#signingCurve(),
     );
     const doc = buildDidDocument({
-      did: cfg.did,
+      did: this.#accountDid(),
       handle: cfg.handle,
       pdsEndpoint: cfg.baseUrl,
       publicKeyMultibase: multibase,
@@ -340,7 +413,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (handle !== this.#cfg.handle) {
       throw namedError(400, "InvalidRequest", "Unable to resolve handle");
     }
-    return jsonResponse({ did: this.#cfg.did });
+    return jsonResponse({ did: this.#accountDid() });
   }
 
   #describeRepo(): Response {
@@ -351,9 +424,9 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       .map((row) => row.collection as string);
     return jsonResponse({
       handle: cfg.handle,
-      did: cfg.did,
+      did: this.#accountDid(),
       didDoc: buildDidDocument({
-        did: cfg.did,
+        did: this.#accountDid(),
         handle: cfg.handle,
         pdsEndpoint: cfg.baseUrl,
         publicKeyMultibase: publicKeyMultibase(
@@ -389,7 +462,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     }
     const { cid, rev } = await this.#writeRecord(collection, rkey, body.record);
     return jsonResponse({
-      uri: atUri(this.#cfg.did, collection, rkey),
+      uri: atUri(this.#accountDid(), collection, rkey),
       cid: cid.toString(),
       commit: { cid: this.#kvGet("head_cid"), rev },
     });
@@ -414,7 +487,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     }
     const { cid, rev } = await this.#writeRecord(collection, rkey, body.record);
     return jsonResponse({
-      uri: atUri(this.#cfg.did, collection, rkey),
+      uri: atUri(this.#accountDid(), collection, rkey),
       cid: cid.toString(),
       commit: { cid: this.#kvGet("head_cid"), rev },
     });
@@ -493,7 +566,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (!row)
       throw namedError(400, "RecordNotFound", "Could not locate record");
     return jsonResponse({
-      uri: atUri(this.#cfg.did, collection, rkey),
+      uri: atUri(this.#accountDid(), collection, rkey),
       cid: row.cid as string,
       value: cborToJson(decodeCbor(unbase64(row.value as string))),
     });
@@ -520,7 +593,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       .toArray();
     const page = rows.slice(0, limit);
     const records = page.map((row) => ({
-      uri: atUri(this.#cfg.did, collection, row.rkey as string),
+      uri: atUri(this.#accountDid(), collection, row.rkey as string),
       cid: row.cid as string,
       value: cborToJson(decodeCbor(unbase64(row.value as string))),
     }));
@@ -584,7 +657,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   #blobKey(cid: CID): string {
-    return `blob/${this.#cfg.did}/${cid.toString()}`;
+    return `blob/${this.#accountDid()}/${cid.toString()}`;
   }
 
   // --- commit + sync --------------------------------------------------------
@@ -616,7 +689,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const prev = prevCid ? CID.parse(prevCid) : null;
     const sign = await this.#signer();
     const { cid, bytes } = await formatCommit(
-      { did: this.#cfg.did, version: 3, data: root, rev, prev },
+      { did: this.#accountDid(), version: 3, data: root, rev, prev },
       sign,
     );
     this.#kvSet("head_cid", cid.toString());

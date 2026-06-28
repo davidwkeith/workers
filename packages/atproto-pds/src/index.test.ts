@@ -402,6 +402,68 @@ describe("AT Protocol PDS", () => {
     const compressed = base58btcDecode(pubMultibase.slice(1)).slice(2);
     expect(await verifyCommit(commit, compressed, "secp256k1")).toBe(true);
   });
+
+  it("mints a did:plc account and serves the derived DID consistently", async () => {
+    const host = "plc-account.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      didMethod: "plc",
+    });
+
+    // The handle → DID binding is the DO-derived did:plc, not a did:web.
+    const did = await (
+      await call(handler, host, "/.well-known/atproto-did")
+    ).text();
+    expect(did).toMatch(/^did:plc:[a-z2-7]{24}$/);
+
+    // A did:plc account's document lives in the PLC directory, not at the origin.
+    expect((await call(handler, host, "/.well-known/did.json")).status).toBe(
+      404,
+    );
+
+    // Sessions and repo description report the same did:plc.
+    const token = await login(handler, host);
+    const session = (await (
+      await call(handler, host, "/xrpc/com.atproto.server.getSession", {
+        token,
+      })
+    ).json()) as { did: string };
+    expect(session.did).toBe(did);
+    const described = (await (
+      await call(
+        handler,
+        host,
+        "/xrpc/com.atproto.repo.describeRepo?repo=" + host,
+      )
+    ).json()) as { did: string };
+    expect(described.did).toBe(did);
+
+    // Commits are signed under the did:plc, so the exported repo is self-consistent.
+    await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+      body: {
+        collection: "app.bsky.feed.post",
+        rkey: "x",
+        record: { $type: "app.bsky.feed.post", text: "hello plc" },
+      },
+      token,
+    });
+    const car = readCar(
+      new Uint8Array(
+        await (
+          await call(
+            handler,
+            host,
+            "/xrpc/com.atproto.sync.getRepo?did=" + host,
+          )
+        ).arrayBuffer(),
+      ),
+    );
+    const rootBlock = car.blocks.find((b) => b.cid.equals(car.roots[0]!))!;
+    const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
+    expect(commit.did).toBe(did);
+  });
 });
 
 /** Decode a `zDn…` p256 Multikey back to the raw uncompressed public key. */

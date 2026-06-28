@@ -43,12 +43,18 @@ secp256k1 signing curve):
   document (`/.well-known/did.json`) all live under the user's own origin — no
   external PLC directory, which keeps the default on-thesis. Because most real
   Bluesky accounts are PLC-rooted, `did:plc` support is being added as an opt-in
-  (#182): the pure **operation core** (`plc.ts` — build/sign genesis & rotation
-  operations, derive the `did:plc:` identifier, chain via `prev`) has landed; the
-  Durable Object wiring and the (injectable) PLC **directory client** for
-  submission/resolution follow in the next increment. `did:plc` necessarily
-  depends on the external PLC directory — a trade-off accepted only to interoperate
-  with the existing network, never made the default.
+  (#182, `didMethod: "plc"`): the operation core (`plc.ts`) **and** the Durable
+  Object wiring have landed — a fresh `did:plc` account generates a DO-custodied
+  secp256k1 **rotation key**, self-signs a genesis operation, derives its
+  `did:plc:` DID, and serves it consistently (the front door routes the DO by a
+  stable host key, forwards `/.well-known/atproto-did` to the DO, and returns 404
+  for `/.well-known/did.json` since a PLC account's document lives in the
+  directory). The remaining piece is the (injectable) PLC **directory client** for
+  submitting the genesis operation and resolving foreign DIDs, which migration
+  (#183) also needs. `did:plc` necessarily depends on the external PLC directory —
+  a trade-off accepted only to interoperate with the existing network, never made
+  the default. **Rotation-key custody:** the key is generated inside and never
+  leaves the DO, exactly like the repository signing key.
 - **The MST is rebuilt from the full entry set on each commit.** Because an MST's
   shape is a pure function of its `{key → value}` entries (a key's layer is fixed
   by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
