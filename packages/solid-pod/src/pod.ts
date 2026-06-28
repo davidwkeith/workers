@@ -1071,14 +1071,18 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         to: string,
         depth: "0" | "infinity",
       ): Promise<WriteOutcome> => {
-        const destExisted = store.head(to) !== null;
+        // Defensive: a collection's destination must be a collection path so
+        // child keys concatenate correctly. The router normalizes this, but the
+        // backend is a public seam, so guard here too.
+        const dest = collectionDest(from, to);
+        const destExisted = store.head(dest) !== null;
         // Overwrite is delete-then-copy (the router already 412'd a no-overwrite
         // collision), so the destination subtree never lingers under the copy.
-        if (destExisted) this.#webdavDeleteTree(store, to);
-        await this.#webdavCopyTree(store, origin, from, to, depth);
-        this.#ensureContainerChain(store, origin, to);
+        if (destExisted) this.#webdavDeleteTree(store, dest);
+        await this.#webdavCopyTree(store, origin, from, dest, depth);
+        this.#ensureContainerChain(store, origin, dest);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, to), destExisted ? "Update" : "Create");
+        this.#broadcast(toIri(origin, dest), destExisted ? "Update" : "Create");
         return { created: !destExisted };
       },
 
@@ -1089,14 +1093,15 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       ): Promise<WriteOutcome> => {
         // MOVE is always Depth: infinity (RFC 4918 §9.9.3): copy the whole
         // subtree, then drop the source.
-        const destExisted = store.head(to) !== null;
-        if (destExisted) this.#webdavDeleteTree(store, to);
-        await this.#webdavCopyTree(store, origin, from, to, "infinity");
-        this.#ensureContainerChain(store, origin, to);
+        const dest = collectionDest(from, to);
+        const destExisted = store.head(dest) !== null;
+        if (destExisted) this.#webdavDeleteTree(store, dest);
+        await this.#webdavCopyTree(store, origin, from, dest, "infinity");
+        this.#ensureContainerChain(store, origin, dest);
         this.#webdavDeleteTree(store, from);
         this.#removeContainment(store, origin, from);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, to), destExisted ? "Update" : "Create");
+        this.#broadcast(toIri(origin, dest), destExisted ? "Update" : "Create");
         this.#broadcast(toIri(origin, from), "Delete");
         return { created: !destExisted };
       },
@@ -1532,6 +1537,11 @@ function mapStoreError(error: unknown): Error {
     return new WebdavCollectionNotEmpty();
   }
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** A collection's COPY/MOVE destination must itself be a collection path. */
+function collectionDest(from: string, to: string): string {
+  return isContainer(from) && !to.endsWith("/") ? `${to}/` : to;
 }
 
 /** Narrow WebDAV write preconditions to the store's write options. */

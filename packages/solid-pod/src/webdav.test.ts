@@ -280,6 +280,21 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  it("normalizes a collection destination that omits the trailing slash", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("MKCOL", "/box");
+      await call("PUT", "/box/a.txt", { body: "alpha" });
+      // Destination `/clone` (no slash) for a collection source must be treated
+      // as `/clone/` so child keys are not corrupted into `/clonea.txt`.
+      const copy = await call("COPY", "/box/", {
+        headers: { destination: `${baseUrl}/clone` },
+      });
+      expect(copy.status).toBe(201);
+      expect(await (await call("GET", "/clone/a.txt")).text()).toBe("alpha");
+      expect((await call("GET", "/clonea.txt")).status).toBe(404);
+    });
+  });
+
   it("MOVEs a collection subtree and drops the source", async () => {
     await withPod(RW, async ({ call, baseUrl }) => {
       await call("MKCOL", "/old");

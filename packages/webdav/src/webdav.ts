@@ -429,9 +429,16 @@ async function copyMove(
   resolved: Resolved,
   method: "COPY" | "MOVE",
 ): Promise<Response> {
-  const destination = destinationOf(ctx.request, ctx.url, resolved);
+  let destination = destinationOf(ctx.request, ctx.url, resolved);
   if (destination === null)
     return problem(400, "Missing or invalid Destination");
+  // A collection's destination must be a collection path; without this a client
+  // that drops the trailing slash (`/dir` for `/dir/`) would slip past the
+  // equality, into-itself, and lock guards below and corrupt child paths in the
+  // backend copy. Normalize once, up front.
+  if (isCollectionPath(ctx.path) && !destination.endsWith("/")) {
+    destination = `${destination}/`;
+  }
   if (isAuxiliary(destination)) return problem(403, "Forbidden destination");
   if (destination === ctx.path)
     return problem(403, "Source and destination are equal");
