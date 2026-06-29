@@ -123,6 +123,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   #config: ForwardedConfig | null = null;
   #signerFn: Signer | null = null;
   #accountDidCache: string | null = null;
+  // The signing curve and raw public key are fixed at genesis, so cache them to
+  // avoid a SQLite read on every identity request (they are read several times).
+  #signingCurveCache: SigningCurve | null = null;
+  #publicKeyRawCache: Uint8Array | null = null;
   #initPromise: Promise<void> | null = null;
   #writeChain: Promise<unknown> = Promise.resolve();
 
@@ -362,7 +366,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   /** The curve this repository was initialised with (authoritative, persisted). */
   #signingCurve(): SigningCurve {
-    return (this.#kvGet("signing_curve") as SigningCurve | null) ?? "p256";
+    if (this.#signingCurveCache === null) {
+      this.#signingCurveCache =
+        (this.#kvGet("signing_curve") as SigningCurve | null) ?? "p256";
+    }
+    return this.#signingCurveCache;
   }
 
   async #signer(): Promise<Signer> {
@@ -376,7 +384,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   #publicKeyRaw(): Uint8Array {
-    return unbase64(this.#kvGet("pubkey_raw") as string);
+    if (this.#publicKeyRawCache === null) {
+      this.#publicKeyRawCache = unbase64(this.#kvGet("pubkey_raw") as string);
+    }
+    return this.#publicKeyRawCache;
   }
 
   // --- XRPC dispatch --------------------------------------------------------
@@ -641,6 +652,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       handle: cfg.handle,
       pdsEndpoint: cfg.baseUrl,
       publicKeyMultibase: multibase,
+      curve: this.#signingCurve(),
     });
     return jsonResponse(doc as JsonValue);
   }
@@ -670,6 +682,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
           this.#publicKeyRaw(),
           this.#signingCurve(),
         ),
+        curve: this.#signingCurve(),
       }) as JsonValue,
       collections,
       handleIsCorrect: true,
@@ -879,12 +892,21 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       Math.max(Number(url.searchParams.get("limit") ?? "50") || 50, 1),
       100,
     );
-    const cursor = url.searchParams.get("cursor");
+    // Normalise an empty `cursor` param to null (treat it as "no cursor"):
+    // otherwise reverse paging would filter on `rkey < ''` and return nothing.
+    const cursor = url.searchParams.get("cursor") || null;
+    // `reverse=true` lists in descending rkey order; the cursor then pages
+    // *down* (rkey < cursor) instead of up. The comparator/order tokens come
+    // from a fixed two-value set, never from user input, so interpolating them
+    // into the SQL is safe.
+    const reverse = url.searchParams.get("reverse") === "true";
+    const comparator = reverse ? "<" : ">";
+    const order = reverse ? "DESC" : "ASC";
     const rows = this.#sql
       .exec(
         `SELECT rkey, cid, value FROM records
-           WHERE collection = ? AND (? IS NULL OR rkey > ?)
-           ORDER BY rkey LIMIT ?`,
+           WHERE collection = ? AND (? IS NULL OR rkey ${comparator} ?)
+           ORDER BY rkey ${order} LIMIT ?`,
         collection,
         cursor,
         cursor,

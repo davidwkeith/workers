@@ -68,8 +68,18 @@ export function errorResponse(error: unknown): Response {
   );
 }
 
-const NSID_RE =
-  /^[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+// AT Protocol NSID syntax (https://atproto.com/specs/nsid):
+//  - at least 3 dot-separated segments — the authority (every segment but the
+//    last) must itself be ≥2 segments, plus the trailing name segment;
+//  - every segment starts with an ASCII letter, is 1–63 chars of letters,
+//    digits and hyphens, and may not end with a hyphen;
+//  - the final *name* segment is letters and digits only (no hyphens);
+//  - the whole NSID is at most 317 chars.
+const NSID_AUTHORITY_SEGMENT = "[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?";
+const NSID_NAME_SEGMENT = "[a-zA-Z][a-zA-Z0-9]{0,62}";
+const NSID_RE = new RegExp(
+  `^(?:${NSID_AUTHORITY_SEGMENT}\\.){2,}${NSID_NAME_SEGMENT}$`,
+);
 
 /** Whether a string is a syntactically valid NSID (collection / lexicon id). */
 export function isValidNsid(nsid: string): boolean {

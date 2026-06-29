@@ -111,8 +111,42 @@ export async function importRepoFromCar(
   }
   const head = roots[0] as CID;
 
+  // A CAR is untrusted external input: its records are only as trustworthy as
+  // the chain from the *signed* root commit down to each block. That chain is
+  // by content address, so every block must hash to the CID it is filed under —
+  // otherwise a tampered CAR could swap MST-node or record bytes under the
+  // expected CIDs and the root-commit signature would still "verify" while the
+  // recovered records are forged. Recompute and compare each block's CID (every
+  // block in a parsed CAR is CIDv1/SHA-256, so `CID.create` reproduces it).
+  // Each recompute is an independent async SHA-256, so verify them concurrently
+  // rather than serially — a large repo CAR carries thousands of blocks and a
+  // sequential `await` per block would dominate import latency. But verify with
+  // a *bounded* pool: `blocks.map(async …)` would create one pending promise per
+  // block at once (tens of thousands on a big repo), and that closure/promise
+  // overhead is itself a cost against the Worker's 128 MB ceiling. A small fixed
+  // set of workers pulling from a shared cursor caps in-flight work while still
+  // parallelising (single-threaded JS makes the `cursor++` race-free).
   const index = new Map<string, Uint8Array>();
-  for (const block of blocks) index.set(block.cid.toString(), block.bytes);
+  const VERIFY_CONCURRENCY = 64;
+  let cursor = 0;
+  const verifyWorker = async (): Promise<void> => {
+    while (cursor < blocks.length) {
+      const block = blocks[cursor++];
+      if (!block) break;
+      const computed = await CID.create(block.cid.codec, block.bytes);
+      if (!computed.equals(block.cid)) {
+        throw new Error(
+          `migrate: CAR block ${block.cid.toString()} does not match its content (expected ${computed.toString()})`,
+        );
+      }
+      index.set(block.cid.toString(), block.bytes);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(VERIFY_CONCURRENCY, blocks.length) }, () =>
+      verifyWorker(),
+    ),
+  );
   const getBlock = (cid: CID): Uint8Array | undefined =>
     index.get(cid.toString());
 

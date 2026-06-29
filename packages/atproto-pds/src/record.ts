@@ -8,7 +8,7 @@
  * Pure and runtime-free.
  */
 
-import type { CborValue } from "./cbor.js";
+import { assignKey, type CborValue } from "./cbor.js";
 import { CID } from "./cid.js";
 
 /** Any JSON value (records are JSON on the wire). */
@@ -50,10 +50,14 @@ export function jsonToCbor(value: JsonValue): CborValue {
       throw new Error("record: $bytes must be a string");
     return base64Decode(b);
   }
+  // Incoming records are untrusted: guard the `__proto__` key so it becomes an
+  // own property rather than poisoning the prototype chain.
   const out: { [key: string]: CborValue } = {};
   for (const key of keys) {
-    out[key] = jsonToCbor(
-      (value as { [k: string]: JsonValue })[key] as JsonValue,
+    assignKey(
+      out,
+      key,
+      jsonToCbor((value as { [k: string]: JsonValue })[key] as JsonValue),
     );
   }
   return out;
@@ -65,8 +69,11 @@ export function cborToJson(value: CborValue): JsonValue {
   if (value instanceof Uint8Array) return { $bytes: base64Encode(value) };
   if (Array.isArray(value)) return value.map(cborToJson);
   if (value !== null && typeof value === "object") {
+    // A stored record could carry a `__proto__` key; guard it so it becomes an
+    // own property rather than poisoning the prototype chain.
     const out: { [key: string]: JsonValue } = {};
-    for (const [key, v] of Object.entries(value)) out[key] = cborToJson(v);
+    for (const [key, v] of Object.entries(value))
+      assignKey(out, key, cborToJson(v));
     return out;
   }
   return value;
