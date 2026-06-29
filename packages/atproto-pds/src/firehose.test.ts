@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC } from "./cid.js";
 import {
+  encodeAccountFrame,
   encodeCommitBody,
   encodeCommitFrame,
   encodeErrorFrame,
@@ -129,6 +130,44 @@ describe("firehose framing", () => {
     const frame = encodeInfoFrame("OutdatedCursor");
     expect(decodeCbor(frame.slice(header.length))).toEqual({
       name: "OutdatedCursor",
+    });
+  });
+
+  it("frames a deactivated #account event with a status", () => {
+    const header = encodeFrameHeader("#account");
+    const frame = encodeAccountFrame({
+      seq: 7,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:00.000Z",
+      active: false,
+      status: "deactivated",
+    });
+    expect(decodeCbor(frame.slice(0, header.length))).toEqual({
+      op: 1,
+      t: "#account",
+    });
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      seq: 7,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:00.000Z",
+      active: false,
+      status: "deactivated",
+    });
+  });
+
+  it("omits `status` for an active #account event", () => {
+    const header = encodeFrameHeader("#account");
+    const frame = encodeAccountFrame({
+      seq: 8,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:01.000Z",
+      active: true,
+    });
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      seq: 8,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:01.000Z",
+      active: true,
     });
   });
 });

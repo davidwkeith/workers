@@ -26,6 +26,7 @@ import { writeCar, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 import {
+  encodeAccountFrame,
   encodeCommitFrame,
   encodeErrorFrame,
   encodeInfoFrame,
@@ -483,8 +484,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     active: boolean,
   ): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
+    const changed = this.#isActive() !== active;
     if (active) this.#kvSet("deactivated", "0");
     else this.#kvSet("deactivated", "1");
+    // Announce the cutover on the firehose, but only on a real transition so a
+    // repeated activate/deactivate does not emit redundant events.
+    if (changed) this.#emitAccount(active);
     return jsonResponse({ did: this.#accountDid(), active });
   }
 
@@ -1244,6 +1249,30 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       ops: args.ops,
       time: new Date().toISOString(),
     });
+    this.#appendFrame(seq, frame);
+  }
+
+  /**
+   * Emit an `#account` event when the migration cutover toggles hosting status.
+   * Relays subscribed to the firehose learn the live home changed without
+   * re-polling `getRepoStatus`. Shares the single `seq` space and backfill ring
+   * with `#commit`, so a reconnecting consumer replays it like any other event.
+   */
+  #emitAccount(active: boolean): void {
+    const seq = this.#nextSeq();
+    const frame = encodeAccountFrame({
+      seq,
+      did: this.#accountDid(),
+      time: new Date().toISOString(),
+      active,
+      // The only inactive state this PDS produces is an owner deactivation.
+      ...(active ? {} : { status: "deactivated" }),
+    });
+    this.#appendFrame(seq, frame);
+  }
+
+  /** Persist a framed event to the backfill ring (trimming it) and broadcast. */
+  #appendFrame(seq: number, frame: Uint8Array): void {
     this.#sql.exec(
       "INSERT INTO firehose (seq, frame) VALUES (?, ?)",
       seq,
