@@ -679,8 +679,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
    */
   async #updateHandle(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as { handle?: string };
-    const handle = body.handle?.toLowerCase();
+    // The body is untrusted: a non-string `handle` must fail as a clean 400, not
+    // throw a TypeError on `.toLowerCase()` (which would surface as a 500).
+    const body = (await request.json()) as { handle?: unknown };
+    const handle =
+      typeof body.handle === "string" ? body.handle.toLowerCase() : undefined;
     if (!handle || !isValidHandle(handle)) {
       throw invalidRequest("`handle` must be a valid handle");
     }

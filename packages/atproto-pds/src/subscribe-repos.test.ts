@@ -312,18 +312,24 @@ describe("subscribeRepos firehose", () => {
     const token = await login(handler, host);
     const { reader } = await subscribe(handler, host);
 
-    const res = await handler(
-      new Request(`https://${host}/xrpc/com.atproto.identity.updateHandle`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ handle: "alias.example" }),
-      }),
-      testEnv,
-      ctx,
-    );
+    const updateHandle = (handle: unknown) =>
+      handler(
+        new Request(`https://${host}/xrpc/com.atproto.identity.updateHandle`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ handle }),
+        }),
+        testEnv,
+        ctx,
+      );
+
+    // A non-string handle is a clean 400, not a 500 (no frame emitted).
+    expect((await updateHandle(123)).status).toBe(400);
+
+    const res = await updateHandle("alias.example");
     expect(res.status).toBe(200);
 
     const idHeader = encodeFrameHeader("#identity");
