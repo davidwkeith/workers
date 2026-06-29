@@ -89,3 +89,26 @@ export function encodeCommitBody(commit: FirehoseCommit): Uint8Array {
 export function encodeCommitFrame(commit: FirehoseCommit): Uint8Array {
   return concatBytes([encodeFrameHeader("#commit"), encodeCommitBody(commit)]);
 }
+
+/**
+ * Encode an **info** frame (`{ op: 1, t: "#info" }` + `{ name, message }`). The
+ * stream uses these for non-fatal notices — e.g. `OutdatedCursor` when a
+ * consumer's requested `cursor` predates the buffered backfill window.
+ */
+export function encodeInfoFrame(name: string, message?: string): Uint8Array {
+  const body: { [key: string]: CborValue } = { name };
+  if (message !== undefined) body.message = message;
+  return concatBytes([encodeFrameHeader("#info"), encodeCbor(body)]);
+}
+
+/**
+ * Encode an **error** frame (`{ op: -1 }` + `{ error, message }`). The header's
+ * `op` is `-1` (not `1`) and carries no `t`; the body names the error — e.g.
+ * `FutureCursor` for a `cursor` ahead of the stream. A consumer treats this as
+ * terminal.
+ */
+export function encodeErrorFrame(error: string, message?: string): Uint8Array {
+  const body: { [key: string]: CborValue } = { error };
+  if (message !== undefined) body.message = message;
+  return concatBytes([encodeCbor({ op: -1 }), encodeCbor(body)]);
+}

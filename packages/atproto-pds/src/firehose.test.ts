@@ -5,7 +5,9 @@ import { CID, DAG_CBOR_CODEC } from "./cid.js";
 import {
   encodeCommitBody,
   encodeCommitFrame,
+  encodeErrorFrame,
   encodeFrameHeader,
+  encodeInfoFrame,
   type FirehoseCommit,
 } from "./firehose.js";
 
@@ -97,5 +99,36 @@ describe("firehose framing", () => {
     });
     const body = decodeCbor(frame.slice(header.length)) as { seq: number };
     expect(body.seq).toBe(1);
+  });
+
+  it("frames an #info notice (op 1) with a name and message", () => {
+    const header = encodeFrameHeader("#info");
+    const frame = encodeInfoFrame("OutdatedCursor", "too far back");
+    expect(decodeCbor(frame.slice(0, header.length))).toEqual({
+      op: 1,
+      t: "#info",
+    });
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      name: "OutdatedCursor",
+      message: "too far back",
+    });
+  });
+
+  it("frames an error (op -1) with an error name, no `t`", () => {
+    const errorHeader = encodeCbor({ op: -1 });
+    const frame = encodeErrorFrame("FutureCursor", "ahead of the stream");
+    expect(decodeCbor(frame.slice(0, errorHeader.length))).toEqual({ op: -1 });
+    expect(decodeCbor(frame.slice(errorHeader.length))).toEqual({
+      error: "FutureCursor",
+      message: "ahead of the stream",
+    });
+  });
+
+  it("omits the optional message when none is given", () => {
+    const header = encodeFrameHeader("#info");
+    const frame = encodeInfoFrame("OutdatedCursor");
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      name: "OutdatedCursor",
+    });
   });
 });
