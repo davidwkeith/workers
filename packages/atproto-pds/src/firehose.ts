@@ -72,6 +72,21 @@ export interface FirehoseAccount {
   readonly status?: string;
 }
 
+/**
+ * An `#identity` event: the account's identity changed (here, a handle update).
+ * Relays consume it to re-resolve the handle ⇄ DID binding.
+ */
+export interface FirehoseIdentity {
+  /** Monotonic stream sequence number (shared with `#commit`). */
+  readonly seq: number;
+  /** The repo DID whose identity changed. */
+  readonly did: string;
+  /** ISO timestamp this event was broadcast. */
+  readonly time: string;
+  /** The account's new handle, when known. */
+  readonly handle?: string;
+}
+
 /** Encode an event-stream frame **header** (`{ op: 1, t }`) as DAG-CBOR. */
 export function encodeFrameHeader(t: string): Uint8Array {
   return encodeCbor({ op: 1, t });
@@ -130,6 +145,20 @@ export function encodeAccountFrame(account: FirehoseAccount): Uint8Array {
     body.status = account.status;
   }
   return concatBytes([encodeFrameHeader("#account"), encodeCbor(body)]);
+}
+
+/**
+ * Encode an `#identity` frame: the header (`{ op: 1, t: "#identity" }`) followed
+ * by `{ seq, did, time, handle? }`. Emitted when the account's handle changes.
+ */
+export function encodeIdentityFrame(identity: FirehoseIdentity): Uint8Array {
+  const body: { [key: string]: CborValue } = {
+    seq: identity.seq,
+    did: identity.did,
+    time: identity.time,
+  };
+  if (identity.handle !== undefined) body.handle = identity.handle;
+  return concatBytes([encodeFrameHeader("#identity"), encodeCbor(body)]);
 }
 
 /**

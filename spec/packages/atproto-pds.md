@@ -77,15 +77,16 @@ secp256k1 signing curve):
   authenticate the one owner via a configured password → HS256 access/refresh
   JWTs. The firehose (`subscribeRepos` over hibernatable WebSockets) is complete
   (#184): the pure **frame encoder** (`firehose.ts` — the DAG-CBOR header +
-  `#commit`/`#account`/`#info`/error body framing) plus the Durable Object
-  WebSocket endpoint — a hibernatable `acceptWebSocket`, a monotonic **persisted
-  `seq`** cursor, a per-commit broadcast on every write/delete/import, and a
-  bounded `?cursor=` backfill ring (an `OutdatedCursor` info frame past the
-  window, a `FutureCursor` error past the head). The activate/deactivate
-  migration cutover also emits an **`#account`** event (sharing the same `seq`
-  space and backfill ring), so a subscribed Relay learns the live home changed
-  without re-polling `getRepoStatus`. `did:plc` (#182) and account migration
-  (#183) are complete.
+  `#commit`/`#account`/`#identity`/`#info`/error body framing) plus the Durable
+  Object WebSocket endpoint — a hibernatable `acceptWebSocket`, a monotonic
+  **persisted `seq`** cursor, a per-commit broadcast on every write/delete/import,
+  and a bounded `?cursor=` backfill ring (an `OutdatedCursor` info frame past the
+  window, a `FutureCursor` error past the head). The activate/deactivate migration
+  cutover also emits an **`#account`** event, and `com.atproto.identity.updateHandle`
+  changes the account handle and emits an **`#identity`** event (all sharing the
+  one `seq` space and backfill ring), so a subscribed Relay learns the live home
+  or the handle ⇄ DID binding changed without re-polling. `did:plc` (#182) and
+  account migration (#183) are complete.
 
 ## Why it does not fit the way the others do
 

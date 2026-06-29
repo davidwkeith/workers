@@ -8,6 +8,7 @@ import {
   encodeCommitFrame,
   encodeErrorFrame,
   encodeFrameHeader,
+  encodeIdentityFrame,
   encodeInfoFrame,
   type FirehoseCommit,
 } from "./firehose.js";
@@ -152,6 +153,40 @@ describe("firehose framing", () => {
       time: "2026-06-29T00:00:00.000Z",
       active: false,
       status: "deactivated",
+    });
+  });
+
+  it("frames an #identity event with the new handle", () => {
+    const header = encodeFrameHeader("#identity");
+    const frame = encodeIdentityFrame({
+      seq: 9,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:02.000Z",
+      handle: "alias.example.com",
+    });
+    expect(decodeCbor(frame.slice(0, header.length))).toEqual({
+      op: 1,
+      t: "#identity",
+    });
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      seq: 9,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:02.000Z",
+      handle: "alias.example.com",
+    });
+  });
+
+  it("omits `handle` from an #identity event when not provided", () => {
+    const header = encodeFrameHeader("#identity");
+    const frame = encodeIdentityFrame({
+      seq: 10,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:03.000Z",
+    });
+    expect(decodeCbor(frame.slice(header.length))).toEqual({
+      seq: 10,
+      did: "did:web:alice.example.com",
+      time: "2026-06-29T00:00:03.000Z",
     });
   });
 

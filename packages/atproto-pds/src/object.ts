@@ -29,6 +29,7 @@ import {
   encodeAccountFrame,
   encodeCommitFrame,
   encodeErrorFrame,
+  encodeIdentityFrame,
   encodeInfoFrame,
   type FirehoseRepoOp,
 } from "./firehose.js";
@@ -46,7 +47,7 @@ import {
   type SigningCurve,
   type Signer,
 } from "./crypto.js";
-import { buildDidDocument } from "./identity.js";
+import { buildDidDocument, isValidHandle } from "./identity.js";
 import { importRepoFromCar } from "./migrate.js";
 import { submitPlcOperation } from "./plc-directory.js";
 import { resolveSigningKey } from "./resolve.js";
@@ -128,6 +129,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   // avoid a SQLite read on every identity request (they are read several times).
   #signingCurveCache: SigningCurve | null = null;
   #publicKeyRawCache: Uint8Array | null = null;
+  // The effective handle: an `updateHandle` override if set, else the configured
+  // one. Cached and invalidated on update to avoid a SQLite read per identity
+  // request (it is read several times — sessions, DID doc, resolveHandle).
+  #handleCache: string | null = null;
   #initPromise: Promise<void> | null = null;
   #writeChain: Promise<unknown> = Promise.resolve();
 
@@ -414,6 +419,10 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         });
       case "com.atproto.identity.resolveHandle":
         return this.#resolveHandle(url);
+      case "com.atproto.identity.updateHandle":
+        // A mutation that emits an `#identity` firehose event — serialize it on
+        // the write chain like the record mutations below.
+        return this.#enqueueWrite(() => this.#updateHandle(request));
       case "com.atproto.identity.getRecommendedDidCredentials":
         return this.#getRecommendedDidCredentials(request);
       case "com.atproto.repo.describeRepo":
@@ -539,7 +548,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       : [];
     return jsonResponse({
       rotationKeys,
-      alsoKnownAs: [`at://${cfg.handle}`],
+      alsoKnownAs: [`at://${this.#handle()}`],
       verificationMethods: {
         atproto: didKeyFromPublicKey(
           this.#publicKeyRaw(),
@@ -593,7 +602,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const tokens = await this.#issueTokens();
     return jsonResponse({
       did: this.#accountDid(),
-      handle: cfg.handle,
+      handle: this.#handle(),
       accessJwt: tokens.access,
       refreshJwt: tokens.refresh,
     });
@@ -619,7 +628,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #getSession(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    return jsonResponse({ did: this.#accountDid(), handle: this.#cfg.handle });
+    return jsonResponse({ did: this.#accountDid(), handle: this.#handle() });
   }
 
   async #refreshSession(request: Request): Promise<Response> {
@@ -627,7 +636,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const tokens = await this.#issueTokens();
     return jsonResponse({
       did: this.#accountDid(),
-      handle: this.#cfg.handle,
+      handle: this.#handle(),
       accessJwt: tokens.access,
       refreshJwt: tokens.refresh,
     });
@@ -652,6 +661,37 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   // --- identity -------------------------------------------------------------
 
+  /** The account's current handle: an `updateHandle` override, else config. */
+  #handle(): string {
+    if (this.#handleCache === null) {
+      this.#handleCache =
+        (this.#kvGet("handle_override") as string | null) ?? this.#cfg.handle;
+    }
+    return this.#handleCache;
+  }
+
+  /**
+   * Change the account handle (`com.atproto.identity.updateHandle`) and announce
+   * it on the firehose as an `#identity` event so Relays re-resolve the handle ⇄
+   * DID binding. The PDS records the claimed handle; the network still verifies
+   * it resolves back to this DID (DNS `_atproto` or `/.well-known/atproto-did`).
+   * Serialized through the write chain like every other firehose-emitting change.
+   */
+  async #updateHandle(request: Request): Promise<Response> {
+    await this.#requireAuth(request, ACCESS_SCOPE);
+    const body = (await request.json()) as { handle?: string };
+    const handle = body.handle?.toLowerCase();
+    if (!handle || !isValidHandle(handle)) {
+      throw invalidRequest("`handle` must be a valid handle");
+    }
+    if (handle !== this.#handle()) {
+      this.#kvSet("handle_override", handle);
+      this.#handleCache = handle;
+      this.#emitIdentity(handle);
+    }
+    return jsonResponse({});
+  }
+
   #serveDidDocument(): Response {
     const cfg = this.#cfg;
     const multibase = publicKeyMultibase(
@@ -660,7 +700,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     );
     const doc = buildDidDocument({
       did: this.#accountDid(),
-      handle: cfg.handle,
+      handle: this.#handle(),
       pdsEndpoint: cfg.baseUrl,
       publicKeyMultibase: multibase,
       curve: this.#signingCurve(),
@@ -670,7 +710,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   #resolveHandle(url: URL): Response {
     const handle = url.searchParams.get("handle");
-    if (handle !== this.#cfg.handle) {
+    if (handle !== this.#handle()) {
       throw namedError(400, "InvalidRequest", "Unable to resolve handle");
     }
     return jsonResponse({ did: this.#accountDid() });
@@ -683,11 +723,11 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       .toArray()
       .map((row) => row.collection as string);
     return jsonResponse({
-      handle: cfg.handle,
+      handle: this.#handle(),
       did: this.#accountDid(),
       didDoc: buildDidDocument({
         did: this.#accountDid(),
-        handle: cfg.handle,
+        handle: this.#handle(),
         pdsEndpoint: cfg.baseUrl,
         publicKeyMultibase: publicKeyMultibase(
           this.#publicKeyRaw(),
@@ -1273,6 +1313,21 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       active,
       // The only inactive state this PDS produces is an owner deactivation.
       ...(active ? {} : { status: "deactivated" }),
+    });
+    this.#appendFrame(seq, frame);
+  }
+
+  /**
+   * Emit an `#identity` event when the account handle changes (`updateHandle`).
+   * Shares the single `seq` space and backfill ring with `#commit`/`#account`.
+   */
+  #emitIdentity(handle: string): void {
+    const seq = this.#nextSeq();
+    const frame = encodeIdentityFrame({
+      seq,
+      did: this.#accountDid(),
+      time: new Date().toISOString(),
+      handle,
     });
     this.#appendFrame(seq, frame);
   }
