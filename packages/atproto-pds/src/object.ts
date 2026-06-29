@@ -1289,20 +1289,26 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       if (bytes) carBlocks.push({ cid: op.cid, bytes });
     }
     const fullCar = writeCar([args.commitCid], carBlocks);
-    // Blobs newly referenced by this commit's created/updated records, so a
-    // consumer knows which blobs to fetch without decoding every record itself.
-    const blobCids = new Set<string>();
-    for (const op of args.ops) {
-      if (!op.cid) continue;
-      const bytes = recordByCid.get(op.cid.toString());
-      if (!bytes) continue;
-      for (const blob of extractBlobCids(decodeCbor(bytes))) blobCids.add(blob);
-    }
     // The package rebuilds the whole MST into each frame, so a large repo's
     // every-commit diff can outgrow the WebSocket message ceiling. Past the
     // configured cap, send `tooBig`: an empty blocks CAR and no ops/blobs, which
     // tells the consumer to fall back to `getRepo`.
     const tooBig = fullCar.length > this.#cfg.firehoseMaxBlocksBytes;
+    // Blobs newly referenced by this commit's created/updated records, so a
+    // consumer knows which blobs to fetch without decoding every record itself.
+    // Skipped when `tooBig` (the field is emitted empty anyway), so the CBOR
+    // decode + extraction isn't wasted on a fall-back-to-getRepo frame.
+    const blobCids = new Set<string>();
+    if (!tooBig) {
+      for (const op of args.ops) {
+        if (!op.cid) continue;
+        const bytes = recordByCid.get(op.cid.toString());
+        if (!bytes) continue;
+        for (const blob of extractBlobCids(decodeCbor(bytes))) {
+          blobCids.add(blob);
+        }
+      }
+    }
     const frame = encodeCommitFrame({
       seq,
       repo: this.#accountDid(),
