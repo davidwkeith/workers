@@ -305,4 +305,55 @@ describe("subscribeRepos firehose", () => {
       ),
     ]);
   });
+
+  it("emits an #account event on the migration activate/deactivate cutover", async () => {
+    const host = "fh-account.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const { reader } = await subscribe(handler, host);
+
+    const setActive = async (active: boolean): Promise<void> => {
+      const nsid = active
+        ? "com.atproto.server.activateAccount"
+        : "com.atproto.server.deactivateAccount";
+      const res = await handler(
+        new Request(`https://${host}/xrpc/${nsid}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+        }),
+        testEnv,
+        ctx,
+      );
+      expect(res.status).toBe(200);
+    };
+
+    const accountHeader = encodeFrameHeader("#account");
+    const decodeAccount = (frame: Uint8Array) => ({
+      header: decodeCbor(frame.slice(0, accountHeader.length)) as {
+        op: number;
+        t: string;
+      },
+      body: decodeCbor(frame.slice(accountHeader.length)) as {
+        seq: number;
+        did: string;
+        active: boolean;
+        status?: string;
+      },
+    });
+
+    // Deactivate — the old-home side of a cutover.
+    await setActive(false);
+    const down = decodeAccount(await reader.next());
+    expect(down.header).toEqual({ op: 1, t: "#account" });
+    expect(down.body.did).toBe(`did:web:${host}`);
+    expect(down.body.active).toBe(false);
+    expect(down.body.status).toBe("deactivated");
+
+    // Reactivate — active, no status, and the shared seq advances.
+    await setActive(true);
+    const up = decodeAccount(await reader.next());
+    expect(up.body.active).toBe(true);
+    expect(up.body.status).toBeUndefined();
+    expect(up.body.seq).toBe(down.body.seq + 1);
+  });
 });
