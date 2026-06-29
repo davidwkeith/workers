@@ -306,6 +306,60 @@ describe("subscribeRepos firehose", () => {
     ]);
   });
 
+  it("updates the handle and emits an #identity event", async () => {
+    const host = "fh-identity.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const { reader } = await subscribe(handler, host);
+
+    const updateHandle = (handle: unknown) =>
+      handler(
+        new Request(`https://${host}/xrpc/com.atproto.identity.updateHandle`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ handle }),
+        }),
+        testEnv,
+        ctx,
+      );
+
+    // A non-string handle is a clean 400, not a 500 (no frame emitted).
+    expect((await updateHandle(123)).status).toBe(400);
+
+    const res = await updateHandle("alias.example");
+    expect(res.status).toBe(200);
+
+    const idHeader = encodeFrameHeader("#identity");
+    const frame = await reader.next();
+    expect(decodeCbor(frame.slice(0, idHeader.length))).toEqual({
+      op: 1,
+      t: "#identity",
+    });
+    const body = decodeCbor(frame.slice(idHeader.length)) as {
+      seq: number;
+      did: string;
+      handle: string;
+    };
+    expect(body.seq).toBe(1);
+    expect(body.did).toBe(`did:web:${host}`);
+    expect(body.handle).toBe("alias.example");
+
+    // The new handle is now the one that resolves; the old one no longer does.
+    const resolve = (handle: string) =>
+      handler(
+        new Request(
+          `https://${host}/xrpc/com.atproto.identity.resolveHandle?handle=${handle}`,
+        ),
+        testEnv,
+        ctx,
+      );
+    expect((await resolve("alias.example")).status).toBe(200);
+    expect((await resolve(host)).status).toBe(400);
+  });
+
   it("emits an #account event on the migration activate/deactivate cutover", async () => {
     const host = "fh-account.example";
     const handler = pds(host);
