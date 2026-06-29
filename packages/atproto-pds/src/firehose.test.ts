@@ -155,13 +155,16 @@ describe("firehose framing", () => {
     });
   });
 
-  it("omits `status` for an active #account event", () => {
+  it("drops `status` for an active #account event even if one is passed", () => {
     const header = encodeFrameHeader("#account");
     const frame = encodeAccountFrame({
       seq: 8,
       did: "did:web:alice.example.com",
       time: "2026-06-29T00:00:01.000Z",
       active: true,
+      // The lexicon forbids `status` on an active account; the encoder must drop
+      // it rather than emit a malformed frame.
+      status: "deactivated",
     });
     expect(decodeCbor(frame.slice(header.length))).toEqual({
       seq: 8,

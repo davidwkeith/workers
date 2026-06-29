@@ -484,13 +484,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     active: boolean,
   ): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const changed = this.#isActive() !== active;
-    if (active) this.#kvSet("deactivated", "0");
-    else this.#kvSet("deactivated", "1");
-    // Announce the cutover on the firehose, but only on a real transition so a
-    // repeated activate/deactivate does not emit redundant events.
-    if (changed) this.#emitAccount(active);
-    return jsonResponse({ did: this.#accountDid(), active });
+    // Serialize through the write chain like every other mutation, so this
+    // status change and its `#account` event take a deterministic place in the
+    // single firehose order relative to concurrent `#commit`s (and stay correct
+    // even if event emission ever gains an `await`).
+    return this.#enqueueWrite(async () => {
+      const changed = this.#isActive() !== active;
+      if (active) this.#kvSet("deactivated", "0");
+      else this.#kvSet("deactivated", "1");
+      // Announce the cutover on the firehose, but only on a real transition so a
+      // repeated activate/deactivate does not emit redundant events.
+      if (changed) this.#emitAccount(active);
+      return jsonResponse({ did: this.#accountDid(), active });
+    });
   }
 
   /** Report the account's status to its owner (`checkAccountStatus`). */

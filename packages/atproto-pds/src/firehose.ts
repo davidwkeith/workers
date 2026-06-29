@@ -124,7 +124,11 @@ export function encodeAccountFrame(account: FirehoseAccount): Uint8Array {
     time: account.time,
     active: account.active,
   };
-  if (account.status !== undefined) body.status = account.status;
+  // The lexicon permits `status` only for an inactive account; never emit it for
+  // an active one, regardless of what the caller passed.
+  if (!account.active && account.status !== undefined) {
+    body.status = account.status;
+  }
   return concatBytes([encodeFrameHeader("#account"), encodeCbor(body)]);
 }
 
