@@ -97,6 +97,13 @@ export interface AtprotoPdsConfig {
   readonly refreshTokenTtlSeconds?: number;
   /** Maximum accepted blob size in bytes. Defaults to 5 MiB. */
   readonly maxBlobSizeBytes?: number;
+  /**
+   * Maximum size in bytes of a `#commit` event's blocks CAR before the firehose
+   * marks it `tooBig` (sending an empty CAR and no ops, so a consumer falls back
+   * to `getRepo`). Defaults to 1 MiB — under the Workers WebSocket message
+   * ceiling, and a natural cap given the whole MST is rebuilt into each frame.
+   */
+  readonly firehoseMaxBlocksBytes?: number;
 
   /** Injectable clock (epoch ms) for deterministic tests. Defaults to `Date.now`. */
   readonly now?: () => number;
@@ -128,6 +135,7 @@ export interface ResolvedConfig {
   readonly accessTokenTtlSeconds: number;
   readonly refreshTokenTtlSeconds: number;
   readonly maxBlobSizeBytes: number;
+  readonly firehoseMaxBlocksBytes: number;
   readonly now: () => number;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -153,11 +161,13 @@ export interface ForwardedConfig {
   readonly accessTokenTtlSeconds: number;
   readonly refreshTokenTtlSeconds: number;
   readonly maxBlobSizeBytes: number;
+  readonly firehoseMaxBlocksBytes: number;
 }
 
 const DEFAULT_ACCESS_TTL = 7200;
 const DEFAULT_REFRESH_TTL = 90 * 24 * 60 * 60;
 const DEFAULT_MAX_BLOB = 5 * 1024 * 1024;
+const DEFAULT_FIREHOSE_MAX_BLOCKS = 1024 * 1024;
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
@@ -208,6 +218,8 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
     refreshTokenTtlSeconds:
       config.refreshTokenTtlSeconds ?? DEFAULT_REFRESH_TTL,
     maxBlobSizeBytes: config.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB,
+    firehoseMaxBlocksBytes:
+      config.firehoseMaxBlocksBytes ?? DEFAULT_FIREHOSE_MAX_BLOCKS,
     now: config.now ?? (() => Date.now()),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
@@ -230,5 +242,6 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     accessTokenTtlSeconds: config.accessTokenTtlSeconds,
     refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
     maxBlobSizeBytes: config.maxBlobSizeBytes,
+    firehoseMaxBlocksBytes: config.firehoseMaxBlocksBytes,
   };
 }

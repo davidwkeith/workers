@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import { readCar } from "./car.js";
 import { decodeCbor } from "./cbor.js";
-import { CID } from "./cid.js";
+import { CID, RAW_CODEC } from "./cid.js";
 import { encodeErrorFrame, encodeFrameHeader } from "./firehose.js";
-import { createAtprotoPds, type AtprotoPdsEnv } from "./index.js";
+import {
+  createAtprotoPds,
+  type AtprotoPdsConfig,
+  type AtprotoPdsEnv,
+} from "./index.js";
 
 /**
  * The repository firehose (`com.atproto.sync.subscribeRepos`) over the real
@@ -20,11 +24,12 @@ const ctx = {} as ExecutionContext;
 const PASSWORD = "correct horse battery staple";
 const SECRET = "jwt-signing-secret";
 
-function pds(host: string) {
+function pds(host: string, overrides: Partial<AtprotoPdsConfig> = {}) {
   return createAtprotoPds({
     baseUrl: `https://${host}`,
     password: PASSWORD,
     jwtSecret: SECRET,
+    ...overrides,
   });
 }
 
@@ -127,6 +132,8 @@ function decodeCommit(frame: Uint8Array): {
     since: string | null;
     blocks: Uint8Array;
     ops: { action: string; path: string; cid: CID | null }[];
+    tooBig: boolean;
+    blobs: CID[];
   };
 } {
   const header = decodeCbor(frame.slice(0, COMMIT_HEADER.length)) as {
@@ -358,6 +365,67 @@ describe("subscribeRepos firehose", () => {
       );
     expect((await resolve("alias.example")).status).toBe(200);
     expect((await resolve(host)).status).toBe(400);
+  });
+
+  it("lists a record's blob refs in the #commit blobs field", async () => {
+    const host = "fh-blobs.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const { reader } = await subscribe(handler, host);
+
+    // A record embedding a blob ref — the blob need not be uploaded for the
+    // commit to advertise it (the field is derived from the record content).
+    const blobCid = await CID.create(RAW_CODEC, new Uint8Array([1, 2, 3]));
+    const res = await handler(
+      new Request(`https://${host}/xrpc/com.atproto.repo.createRecord`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          collection: "app.bsky.feed.post",
+          rkey: "withblob",
+          record: {
+            $type: "app.bsky.feed.post",
+            text: "hi",
+            embed: {
+              $type: "blob",
+              ref: { $link: blobCid.toString() },
+              mimeType: "image/png",
+              size: 3,
+            },
+          },
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+
+    const { body } = decodeCommit(await reader.next());
+    expect(body.tooBig).toBe(false);
+    expect(body.blobs.map((c) => c.toString())).toEqual([blobCid.toString()]);
+  });
+
+  it("marks an oversized commit tooBig and omits ops/blocks", async () => {
+    const host = "fh-toobig.example";
+    // Cap the blocks CAR at a few bytes so any real commit overflows it.
+    const handler = pds(host, { firehoseMaxBlocksBytes: 8 });
+    const token = await login(handler, host);
+    const { reader } = await subscribe(handler, host);
+
+    await createRecord(handler, host, token, "x", "hello");
+    const { body } = decodeCommit(await reader.next());
+    expect(body.tooBig).toBe(true);
+    expect(body.ops).toEqual([]);
+    expect(body.blobs).toEqual([]);
+    // `blocks` is a minimal CAR carrying only the commit root, no blocks.
+    const car = readCar(body.blocks);
+    expect(car.blocks).toHaveLength(0);
+    expect(car.roots.map((r) => r.toString())).toEqual([
+      body.commit.toString(),
+    ]);
   });
 
   it("emits an #account event on the migration activate/deactivate cutover", async () => {

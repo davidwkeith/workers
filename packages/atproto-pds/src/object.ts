@@ -1288,14 +1288,31 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
       const bytes = recordByCid.get(op.cid.toString());
       if (bytes) carBlocks.push({ cid: op.cid, bytes });
     }
+    const fullCar = writeCar([args.commitCid], carBlocks);
+    // Blobs newly referenced by this commit's created/updated records, so a
+    // consumer knows which blobs to fetch without decoding every record itself.
+    const blobCids = new Set<string>();
+    for (const op of args.ops) {
+      if (!op.cid) continue;
+      const bytes = recordByCid.get(op.cid.toString());
+      if (!bytes) continue;
+      for (const blob of extractBlobCids(decodeCbor(bytes))) blobCids.add(blob);
+    }
+    // The package rebuilds the whole MST into each frame, so a large repo's
+    // every-commit diff can outgrow the WebSocket message ceiling. Past the
+    // configured cap, send `tooBig`: an empty blocks CAR and no ops/blobs, which
+    // tells the consumer to fall back to `getRepo`.
+    const tooBig = fullCar.length > this.#cfg.firehoseMaxBlocksBytes;
     const frame = encodeCommitFrame({
       seq,
       repo: this.#accountDid(),
       commit: args.commitCid,
       rev: args.rev,
       since: args.since,
-      blocks: writeCar([args.commitCid], carBlocks),
-      ops: args.ops,
+      blocks: tooBig ? writeCar([args.commitCid], []) : fullCar,
+      ops: tooBig ? [] : args.ops,
+      blobs: tooBig ? [] : [...blobCids].map((cid) => CID.parse(cid)),
+      tooBig,
       time: new Date().toISOString(),
     });
     this.#appendFrame(seq, frame);

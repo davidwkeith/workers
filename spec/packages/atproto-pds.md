@@ -81,11 +81,15 @@ secp256k1 signing curve):
   Object WebSocket endpoint — a hibernatable `acceptWebSocket`, a monotonic
   **persisted `seq`** cursor, a per-commit broadcast on every write/delete/import,
   and a bounded `?cursor=` backfill ring (an `OutdatedCursor` info frame past the
-  window, a `FutureCursor` error past the head). The activate/deactivate migration
-  cutover also emits an **`#account`** event, and `com.atproto.identity.updateHandle`
-  changes the account handle and emits an **`#identity`** event (all sharing the
-  one `seq` space and backfill ring), so a subscribed Relay learns the live home
-  or the handle ⇄ DID binding changed without re-polling. `did:plc` (#182) and
+  window, a `FutureCursor` error past the head). A `#commit` carries the **blob
+  refs** its records introduce and, because the whole MST is rebuilt into each
+  frame, falls back to **`tooBig`** (an empty blocks CAR, no ops) once the diff
+  exceeds the configurable `firehoseMaxBlocksBytes` ceiling (default 1 MiB), so a
+  consumer reverts to `getRepo`. The activate/deactivate migration cutover also
+  emits an **`#account`** event, and `com.atproto.identity.updateHandle` changes
+  the account handle and emits an **`#identity`** event (all sharing the one
+  `seq` space and backfill ring), so a subscribed Relay learns the live home or
+  the handle ⇄ DID binding changed without re-polling. `did:plc` (#182) and
   account migration (#183) are complete.
 
 ## Why it does not fit the way the others do
