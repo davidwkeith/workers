@@ -49,17 +49,18 @@ pnpm test --project @dwk/activitypub
 ## File layout
 
 ```
-src/index.ts          # public surface: createActivityPub, ActivityPubObject, actor, nodeinfo, delivery, types
-src/config.ts         # ActivityPubConfig type, Env fragment, IRI derivation
-src/handler.ts        # createActivityPub factory (actor/inbox/outbox/collection routes)
-src/object.ts         # ActivityPubObject Durable Object (inbox/outbox/followers/following)
-src/actor.ts          # actor document builder, collection/page builders, AS2 helpers
-src/events.ts         # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP helpers (#171)
-src/nodeinfo.ts       # NodeInfo 2.0/2.1 discovery and documents
-src/signatures.ts     # HTTP signature signing/verification wrappers
-src/delivery.ts       # outbound activity delivery with retry
-src/test-harness.ts   # test-only DO class (not published)
-src/*.test.ts         # colocated tests
+src/index.ts        # public surface: createActivityPub, ActivityPubObject, AS2, nodeinfo, delivery, types
+src/config.ts       # ActivityPubConfig type, Env fragment, IRI derivation
+src/handler.ts      # createActivityPub factory (actor/inbox/outbox/collection routes)
+src/object.ts       # ActivityPubObject Durable Object (inbox/outbox/followers/following)
+src/as2.ts          # actor document builder, collection/page builders, AS2 helpers
+src/events.ts       # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP helpers (#171)
+src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
+src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)
+src/delivery.ts     # outbound activity delivery with SSRF guard (retry lives in the DO)
+src/log.ts          # structured logging/metrics event vocabulary
+src/test-harness.ts # test-only DO class (not published)
+src/*.test.ts       # colocated tests
 ```
 
 ## Dependencies

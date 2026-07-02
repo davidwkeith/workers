@@ -48,8 +48,10 @@ src/handler.ts     # createIndieAuth factory (authorization + token + metadata r
 src/token.ts       # JWT signing/verification, access token hash
 src/store.ts       # createIndieAuthStore (D1-backed code + token persistence)
 src/pkce.ts        # PKCE challenge verification
-src/auth.ts        # profile URL canonicalization, rel=me verification
+src/profile.ts     # profile URL canonicalization, rel=me verification
 src/metadata.ts    # RFC 8414 server metadata builder
+src/encoding.ts    # base64url + UTF-8 helpers shared by PKCE and token code paths
+src/log.ts         # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts      # colocated tests
 ```
 

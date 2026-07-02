@@ -36,6 +36,10 @@ unit-testable.
 - Support transactional writes so `solid-pod` can apply N3 Patch
   `deletes`+`inserts` in **one SQLite transaction**, and so `If-Match`/ETag
   check-and-write is **TOCTOU-free**.
+- Track **per-resource byte size and last-modified time** (`ResourceMeta.size` /
+  `modifiedAt`, refreshed on every write), so consumers like the WebDAV façade
+  can serve real `getcontentlength` / `getlastmodified` PROPFIND properties
+  without touching the body.
 
 ## Design constraints
 

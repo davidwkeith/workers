@@ -46,25 +46,23 @@ pnpm test --project @dwk/server
 ## File layout
 
 ```
-src/index.ts              # public surface: createServer, bindings, adapters, shims
-src/server.ts             # DwkServer class, Express setup, mount routing
-src/config.ts             # HostConfig, Mount, FetchHandler types
-src/adapter.ts            # toWebRequest, sendWebResponse (Fetch ↔ Express)
-src/bindings.ts           # assembleBindings (D1, R2, KV, DO, queue, cron)
-src/context.ts            # WaitUntilTracker, HostExecutionContext
-src/queue.ts              # QueueBroker, queue consumer binding
-src/cron.ts               # CronScheduler, scheduled task binding
-src/d1.ts                 # createD1Database (node:sqlite backed)
-src/r2.ts                 # createR2Bucket (filesystem backed)
-src/kv.ts                 # createKVNamespace (in-memory)
-src/durable-object.ts     # DurableObject base, createDurableObjectNamespace
-src/lock.ts               # acquireWriterLock, data directory locking
-src/html-rewriter.ts      # installHTMLRewriter polyfill
-src/request-duplex.ts     # installRequestDuplex for streaming request bodies
-src/websocket.ts          # installWebSocketGlobals, WebSocketPair
-src/cloudflare-workers.ts # cloudflare:workers module shim
-src/resolve.ts            # resolve, registerCloudflareWorkers
-src/*.test.ts             # colocated tests
+src/index.ts                     # public surface: createServer, bindings, adapters, shims
+src/server.ts                    # DwkServer class, Express setup, mount routing
+src/cli.ts                       # dwk-serve bin entry + startServer lifecycle
+src/config.ts                    # HostConfig, Mount, FetchHandler types
+src/adapter.ts                   # toWebRequest, sendWebResponse (Fetch ↔ Express)
+src/bindings.ts                  # assembleBindings (shims → Env, on-disk layout)
+src/context.ts                   # WaitUntilTracker, HostExecutionContext
+src/lifecycle.ts                 # queue/scheduled handler adapters (bind Env + ctx)
+src/lock.ts                      # acquireWriterLock, data directory locking
+src/html-rewriter.ts             # installHTMLRewriter polyfill
+src/request-duplex.ts            # installRequestDuplex for streaming request bodies
+src/web-socket.ts                # installWebSocketGlobals, WebSocketPair
+src/web-socket-upgrade.ts        # bridges real HTTP Upgrade sockets to a mount's DO
+src/cloudflare-workers.ts        # cloudflare:workers module shim
+src/cloudflare-workers-loader.ts # registerCloudflareWorkers ESM loader hook
+src/shims/                       # Node-backed binding shims (D1, R2, KV, DO, queue, cron)
+src/*.test.ts                    # colocated tests
 ```
 
 ## Dependencies (runtime)

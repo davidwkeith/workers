@@ -34,7 +34,8 @@ pnpm test --project @dwk/log
 ## File layout
 
 ```
-src/index.ts       # public surface: Logger, Metrics, consoleLogger, noopLogger, withContext, hostFromUrl
+src/index.ts       # public surface: Logger, consoleLogger, noopLogger, withContext, hostFromUrl
+src/metrics.ts     # Metrics seam: noopMetrics, analyticsEngineMetrics
 src/*.test.ts      # colocated tests
 ```
 

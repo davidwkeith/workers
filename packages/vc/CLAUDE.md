@@ -44,18 +44,18 @@ pnpm test --project @dwk/vc
 ## File layout
 
 ```
-src/index.ts           # public surface: createVc, Data Integrity, did:web, status list, codecs
-src/config.ts          # VcConfig type and Env fragment
-src/handler.ts         # createVc factory (issue/verify/revoke/did.json routes)
-src/proof.ts           # Data Integrity proof creation and verification
-src/credential.ts      # credential building and validation, VCDM 2.0
-src/did-web.ts         # did:web ↔ URL conversion, DID document builder
-src/status.ts          # Bitstring Status List credential, encode/decode
-src/store.ts           # createVcStatusStore (D1-backed revocation status)
-src/jcs.ts             # JSON Canonicalization Scheme (RFC 8785)
-src/codecs.ts          # base58btc, base64url, multibase, multikey
-src/xsd.ts             # XSD datetime validation and formatting
-src/*.test.ts          # colocated tests
+src/index.ts          # public surface: createVc, Data Integrity, did:web, status list, codecs
+src/config.ts         # VcConfig type and Env fragment
+src/handler.ts        # createVc factory (issue/verify/status routes, served status lists)
+src/data-integrity.ts # Data Integrity proof creation and verification (JCS cryptosuites)
+src/credential.ts     # credential building and validation, VCDM 2.0
+src/did-web.ts        # did:web ↔ URL conversion, DID document builder, resolver
+src/status-list.ts    # Bitstring Status List codec/builders + createVcStatusStore (D1)
+src/jcs.ts            # JSON Canonicalization Scheme (RFC 8785)
+src/multibase.ts      # base58btc, base64url, multibase, multikey
+src/datetime.ts       # XSD dateTimeStamp validation and formatting
+src/log.ts            # structured logging/metrics event vocabulary
+src/*.test.ts         # colocated tests
 ```
 
 ## Dependencies

@@ -47,12 +47,19 @@ src/index.ts        # public surface: createMicrosub, poller, queue consumer, st
 src/config.ts       # MicrosubConfig type and Env fragment
 src/handler.ts      # createMicrosub factory (channel/follow/timeline/search actions)
 src/store.ts        # createMicrosubStore (D1-backed channels, follows, timeline)
-src/feed.ts         # parseFeed (Atom/RSS/JSON Feed → JF2)
-src/hfeed.ts        # parseHFeed (mf2 h-feed → JF2)
-src/discovery.ts    # discoverFeed, fetchFeed (feed URL discovery + fetching)
+src/jf2.ts          # feed → JF2 normalization (JSON Feed/Atom/RSS/h-feed entries)
+src/xml.ts          # minimal dependency-free XML reader for Atom/RSS parsing
+src/hfeed.ts        # h-feed/h-entry mf2 parsing (HTMLRewriter → JF2)
+src/discovery.ts    # discoverFeed (feed URL discovery + parsing)
+src/fetch.ts        # injectable FetchLike type, body-size-capped text reader
 src/safe-fetch.ts   # SSRF-safe fetch with private IP blocking
-src/auth.ts         # token extraction, scope checking
-src/queue.ts        # queue consumer and job types
+src/auth.ts         # token extraction, scope checking, DPoP enforcement
+src/replay.ts       # D1-backed DPoP proof jti replay record (short TTL)
+src/poll.ts         # createMicrosubPoller (scheduled: one queue job per feed)
+src/queue.ts        # queued poll job shapes
+src/consumer.ts     # createMicrosubQueueConsumer (fetch, parse, append)
+src/log.ts          # structured observability event taxonomy (@dwk/log vocabulary)
+src/test-harness.ts # test-only DPoP/token helpers (not published)
 src/*.test.ts       # colocated tests
 ```
 

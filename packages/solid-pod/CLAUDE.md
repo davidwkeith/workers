@@ -57,19 +57,22 @@ pnpm test --project @dwk/solid-pod
 ## File layout
 
 ```
-src/index.ts          # public surface: createSolidPod, GC handler, SolidPodObject, types
-src/config.ts         # SolidPodConfig type, Env fragment, AuthContext, Jwks
-src/handler.ts        # createSolidPod factory (LDP routes)
-src/pod.ts            # SolidPodObject Durable Object (the core)
-src/gc.ts             # createSolidPodGc (orphan R2 blob cleanup)
-src/ldp.ts            # LDP resource/container semantics
-src/patch.ts          # N3 Patch parsing and bounded where-clause solver
-src/negotiation.ts    # content negotiation (Turtle/JSON-LD)
-src/auth.ts           # DPoP token validation, AuthContext construction
-src/event.ts          # schema.org RDF ↔ @dwk/calendar CalendarEvent adapter (#172)
-src/notifications.ts  # WebSocket notification support
-src/test-harness.ts   # test-only DO class (not published)
-src/*.test.ts         # colocated tests
+src/index.ts        # public surface: createSolidPod, GC handler, SolidPodObject, types
+src/config.ts       # SolidPodConfig type, Env fragment, AuthContext, Jwks
+src/handler.ts      # createSolidPod factory (LDP routes)
+src/pod.ts          # SolidPodObject Durable Object (the core, incl. WebSocket notifications)
+src/gc.ts           # createSolidPodGc (orphan R2 blob cleanup)
+src/ldp.ts          # LDP resource/container semantics
+src/patch.ts        # N3 Patch parsing and bounded where-clause solver
+src/negotiation.ts  # content negotiation (Turtle/JSON-LD)
+src/auth.ts         # DPoP token validation, AuthContext construction
+src/jwt.ts          # JWT decode + JWKS signature verification (asymmetric only)
+src/encoding.ts     # base64url/UTF-8 helpers for the edge auth path
+src/wac.ts          # effective-.acl resolution, decision deferred to @dwk/wac
+src/event.ts        # schema.org RDF ↔ @dwk/calendar CalendarEvent adapter (#172)
+src/log.ts          # structured logging/metrics event vocabulary
+src/test-harness.ts # test-only DO class (not published)
+src/*.test.ts       # colocated tests
 ```
 
 ## Dependencies

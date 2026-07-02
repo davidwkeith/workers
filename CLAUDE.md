@@ -195,9 +195,9 @@ packages/<name>/
   standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
   `negotiation.ts`, `inbox.ts`/`sender.ts`/`safe-fetch.ts`). `workerd`-bound
   packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
-  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`)
-  keep a `test-harness.ts` (excluded from both the build and the published
-  `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
+  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`,
+  `@dwk/atproto-pds`, `@dwk/webdav`) keep a `test-harness.ts` (excluded from
+  both the build and the published `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
   Object (from `pod.ts`) and a GC handler (`gc.ts`).
 
 ### Test environment split (important)
@@ -213,7 +213,8 @@ when adding a package:
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`.
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
+  `@dwk/atproto-pds`, `@dwk/webdav`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.

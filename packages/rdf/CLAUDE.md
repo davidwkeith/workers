@@ -36,18 +36,18 @@ pnpm test --project @dwk/rdf jsonld     # single file by substring
 ## File layout
 
 ```
-src/index.ts       # public surface: parse, serialize, format helpers, stored-term converters
-src/turtle.ts      # N3.js Turtle parse/write
-src/jsonld.ts      # lightweight JSON-LD parse/write
-src/formats.ts     # media-type → format mapping
-src/stored.ts      # quad ↔ stored-term conversion for DO SQLite
-src/*.test.ts      # colocated tests
+src/index.ts        # public surface: parse, serialize, format helpers, stored-term converters
+src/turtle.ts       # N3.js Turtle-family (Turtle/TriG/N-Triples/N-Quads) parse/write
+src/jsonld.ts       # dependency-free JSON-LD ⇄ quads converter
+src/media-types.ts  # RDF media-type registry for content negotiation
+src/store.ts        # quad ↔ stored-term conversion for DO SQLite
+src/*.test.ts       # colocated tests
 ```
 
 ## Dependencies
 
-- `n3` (2.0.3) — Turtle family parser/writer.
-- `@types/n3` (1.26.1) — type definitions.
+- `n3` — Turtle family parser/writer.
+- `@types/n3` — type definitions.
 
 ## Depended on by
 

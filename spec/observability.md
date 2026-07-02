@@ -120,8 +120,11 @@ Redaction is the caller's responsibility, but the seam helps.
   events — SSRF blocks (by reason), receive accepted/rejected, verification
   outcomes (by links/status), queue-consumer retry reasons, and send outcomes
   (by delivered/status).
-- **All endpoint packages now emit on both seams.** Each owns an exported event
-  taxonomy and passes the same `(event, fields)` to logger and metrics:
+- **All endpoint packages except `@dwk/webdav` emit on both seams.** Each owns
+  an exported event taxonomy (a `*LogEvent` vocabulary, typically in `src/log.ts`)
+  and passes the same `(event, fields)` to logger and metrics. `@dwk/webdav` has
+  no observability seam yet — a known gap to close, not an exemption. The
+  representative examples (not an exhaustive list):
   - `@dwk/indieauth` (`IndieAuthLogEvent`): authorization rejections (by
     reason), code issuance, token issuance, token-endpoint rejections (by
     reason), and revocations.
