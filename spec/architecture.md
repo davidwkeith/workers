@@ -33,7 +33,7 @@ bundle stays inside the platform limits (see
 | `@dwk/http-signatures` | lib | HTTP message signatures (RFC 9421 + draft-cavage), sign and verify. Protocol-agnostic. |
 | `@dwk/oauth` | lib | OAuth building blocks (RFC 8414/7662/7009/9126/7591). Protocol-agnostic. |
 | `@dwk/calendar` | lib | Canonical JSCalendar (RFC 8984)-shaped event model + RFC 5545 iCalendar / JSCalendar serializers; per-standard adapters live in the endpoint packages. |
-| `@dwk/store` | lib + DO | Encapsulates the DO-SQLite quad store + R2 copy-on-write blob bodies behind one interface (and ships the storage **Durable Object** the DO packages build on), keeping endpoint packages storage-agnostic and unit-testable. |
+| `@dwk/store` | lib | Encapsulates the DO-SQLite quad store + R2 copy-on-write blob bodies behind one interface — `createStore` runs against an injected `DurableObjectState` _inside_ the consuming package's DO (`solid-pod`, `remotestorage`) — keeping endpoint packages storage-agnostic and unit-testable. |
 | `@dwk/server` | host (private) | Node/Express self-hosting host with Workers-API shims. Never published to npm; ships only as a Docker image. |
 
 ## Mental model
@@ -60,8 +60,10 @@ client ─▶│  stateless Worker front door  (routing, edge auth)      │
   notification authority for a Solid Pod. The same pattern repeats across the
   packages that ship a DO: `@dwk/solid-pod` (per-pod), `@dwk/activitypub`
   (per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP),
-  `@dwk/atproto-pds` (per-account repository), and `@dwk/store` (the DO-SQLite
-  storage object the others build on).
+  and `@dwk/atproto-pds` (per-account repository). `@dwk/store` ships no DO of
+  its own — it is the storage library instantiated _inside_ a consuming
+  package's DO (`solid-pod`, `remotestorage`) against the object's injected
+  SQLite + R2 bindings; its only DO class is the test harness.
 - **R2** holds blob bodies (oversized or binary resources, media uploads).
 - The **IndieWeb trio** (`indieauth`, `micropub`, `webmention`) is stateless
   handlers backed by D1 and/or R2 — no Durable Object.

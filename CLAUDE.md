@@ -97,9 +97,11 @@ pushing.
 → **R2** for blob bodies. The IndieWeb trio (`indieauth`, `micropub`,
 `webmention`) is stateless handlers backed by D1 / R2; the packages that ship a
 **Durable Object** are `@dwk/solid-pod` (per-pod), `@dwk/activitypub`
-(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP),
-`@dwk/atproto-pds` (per-account repository), and `@dwk/store` (the DO-SQLite
-storage object the others build on).
+(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP), and
+`@dwk/atproto-pds` (per-account repository). `@dwk/store` ships no DO of its
+own — it is the DO-SQLite + R2 storage library instantiated _inside_ a
+consuming package's DO (`solid-pod`, `remotestorage`) against the object's
+injected state.
 
 ### Package taxonomy
 
