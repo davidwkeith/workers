@@ -37,6 +37,16 @@ pnpm test --project @dwk/http-signatures
 
 ```
 src/index.ts       # public surface: signMessage, verifyMessage, digest helpers, types
+src/types.ts       # shared plain-data message + algorithm types
+src/sign.ts        # unified signing entry point, dispatches on wire profile
+src/verify.ts      # unified verification: profile auto-detect + digest check
+src/rfc9421.ts     # RFC 9421 wire profile: Signature-Input/Signature pair
+src/cavage.ts      # legacy draft-cavage "Signature" profile for fediverse interop
+src/components.ts  # covered-component value derivation (RFC 9421 §2.1–2.2)
+src/sf.ts          # focused RFC 8941 structured-fields parser
+src/digest.ts      # Content-Digest (RFC 9530) + legacy Digest (RFC 3230) helpers
+src/algorithms.ts  # algorithm allow-list + Web Crypto sign/verify primitives
+src/base64.ts      # base64 / base64url ⇄ bytes helpers
 src/*.test.ts      # colocated tests
 ```
 

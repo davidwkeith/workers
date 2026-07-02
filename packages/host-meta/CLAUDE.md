@@ -40,6 +40,7 @@ src/document.ts      # host-meta document model and lrdd template
 src/jrd.ts           # JRD serialization
 src/xrd.ts           # XRD/XML serialization with entity escaping
 src/negotiation.ts   # format negotiation (XRD vs JRD)
+src/log.ts           # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts        # colocated tests
 ```
 

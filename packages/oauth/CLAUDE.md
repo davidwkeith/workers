@@ -43,6 +43,12 @@ src/introspection.ts  # RFC 7662 introspection handler
 src/revocation.ts     # RFC 7009 revocation handler
 src/par.ts            # RFC 9126 PAR handler
 src/registration.ts   # RFC 7591 DCR handler
+src/store.ts          # plain-data storage seams for the stateful endpoints
+src/errors.ts         # shared OAuth 2.0 error-code registry
+src/http.ts           # request/response helpers shared by the handlers
+src/encoding.ts       # base64url + random-identifier helpers
+src/log.ts            # structured observability event taxonomy
+src/observability.ts  # shared logging/metrics seam (opt-in, default no-op)
 src/*.test.ts         # colocated tests
 ```
 

@@ -48,17 +48,21 @@ pnpm test --project @dwk/remotestorage
 ## File layout
 
 ```
-src/index.ts         # public surface: createRemoteStorage, GC handler, DO, auth, scopes, folder, CORS
-src/config.ts        # RemoteStorageConfig type, Env fragment, path parsing
-src/handler.ts       # createRemoteStorage factory (GET/PUT/DELETE routes)
-src/object.ts        # RemoteStorageObject Durable Object
-src/auth.ts          # bearer token extraction and validation
-src/scopes.ts        # scope parsing, authorization, module/path matching
-src/folder.ts        # folder listing model and rendering
-src/cors.ts          # CORS headers and preflight handler
-src/discovery.ts     # remoteStorageLink for WebFinger integration
-src/test-harness.ts  # test-only DO class (not published)
-src/*.test.ts        # colocated tests
+src/index.ts        # public surface: createRemoteStorage, GC handler, DO, auth, scopes, folder, CORS
+src/config.ts       # RemoteStorageConfig type, Env fragment, path parsing
+src/handler.ts      # createRemoteStorage factory (GET/PUT/DELETE routes)
+src/storage.ts      # RemoteStorageObject Durable Object
+src/auth.ts         # bearer token extraction and validation
+src/jwt.ts          # JWT decode + JWKS signature verification (asymmetric only)
+src/scope.ts        # scope parsing, authorization, module/path matching
+src/folder.ts       # folder listing model and rendering
+src/cors.ts         # CORS headers and preflight handler
+src/discovery.ts    # remoteStorageLink for WebFinger integration
+src/encoding.ts     # base64url/UTF-8 helpers for the token decode path
+src/gc.ts           # createRemoteStorageGc (orphan R2 blob cleanup)
+src/log.ts          # structured logging/metrics event vocabulary
+src/test-harness.ts # test-only DO class (not published)
+src/*.test.ts       # colocated tests
 ```
 
 ## Dependencies

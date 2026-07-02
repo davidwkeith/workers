@@ -43,16 +43,17 @@ pnpm test --project @dwk/webauthn
 ## File layout
 
 ```
-src/index.ts          # public surface: createWebAuthn, WebAuthnObject, verify functions, types
-src/config.ts         # WebAuthnConfig type and Env fragment
-src/handler.ts        # createWebAuthn factory (registration/authentication routes)
-src/object.ts         # WebAuthnObject Durable Object (challenge + credential storage)
-src/registration.ts   # verifyRegistration (attestation parsing, COSE key decoding)
-src/authentication.ts # verifyAuthentication (assertion verification, counter check)
-src/client-data.ts    # parseClientData (origin, type, challenge validation)
-src/authenticator.ts  # parseAuthenticatorData (flags, counter, AAGUID, public key)
-src/test-harness.ts   # test-only DO class (not published)
-src/*.test.ts         # colocated tests
+src/index.ts        # public surface: createWebAuthn, WebAuthnObject, verify functions, types
+src/config.ts       # WebAuthnConfig type and Env fragment
+src/handler.ts      # createWebAuthn factory (routes the four ceremony steps to the DO)
+src/rp.ts           # WebAuthnObject Durable Object (challenge + credential storage)
+src/verify.ts       # verifyRegistration/verifyAuthentication ceremony core (pure)
+src/cbor.ts         # minimal CBOR (RFC 8949) decoder (attestation object, COSE_Key)
+src/cose.ts         # COSE_Key → JWK conversion, Web Crypto verify params, DER → raw ECDSA
+src/encoding.ts     # base64url/byte helpers shared across the ceremonies
+src/log.ts          # structured logging/metrics event vocabulary
+src/test-harness.ts # test-only DO class + authenticator simulator (not published)
+src/*.test.ts       # colocated tests
 ```
 
 ## Dependencies

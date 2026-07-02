@@ -49,11 +49,15 @@ src/handler.ts     # createMicropub factory (create/update/delete/query/media ro
 src/store.ts       # createMicropubStore (D1-backed post persistence)
 src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
+src/event.ts       # h-event post type: markup rendering, h-event → CalendarEvent
+src/replay.ts      # D1-backed DPoP proof jti replay record (short TTL)
+src/log.ts         # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts      # colocated tests
 ```
 
 ## Dependencies
 
+- `@dwk/calendar` — CalendarEvent model the h-event adapter maps onto.
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/indieauth` — access token verification and signing.
 - `@dwk/log` — structured logging.

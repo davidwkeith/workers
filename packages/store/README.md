@@ -14,7 +14,9 @@ unit-testable. Authoritative state lives only in DO SQLite and R2 — never KV.
 - **One interface, two backends.** RDF triples live in the DO's SQLite quad
   store; opaque bodies live in R2. `head`, `readQuads`, `writeQuads`,
   `patchQuads`, `putBlob`, `readBlob`, `putResource`, and `delete` hang off a
-  single `Store`.
+  single `Store`. `head` returns a `ResourceMeta` that, alongside the opaque
+  ETag, tracks per-resource byte `size` and `modifiedAt` (refreshed on every
+  write) so WebDAV `PROPFIND` can serve `getcontentlength` / `getlastmodified`.
 - **Transactional writes.** `writeQuads` / `patchQuads` apply an N3-Patch's
   `deletes`+`inserts` in one `transactionSync`, and the `If-Match` /
   `If-None-Match` preconditions are checked and applied inside the same

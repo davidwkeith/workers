@@ -42,18 +42,22 @@ its limitations are documented in
 [`packages/rdf/README.md`](https://github.com/davidwkeith/workers/blob/main/packages/rdf/README.md).
 Widening the subset later does not change the public API.
 
-## 5. WebDAV façade for OS-native pod access — IN PROGRESS
+## 5. WebDAV façade for OS-native pod access — RESOLVED (implemented)
 
 OS file managers (Finder, Explorer, GNOME/KDE, iOS Files) speak **WebDAV
 (RFC 4918)** but not Solid/LDP, so the [`@dwk/webdav`](packages/webdav.md) façade
 lets a user mount their pod as a network drive with zero install. The verbs are a
-thin layer over `@dwk/store` + the `solid-pod` DO; the load-bearing decisions are
+thin layer over `@dwk/store` + the `solid-pod` DO; the load-bearing decisions were
 the **auth bridge** (scoped, hashed-at-rest *app passwords* over Basic-HTTPS,
 since no OS client can do DPoP) and **Class 2 locking** (lock state in DO SQLite).
-The package now ships its pure **protocol core** (XXE-safe XML, scoped app
-passwords, `Content-Type`/`If` header parsing); the `createWebdav` handler,
-Class 2 locking, and the per-pod Durable Object integration remain to land. Spec
-in [`packages/webdav.md`](packages/webdav.md). Tracked in
+All of it has landed: the protocol core (XXE-safe XML, scoped app passwords,
+`Content-Type`/`If` header parsing), the `createWebdav` Class 2 verb router with
+locking, the per-pod Durable Object integration (`createSolidPodWebdav` in
+`@dwk/solid-pod`), `COPY`/`MOVE` (resource + collection), the owner-gated
+app-password mint/list/revoke endpoint, and per-resource size + mtime in
+`@dwk/store` so PROPFIND metadata is real. The remaining increment is a hosted
+litmus conformance run against a deployed Worker. Spec in
+[`packages/webdav.md`](packages/webdav.md). Tracked in
 [#169](https://github.com/davidwkeith/workers/issues/169).
 
 ---

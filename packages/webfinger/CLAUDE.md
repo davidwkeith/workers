@@ -41,7 +41,8 @@ src/index.ts       # public surface: createWebfinger factory, JRD builder, resou
 src/config.ts      # config types and resolution
 src/handler.ts     # createWebfinger factory
 src/jrd.ts         # JRD building and rel filtering
-src/normalize.ts   # resource URI normalization and validation
+src/resource.ts    # resource URI normalization for case-insensitive matching
+src/log.ts         # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts      # colocated tests
 ```
 

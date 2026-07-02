@@ -48,11 +48,14 @@ src/index.ts          # public surface: createWebSub, publishNotifier, queue con
 src/config.ts         # WebSubConfig type and Env fragment
 src/handler.ts        # createWebSub factory (subscribe/unsubscribe/publish routes)
 src/store.ts          # createD1SubscriptionStore (D1-backed subscription persistence)
-src/validation.ts     # request parameter validation
-src/verification.ts   # intent verification (hub.challenge callback)
-src/distribution.ts   # content fetching, HMAC signing, subscriber delivery
-src/queue.ts          # queue consumer and job types (VerifyJob, DistributeJob)
+src/validate.ts       # request parameter validation
+src/verify.ts         # intent verification (hub.challenge callback)
+src/distribute.ts     # content fetching, HMAC signing, subscriber delivery
+src/queue.ts          # queued job shapes (verify + distribute kinds)
+src/consumer.ts       # createWebSubQueueConsumer (verification + fan-out delivery)
+src/fetch.ts          # injectable FetchLike type and body-size cap
 src/safe-fetch.ts     # SSRF-safe fetch with private IP blocking
+src/log.ts            # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts         # colocated tests
 ```
 

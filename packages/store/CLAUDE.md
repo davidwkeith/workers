@@ -8,7 +8,10 @@ Encapsulates all Cloudflare-specific storage behind a single `Store` interface.
 Per-pod Durable Object with SQLite for quads/metadata and R2 for large blob
 bodies. Implements transactional writes (N3 Patch deletes + inserts in one txn),
 TOCTOU-free If-Match/ETag checks, content-addressed R2 deduplication, and an
-orphan-outbox GC pattern for safe blob cleanup.
+orphan-outbox GC pattern for safe blob cleanup. Each resource pointer also
+tracks byte size and last-modified time (`ResourceMeta.size` / `modifiedAt`,
+refreshed on every write) so WebDAV PROPFIND can serve `getcontentlength` /
+`getlastmodified`.
 
 ## Spec
 
@@ -50,6 +53,9 @@ pnpm test --project @dwk/store
 
 ```
 src/index.ts         # public surface: createStore, collectGarbage, forwardOrphans, types
+src/store.ts         # the Store interface + createStore (quads, blobs, ETags, outbox)
+src/sql.ts           # DO-SQLite schema and the quad ↔ row codec
+src/gc.ts            # out-of-band blob GC: forwardOrphans, collectGarbage, d1OrphanSink
 src/test-harness.ts  # Miniflare DO class for tests (not published)
 src/*.test.ts        # colocated tests
 ```

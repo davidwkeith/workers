@@ -123,7 +123,7 @@ To start a _new_ prerelease line later: `pnpm changeset pre enter beta` (or
 # Each package on the expected dist-tag (registry is authoritative):
 for p in dpop rdf log store wac solid-pod activitypub micropub microsub \
          indieauth webmention websub webfinger host-meta webauthn vc ldn \
-         oauth http-signatures remotestorage; do
+         oauth http-signatures remotestorage atproto-pds calendar webdav; do
   printf '%-22s beta=%s latest=%s\n' "@dwk/$p" \
     "$(npm view @dwk/$p dist-tags.beta 2>/dev/null)" \
     "$(npm view @dwk/$p dist-tags.latest 2>/dev/null)"
@@ -133,7 +133,7 @@ done
 npm view @dwk/server version            # expect E404
 
 # Git tags reached origin:
-git ls-remote --tags origin | grep -c '@dwk'   # expect 20
+git ls-remote --tags origin | grep -c '@dwk'   # expect 23 (one per publishable package)
 ```
 
 The meaningful tag pre-1.0 is **`latest`** — it should equal the version you just

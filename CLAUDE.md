@@ -97,9 +97,11 @@ pushing.
 → **R2** for blob bodies. The IndieWeb trio (`indieauth`, `micropub`,
 `webmention`) is stateless handlers backed by D1 / R2; the packages that ship a
 **Durable Object** are `@dwk/solid-pod` (per-pod), `@dwk/activitypub`
-(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP),
-`@dwk/atproto-pds` (per-account repository), and `@dwk/store` (the DO-SQLite
-storage object the others build on).
+(per-actor), `@dwk/remotestorage` (per-account), `@dwk/webauthn` (per-RP), and
+`@dwk/atproto-pds` (per-account repository). `@dwk/store` ships no DO of its
+own — it is the DO-SQLite + R2 storage library instantiated _inside_ a
+consuming package's DO (`solid-pod`, `remotestorage`) against the object's
+injected state.
 
 ### Package taxonomy
 
@@ -195,9 +197,9 @@ packages/<name>/
   standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
   `negotiation.ts`, `inbox.ts`/`sender.ts`/`safe-fetch.ts`). `workerd`-bound
   packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
-  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`)
-  keep a `test-harness.ts` (excluded from both the build and the published
-  `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
+  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`,
+  `@dwk/atproto-pds`, `@dwk/webdav`) keep a `test-harness.ts` (excluded from
+  both the build and the published `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
   Object (from `pod.ts`) and a GC handler (`gc.ts`).
 
 ### Test environment split (important)
@@ -213,7 +215,8 @@ when adding a package:
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`.
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
+  `@dwk/atproto-pds`, `@dwk/webdav`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.

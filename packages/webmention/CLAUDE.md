@@ -42,14 +42,17 @@ pnpm test --project @dwk/webmention
 ## File layout
 
 ```
-src/index.ts        # public surface: createWebmention, queue consumer, sender, validation, types
-src/handler.ts      # createWebmention factory (receiver endpoint)
-src/validation.ts   # sync parameter validation (source, target)
-src/discovery.ts    # endpoint discovery for sending
+src/index.ts        # public surface: createWebmention factory + queue consumer, config/Env, types
+src/validate.ts     # sync parameter validation (source, target)
+src/discovery.ts    # endpoint discovery for sending (Link header + HTML)
 src/sender.ts       # sendWebmention, sendWebmentions
 src/verify.ts       # async source verification (link checking)
-src/store.ts        # createD1Inbox (D1-backed mention storage)
+src/inbox.ts        # InboxStore interface, createD1Inbox (D1-backed mention storage)
+src/rsvp.ts         # Indie RSVP recognition (p-rsvp + u-in-reply-to extraction)
+src/html.ts         # Link-header parsing + HTMLRewriter scanning helpers
+src/fetch.ts        # injectable FetchLike type
 src/safe-fetch.ts   # SSRF-safe fetch with private IP blocking
+src/log.ts          # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts       # colocated tests
 ```
 
