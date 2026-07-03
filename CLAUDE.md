@@ -59,6 +59,7 @@ Run from the repo root (pnpm 10, Node >=20):
 | Typecheck all (no emit) | `pnpm typecheck`                                                |
 | Run full test suite     | `pnpm test` (vitest, all package projects)                      |
 | Watch tests             | `pnpm test:watch`                                               |
+| Coverage                | `pnpm test:coverage` (vitest + istanbul)                        |
 | Integration lifecycle   | `pnpm test:integration` (`vitest run --project @dwk/solid-pod`) |
 | Unit-test release gate  | `pnpm test:gate` (`node --test scripts/release-gate.test.mjs`)  |
 | Lint                    | `pnpm lint`                                                     |

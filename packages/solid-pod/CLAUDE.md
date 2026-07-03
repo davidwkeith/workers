@@ -59,7 +59,8 @@ pnpm test --project @dwk/solid-pod
 ```
 src/index.ts        # public surface: createSolidPod, GC handler, SolidPodObject, types
 src/config.ts       # SolidPodConfig type, Env fragment, AuthContext, Jwks
-src/handler.ts      # createSolidPod factory (LDP routes)
+src/handler.ts      # createSolidPod factory (LDP routes) + createSolidPodWebdav /
+                    # createSolidPodWebdavCredentials (the WebDAV second door)
 src/pod.ts          # SolidPodObject Durable Object (the core, incl. WebSocket notifications)
 src/gc.ts           # createSolidPodGc (orphan R2 blob cleanup)
 src/ldp.ts          # LDP resource/container semantics
