@@ -58,6 +58,13 @@ expression of "there are no instances in atproto".
   directory is never the default path). The alarm reads its state from storage
   (`plc_directory_url`, `plc_genesis`, `account_did`, `plc_submitted`,
   `plc_attempts`) since it runs without request config.
+- **Firehose events share one seq stream.** `#commit`, `#account` (migration
+  cutover), and `#identity` (`com.atproto.identity.updateHandle`) frames share
+  the monotonic seq cursor; mutations that emit an event are serialized on the
+  DO write queue so each event takes a deterministic seq. `#commit` frames
+  carry the new blob CIDs referenced by the commit; an oversized diff falls
+  back to `tooBig: true` with empty blocks/ops/blobs (consumers re-sync via
+  `getRepo`).
 
 ## Test environment
 
@@ -92,7 +99,7 @@ src/plc.ts          # did:plc operation core (build/sign/derive-DID/CID/verify)
 src/plc-directory.ts # PLC directory client (submit/resolve, injectable fetch)
 src/migrate.ts      # inbound migration: CAR import core (verify + recover records)
 src/resolve.ts      # DID-document resolution → source signing key (did:web/did:plc)
-src/firehose.ts     # subscribeRepos frame encoders (#commit/#info/error)
+src/firehose.ts     # subscribeRepos frame encoders (#commit/#account/#identity/#info/error)
                     # (the DO endpoint, seq cursor + backfill live in object.ts)
 src/identity.ts     # did:web document, handle validation
 src/auth.ts         # session HS256 JWTs, constant-time compare
