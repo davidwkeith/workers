@@ -44,6 +44,13 @@ export interface FirehoseCommit {
   readonly blocks: Uint8Array;
   /** The mutations in this commit. */
   readonly ops: readonly FirehoseRepoOp[];
+  /**
+   * Whether the commit's diff was too large to inline. When true, `blocks` is an
+   * empty CAR and `ops`/`blobs` are empty — a consumer falls back to `getRepo`.
+   */
+  readonly tooBig: boolean;
+  /** CIDs of blobs newly referenced by this commit's created/updated records. */
+  readonly blobs: readonly CID[];
   /** ISO timestamp this event was broadcast. */
   readonly time: string;
   /** Root CID of the previous commit's MST tree (optional). */
@@ -96,9 +103,9 @@ export function encodeFrameHeader(t: string): Uint8Array {
 export function encodeCommitBody(commit: FirehoseCommit): Uint8Array {
   const body: { [key: string]: CborValue } = {
     seq: commit.seq,
-    // Deprecated-but-required by the lexicon; emit stable defaults.
+    // `rebase` is deprecated-but-required by the lexicon; always false here.
     rebase: false,
-    tooBig: false,
+    tooBig: commit.tooBig,
     repo: commit.repo,
     commit: commit.commit,
     rev: commit.rev,
@@ -113,7 +120,7 @@ export function encodeCommitBody(commit: FirehoseCommit): Uint8Array {
       if (op.prev !== undefined) out.prev = op.prev;
       return out;
     }),
-    blobs: [],
+    blobs: [...commit.blobs],
     time: commit.time,
   };
   if (commit.prevData !== undefined && commit.prevData !== null) {

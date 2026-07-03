@@ -39,6 +39,8 @@ describe("firehose framing", () => {
         { action: "create", path: "app.bsky.feed.post/x", cid: recordCid },
         { action: "delete", path: "app.bsky.feed.post/y", cid: null },
       ],
+      tooBig: false,
+      blobs: [recordCid],
       time: "2026-06-28T00:00:00.000Z",
     };
 
@@ -65,7 +67,8 @@ describe("firehose framing", () => {
     expect(body.rev).toBe("3labc");
     expect(body.since).toBe("3laaa");
     expect([...body.blocks]).toEqual([1, 2, 3]);
-    expect(body.blobs).toEqual([]);
+    expect(body.blobs).toHaveLength(1);
+    expect((body.blobs[0] as CID).toString()).toBe(recordCid.toString());
     expect(body.time).toBe(event.time);
     expect(body.ops).toHaveLength(2);
     expect(body.ops[0]).toMatchObject({
@@ -89,6 +92,8 @@ describe("firehose framing", () => {
       since: null,
       blocks: new Uint8Array(0),
       ops: [],
+      tooBig: false,
+      blobs: [],
       time: "2026-06-28T00:00:00.000Z",
     };
     const header = encodeFrameHeader("#commit");
@@ -101,6 +106,30 @@ describe("firehose framing", () => {
     });
     const body = decodeCbor(frame.slice(header.length)) as { seq: number };
     expect(body.seq).toBe(1);
+  });
+
+  it("emits the tooBig flag with empty ops/blobs", async () => {
+    const event: FirehoseCommit = {
+      seq: 2,
+      repo: "did:web:alice.example",
+      commit: await cidOf({ c: 2 }),
+      rev: "3m",
+      since: null,
+      blocks: new Uint8Array(0),
+      ops: [],
+      tooBig: true,
+      blobs: [],
+      time: "2026-06-28T00:00:00.000Z",
+    };
+    const header = encodeFrameHeader("#commit");
+    const body = decodeCbor(encodeCommitFrame(event).slice(header.length)) as {
+      tooBig: boolean;
+      ops: unknown[];
+      blobs: unknown[];
+    };
+    expect(body.tooBig).toBe(true);
+    expect(body.ops).toEqual([]);
+    expect(body.blobs).toEqual([]);
   });
 
   it("frames an #info notice (op 1) with a name and message", () => {
