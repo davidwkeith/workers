@@ -33,15 +33,15 @@
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
-    "@cloudflare/vitest-pool-workers": "0.16.18",
+    "@cloudflare/vitest-pool-workers": "0.18.0",
     "@cloudflare/workers-types": "4.20260620.1",
     "@eslint/js": "10.0.1",
     "@vitest/coverage-istanbul": "4.1.9",
-    "eslint": "10.5.0",
-    "prettier": "3.8.4",
+    "eslint": "10.6.0",
+    "prettier": "3.9.4",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.61.1",
+    "typescript-eslint": "8.62.1",
     "vitest": "4.1.9",
-    "wrangler": "4.103.0"
+    "wrangler": "4.107.0"
   }
 }
