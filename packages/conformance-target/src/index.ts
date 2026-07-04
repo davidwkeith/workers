@@ -9,6 +9,8 @@
  */
 
 import type { ConformanceEnv } from "./config.js";
+import type { Mount } from "./mounts.js";
+import { buildMounts, routeRequest } from "./mounts.js";
 
 export type { ConformanceEnv } from "./config.js";
 export { configsFor, ownerWebId, USERNAME } from "./config.js";
@@ -21,8 +23,11 @@ export { RemoteStorageObject } from "@dwk/remotestorage";
 export { SolidPodObject } from "@dwk/solid-pod";
 export { WebAuthnObject } from "@dwk/webauthn";
 
+let mounts: readonly Mount[] | undefined;
+
 export default {
-  async fetch(): Promise<Response> {
-    return new Response("Not Found", { status: 404 });
+  async fetch(request, env, ctx): Promise<Response> {
+    mounts ??= buildMounts(env);
+    return routeRequest(mounts, request, env, ctx);
   },
 } satisfies ExportedHandler<ConformanceEnv>;
