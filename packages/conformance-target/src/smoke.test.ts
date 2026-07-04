@@ -5,7 +5,6 @@
  * that lives in each package's own tests.
  */
 
-import { createIndieAuthStore } from "@dwk/indieauth";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -16,10 +15,21 @@ import worker from "./index.js";
 const testEnv = env as unknown as ConformanceEnv;
 const BASE = "https://conformance.test";
 
-// A real deployment creates the AUTH_DB schema at deploy time; the test
-// harness does it here via the package's public (idempotent) store API.
+// A real deployment creates the D1 schemas at deploy time via `POST
+// /admin/init` (see README.md); the test harness does the same here, through
+// the same mounted route rather than importing store internals directly.
 beforeAll(async () => {
-  await createIndieAuthStore(testEnv).init();
+  const res = await worker.fetch(
+    new Request(`${BASE}/admin/init`, {
+      method: "POST",
+      headers: { authorization: "Bearer conformance-test-admin-token" },
+    }) as unknown as Parameters<typeof worker.fetch>[0],
+    testEnv,
+    createExecutionContext(),
+  );
+  if (res.status !== 200) {
+    throw new Error(`admin init failed: ${res.status} ${await res.text()}`);
+  }
 });
 
 function call(path: string, init?: RequestInit): Promise<Response> {
@@ -32,6 +42,27 @@ function call(path: string, init?: RequestInit): Promise<Response> {
   >[0];
   return worker.fetch(request, testEnv, createExecutionContext());
 }
+
+describe("admin", () => {
+  it("rejects an unauthenticated init request", async () => {
+    const res = await call("/admin/init", { method: "POST" });
+    expect(res.status).toBe(401);
+  });
+
+  it("initializes the D1 schemas for the admin bearer", async () => {
+    const res = await call("/admin/init", {
+      method: "POST",
+      headers: { authorization: "Bearer conformance-test-admin-token" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { initialized: Record<string, string> };
+    expect(body.initialized["@dwk/indieauth"]).toBe("initialized");
+    expect(body.initialized["@dwk/micropub"]).toBe("initialized");
+    expect(body.initialized["@dwk/microsub"]).toBe("initialized");
+    expect(body.initialized["@dwk/websub"]).toContain("unavailable");
+    expect(body.initialized["@dwk/webmention"]).toContain("unavailable");
+  });
+});
 
 describe("home", () => {
   it("serves the h-card identity page with endpoint discovery links", async () => {

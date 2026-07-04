@@ -22,6 +22,7 @@ import { createWebfinger } from "@dwk/webfinger";
 import { createWebmention } from "@dwk/webmention";
 import { createWebSub } from "@dwk/websub";
 
+import { createAdminInit } from "./admin.js";
 import { createConsent } from "./approval.js";
 import type { ConformanceEnv } from "./config.js";
 import { configsFor, USERNAME } from "./config.js";
@@ -56,6 +57,13 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
         u.pathname === "/.well-known/host-meta" ||
         u.pathname === "/.well-known/host-meta.json",
       handler: createHostMeta(c.hostMeta),
+    },
+    {
+      // Operator-only: one-time D1 schema init for a freshly deployed target
+      // (see admin.ts and README.md's deploy runbook).
+      name: "admin",
+      matches: (u) => u.pathname === "/admin/init",
+      handler: createAdminInit(env),
     },
     {
       // Deployer-owned consent submission for the IndieAuth consent form:

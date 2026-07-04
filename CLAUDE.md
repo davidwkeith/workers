@@ -18,9 +18,12 @@ reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
-`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`) — plus a 24th, `@dwk/server`,
-the Node/Express self-hosting host, which is marked `"private": true` and is
-**never published** (it ships only as a Docker image).
+`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`) — plus two private
+packages that are never published: a 24th, `@dwk/server`, the Node/Express
+self-hosting host (marked `"private": true`, ships only as a Docker image),
+and `@dwk/conformance-target`, the deployed conformance Worker
+(`conformance.dwk.io`) every endpoint package composes into for the hosted
+suites.
 Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. Versioning is via Changesets **pre mode**
 (`.changeset/pre.json`, tag `beta`); the packages are published to npm as
