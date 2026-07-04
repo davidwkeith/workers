@@ -4,17 +4,27 @@
  * URLs the packages advertise cannot drift apart. Tasks 3–5 fill the table.
  */
 
+import { createActivityPub } from "@dwk/activitypub";
+import { createAtprotoPds } from "@dwk/atproto-pds";
 import { createHostMeta } from "@dwk/host-meta";
 import { createIndieAuth } from "@dwk/indieauth";
 import { createMicropub } from "@dwk/micropub";
 import { createMicrosub } from "@dwk/microsub";
+import { createRemoteStorage } from "@dwk/remotestorage";
+import {
+  createSolidPod,
+  createSolidPodWebdav,
+  createSolidPodWebdavCredentials,
+} from "@dwk/solid-pod";
+import { createVc } from "@dwk/vc";
+import { createWebAuthn } from "@dwk/webauthn";
 import { createWebfinger } from "@dwk/webfinger";
 import { createWebmention } from "@dwk/webmention";
 import { createWebSub } from "@dwk/websub";
 
 import { createConsent } from "./approval.js";
 import type { ConformanceEnv } from "./config.js";
-import { configsFor } from "./config.js";
+import { configsFor, USERNAME } from "./config.js";
 import { createHome } from "./home.js";
 
 export type Handler = (
@@ -86,6 +96,60 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
       name: "@dwk/websub",
       matches: (u) => u.pathname === "/websub",
       handler: createWebSub(c.websub),
+    },
+    {
+      name: "@dwk/activitypub",
+      matches: (u) =>
+        u.pathname === `/users/${USERNAME}` ||
+        u.pathname.startsWith(`/users/${USERNAME}/`) ||
+        u.pathname === "/inbox" ||
+        u.pathname === "/.well-known/nodeinfo" ||
+        u.pathname.startsWith("/nodeinfo/"),
+      handler: createActivityPub(c.activitypub),
+    },
+    {
+      name: "@dwk/remotestorage",
+      matches: (u) => u.pathname.startsWith("/storage/"),
+      handler: createRemoteStorage(c.remotestorage),
+    },
+    {
+      name: "@dwk/solid-pod",
+      matches: (u) => u.pathname === "/pod" || u.pathname.startsWith("/pod/"),
+      handler: createSolidPod(c.solidPod),
+    },
+    {
+      name: "@dwk/webdav (litmus pod door)",
+      matches: (u) => u.pathname === "/dav" || u.pathname.startsWith("/dav/"),
+      handler: createSolidPodWebdav(c.davPod),
+    },
+    {
+      name: "@dwk/webdav (credentials)",
+      matches: (u) => u.pathname === "/dav-credentials",
+      handler: createSolidPodWebdavCredentials(c.davPod),
+    },
+    {
+      name: "@dwk/webauthn",
+      matches: (u) => u.pathname.startsWith("/webauthn/"),
+      handler: createWebAuthn(c.webauthn),
+    },
+    {
+      // Known limitation (P5, vc-data-model-2.0 suite): the VC issuer's
+      // default did:web resolves to /.well-known/did.json, which the atproto
+      // mount below serves with *its own* keys. An issue→verify round-trip
+      // against the deployed target will fail DID resolution until the VC
+      // issuer gets its own DID path. The smoke test below only proves the
+      // mount answers, not full DID interop.
+      name: "@dwk/vc",
+      matches: (u) => u.pathname.startsWith("/credentials/"),
+      handler: createVc(c.vc),
+    },
+    {
+      name: "@dwk/atproto-pds",
+      matches: (u) =>
+        u.pathname.startsWith("/xrpc/") ||
+        u.pathname === "/.well-known/atproto-did" ||
+        u.pathname === "/.well-known/did.json",
+      handler: createAtprotoPds(c.atproto),
     },
     {
       name: "home",
