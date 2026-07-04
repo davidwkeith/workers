@@ -62,6 +62,7 @@ Modified files: `conformance/status.json` (new entry), `.github/workflows/confor
 ### Task 1: Package scaffold + Env union
 
 **Files:**
+
 - Create: `packages/conformance-target/package.json`
 - Create: `packages/conformance-target/tsconfig.json`
 - Create: `packages/conformance-target/tsconfig.build.json`
@@ -72,6 +73,7 @@ Modified files: `conformance/status.json` (new entry), `.github/workflows/confor
 - Modify: `conformance/status.json` (add entry)
 
 **Interfaces:**
+
 - Produces: `ConformanceEnv` (the union Env), `configsFor(env)` returning `{ webfinger, hostMeta, indieauth, micropub, microsub, webmention, websub, activitypub, remotestorage, solidPod, davPod, webauthn, vc, atproto }` config objects, `ownerWebId(env)`. Later tasks import these from `./config.js`.
 
 - [ ] **Step 1: Write `package.json`**
@@ -303,10 +305,7 @@ import type { HostMetaConfig, HostMetaEnv } from "@dwk/host-meta";
 import type { IndieAuthConfig, IndieAuthEnv } from "@dwk/indieauth";
 import type { MicropubConfig, MicropubEnv } from "@dwk/micropub";
 import type { MicrosubConfig, MicrosubEnv } from "@dwk/microsub";
-import type {
-  RemoteStorageConfig,
-  RemoteStorageEnv,
-} from "@dwk/remotestorage";
+import type { RemoteStorageConfig, RemoteStorageEnv } from "@dwk/remotestorage";
 import type { SolidPodConfig, SolidPodEnv } from "@dwk/solid-pod";
 import type { VcConfig, VcEnv } from "@dwk/vc";
 import type { WebAuthnConfig, WebAuthnEnv } from "@dwk/webauthn";
@@ -325,7 +324,8 @@ export const USERNAME = "conformance";
  * packages ever declare the same binding at incompatible types.
  */
 export interface ConformanceEnv
-  extends IndieAuthEnv,
+  extends
+    IndieAuthEnv,
     MicropubEnv,
     MicrosubEnv,
     WebmentionEnv,
@@ -361,7 +361,9 @@ export function ownerWebId(env: ConformanceEnv): string {
  * Interim owner authentication for the Solid pods: a shared-secret bearer
  * resolves to the owner WebID. Replaced by real Solid-OIDC in P4.
  */
-function adminAuthenticate(env: ConformanceEnv): SolidPodConfig["authenticate"] {
+function adminAuthenticate(
+  env: ConformanceEnv,
+): SolidPodConfig["authenticate"] {
   return (request) => {
     const auth = request.headers.get("authorization");
     if (auth === `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`) {
@@ -593,12 +595,14 @@ git commit -m "feat(conformance-target): scaffold private composed-Worker packag
 ### Task 2: Router core + home handler + first smoke tests
 
 **Files:**
+
 - Create: `packages/conformance-target/src/mounts.ts`
 - Create: `packages/conformance-target/src/home.ts`
 - Create: `packages/conformance-target/src/smoke.test.ts`
 - Modify: `packages/conformance-target/src/index.ts` (wire the router)
 
 **Interfaces:**
+
 - Consumes: `ConformanceEnv`, `configsFor`, `ownerWebId` from Task 1.
 - Produces: `buildMounts(env: ConformanceEnv): readonly Mount[]`, `routeRequest(mounts, request, env, ctx): Promise<Response>`, `createHome(env): Handler`. `Mount = { name: string; matches(url: URL, request: Request): boolean; handler: Handler }`; `Handler = (request, env: ConformanceEnv, ctx) => Promise<Response>`. Tasks 3–5 add entries to the mount table in `buildMounts`.
 
@@ -837,11 +841,13 @@ git commit -m "feat(conformance-target): mount-table router + test identity page
 ### Task 3: Discovery + IndieAuth mounts
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/approval.ts` (real consent flow)
 - Modify: `packages/conformance-target/src/mounts.ts` (add 3 mounts)
 - Modify: `packages/conformance-target/src/smoke.test.ts` (add tests)
 
 **Interfaces:**
+
 - Consumes: `configsFor` (webfinger/hostMeta/indieauth entries), `approveAuthorization`.
 - Produces: mounted `/.well-known/webfinger`, `/.well-known/host-meta[.json]`, `/.well-known/oauth-authorization-server`, `/authorize`, `/token`, `/revocation`.
 
@@ -982,34 +988,34 @@ import { createWebfinger } from "@dwk/webfinger";
 ```
 
 ```typescript
-  return [
-    {
-      name: "@dwk/webfinger",
-      matches: (u) => u.pathname === "/.well-known/webfinger",
-      handler: createWebfinger(c.webfinger),
-    },
-    {
-      name: "@dwk/host-meta",
-      matches: (u) =>
-        u.pathname === "/.well-known/host-meta" ||
-        u.pathname === "/.well-known/host-meta.json",
-      handler: createHostMeta(c.hostMeta),
-    },
-    {
-      name: "@dwk/indieauth",
-      matches: (u) =>
-        u.pathname === "/.well-known/oauth-authorization-server" ||
-        u.pathname === "/authorize" ||
-        u.pathname === "/token" ||
-        u.pathname === "/revocation",
-      handler: createIndieAuth(c.indieauth),
-    },
-    {
-      name: "home",
-      matches: (u) => u.pathname === "/" || u.pathname === "/profile/card",
-      handler: createHome(env),
-    },
-  ];
+return [
+  {
+    name: "@dwk/webfinger",
+    matches: (u) => u.pathname === "/.well-known/webfinger",
+    handler: createWebfinger(c.webfinger),
+  },
+  {
+    name: "@dwk/host-meta",
+    matches: (u) =>
+      u.pathname === "/.well-known/host-meta" ||
+      u.pathname === "/.well-known/host-meta.json",
+    handler: createHostMeta(c.hostMeta),
+  },
+  {
+    name: "@dwk/indieauth",
+    matches: (u) =>
+      u.pathname === "/.well-known/oauth-authorization-server" ||
+      u.pathname === "/authorize" ||
+      u.pathname === "/token" ||
+      u.pathname === "/revocation",
+    handler: createIndieAuth(c.indieauth),
+  },
+  {
+    name: "home",
+    matches: (u) => u.pathname === "/" || u.pathname === "/profile/card",
+    handler: createHome(env),
+  },
+];
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -1032,10 +1038,12 @@ git commit -m "feat(conformance-target): mount webfinger, host-meta, indieauth"
 ### Task 4: IndieWeb content mounts (micropub, microsub, webmention, websub)
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/mounts.ts`
 - Modify: `packages/conformance-target/src/smoke.test.ts`
 
 **Interfaces:**
+
 - Consumes: `configsFor` entries `micropub`, `microsub`, `webmention`, `websub`.
 - Produces: mounted `/micropub`, `/media[/*]`, `/microsub`, `/webmention`, `/websub`.
 
@@ -1155,10 +1163,12 @@ git commit -m "feat(conformance-target): mount micropub, microsub, webmention, w
 ### Task 5: Storage + identity mounts (solid-pod, WebDAV doors, remotestorage, webauthn, vc, activitypub, atproto-pds)
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/mounts.ts`
 - Modify: `packages/conformance-target/src/smoke.test.ts`
 
 **Interfaces:**
+
 - Consumes: `configsFor` entries `solidPod`, `davPod`, `remotestorage`, `webauthn`, `vc`, `activitypub`, `atproto`.
 - Produces: mounted `/pod/*`, `/dav/*`, `/dav-credentials`, `/storage/*`, `/webauthn/*`, `/credentials/*`, `/users/conformance*` + nodeinfo, `/xrpc/*` + atproto well-knowns.
 
@@ -1337,6 +1347,7 @@ Insert into the `buildMounts` array (before the `home` entry). `USERNAME` is imp
 
 Run: `pnpm test --project @dwk/conformance-target`
 Expected: PASS. Debug notes for likely first-run failures:
+
 - Solid pod anonymous/admin expectations: check the actual status against
   `packages/solid-pod/src/handler.ts` WAC defaults and its tests; adjust the
   assertion to the protocol-correct observed value.
@@ -1347,7 +1358,7 @@ Expected: PASS. Debug notes for likely first-run failures:
 
 Known limitation to record as a code comment on the `vc` mount: the VC
 issuer's default `did:web` resolves to `/.well-known/did.json`, which the
-atproto mount serves with *its* keys — a VC issue→verify round-trip against
+atproto mount serves with _its_ keys — a VC issue→verify round-trip against
 the deployed target will fail DID resolution until the VC issuer gets its own
 DID path. That is P5 scope (`vc-data-model-2.0` suite), not P1; the smoke
 test intentionally only proves the mount answers.
@@ -1365,10 +1376,12 @@ git commit -m "feat(conformance-target): mount storage + identity packages"
 ### Task 6: queue() and scheduled() handlers
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/index.ts`
 - Modify: `packages/conformance-target/src/smoke.test.ts`
 
 **Interfaces:**
+
 - Consumes: `configsFor`; `createWebmentionQueueConsumer` + `WebmentionJob` (`@dwk/webmention`), `createWebSubQueueConsumer` + `WebSubJob` (`@dwk/websub`), `createMicrosubQueueConsumer` (`@dwk/microsub`), `createSolidPodGc` (`@dwk/solid-pod`).
 - Produces: the final `ExportedHandler` with `fetch`, `queue`, `scheduled`.
 
@@ -1512,6 +1525,7 @@ git commit -m "feat(conformance-target): queue consumers + shared GC schedule"
 ### Task 7: wrangler.jsonc + README runbook + doc pointers
 
 **Files:**
+
 - Create: `packages/conformance-target/wrangler.jsonc`
 - Create: `packages/conformance-target/README.md`
 - Modify: `conformance/README.md` (target section)
@@ -1519,6 +1533,7 @@ git commit -m "feat(conformance-target): queue consumers + shared GC schedule"
 - Modify: `CLAUDE.md` (package count sentence)
 
 **Interfaces:**
+
 - Consumes: binding names from `ConformanceEnv`; DO class names from `src/index.ts` re-exports.
 - Produces: the deployable config + the operator runbook Task 8's CI job and the litmus run depend on.
 
@@ -1535,11 +1550,9 @@ git commit -m "feat(conformance-target): queue consumers + shared GC schedule"
   "main": "src/index.ts",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
-  "routes": [
-    { "pattern": "conformance.dwk.io", "custom_domain": true }
-  ],
+  "routes": [{ "pattern": "conformance.dwk.io", "custom_domain": true }],
   "vars": {
-    "BASE_URL": "https://conformance.dwk.io"
+    "BASE_URL": "https://conformance.dwk.io",
   },
   "durable_objects": {
     "bindings": [
@@ -1547,8 +1560,8 @@ git commit -m "feat(conformance-target): queue consumers + shared GC schedule"
       { "name": "STORAGE", "class_name": "RemoteStorageObject" },
       { "name": "ACTOR", "class_name": "ActivityPubObject" },
       { "name": "WEBAUTHN", "class_name": "WebAuthnObject" },
-      { "name": "REPO", "class_name": "AtprotoRepoObject" }
-    ]
+      { "name": "REPO", "class_name": "AtprotoRepoObject" },
+    ],
   },
   "migrations": [
     {
@@ -1558,40 +1571,64 @@ git commit -m "feat(conformance-target): queue consumers + shared GC schedule"
         "RemoteStorageObject",
         "ActivityPubObject",
         "WebAuthnObject",
-        "AtprotoRepoObject"
-      ]
-    }
+        "AtprotoRepoObject",
+      ],
+    },
   ],
   "r2_buckets": [
     { "binding": "BLOBS", "bucket_name": "dwk-conformance-blobs" },
-    { "binding": "MEDIA", "bucket_name": "dwk-conformance-media" }
+    { "binding": "MEDIA", "bucket_name": "dwk-conformance-media" },
   ],
   "d1_databases": [
-    { "binding": "AUTH_DB", "database_name": "dwk-conformance-auth", "database_id": "REPLACE-AFTER-d1-create" },
-    { "binding": "MICROPUB_DB", "database_name": "dwk-conformance-micropub", "database_id": "REPLACE-AFTER-d1-create" },
-    { "binding": "MICROSUB_DB", "database_name": "dwk-conformance-microsub", "database_id": "REPLACE-AFTER-d1-create" },
-    { "binding": "WEBSUB_DB", "database_name": "dwk-conformance-websub", "database_id": "REPLACE-AFTER-d1-create" },
-    { "binding": "WEBMENTION_INBOX", "database_name": "dwk-conformance-webmention", "database_id": "REPLACE-AFTER-d1-create" },
-    { "binding": "GC_DB", "database_name": "dwk-conformance-gc", "database_id": "REPLACE-AFTER-d1-create" }
+    {
+      "binding": "AUTH_DB",
+      "database_name": "dwk-conformance-auth",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "MICROPUB_DB",
+      "database_name": "dwk-conformance-micropub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "MICROSUB_DB",
+      "database_name": "dwk-conformance-microsub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "WEBSUB_DB",
+      "database_name": "dwk-conformance-websub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "WEBMENTION_INBOX",
+      "database_name": "dwk-conformance-webmention",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "GC_DB",
+      "database_name": "dwk-conformance-gc",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
   ],
   "queues": {
     "producers": [
       { "binding": "WEBMENTION_QUEUE", "queue": "conformance-webmention" },
       { "binding": "WEBSUB_QUEUE", "queue": "conformance-websub" },
-      { "binding": "MICROSUB_QUEUE", "queue": "conformance-microsub" }
+      { "binding": "MICROSUB_QUEUE", "queue": "conformance-microsub" },
     ],
     "consumers": [
       { "queue": "conformance-webmention" },
       { "queue": "conformance-websub" },
-      { "queue": "conformance-microsub" }
-    ]
+      { "queue": "conformance-microsub" },
+    ],
   },
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["*/15 * * * *"],
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }
 ```
 
@@ -1610,24 +1647,24 @@ Worker".
 
 ## Mount table
 
-| Path | Package |
-| --- | --- |
-| `/.well-known/webfinger` | `@dwk/webfinger` |
-| `/.well-known/host-meta[.json]` | `@dwk/host-meta` |
-| `/.well-known/oauth-authorization-server`, `/authorize`, `/token`, `/revocation` | `@dwk/indieauth` |
-| `/micropub`, `/media/*` | `@dwk/micropub` |
-| `/microsub` | `@dwk/microsub` |
-| `/webmention` | `@dwk/webmention` |
-| `/websub` | `@dwk/websub` |
-| `/users/conformance*`, `/inbox`, `/.well-known/nodeinfo`, `/nodeinfo/*` | `@dwk/activitypub` |
-| `/storage/<account>/*` | `@dwk/remotestorage` |
-| `/pod/*` | `@dwk/solid-pod` (LDP door) |
-| `/dav/*` | `@dwk/solid-pod` WebDAV door — **its own pod** (litmus target) |
-| `/dav-credentials` | app-password mint/list/revoke (owner-gated) |
-| `/webauthn/*` | `@dwk/webauthn` |
-| `/credentials/*` | `@dwk/vc` |
-| `/xrpc/*`, `/.well-known/atproto-did`, `/.well-known/did.json` | `@dwk/atproto-pds` |
-| `/`, `/profile/card` | test identity (h-card + WebID) |
+| Path                                                                             | Package                                                        |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `/.well-known/webfinger`                                                         | `@dwk/webfinger`                                               |
+| `/.well-known/host-meta[.json]`                                                  | `@dwk/host-meta`                                               |
+| `/.well-known/oauth-authorization-server`, `/authorize`, `/token`, `/revocation` | `@dwk/indieauth`                                               |
+| `/micropub`, `/media/*`                                                          | `@dwk/micropub`                                                |
+| `/microsub`                                                                      | `@dwk/microsub`                                                |
+| `/webmention`                                                                    | `@dwk/webmention`                                              |
+| `/websub`                                                                        | `@dwk/websub`                                                  |
+| `/users/conformance*`, `/inbox`, `/.well-known/nodeinfo`, `/nodeinfo/*`          | `@dwk/activitypub`                                             |
+| `/storage/<account>/*`                                                           | `@dwk/remotestorage`                                           |
+| `/pod/*`                                                                         | `@dwk/solid-pod` (LDP door)                                    |
+| `/dav/*`                                                                         | `@dwk/solid-pod` WebDAV door — **its own pod** (litmus target) |
+| `/dav-credentials`                                                               | app-password mint/list/revoke (owner-gated)                    |
+| `/webauthn/*`                                                                    | `@dwk/webauthn`                                                |
+| `/credentials/*`                                                                 | `@dwk/vc`                                                      |
+| `/xrpc/*`, `/.well-known/atproto-did`, `/.well-known/did.json`                   | `@dwk/atproto-pds`                                             |
+| `/`, `/profile/card`                                                             | test identity (h-card + WebID)                                 |
 
 The `/dav` pod is deliberately separate from `/pod`: the per-pod Durable
 Object is keyed by the configured `baseUrl`, so mounting both doors on one pod
@@ -1780,9 +1817,11 @@ git commit -m "feat(conformance-target): wrangler config + deploy/litmus runbook
 ### Task 8: CI deploy job
 
 **Files:**
+
 - Modify: `.github/workflows/conformance.yml`
 
 **Interfaces:**
+
 - Consumes: the `packages/conformance-target` package and its `deploy` script; repo secrets `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` (added by the operator, Task 7 README step 4).
 - Produces: `deploy-target` job; `hosted-suite` depends on it.
 
@@ -1791,43 +1830,43 @@ git commit -m "feat(conformance-target): wrangler config + deploy/litmus runbook
 Insert between the `integration` and `hosted-suite` jobs:
 
 ```yaml
-  # Deploys the composed conformance target (packages/conformance-target) to
-  # conformance.dwk.io so the hosted suites have something to run against.
-  # Skips gracefully when the Cloudflare secrets are not configured, so the
-  # weekly schedule stays green on forks / before one-time setup.
-  deploy-target:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Cloudflare credentials
-        id: creds
-        run: echo "ok=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-        if: steps.creds.outputs.ok == 'true'
-      - uses: pnpm/action-setup@v6
-        if: steps.creds.outputs.ok == 'true'
-      - uses: actions/setup-node@v6
-        if: steps.creds.outputs.ok == 'true'
-        with:
-          # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
-          # flag-free (spec/self-hosting.md §16 decision 2).
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-        if: steps.creds.outputs.ok == 'true'
-      - name: Build workspace packages
-        if: steps.creds.outputs.ok == 'true'
-        run: pnpm build
-      - name: Deploy conformance target
-        if: steps.creds.outputs.ok == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: packages/conformance-target
-      - name: Deploy skipped
-        if: steps.creds.outputs.ok != 'true'
-        run: echo "CLOUDFLARE_API_TOKEN not configured; skipping deploy."
+# Deploys the composed conformance target (packages/conformance-target) to
+# conformance.dwk.io so the hosted suites have something to run against.
+# Skips gracefully when the Cloudflare secrets are not configured, so the
+# weekly schedule stays green on forks / before one-time setup.
+deploy-target:
+  if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+  runs-on: ubuntu-latest
+  steps:
+    - name: Check Cloudflare credentials
+      id: creds
+      run: echo "ok=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v7
+      if: steps.creds.outputs.ok == 'true'
+    - uses: pnpm/action-setup@v6
+      if: steps.creds.outputs.ok == 'true'
+    - uses: actions/setup-node@v6
+      if: steps.creds.outputs.ok == 'true'
+      with:
+        # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
+        # flag-free (spec/self-hosting.md §16 decision 2).
+        node-version: 24
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      if: steps.creds.outputs.ok == 'true'
+    - name: Build workspace packages
+      if: steps.creds.outputs.ok == 'true'
+      run: pnpm build
+    - name: Deploy conformance target
+      if: steps.creds.outputs.ok == 'true'
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        workingDirectory: packages/conformance-target
+    - name: Deploy skipped
+      if: steps.creds.outputs.ok != 'true'
+      run: echo "CLOUDFLARE_API_TOKEN not configured; skipping deploy."
 ```
 
 - [ ] **Step 2: Make `hosted-suite` wait for the deploy**
@@ -1835,12 +1874,12 @@ Insert between the `integration` and `hosted-suite` jobs:
 Change the `hosted-suite` job's opening lines to:
 
 ```yaml
-  hosted-suite:
-    needs: deploy-target
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+hosted-suite:
+  needs: deploy-target
+  if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
 ```
 
-(`needs` + the unchanged `if` keeps current behaviour: both jobs share the same triggers, and a skipped deploy still lets the suite job run its documented no-op.) Note: `needs` skips the dependent job if the needed job fails — that is desired (don't test a failed deploy). A *skipped* deploy step inside a succeeded job does not block it.
+(`needs` + the unchanged `if` keeps current behaviour: both jobs share the same triggers, and a skipped deploy still lets the suite job run its documented no-op.) Note: `needs` skips the dependent job if the needed job fails — that is desired (don't test a failed deploy). A _skipped_ deploy step inside a succeeded job does not block it.
 
 - [ ] **Step 3: Validate the workflow syntax**
 

@@ -40,23 +40,23 @@ standard package shape (tsconfig pair, vitest project, README).
 One Worker `fetch` handler routing path prefixes to each endpoint package's
 factory, per the composition contract:
 
-| Mount | Package / factory |
-| --- | --- |
-| `/.well-known/webfinger` | `@dwk/webfinger` |
-| `/.well-known/host-meta` | `@dwk/host-meta` |
-| `/auth/*` (authorization, token, metadata) | `@dwk/indieauth` |
-| `/micropub` | `@dwk/micropub` |
-| `/microsub` | `@dwk/microsub` |
-| `/webmention` | `@dwk/webmention` |
-| `/websub` | `@dwk/websub` |
-| ActivityPub actor + `/inbox`, `/outbox` | `@dwk/activitypub` |
-| `/storage/*` | `@dwk/remotestorage` |
-| `/pod/*` (LDP) | `@dwk/solid-pod` |
-| `/dav/*` | `createSolidPodWebdav` + `createSolidPodWebdavCredentials` |
-| `/webauthn/*` | `@dwk/webauthn` |
-| `/vc/*` | `@dwk/vc` |
-| `/xrpc/*` | `@dwk/atproto-pds` |
-| `/` and test-content pages | small static handler (test identity homepage: h-card, rel=me, endpoint discovery links, webmention test posts) |
+| Mount                                      | Package / factory                                                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `/.well-known/webfinger`                   | `@dwk/webfinger`                                                                                               |
+| `/.well-known/host-meta`                   | `@dwk/host-meta`                                                                                               |
+| `/auth/*` (authorization, token, metadata) | `@dwk/indieauth`                                                                                               |
+| `/micropub`                                | `@dwk/micropub`                                                                                                |
+| `/microsub`                                | `@dwk/microsub`                                                                                                |
+| `/webmention`                              | `@dwk/webmention`                                                                                              |
+| `/websub`                                  | `@dwk/websub`                                                                                                  |
+| ActivityPub actor + `/inbox`, `/outbox`    | `@dwk/activitypub`                                                                                             |
+| `/storage/*`                               | `@dwk/remotestorage`                                                                                           |
+| `/pod/*` (LDP)                             | `@dwk/solid-pod`                                                                                               |
+| `/dav/*`                                   | `createSolidPodWebdav` + `createSolidPodWebdavCredentials`                                                     |
+| `/webauthn/*`                              | `@dwk/webauthn`                                                                                                |
+| `/vc/*`                                    | `@dwk/vc`                                                                                                      |
+| `/xrpc/*`                                  | `@dwk/atproto-pds`                                                                                             |
+| `/` and test-content pages                 | small static handler (test identity homepage: h-card, rel=me, endpoint discovery links, webmention test posts) |
 
 Exact prefixes follow each package's README/spec where one is prescribed
 (e.g. `.well-known` paths are fixed by their standards); the table above is
@@ -111,16 +111,16 @@ suites, so the schedule can chain them):
 
 `scripts/conformance/run-suite.mjs` stays the single seam. Per suite:
 
-| Suite | Mode | Plan |
-| --- | --- | --- |
-| **litmus** (`webdav`) | already automated | Point at `https://conformance.dwk.io/dav/…` with a minted app password. No dispatcher change needed beyond docs. |
-| **webmention.rocks** | new automated runner | *Sender:* drive the `@dwk/webmention` sender at each `webmention.rocks/test/N` page (discovery + delivery), assert the test endpoint accepts. *Receiver:* trigger their receiver tests against `https://conformance.dwk.io/webmention` (source pages hosted on the target's static handler), then verify the mentions were stored/verified via the package's query surface. Runner lives in `scripts/conformance/` and is invoked by the dispatcher when `--target` is set. |
-| **Solid conformance-test-harness** | CI Docker job, after a spike | The harness authenticates via Solid-OIDC (client credentials / login flows). **Spike first:** determine what `@dwk/solid-pod`'s DPoP-based auth must expose for the harness to log in, and whether a subset profile is the right initial scope. Outcome of the spike defines the P4 work. |
-| **micropub.rocks** | manual runbook | `docs/conformance/micropub-rocks.md`: register the endpoint, obtain a token via the deployed IndieAuth, click through, publish the implementation report, record result. |
-| **websub.rocks** | manual runbook | Same pattern, `docs/conformance/websub-rocks.md`. |
-| **remoteStorage api-test-suite** | later (P5) | CLI suite; automatable in CI against `/storage`. |
-| **atproto interop** (`goat`, CAR round-trip) | later (P5) | Scripted checks against `/xrpc`. |
-| **VC test suites**, **WebAuthn** | later (P5) | Documented pending; wired as each comes up. |
+| Suite                                        | Mode                         | Plan                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **litmus** (`webdav`)                        | already automated            | Point at `https://conformance.dwk.io/dav/…` with a minted app password. No dispatcher change needed beyond docs.                                                                                                                                                                                                                                                                                                                                                            |
+| **webmention.rocks**                         | new automated runner         | _Sender:_ drive the `@dwk/webmention` sender at each `webmention.rocks/test/N` page (discovery + delivery), assert the test endpoint accepts. _Receiver:_ trigger their receiver tests against `https://conformance.dwk.io/webmention` (source pages hosted on the target's static handler), then verify the mentions were stored/verified via the package's query surface. Runner lives in `scripts/conformance/` and is invoked by the dispatcher when `--target` is set. |
+| **Solid conformance-test-harness**           | CI Docker job, after a spike | The harness authenticates via Solid-OIDC (client credentials / login flows). **Spike first:** determine what `@dwk/solid-pod`'s DPoP-based auth must expose for the harness to log in, and whether a subset profile is the right initial scope. Outcome of the spike defines the P4 work.                                                                                                                                                                                   |
+| **micropub.rocks**                           | manual runbook               | `docs/conformance/micropub-rocks.md`: register the endpoint, obtain a token via the deployed IndieAuth, click through, publish the implementation report, record result.                                                                                                                                                                                                                                                                                                    |
+| **websub.rocks**                             | manual runbook               | Same pattern, `docs/conformance/websub-rocks.md`.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **remoteStorage api-test-suite**             | later (P5)                   | CLI suite; automatable in CI against `/storage`.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **atproto interop** (`goat`, CAR round-trip) | later (P5)                   | Scripted checks against `/xrpc`.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **VC test suites**, **WebAuthn**             | later (P5)                   | Documented pending; wired as each comes up.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 The dispatcher's existing behaviour is preserved: no `--target` → print the
 procedure and exit 0.
