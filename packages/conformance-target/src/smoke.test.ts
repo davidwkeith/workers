@@ -154,3 +154,52 @@ describe("@dwk/indieauth", () => {
     expect(redirect.searchParams.get("state")).toBe("s1");
   });
 });
+
+describe("IndieWeb endpoints", () => {
+  it("micropub config query requires a token", async () => {
+    const res = await call("/micropub?q=config");
+    expect(res.status).toBe(401);
+  });
+
+  it("microsub requires a token", async () => {
+    const res = await call("/microsub?action=channels");
+    expect(res.status).toBe(401);
+  });
+
+  it("webmention rejects a mention without source/target", async () => {
+    const res = await call("/webmention", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "source=",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("webmention accepts a well-formed mention for our origin", async () => {
+    const res = await call("/webmention", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        source: "https://sender.example/post",
+        target: `${BASE}/`,
+      }).toString(),
+    });
+    // Async verification via WEBMENTION_QUEUE: the spec allows 201 (status
+    // resource created) or 202 (accepted for processing).
+    expect([201, 202]).toContain(res.status);
+  });
+
+  it("websub rejects a subscription for a foreign topic", async () => {
+    const res = await call("/websub", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        "hub.mode": "subscribe",
+        "hub.topic": "https://evil.example/feed",
+        "hub.callback": "https://subscriber.example/cb",
+      }).toString(),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+  });
+});

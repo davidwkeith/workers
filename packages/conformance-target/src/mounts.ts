@@ -6,7 +6,11 @@
 
 import { createHostMeta } from "@dwk/host-meta";
 import { createIndieAuth } from "@dwk/indieauth";
+import { createMicropub } from "@dwk/micropub";
+import { createMicrosub } from "@dwk/microsub";
 import { createWebfinger } from "@dwk/webfinger";
+import { createWebmention } from "@dwk/webmention";
+import { createWebSub } from "@dwk/websub";
 
 import { createConsent } from "./approval.js";
 import type { ConformanceEnv } from "./config.js";
@@ -59,6 +63,29 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
         u.pathname === "/token" ||
         u.pathname === "/revocation",
       handler: createIndieAuth(c.indieauth),
+    },
+    {
+      name: "@dwk/micropub",
+      matches: (u) =>
+        u.pathname === "/micropub" ||
+        u.pathname === "/media" ||
+        u.pathname.startsWith("/media/"),
+      handler: createMicropub(c.micropub),
+    },
+    {
+      name: "@dwk/microsub",
+      matches: (u) => u.pathname === "/microsub",
+      handler: createMicrosub(c.microsub),
+    },
+    {
+      name: "@dwk/webmention",
+      matches: (u) => u.pathname === "/webmention",
+      handler: createWebmention(c.webmention),
+    },
+    {
+      name: "@dwk/websub",
+      matches: (u) => u.pathname === "/websub",
+      handler: createWebSub(c.websub),
     },
     {
       name: "home",
