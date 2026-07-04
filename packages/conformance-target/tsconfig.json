@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@dwk/activitypub": ["../activitypub/src/index.ts"],
+      "@dwk/atproto-pds": ["../atproto-pds/src/index.ts"],
+      "@dwk/host-meta": ["../host-meta/src/index.ts"],
+      "@dwk/indieauth": ["../indieauth/src/index.ts"],
+      "@dwk/micropub": ["../micropub/src/index.ts"],
+      "@dwk/microsub": ["../microsub/src/index.ts"],
+      "@dwk/remotestorage": ["../remotestorage/src/index.ts"],
+      "@dwk/solid-pod": ["../solid-pod/src/index.ts"],
+      "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/webauthn": ["../webauthn/src/index.ts"],
+      "@dwk/webfinger": ["../webfinger/src/index.ts"],
+      "@dwk/webmention": ["../webmention/src/index.ts"],
+      "@dwk/websub": ["../websub/src/index.ts"],
+      "@dwk/calendar": ["../calendar/src/index.ts"],
+      "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/rdf": ["../rdf/src/index.ts"],
+      "@dwk/wac": ["../wac/src/index.ts"],
+      "@dwk/store": ["../store/src/index.ts"],
+      "@dwk/webdav": ["../webdav/src/index.ts"]
+    },
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
+    "noEmit": true
+  },
+  "include": ["src"]
+}
