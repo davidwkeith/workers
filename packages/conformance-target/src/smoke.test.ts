@@ -303,3 +303,41 @@ describe("storage and identity endpoints", () => {
     expect(await res.text()).toContain("did:web:conformance.test");
   });
 });
+
+describe("queue and scheduled handlers", () => {
+  function emptyBatch(queue: string): MessageBatch<never> {
+    return {
+      queue,
+      messages: [],
+      ackAll() {},
+      retryAll() {},
+    } as unknown as MessageBatch<never>;
+  }
+
+  it("dispatches known queues and rejects unknown ones", async () => {
+    const ctx = createExecutionContext();
+    await expect(
+      worker.queue(emptyBatch("conformance-webmention"), testEnv, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      worker.queue(emptyBatch("conformance-websub"), testEnv, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      worker.queue(emptyBatch("conformance-microsub"), testEnv, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      worker.queue(emptyBatch("no-such-queue"), testEnv, ctx),
+    ).rejects.toThrow(/unknown queue/);
+  });
+
+  it("runs the shared GC pass", async () => {
+    const controller = {
+      scheduledTime: Date.now(),
+      cron: "*/15 * * * *",
+      noRetry() {},
+    } as unknown as ScheduledController;
+    await expect(
+      worker.scheduled(controller, testEnv, createExecutionContext()),
+    ).resolves.toBeUndefined();
+  });
+});

@@ -8,7 +8,16 @@
  * @see spec/composition-contract.md
  */
 
+import { createMicrosubQueueConsumer } from "@dwk/microsub";
+import { createSolidPodGc } from "@dwk/solid-pod";
+import type { SolidPodGcEnv } from "@dwk/solid-pod";
+import type { WebmentionJob } from "@dwk/webmention";
+import { createWebmentionQueueConsumer } from "@dwk/webmention";
+import type { WebSubJob } from "@dwk/websub";
+import { createWebSubQueueConsumer } from "@dwk/websub";
+
 import type { ConformanceEnv } from "./config.js";
+import { configsFor } from "./config.js";
 import type { Mount } from "./mounts.js";
 import { buildMounts, routeRequest } from "./mounts.js";
 
@@ -25,9 +34,57 @@ export { WebAuthnObject } from "@dwk/webauthn";
 
 let mounts: readonly Mount[] | undefined;
 
+type AnyJob = WebmentionJob | WebSubJob | unknown;
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     mounts ??= buildMounts(env);
     return routeRequest(mounts, request, env, ctx);
   },
-} satisfies ExportedHandler<ConformanceEnv>;
+
+  async queue(batch, env, ctx): Promise<void> {
+    const c = configsFor(env);
+    switch (batch.queue) {
+      case "conformance-webmention":
+        return createWebmentionQueueConsumer(c.webmention)(
+          batch as MessageBatch<WebmentionJob>,
+          env,
+          ctx,
+        );
+      case "conformance-websub":
+        return createWebSubQueueConsumer(c.websub)(
+          batch as MessageBatch<WebSubJob>,
+          env,
+          ctx,
+        );
+      case "conformance-microsub":
+        return createMicrosubQueueConsumer(c.microsub)(
+          batch as Parameters<
+            ReturnType<typeof createMicrosubQueueConsumer>
+          >[0],
+          env,
+          ctx,
+        );
+      default:
+        throw new Error(
+          `@dwk/conformance-target: unknown queue "${batch.queue}"`,
+        );
+    }
+  },
+
+  async scheduled(event, env, ctx): Promise<void> {
+    // solid-pod and remotestorage share the @dwk/store GC schema and the same
+    // BLOBS/GC_DB bindings, so one collector pass covers both packages.
+    //
+    // `GC_DB` is optional on `SolidPodEnv`/`RemoteStorageEnv` (the DO
+    // opportunistically forwards orphans only when it's bound) but required
+    // on `SolidPodGcEnv` (the cron handler needs it to run at all). This
+    // deployment always binds `GC_DB` (see vitest.config.ts's `d1Databases`
+    // / wrangler.jsonc), so the narrowing is type-only.
+    await createSolidPodGc(configsFor(env).solidPod)(
+      event,
+      env as unknown as SolidPodGcEnv,
+      ctx,
+    );
+  },
+} satisfies ExportedHandler<ConformanceEnv, AnyJob>;
