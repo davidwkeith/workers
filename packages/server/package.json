@@ -61,7 +61,7 @@
     "ws": "8.21.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "4.20260620.1",
+    "@cloudflare/workers-types": "5.20260705.1",
     "esbuild": "0.28.1",
     "@dwk/host-meta": "workspace:*",
     "@dwk/indieauth": "workspace:*",
