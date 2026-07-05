@@ -6,7 +6,8 @@
     // typecheck ahead of build), which would otherwise trip the
     // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
     "paths": {
-      "@dwk/log": ["../log/src/index.ts"]
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

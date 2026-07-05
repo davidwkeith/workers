@@ -17,7 +17,7 @@ import {
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
 } from "./distribute.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 import type { WebSubJob } from "./queue.js";
 
 /**

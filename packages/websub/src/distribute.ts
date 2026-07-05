@@ -22,10 +22,8 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import type { FetchLike } from "./fetch.js";
-import { readBytesCapped } from "./fetch.js";
+import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebSubLogEvent } from "./log.js";
-import { safeFetch } from "./safe-fetch.js";
 import type { Subscription } from "./store.js";
 
 /** A topic's current content, as fetched from the topic URL. */
@@ -53,6 +51,13 @@ const HASH_FOR_METHOD: Record<SignatureAlgorithm, string> = {
 
 /** WebSub's secure default signature method; SHA-1 interop is opt-in only. */
 export const DEFAULT_SIGNATURE_ALGORITHM: SignatureAlgorithm = "sha256";
+
+/**
+ * Cap on a fetched topic's body (4 MB). Kept local rather than relying on
+ * `@dwk/safe-fetch`'s smaller 2 MB default, since this hub has always
+ * accepted up to 4 MB topics and that behavior must not silently regress.
+ */
+const MAX_CONTENT_BYTES = 4 * 1024 * 1024;
 
 /** Outcome of delivering content to one subscriber. */
 export interface DeliveryResult {
@@ -155,7 +160,12 @@ export async function fetchTopicContent(
       doFetch,
       topic,
       { method: "GET" },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     response = result.response;
   } catch {
@@ -187,7 +197,7 @@ export async function fetchTopicContent(
     metrics.count(WebSubLogEvent.TopicContentTypeMissing, fields);
     return { kind: "drop" };
   }
-  const body = await readBytesCapped(response);
+  const body = await readBytesCapped(response, MAX_CONTENT_BYTES);
   if (body === null) {
     const fields = { topicHost: hostFromUrl(topic), status: response.status };
     logger.warn(WebSubLogEvent.TopicFetchFailed, fields);
@@ -247,7 +257,12 @@ export async function deliverToSubscriber(
         // `content.body` is a Uint8Array; pass its backing buffer as the body.
         body: content.body as BodyInit,
       },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     await result.response.body?.cancel().catch(() => undefined);
     return finish(result.response.ok, result.response.status);

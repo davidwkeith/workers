@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMicrosub, type MicrosubHandler } from "./handler.js";
 import type { MicrosubEnv } from "./config.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 import { createMicrosubStore } from "./store.js";
 import { createDpopReplayStore } from "./replay.js";
 import {

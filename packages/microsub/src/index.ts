@@ -76,10 +76,13 @@ export {
   assertPublicUrl,
   isPrivateOrReservedHost,
   SsrfError,
+  DEFAULT_MAX_REDIRECTS,
+  DEFAULT_TIMEOUT_MS,
+  type FetchLike,
+  type SafeFetchOptions,
+  type SafeFetchResult,
   type SsrfReason,
-} from "./safe-fetch.js";
-
-export type { FetchLike } from "./fetch.js";
+} from "@dwk/safe-fetch";
 export type { MicrosubJob, PollJob } from "./queue.js";
 
 export { MicrosubLogEvent } from "./log.js";

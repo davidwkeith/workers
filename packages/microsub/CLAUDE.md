@@ -51,8 +51,6 @@ src/jf2.ts          # feed → JF2 normalization (JSON Feed/Atom/RSS/h-feed entr
 src/xml.ts          # minimal dependency-free XML reader for Atom/RSS parsing
 src/hfeed.ts        # h-feed/h-entry mf2 parsing (HTMLRewriter → JF2)
 src/discovery.ts    # discoverFeed (feed URL discovery + parsing)
-src/fetch.ts        # injectable FetchLike type, body-size-capped text reader
-src/safe-fetch.ts   # SSRF-safe fetch with private IP blocking
 src/auth.ts         # token extraction, scope checking, DPoP enforcement
 src/replay.ts       # D1-backed DPoP proof jti replay record (short TTL)
 src/poll.ts         # createMicrosubPoller (scheduled: one queue job per feed)
@@ -68,3 +66,6 @@ src/*.test.ts       # colocated tests
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/indieauth` — access token verification.
 - `@dwk/log` — structured logging.
+- `@dwk/safe-fetch` — SSRF-safe fetch (`safeFetch`, `readBodyCapped`,
+  `FetchLike`) with private/reserved IP blocking; re-exported from
+  `index.ts` for backwards compatibility.

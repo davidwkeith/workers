@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   assertPublicUrl,
   isPrivateOrReservedHost,
-  safeFetch,
   SsrfError,
+  safeFetch,
+  type FetchLike,
 } from "./safe-fetch.js";
-import type { FetchLike } from "./fetch.js";
 
 describe("isPrivateOrReservedHost", () => {
   it("blocks loopback addresses", () => {
@@ -45,14 +45,11 @@ describe("isPrivateOrReservedHost", () => {
   });
 
   it("blocks IPv6 addresses that embed a private IPv4", () => {
-    // IPv4-mapped ::ffff:0:0/96
     expect(isPrivateOrReservedHost("[::ffff:127.0.0.1]")).toBe(true);
     expect(isPrivateOrReservedHost("[::ffff:169.254.169.254]")).toBe(true);
     expect(isPrivateOrReservedHost("[::ffff:8.8.8.8]")).toBe(false);
-    // Deprecated IPv4-compatible ::/96
     expect(isPrivateOrReservedHost("[::127.0.0.1]")).toBe(true);
     expect(isPrivateOrReservedHost("[::169.254.169.254]")).toBe(true);
-    // NAT64 well-known prefix 64:ff9b::/96
     expect(isPrivateOrReservedHost("[64:ff9b::127.0.0.1]")).toBe(true);
     expect(isPrivateOrReservedHost("[64:ff9b::169.254.169.254]")).toBe(true);
   });
@@ -80,19 +77,30 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("example.com")).toBe(false);
     expect(isPrivateOrReservedHost("example.com.")).toBe(false);
     expect(isPrivateOrReservedHost("8.8.8.8")).toBe(false);
-    expect(isPrivateOrReservedHost("172.32.0.1")).toBe(false); // just above 172.16/12
+    expect(isPrivateOrReservedHost("172.32.0.1")).toBe(false);
     expect(isPrivateOrReservedHost("[2606:4700:4700::1111]")).toBe(false);
   });
 });
 
 describe("assertPublicUrl", () => {
-  it("returns the parsed URL for a public http(s) URL", () => {
+  it("returns the parsed URL for a public http(s) URL by default", () => {
     expect(assertPublicUrl("https://example.com/x").host).toBe("example.com");
+    expect(assertPublicUrl("http://example.com/x").host).toBe("example.com");
   });
 
   it("rejects non-http(s) schemes", () => {
     expect(() => assertPublicUrl("file:///etc/passwd")).toThrow(SsrfError);
     expect(() => assertPublicUrl("javascript:alert(1)")).toThrow(SsrfError);
+  });
+
+  it("restricts to allowedSchemes when given", () => {
+    expect(() =>
+      assertPublicUrl("http://example.com/x", { allowedSchemes: ["https:"] }),
+    ).toThrow(SsrfError);
+    expect(
+      assertPublicUrl("https://example.com/x", { allowedSchemes: ["https:"] })
+        .protocol,
+    ).toBe("https:");
   });
 
   it("rejects a private host", () => {
@@ -113,9 +121,7 @@ describe("safeFetch", () => {
     const { response, url } = await safeFetch(
       doFetch,
       "https://example.com/a",
-      {
-        method: "GET",
-      },
+      { method: "GET" },
     );
     expect(await response.text()).toBe("ok");
     expect(url).toBe("https://example.com/a");
@@ -129,12 +135,36 @@ describe("safeFetch", () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("combines a caller-supplied signal with its own timeout", async () => {
+    const doFetch = vi.fn<FetchLike>(async () => new Response("ok"));
+    const controller = new AbortController();
+    await safeFetch(doFetch, "https://example.com/", {
+      method: "GET",
+      signal: controller.signal,
+    });
+    const init = doFetch.mock.calls[0]?.[1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal).not.toBe(controller.signal);
+  });
+
   it("rejects a blocked initial host", async () => {
     const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
     await expect(
       safeFetch(doFetch, "http://169.254.169.254/latest", { method: "GET" }),
     ).rejects.toBeInstanceOf(SsrfError);
     expect(doFetch).not.toHaveBeenCalled();
+  });
+
+  it("respects a restricted allowedSchemes option", async () => {
+    const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
+    await expect(
+      safeFetch(
+        doFetch,
+        "http://example.com/",
+        { method: "GET" },
+        { allowedSchemes: ["https:"] },
+      ),
+    ).rejects.toBeInstanceOf(SsrfError);
   });
 
   it("follows a redirect to another public host, re-validating it", async () => {
@@ -172,10 +202,7 @@ describe("safeFetch", () => {
   it("resolves a relative redirect against the current URL", async () => {
     const doFetch = vi.fn<FetchLike>(async (url) =>
       url === "https://a.example/start"
-        ? new Response(null, {
-            status: 301,
-            headers: { location: "/moved" },
-          })
+        ? new Response(null, { status: 301, headers: { location: "/moved" } })
         : new Response("landed"),
     );
     const { url } = await safeFetch(doFetch, "https://a.example/start", {
@@ -198,9 +225,7 @@ describe("safeFetch", () => {
         doFetch,
         "https://loop.example/",
         { method: "GET" },
-        {
-          maxRedirects: 3,
-        },
+        { maxRedirects: 3 },
       ),
     ).rejects.toBeInstanceOf(SsrfError);
   });
@@ -222,13 +247,13 @@ describe("safeFetch", () => {
       if (url === "https://a.example/") {
         return new Response(null, {
           status: 302,
-          headers: { location: "https://a.example/same" }, // same origin
+          headers: { location: "https://a.example/same" },
         });
       }
       if (url === "https://a.example/same") {
         return new Response(null, {
           status: 302,
-          headers: { location: "https://b.example/cross" }, // cross origin
+          headers: { location: "https://b.example/cross" },
         });
       }
       return new Response("ok");
@@ -237,13 +262,30 @@ describe("safeFetch", () => {
       method: "GET",
       headers: { authorization: "Bearer secret", accept: "text/html" },
     });
-    // hop 0 and hop 1 are same-origin: header retained.
     expect(seen[0]?.get("authorization")).toBe("Bearer secret");
     expect(seen[1]?.get("authorization")).toBe("Bearer secret");
-    // hop 2 followed a cross-origin redirect: credential header dropped, but a
-    // non-sensitive header is kept.
     expect(seen[2]?.get("authorization")).toBeNull();
     expect(seen[2]?.get("accept")).toBe("text/html");
+  });
+
+  it("strips extra stripHeadersCrossOrigin headers on a cross-origin redirect", async () => {
+    const seen: Headers[] = [];
+    const doFetch: FetchLike = vi.fn(async (url, init) => {
+      seen.push(new Headers(init?.headers as HeadersInit));
+      return url === "https://a.example/"
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "https://b.example/cross" },
+          })
+        : new Response("ok");
+    });
+    await safeFetch(
+      doFetch,
+      "https://a.example/",
+      { method: "GET", headers: { "x-hub-signature": "abc" } },
+      { stripHeadersCrossOrigin: ["x-hub-signature"] },
+    );
+    expect(seen[1]?.get("x-hub-signature")).toBeNull();
   });
 
   it("preserves method and body across a redirect (no GET downgrade)", async () => {
@@ -264,5 +306,32 @@ describe("safeFetch", () => {
     expect(seen).toHaveLength(2);
     expect(seen[1]?.method).toBe("POST");
     expect(seen[1]?.body).toBe("source=x&target=y");
+  });
+
+  it("logs and counts under the caller-supplied logEvent on an SSRF block", async () => {
+    const logger = {
+      warn: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      error: vi.fn(),
+    };
+    const metrics = { count: vi.fn(), observe: vi.fn() };
+    const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
+    await expect(
+      safeFetch(
+        doFetch,
+        "http://127.0.0.1/",
+        { method: "GET" },
+        { logger, metrics, logEvent: "custom.ssrf.blocked" },
+      ),
+    ).rejects.toBeInstanceOf(SsrfError);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "custom.ssrf.blocked",
+      expect.objectContaining({ reason: "blocked_host" }),
+    );
+    expect(metrics.count).toHaveBeenCalledWith(
+      "custom.ssrf.blocked",
+      expect.objectContaining({ reason: "blocked_host" }),
+    );
   });
 });

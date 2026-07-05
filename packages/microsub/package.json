@@ -44,6 +44,7 @@
   "dependencies": {
     "@dwk/dpop": "workspace:*",
     "@dwk/indieauth": "workspace:*",
-    "@dwk/log": "workspace:*"
+    "@dwk/log": "workspace:*",
+    "@dwk/safe-fetch": "workspace:*"
   }
 }

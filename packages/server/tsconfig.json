@@ -18,6 +18,7 @@
       "@dwk/micropub": ["../micropub/src/index.ts"],
       "@dwk/microsub": ["../microsub/src/index.ts"],
       "@dwk/rdf": ["../rdf/src/index.ts"],
+      "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"],
       "@dwk/solid-pod": ["../solid-pod/src/index.ts"],
       "@dwk/store": ["../store/src/index.ts"],
       "@dwk/vc": ["../vc/src/index.ts"],

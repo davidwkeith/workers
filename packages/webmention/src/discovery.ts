@@ -19,8 +19,8 @@ import {
   scanElements,
   splitTokens,
 } from "./html.js";
-import { readBodyCapped, type FetchLike } from "./fetch.js";
-import { safeFetch } from "./safe-fetch.js";
+import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
+import { WebmentionLogEvent } from "./log.js";
 
 // The legacy rel values predating the standardized `webmention` token. They are
 // absolute URLs, so a candidate rel is normalized through `URL` before being
@@ -137,7 +137,7 @@ export async function discoverEndpoint(
       doFetch,
       target,
       { method: "GET", headers: { accept: "text/html, */*" } },
-      { logger, metrics },
+      { logger, metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
     );
     response = result.response;
     base = result.url;

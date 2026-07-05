@@ -8,7 +8,8 @@
     "paths": {
       "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/indieauth": ["../indieauth/src/index.ts"],
-      "@dwk/log": ["../log/src/index.ts"]
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

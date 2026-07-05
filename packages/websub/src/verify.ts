@@ -19,10 +19,8 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import type { FetchLike } from "./fetch.js";
-import { readBytesCapped } from "./fetch.js";
+import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebSubLogEvent } from "./log.js";
-import { safeFetch } from "./safe-fetch.js";
 
 /** Bytes of randomness in a generated challenge (hex-encoded → twice as many chars). */
 const CHALLENGE_BYTES = 24;
@@ -125,7 +123,12 @@ export async function verifyIntent(
       doFetch,
       url,
       { method: "GET" },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     response = result.response;
   } catch (err) {
@@ -210,7 +213,12 @@ export async function notifyDenial(
       doFetch,
       url,
       { method: "GET" },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     notified = result.response.ok;
     await result.response.body?.cancel().catch(() => undefined);

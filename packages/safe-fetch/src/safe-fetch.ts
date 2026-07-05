@@ -1,43 +1,46 @@
 /**
- * `@dwk/microsub` — SSRF-safe outbound fetch.
+ * `@dwk/safe-fetch` — SSRF-safe outbound fetch and capped body reads.
  *
- * A Microsub server fetches user- and feed-supplied URLs: a `follow` discovers
- * a feed at a URL the user typed, polling re-fetches it, and `preview`/`search`
- * fetch an arbitrary URL. Without guardrails any of these could be pointed at
- * the Worker's own network — loopback, the link-local cloud metadata IP
- * (`169.254.169.254`), or RFC 1918 ranges — to exfiltrate credentials or probe
- * internal services. This module is the single choke point every outbound fetch
- * in the package goes through. It:
- *
- * 1. rejects URLs whose host is a private, loopback, link-local, or otherwise
- *    non-public address (or a name like `localhost` / `*.internal`),
- * 2. follows redirects manually, re-validating the host on every `Location`
- *    hop so a public-looking host cannot 302 to an internal one, and capping
- *    the hop count, and
- * 3. bounds the whole operation with a single timeout, so a slow-loris source
- *    cannot pin a poll-queue invocation.
+ * Any package that fetches an attacker- or user-supplied URL — a Webmention
+ * `source`, a WebSub `hub.callback`, a Microsub feed URL, a credential's
+ * `statusListCredential`, a `did:web` host — needs the same guardrails: the
+ * URL's host must not be able to point back at the Worker's own network
+ * (loopback, the link-local cloud metadata IP `169.254.169.254`, RFC 1918
+ * ranges, etc.), redirects must be re-validated hop by hop, and the whole
+ * operation must be bounded by a timeout. This module is the single shared
+ * choke point every `@dwk` package routes such a fetch through instead of
+ * re-deriving its own copy.
  *
  * Host validation is purely syntactic on the URL host — DNS rebinding (a name
- * that resolves to a private IP) is out of scope here, as the Workers runtime
- * does not expose name resolution to user code. See `spec/packages/microsub.md`
+ * that resolves to a private IP) is out of scope, as the Workers runtime does
+ * not expose name resolution to user code. See `spec/packages/safe-fetch.md`
  * and `spec/non-functional-requirements.md`.
  *
  * @packageDocumentation
  */
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
-import type { FetchLike } from "./fetch.js";
-import { MicrosubLogEvent } from "./log.js";
+
+/** A minimal, injectable `fetch` signature. */
+export type FetchLike = (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response>;
 
 /** Default cap on redirect hops before a fetch is abandoned. */
 export const DEFAULT_MAX_REDIRECTS = 5;
 /** Default overall timeout (ms) bounding a fetch, redirects included. */
 export const DEFAULT_TIMEOUT_MS = 10_000;
+/** Default `allowedSchemes` for {@link assertPublicUrl} / {@link safeFetch}. */
+const DEFAULT_ALLOWED_SCHEMES = ["http:", "https:"] as const;
 
 /** HTTP status codes that carry a `Location` we may follow. */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-/** Machine-readable cause of an {@link SsrfError}. */
+/**
+ * Machine-readable cause of an {@link SsrfError}, suitable for logging as a
+ * structured field (no free-text parsing required).
+ */
 export type SsrfReason =
   "invalid_url" | "disallowed_scheme" | "blocked_host" | "too_many_redirects";
 
@@ -45,11 +48,16 @@ export type SsrfReason =
  * Raised when a request is refused on SSRF grounds (blocked host, disallowed
  * scheme, or too many redirects). Callers catch this exactly like a network
  * failure — a blocked attempt looks the same as an unreachable host — but
- * {@link safeFetch} logs it first (event `microsub.ssrf.blocked`) so the single
- * most security-relevant event in the package still produces a signal.
+ * {@link safeFetch} logs it first (under the caller-supplied `logEvent`) so
+ * the single most security-relevant event here still produces a signal.
+ *
+ * Carries the structured {@link reason} and, when known, the sanitized
+ * {@link host} so a logger can record them as queryable fields.
  */
 export class SsrfError extends Error {
+  /** Machine-readable cause. */
   readonly reason: SsrfReason;
+  /** The offending host (name plus any port), when one is known. */
   readonly host?: string;
   constructor(message: string, reason: SsrfReason, host?: string) {
     super(message);
@@ -62,13 +70,19 @@ export class SsrfError extends Error {
 /** Parse a canonical dotted-decimal IPv4 host into its four octets. */
 function parseIPv4(host: string): [number, number, number, number] | null {
   const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (match === null) return null;
+  if (match === null) {
+    return null;
+  }
   const octets: number[] = [];
   for (let group = 1; group <= 4; group++) {
     const part = match[group];
-    if (part === undefined) return null;
+    if (part === undefined) {
+      return null;
+    }
     const octet = Number.parseInt(part, 10);
-    if (octet > 255) return null;
+    if (octet > 255) {
+      return null;
+    }
     octets.push(octet);
   }
   return octets as [number, number, number, number];
@@ -104,26 +118,36 @@ function isPrivateIPv4(octets: [number, number, number, number]): boolean {
  * `null` when `host` is not a valid IPv6 address.
  */
 function parseIPv6(host: string): number[] | null {
-  if (!host.includes(":")) return null;
+  if (!host.includes(":")) {
+    return null;
+  }
   let str = host;
 
   const v4Match = /(?:^|:)((?:\d{1,3}\.){3}\d{1,3})$/.exec(str);
   const v4Str = v4Match?.[1];
   if (v4Str !== undefined) {
     const v4 = parseIPv4(v4Str);
-    if (v4 === null) return null;
+    if (v4 === null) {
+      return null;
+    }
     const hi = ((v4[0] << 8) | v4[1]).toString(16);
     const lo = ((v4[2] << 8) | v4[3]).toString(16);
     str = `${str.slice(0, str.length - v4Str.length)}${hi}:${lo}`;
   }
 
-  if (str.indexOf("::") !== str.lastIndexOf("::")) return null;
+  if (str.indexOf("::") !== str.lastIndexOf("::")) {
+    return null;
+  }
 
   const toGroups = (part: string): number[] | null => {
-    if (part === "") return [];
+    if (part === "") {
+      return [];
+    }
     const groups: number[] = [];
     for (const token of part.split(":")) {
-      if (!/^[0-9a-fA-F]{1,4}$/.test(token)) return null;
+      if (!/^[0-9a-fA-F]{1,4}$/.test(token)) {
+        return null;
+      }
       groups.push(Number.parseInt(token, 16));
     }
     return groups;
@@ -133,22 +157,29 @@ function parseIPv6(host: string): number[] | null {
     const parts = str.split("::");
     const left = toGroups(parts[0] ?? "");
     const right = toGroups(parts[1] ?? "");
-    if (left === null || right === null) return null;
+    if (left === null || right === null) {
+      return null;
+    }
     const missing = 8 - left.length - right.length;
-    if (missing < 1) return null;
+    if (missing < 1) {
+      return null;
+    }
     return [...left, ...new Array<number>(missing).fill(0), ...right];
   }
 
   const all = toGroups(str);
-  if (all === null || all.length !== 8) return null;
+  if (all === null || all.length !== 8) {
+    return null;
+  }
   return all;
 }
 
 /**
  * True when `groups` (eight 16-bit values) is an IPv6 address that must never
  * be fetched: unspecified, loopback, link-local, site-local, unique-local,
- * multicast, the documentation prefix, or an address that embeds a private
- * IPv4.
+ * multicast, the documentation prefix, or an address that embeds an IPv4
+ * (IPv4-mapped `::ffff:0:0/96`, deprecated IPv4-compatible `::/96`, or NAT64
+ * `64:ff9b::/96`) whose embedded IPv4 is itself private.
  */
 function isPrivateIPv6(groups: number[]): boolean {
   const first = groups[0] ?? 0;
@@ -201,7 +232,9 @@ function isBlockedHostname(host: string): boolean {
  * `URL.hostname` form (IPv6 hosts may arrive wrapped in `[...]`).
  */
 export function isPrivateOrReservedHost(hostname: string): boolean {
-  if (hostname === "") return true;
+  if (hostname === "") {
+    return true;
+  }
   const host = (
     hostname.startsWith("[") && hostname.endsWith("]")
       ? hostname.slice(1, -1)
@@ -209,26 +242,40 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
   ).replace(/\.$/, "");
 
   const v4 = parseIPv4(host);
-  if (v4 !== null) return isPrivateIPv4(v4);
+  if (v4 !== null) {
+    return isPrivateIPv4(v4);
+  }
   const v6 = parseIPv6(host);
-  if (v6 !== null) return isPrivateIPv6(v6);
+  if (v6 !== null) {
+    return isPrivateIPv6(v6);
+  }
   return isBlockedHostname(host);
 }
 
+/** Options for {@link assertPublicUrl}. */
+export interface AssertPublicUrlOptions {
+  /** Schemes to accept (default `["http:", "https:"]`). */
+  readonly allowedSchemes?: readonly string[];
+}
+
 /**
- * Validate that `rawUrl` is a fetchable public `http(s)` URL, returning the
- * parsed {@link URL}. Throws {@link SsrfError} for an unparseable URL, a
- * non-`http(s)` scheme (e.g. `file:`, `javascript:`), or a private/reserved
- * host.
+ * Validate that `rawUrl` is a fetchable public URL, returning the parsed
+ * {@link URL}. Throws {@link SsrfError} for an unparseable URL, a scheme not
+ * in `options.allowedSchemes` (default `http:`/`https:`), or a
+ * private/reserved host.
  */
-export function assertPublicUrl(rawUrl: string): URL {
+export function assertPublicUrl(
+  rawUrl: string,
+  options?: AssertPublicUrlOptions,
+): URL {
+  const allowedSchemes = options?.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES;
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
     throw new SsrfError(`invalid URL: ${rawUrl}`, "invalid_url");
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
+  if (!allowedSchemes.includes(url.protocol)) {
     throw new SsrfError(
       `disallowed scheme: ${url.protocol}`,
       "disallowed_scheme",
@@ -245,28 +292,52 @@ export function assertPublicUrl(rawUrl: string): URL {
   return url;
 }
 
-/** Tunables for {@link safeFetch}. */
-export interface SafeFetchOptions {
+/** Tunables for {@link safeFetch} / {@link safeFetchJson}. */
+export interface SafeFetchOptions extends AssertPublicUrlOptions {
+  /** Maximum redirect hops to follow (default {@link DEFAULT_MAX_REDIRECTS}). */
   readonly maxRedirects?: number;
+  /** Overall timeout in ms, redirects included (default {@link DEFAULT_TIMEOUT_MS}). */
   readonly timeoutMs?: number;
+  /** Logger for SSRF blocks; defaults to a no-op (see `@dwk/log`). */
   readonly logger?: Logger;
+  /** Metrics sink for SSRF-block counters; defaults to a no-op (see `@dwk/log`). */
   readonly metrics?: Metrics;
+  /** Stable event name to log/count an SSRF block under (default `"safe_fetch.ssrf.blocked"`). */
+  readonly logEvent?: string;
+  /**
+   * Extra header names to strip on a cross-origin redirect hop, beyond the
+   * base credential set (`authorization`, `cookie`, `cookie2`,
+   * `proxy-authorization`, `set-cookie`).
+   */
+  readonly stripHeadersCrossOrigin?: readonly string[];
 }
 
 /** A completed {@link safeFetch}: the final response and the URL it came from. */
 export interface SafeFetchResult {
+  /** The final, non-redirect response. */
   readonly response: Response;
+  /** The fully-resolved URL the response came from (the base for relative links). */
   readonly url: string;
 }
+
+const BASE_STRIP_HEADERS = [
+  "authorization",
+  "cookie",
+  "cookie2",
+  "proxy-authorization",
+  "set-cookie",
+];
 
 /**
  * Fetch `rawUrl` through `doFetch` with SSRF guardrails.
  *
  * The initial host and every redirect target are validated with
  * {@link assertPublicUrl}; redirects are followed manually (`redirect:
- * "manual"`) up to `maxRedirects` hops; and a single {@link AbortSignal.timeout}
- * bounds the whole chain. Credential-bearing headers are stripped on a
- * cross-origin redirect, matching what a browser's `fetch` does.
+ * "manual"`) up to `maxRedirects` hops; and a single {@link AbortSignal.timeout},
+ * combined with any signal already on `init` via `AbortSignal.any`, bounds the
+ * whole chain. The request method, headers, and body from `init` are
+ * preserved across hops — a redirected `POST` re-POSTs to the (re-validated)
+ * new location rather than silently degrading to `GET`.
  *
  * @throws {SsrfError} when a host is blocked, a scheme is disallowed, or the
  * redirect cap is exceeded. Other failures (network, timeout) propagate as the
@@ -282,6 +353,13 @@ export async function safeFetch(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const logger = options?.logger ?? noopLogger;
   const metrics = options?.metrics ?? noopMetrics;
+  const logEvent = options?.logEvent ?? "safe_fetch.ssrf.blocked";
+  const stripHeaders = [
+    ...BASE_STRIP_HEADERS,
+    ...(options?.stripHeadersCrossOrigin ?? []),
+  ];
+  // Bound the chain with our own timeout, but don't clobber a caller's signal
+  // (e.g. a worker-shutdown abort): combine them so either can cancel.
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal =
     init.signal != null
@@ -289,7 +367,7 @@ export async function safeFetch(
       : timeoutSignal;
 
   try {
-    let currentUrl = assertPublicUrl(rawUrl).toString();
+    let currentUrl = assertPublicUrl(rawUrl, options).toString();
     let currentInit: RequestInit = { ...init };
     for (let hop = 0; ; hop++) {
       const response = await doFetch(currentUrl, {
@@ -314,18 +392,15 @@ export async function safeFetch(
         );
       }
 
-      const next = assertPublicUrl(new URL(location, currentUrl).toString());
+      const next = assertPublicUrl(
+        new URL(location, currentUrl).toString(),
+        options,
+      );
       await response.body?.cancel().catch(() => undefined);
 
       if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
         const headers = new Headers(currentInit.headers as HeadersInit);
-        for (const name of [
-          "authorization",
-          "cookie",
-          "cookie2",
-          "proxy-authorization",
-          "set-cookie",
-        ]) {
+        for (const name of stripHeaders) {
           headers.delete(name);
         }
         currentInit = { ...currentInit, headers };
@@ -335,8 +410,8 @@ export async function safeFetch(
   } catch (err) {
     if (err instanceof SsrfError) {
       const fields = { reason: err.reason, host: err.host };
-      logger.warn(MicrosubLogEvent.SsrfBlocked, fields);
-      metrics.count(MicrosubLogEvent.SsrfBlocked, fields);
+      logger.warn(logEvent, fields);
+      metrics.count(logEvent, fields);
     }
     throw err;
   }

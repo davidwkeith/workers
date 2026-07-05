@@ -19,10 +19,14 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import { readTextCapped, type FetchLike } from "./fetch.js";
 import { parseHFeed } from "./hfeed.js";
 import { parseFeed, type Jf2Entry } from "./jf2.js";
-import { safeFetch } from "./safe-fetch.js";
+import { MicrosubLogEvent } from "./log.js";
+import {
+  readBodyCapped as readTextCapped,
+  safeFetch,
+  type FetchLike,
+} from "@dwk/safe-fetch";
 
 /** Shared options for the discovery/fetch helpers. */
 export interface DiscoveryOptions {
@@ -48,6 +52,13 @@ export interface FetchedFeed {
   readonly etag: string | null;
   readonly lastModified: string | null;
 }
+
+/**
+ * Cap on a fetched feed/page body (4 MB). Kept local rather than relying on
+ * `@dwk/safe-fetch`'s smaller 2 MB default, since this package has always
+ * accepted up to 4 MB feeds and that behavior must not silently regress.
+ */
+const MAX_FEED_BYTES = 4 * 1024 * 1024;
 
 const FEED_ACCEPT =
   "application/atom+xml, application/rss+xml, application/feed+json, " +
@@ -165,7 +176,7 @@ export async function discoverFeed(
       doFetch,
       target,
       { method: "GET", headers: { accept: FEED_ACCEPT } },
-      { logger, metrics },
+      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
     );
     response = result.response;
     finalUrl = result.url;
@@ -175,7 +186,7 @@ export async function discoverFeed(
 
   if (!response.ok) return null;
   const contentType = response.headers.get("content-type") ?? "";
-  const body = await readTextCapped(response);
+  const body = await readTextCapped(response, MAX_FEED_BYTES);
   if (body === null) return null;
 
   // A syndication feed: parse it directly.
@@ -242,7 +253,7 @@ export async function fetchFeed(
       doFetch,
       feedUrl,
       { method: "GET", headers },
-      { logger, metrics },
+      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
     );
     response = result.response;
     finalUrl = result.url;
@@ -263,7 +274,7 @@ export async function fetchFeed(
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  const body = await readTextCapped(response);
+  const body = await readTextCapped(response, MAX_FEED_BYTES);
   if (body === null) return null;
   const entries = await parseBody(body, contentType, finalUrl);
   return { entries, notModified: false, etag, lastModified };

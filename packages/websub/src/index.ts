@@ -82,7 +82,6 @@ export {
   type DistributeOptions,
 } from "./distribute.js";
 export type { WebSubJob, VerifyJob, DistributeJob } from "./queue.js";
-export type { FetchLike } from "./fetch.js";
 export {
   safeFetch,
   assertPublicUrl,
@@ -90,9 +89,11 @@ export {
   SsrfError,
   DEFAULT_MAX_REDIRECTS,
   DEFAULT_TIMEOUT_MS,
+  readBytesCapped,
+  type FetchLike,
   type SafeFetchOptions,
   type SafeFetchResult,
   type SsrfReason,
-} from "./safe-fetch.js";
+} from "@dwk/safe-fetch";
 export { WebSubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

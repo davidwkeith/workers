@@ -13,6 +13,8 @@
  * keeping the external dependency at arm's length, never the default path.
  */
 
+import { safeFetch } from "@dwk/safe-fetch";
+
 import type { SignedPlcOperation } from "./plc.js";
 
 /** The minimal `fetch` shape this client needs (injectable for tests). */
@@ -55,11 +57,16 @@ export async function submitPlcOperation(
   options: PlcDirectoryOptions = {},
 ): Promise<void> {
   const { base, fetchImpl } = resolve(options);
-  const res = await fetchImpl(`${base}/${did}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(op),
-  });
+  const { response: res } = await safeFetch(
+    fetchImpl,
+    `${base}/${did}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(op),
+    },
+    { logEvent: "atproto-pds.ssrf.blocked" },
+  );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(
@@ -79,7 +86,12 @@ export async function resolvePlcDid(
   options: PlcDirectoryOptions = {},
 ): Promise<unknown | null> {
   const { base, fetchImpl } = resolve(options);
-  const res = await fetchImpl(`${base}/${did}`);
+  const { response: res } = await safeFetch(
+    fetchImpl,
+    `${base}/${did}`,
+    {},
+    { logEvent: "atproto-pds.ssrf.blocked" },
+  );
   if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(`plc: directory resolve failed for ${did} (${res.status})`);
@@ -97,7 +109,12 @@ export async function fetchPlcData(
   options: PlcDirectoryOptions = {},
 ): Promise<unknown | null> {
   const { base, fetchImpl } = resolve(options);
-  const res = await fetchImpl(`${base}/${did}/data`);
+  const { response: res } = await safeFetch(
+    fetchImpl,
+    `${base}/${did}/data`,
+    {},
+    { logEvent: "atproto-pds.ssrf.blocked" },
+  );
   if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(

@@ -59,6 +59,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
       '@noble/curves':
         specifier: 2.2.0
         version: 2.2.0
@@ -167,6 +170,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
 
   packages/oauth:
     dependencies:
@@ -197,6 +203,12 @@ importers:
       '@dwk/webfinger':
         specifier: workspace:*
         version: link:../webfinger
+
+  packages/safe-fetch:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
 
   packages/server:
     dependencies:
@@ -306,6 +318,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
 
   packages/wac:
     dependencies:
@@ -332,12 +347,18 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
 
   packages/websub:
     dependencies:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
 
 packages:
 

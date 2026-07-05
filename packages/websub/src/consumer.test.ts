@@ -7,7 +7,7 @@ import type {
   SubscriptionStore,
   SubscriptionUpsert,
 } from "./store.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 import type {
   ExecutionContext,
   Message,
