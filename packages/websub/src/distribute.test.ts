@@ -7,7 +7,7 @@ import {
   type TopicContent,
 } from "./distribute.js";
 import type { Subscription } from "./store.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 
 const encoder = new TextEncoder();
 

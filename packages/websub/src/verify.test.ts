@@ -6,7 +6,7 @@ import {
   buildDenialUrl,
   notifyDenial,
 } from "./verify.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 
 describe("buildVerificationUrl", () => {
   it("appends hub.* params, preserving existing query", () => {

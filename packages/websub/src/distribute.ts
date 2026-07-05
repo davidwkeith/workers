@@ -22,10 +22,12 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import type { FetchLike } from "./fetch.js";
-import { readBytesCapped } from "./fetch.js";
+import {
+  readBytesCapped,
+  safeFetch,
+  type FetchLike,
+} from "@dwk/safe-fetch";
 import { WebSubLogEvent } from "./log.js";
-import { safeFetch } from "./safe-fetch.js";
 import type { Subscription } from "./store.js";
 
 /** A topic's current content, as fetched from the topic URL. */
@@ -155,7 +157,12 @@ export async function fetchTopicContent(
       doFetch,
       topic,
       { method: "GET" },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     response = result.response;
   } catch {
@@ -247,7 +254,12 @@ export async function deliverToSubscriber(
         // `content.body` is a Uint8Array; pass its backing buffer as the body.
         body: content.body as BodyInit,
       },
-      { logger, metrics },
+      {
+        logger,
+        metrics,
+        logEvent: WebSubLogEvent.SsrfBlocked,
+        stripHeadersCrossOrigin: ["x-hub-signature"],
+      },
     );
     await result.response.body?.cancel().catch(() => undefined);
     return finish(result.response.ok, result.response.status);
