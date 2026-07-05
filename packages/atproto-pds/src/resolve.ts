@@ -9,6 +9,8 @@
  * transport and the Durable Object can pass a configured directory URL.
  */
 
+import { safeFetch } from "@dwk/safe-fetch";
+
 import { decodeMultikey, type DecodedMultikey } from "./crypto.js";
 import { resolvePlcDid, type FetchLike } from "./plc-directory.js";
 
@@ -47,13 +49,18 @@ export async function resolveDidDocument(
     const url = path
       ? `https://${host}/${path}/did.json`
       : `https://${host}/.well-known/did.json`;
-    const res = await fetchImpl(url);
-    if (!res.ok) {
+    const { response } = await safeFetch(
+      fetchImpl,
+      url,
+      { headers: { accept: "application/did+json, application/json" } },
+      { allowedSchemes: ["https:"], logEvent: "atproto-pds.ssrf.blocked" },
+    );
+    if (!response.ok) {
       throw new Error(
-        `resolve: did:web document fetch failed for ${did} (${res.status})`,
+        `resolve: did:web document fetch failed for ${did} (${response.status})`,
       );
     }
-    return (await res.json()) as DidDocument;
+    return (await response.json()) as DidDocument;
   }
   if (did.startsWith("did:plc:")) {
     const doc = await resolvePlcDid(did, {

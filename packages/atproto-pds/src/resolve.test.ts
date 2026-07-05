@@ -1,8 +1,9 @@
+import { SsrfError } from "@dwk/safe-fetch";
 import { describe, expect, it } from "vitest";
 
 import { createRepoKeypair, publicKeyMultibase } from "./crypto.js";
 import type { FetchLike } from "./plc-directory.js";
-import { resolveSigningKey } from "./resolve.js";
+import { resolveDidDocument, resolveSigningKey } from "./resolve.js";
 
 /** A DID document advertising `multibase` as the `#atproto` signing key. */
 function didDoc(did: string, multibase: string) {
@@ -90,5 +91,13 @@ describe("resolveSigningKey", () => {
     await expect(resolveSigningKey("did:example:123")).rejects.toThrow(
       /unsupported DID method/,
     );
+  });
+
+  it("throws SsrfError when the did:web host is private", async () => {
+    await expect(
+      resolveDidDocument("did:web:169.254.169.254", {
+        fetchImpl: async () => new Response("{}"),
+      }),
+    ).rejects.toBeInstanceOf(SsrfError);
   });
 });
