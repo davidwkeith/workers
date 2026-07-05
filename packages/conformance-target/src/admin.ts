@@ -38,8 +38,13 @@ export function createAdminInit(
   env: ConformanceEnv,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
+    // Refuse outright when the secret is unset — otherwise a literal
+    // "Bearer undefined" header would authenticate.
     const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`) {
+    if (
+      !env.CONFORMANCE_ADMIN_TOKEN ||
+      auth !== `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`
+    ) {
       return new Response("Unauthorized", { status: 401 });
     }
     if (request.method.toUpperCase() !== "POST") {

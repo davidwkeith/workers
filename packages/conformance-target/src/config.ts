@@ -80,8 +80,13 @@ function adminAuthenticate(
   env: ConformanceEnv,
 ): SolidPodConfig["authenticate"] {
   return (request) => {
+    // Refuse outright when the secret is unset — otherwise a literal
+    // "Bearer undefined" header would authenticate.
     const auth = request.headers.get("authorization");
-    if (auth === `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`) {
+    if (
+      env.CONFORMANCE_ADMIN_TOKEN &&
+      auth === `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`
+    ) {
       return {
         webid: ownerWebId(env),
         jti: crypto.randomUUID(),

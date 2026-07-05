@@ -12,9 +12,8 @@
  *   with the signed consent token appended.
  *
  * Good enough for a test identity, not a real IdP: the HMAC reuses
- * TOKEN_SIGNING_KEY (domain-separated by the "consent:v1" prefix), the
- * comparison is not constant-time, and replay within the 5-minute TTL is
- * acceptable.
+ * TOKEN_SIGNING_KEY (domain-separated by the "consent:v1" prefix) and replay
+ * within the 5-minute TTL is acceptable.
  */
 
 import type { IndieAuthConfig } from "@dwk/indieauth";
@@ -33,6 +32,15 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+/** Constant-time string comparison to avoid leaking match length via timing. */
+function timingSafeEqual(a: string, b: string): boolean {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 function base64url(bytes: ArrayBuffer): string {
@@ -116,8 +124,8 @@ export function approveAuthorization(
     if (sig !== null && exp !== null) {
       // Recompute over the *validated* AuthorizationRequest fields, not the
       // raw query, so the signature vouches for exactly what will be granted.
-      // The comparison is not constant-time and replay within the TTL is
-      // accepted — fine for a conformance-test identity.
+      // Replay within the TTL is accepted — fine for a conformance-test
+      // identity.
       const expected = await signConsent(
         env.TOKEN_SIGNING_KEY,
         request.clientId,
@@ -126,7 +134,7 @@ export function approveAuthorization(
         request.codeChallenge,
         exp,
       );
-      if (sig === expected && Number(exp) > Date.now()) {
+      if (timingSafeEqual(sig, expected) && Number(exp) > Date.now()) {
         return { me: `${env.BASE_URL}/` };
       }
     }
@@ -157,7 +165,14 @@ export function createConsent(
     } catch {
       return new Response("Bad Request", { status: 400 });
     }
-    if (form.get("password") !== env.CONFORMANCE_PASSWORD) {
+    // Refuse outright when the secret is unset — an empty or missing
+    // password must never authenticate.
+    const password = form.get("password");
+    if (
+      !env.CONFORMANCE_PASSWORD ||
+      typeof password !== "string" ||
+      !timingSafeEqual(password, env.CONFORMANCE_PASSWORD)
+    ) {
       return new Response("Forbidden", { status: 403 });
     }
 
