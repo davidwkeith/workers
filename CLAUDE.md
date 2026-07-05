@@ -205,7 +205,7 @@ packages/<name>/
   `config.ts` (the injected config + `Env` fragment), `handler.ts` (the
   `createX` factory), and feature modules (`auth.ts`, `store.ts`, plus
   standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
-  `negotiation.ts`, `inbox.ts`/`sender.ts`/`safe-fetch.ts`). `workerd`-bound
+  `negotiation.ts`, `inbox.ts`/`sender.ts`). `workerd`-bound
   packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
   `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`,
   `@dwk/atproto-pds`, `@dwk/webdav`) keep a `test-harness.ts` (excluded from
