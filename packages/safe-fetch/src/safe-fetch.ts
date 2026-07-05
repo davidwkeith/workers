@@ -295,3 +295,128 @@ export function assertPublicUrl(
   }
   return url;
 }
+
+/** Tunables for {@link safeFetch} / {@link safeFetchJson}. */
+export interface SafeFetchOptions extends AssertPublicUrlOptions {
+  /** Maximum redirect hops to follow (default {@link DEFAULT_MAX_REDIRECTS}). */
+  readonly maxRedirects?: number;
+  /** Overall timeout in ms, redirects included (default {@link DEFAULT_TIMEOUT_MS}). */
+  readonly timeoutMs?: number;
+  /** Logger for SSRF blocks; defaults to a no-op (see `@dwk/log`). */
+  readonly logger?: Logger;
+  /** Metrics sink for SSRF-block counters; defaults to a no-op (see `@dwk/log`). */
+  readonly metrics?: Metrics;
+  /** Stable event name to log/count an SSRF block under (default `"safe_fetch.ssrf.blocked"`). */
+  readonly logEvent?: string;
+  /**
+   * Extra header names to strip on a cross-origin redirect hop, beyond the
+   * base credential set (`authorization`, `cookie`, `cookie2`,
+   * `proxy-authorization`, `set-cookie`).
+   */
+  readonly stripHeadersCrossOrigin?: readonly string[];
+}
+
+/** A completed {@link safeFetch}: the final response and the URL it came from. */
+export interface SafeFetchResult {
+  /** The final, non-redirect response. */
+  readonly response: Response;
+  /** The fully-resolved URL the response came from (the base for relative links). */
+  readonly url: string;
+}
+
+const BASE_STRIP_HEADERS = [
+  "authorization",
+  "cookie",
+  "cookie2",
+  "proxy-authorization",
+  "set-cookie",
+];
+
+/**
+ * Fetch `rawUrl` through `doFetch` with SSRF guardrails.
+ *
+ * The initial host and every redirect target are validated with
+ * {@link assertPublicUrl}; redirects are followed manually (`redirect:
+ * "manual"`) up to `maxRedirects` hops; and a single {@link AbortSignal.timeout},
+ * combined with any signal already on `init` via `AbortSignal.any`, bounds the
+ * whole chain. The request method, headers, and body from `init` are
+ * preserved across hops — a redirected `POST` re-POSTs to the (re-validated)
+ * new location rather than silently degrading to `GET`.
+ *
+ * @throws {SsrfError} when a host is blocked, a scheme is disallowed, or the
+ * redirect cap is exceeded. Other failures (network, timeout) propagate as the
+ * underlying fetch rejection. Callers treat any throw as "fetch failed".
+ */
+export async function safeFetch(
+  doFetch: FetchLike,
+  rawUrl: string,
+  init: RequestInit,
+  options?: SafeFetchOptions,
+): Promise<SafeFetchResult> {
+  const maxRedirects = options?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
+  const logEvent = options?.logEvent ?? "safe_fetch.ssrf.blocked";
+  const stripHeaders = [
+    ...BASE_STRIP_HEADERS,
+    ...(options?.stripHeadersCrossOrigin ?? []),
+  ];
+  // Bound the chain with our own timeout, but don't clobber a caller's signal
+  // (e.g. a worker-shutdown abort): combine them so either can cancel.
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal =
+    init.signal != null
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal;
+
+  try {
+    let currentUrl = assertPublicUrl(rawUrl, options).toString();
+    let currentInit: RequestInit = { ...init };
+    for (let hop = 0; ; hop++) {
+      const response = await doFetch(currentUrl, {
+        ...currentInit,
+        redirect: "manual",
+        signal,
+      });
+
+      if (!REDIRECT_STATUSES.has(response.status)) {
+        return { response, url: currentUrl };
+      }
+
+      const location = response.headers.get("location");
+      if (location === null || location === "") {
+        return { response, url: currentUrl };
+      }
+      if (hop >= maxRedirects) {
+        throw new SsrfError(
+          `too many redirects (> ${maxRedirects})`,
+          "too_many_redirects",
+          new URL(currentUrl).host,
+        );
+      }
+
+      const next = assertPublicUrl(
+        new URL(location, currentUrl).toString(),
+        options,
+      );
+      await response.body?.cancel().catch(() => undefined);
+
+      if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
+        const headers = new Headers(currentInit.headers as HeadersInit);
+        for (const name of stripHeaders) {
+          headers.delete(name);
+        }
+        currentInit = { ...currentInit, headers };
+      }
+      currentUrl = next.toString();
+    }
+  } catch (err) {
+    if (err instanceof SsrfError) {
+      const fields = { reason: err.reason, host: err.host };
+      logger.warn(logEvent, fields);
+      metrics.count(logEvent, fields);
+    }
+    throw err;
+  }
+}
