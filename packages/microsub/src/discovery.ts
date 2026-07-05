@@ -53,6 +53,13 @@ export interface FetchedFeed {
   readonly lastModified: string | null;
 }
 
+/**
+ * Cap on a fetched feed/page body (4 MB). Kept local rather than relying on
+ * `@dwk/safe-fetch`'s smaller 2 MB default, since this package has always
+ * accepted up to 4 MB feeds and that behavior must not silently regress.
+ */
+const MAX_FEED_BYTES = 4 * 1024 * 1024;
+
 const FEED_ACCEPT =
   "application/atom+xml, application/rss+xml, application/feed+json, " +
   "application/json, text/xml, application/xml, text/html;q=0.9, */*;q=0.8";
@@ -179,7 +186,7 @@ export async function discoverFeed(
 
   if (!response.ok) return null;
   const contentType = response.headers.get("content-type") ?? "";
-  const body = await readTextCapped(response);
+  const body = await readTextCapped(response, MAX_FEED_BYTES);
   if (body === null) return null;
 
   // A syndication feed: parse it directly.
@@ -267,7 +274,7 @@ export async function fetchFeed(
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  const body = await readTextCapped(response);
+  const body = await readTextCapped(response, MAX_FEED_BYTES);
   if (body === null) return null;
   const entries = await parseBody(body, contentType, finalUrl);
   return { entries, notModified: false, etag, lastModified };

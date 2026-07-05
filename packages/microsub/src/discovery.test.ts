@@ -102,6 +102,23 @@ describe("discoverFeed", () => {
     ).toBeNull();
   });
 
+  it("accepts a feed body between 2 MB and 4 MB (local cap, not @dwk/safe-fetch's 2 MB default)", async () => {
+    const filler = " ".repeat(2.5 * 1024 * 1024 - JSON_FEED.length - 20);
+    const bigJson = JSON.stringify({
+      version: "https://jsonfeed.org/version/1.1",
+      items: [{ id: "1", url: "https://blog.example/1", title: "One" }],
+      _pad: filler,
+    });
+    expect(bigJson.length).toBeGreaterThan(2 * 1024 * 1024);
+    expect(bigJson.length).toBeLessThan(4 * 1024 * 1024);
+    const doFetch: FetchLike = vi.fn(async () => jsonResponse(bigJson));
+    const result = await discoverFeed("https://blog.example/feed.json", {
+      fetch: doFetch,
+    });
+    expect(result?.feedUrl).toBe("https://blog.example/feed.json");
+    expect(result?.entries).toHaveLength(1);
+  });
+
   it("returns null for a blocked (SSRF) host", async () => {
     const doFetch: FetchLike = vi.fn(async () => jsonResponse(JSON_FEED));
     expect(
@@ -141,6 +158,23 @@ describe("fetchFeed", () => {
     expect(result?.entries).toHaveLength(1);
     expect(result?.etag).toBe('"v2"');
     expect(result?.lastModified).toBe("later");
+  });
+
+  it("accepts a feed body between 2 MB and 4 MB (local cap, not @dwk/safe-fetch's 2 MB default)", async () => {
+    const filler = " ".repeat(2.5 * 1024 * 1024 - JSON_FEED.length - 20);
+    const bigJson = JSON.stringify({
+      version: "https://jsonfeed.org/version/1.1",
+      items: [{ id: "1", url: "https://blog.example/1", title: "One" }],
+      _pad: filler,
+    });
+    expect(bigJson.length).toBeGreaterThan(2 * 1024 * 1024);
+    expect(bigJson.length).toBeLessThan(4 * 1024 * 1024);
+    const doFetch: FetchLike = vi.fn(async () => jsonResponse(bigJson));
+    const result = await fetchFeed("https://blog.example/feed.json", {
+      fetch: doFetch,
+    });
+    expect(result?.notModified).toBe(false);
+    expect(result?.entries).toHaveLength(1);
   });
 
   it("returns null on a non-2xx response", async () => {

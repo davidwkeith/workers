@@ -146,6 +146,23 @@ describe("fetchTopicContent", () => {
     expect(new TextDecoder().decode(result.content.body)).toBe("<feed/>");
   });
 
+  it("accepts a topic body between 2 MB and 4 MB (local cap, not @dwk/safe-fetch's 2 MB default)", async () => {
+    const big = new Uint8Array(2.5 * 1024 * 1024).fill(97); // 2.5 MB of 'a'
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response(big, {
+          status: 200,
+          headers: { "content-type": "application/atom+xml" },
+        }),
+    );
+    const result = await fetchTopicContent("https://example.com/feed", {
+      fetch: fetchImpl,
+    });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.content.body.byteLength).toBe(big.byteLength);
+  });
+
   it("prefers the topic's Content-Type over the configured fallback", async () => {
     const fetchImpl: FetchLike = vi.fn(
       async () =>
