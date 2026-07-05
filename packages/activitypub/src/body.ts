@@ -52,10 +52,10 @@ export async function readRequestBodyCapped(
     }
   }
 
-  const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
+    const reader = body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) {

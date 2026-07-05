@@ -333,10 +333,10 @@ export async function readBodyCapped(
     }
   }
 
-  const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
+    const reader = body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) {
@@ -425,6 +425,7 @@ export async function safeFetchJson(
     }
 
     if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
       throw new Error(`status list fetch failed: ${response.status}`);
     }
     const text = await readBodyCapped(response, maxBodyBytes);
