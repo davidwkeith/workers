@@ -5,6 +5,13 @@ Interop is the release bar (see
 directory holds the machine-readable status that turns "conformance" from a
 nice-to-have into an enforced gate.
 
+## Deployed target
+
+The suites run against `packages/conformance-target` — a private Worker
+composing every endpoint package, deployed to https://conformance.dwk.io via
+the `deploy-target` job in `.github/workflows/conformance.yml`. See
+`packages/conformance-target/README.md` for setup and per-suite runbooks.
+
 ## `status.json`
 
 A single source of truth for every workspace package:

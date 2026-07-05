@@ -65,6 +65,52 @@ importers:
 
   packages/calendar: {}
 
+  packages/conformance-target:
+    dependencies:
+      '@dwk/activitypub':
+        specifier: workspace:*
+        version: link:../activitypub
+      '@dwk/atproto-pds':
+        specifier: workspace:*
+        version: link:../atproto-pds
+      '@dwk/host-meta':
+        specifier: workspace:*
+        version: link:../host-meta
+      '@dwk/indieauth':
+        specifier: workspace:*
+        version: link:../indieauth
+      '@dwk/micropub':
+        specifier: workspace:*
+        version: link:../micropub
+      '@dwk/microsub':
+        specifier: workspace:*
+        version: link:../microsub
+      '@dwk/remotestorage':
+        specifier: workspace:*
+        version: link:../remotestorage
+      '@dwk/solid-pod':
+        specifier: workspace:*
+        version: link:../solid-pod
+      '@dwk/vc':
+        specifier: workspace:*
+        version: link:../vc
+      '@dwk/webauthn':
+        specifier: workspace:*
+        version: link:../webauthn
+      '@dwk/webfinger':
+        specifier: workspace:*
+        version: link:../webfinger
+      '@dwk/webmention':
+        specifier: workspace:*
+        version: link:../webmention
+      '@dwk/websub':
+        specifier: workspace:*
+        version: link:../websub
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 4.20260620.1
+        version: 4.20260620.1
+
   packages/dpop: {}
 
   packages/host-meta:

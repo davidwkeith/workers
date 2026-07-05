@@ -65,3 +65,6 @@ lifecycle tests are green.
   `workflow_dispatch`/schedule via
   [`scripts/conformance/run-suite.mjs`](../scripts/conformance/run-suite.mjs)
   against a target URL; their results are recorded back into `status.json`.
+- **Target:** the hosted suites run against the composed conformance Worker
+  ([`packages/conformance-target`](../packages/conformance-target/README.md)),
+  deployed to `conformance.dwk.io` by the `deploy-target` job.

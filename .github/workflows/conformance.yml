@@ -68,10 +68,49 @@ jobs:
       - name: Integration lifecycle tests
         run: pnpm test:integration
 
+  # Deploys the composed conformance target (packages/conformance-target) to
+  # conformance.dwk.io so the hosted suites have something to run against.
+  # Skips gracefully when the Cloudflare secrets are not configured, so the
+  # weekly schedule stays green on forks / before one-time setup.
+  deploy-target:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare credentials
+        id: creds
+        run: echo "ok=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.creds.outputs.ok == 'true'
+      - uses: pnpm/action-setup@v6
+        if: steps.creds.outputs.ok == 'true'
+      - uses: actions/setup-node@v6
+        if: steps.creds.outputs.ok == 'true'
+        with:
+          # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
+          # flag-free (spec/self-hosting.md §16 decision 2).
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: steps.creds.outputs.ok == 'true'
+      - name: Build workspace packages
+        if: steps.creds.outputs.ok == 'true'
+        run: pnpm build
+      - name: Deploy conformance target
+        if: steps.creds.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: packages/conformance-target
+      - name: Deploy skipped
+        if: steps.creds.outputs.ok != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN not configured; skipping deploy."
+
   # Hosted conformance suites: only on manual dispatch or the weekly schedule,
   # since they require a deployed target. The runner is a documented no-op when
   # no target URL is supplied.
   hosted-suite:
+    needs: deploy-target
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     strategy:

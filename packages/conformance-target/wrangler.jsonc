@@ -1,0 +1,90 @@
+// Deploy config for the conformance target (conformance.dwk.io).
+// One-time resource setup (D1 ids, buckets, queues, secrets) is documented in
+// README.md — the placeholder database_id values below MUST be replaced with
+// the ids `wrangler d1 create` prints before the first deploy.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dwk-conformance-target",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [{ "pattern": "conformance.dwk.io", "custom_domain": true }],
+  "vars": {
+    "BASE_URL": "https://conformance.dwk.io",
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "POD", "class_name": "SolidPodObject" },
+      { "name": "STORAGE", "class_name": "RemoteStorageObject" },
+      { "name": "ACTOR", "class_name": "ActivityPubObject" },
+      { "name": "WEBAUTHN", "class_name": "WebAuthnObject" },
+      { "name": "REPO", "class_name": "AtprotoRepoObject" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "SolidPodObject",
+        "RemoteStorageObject",
+        "ActivityPubObject",
+        "WebAuthnObject",
+        "AtprotoRepoObject",
+      ],
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "BLOBS", "bucket_name": "dwk-conformance-blobs" },
+    { "binding": "MEDIA", "bucket_name": "dwk-conformance-media" },
+  ],
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "dwk-conformance-auth",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "MICROPUB_DB",
+      "database_name": "dwk-conformance-micropub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "MICROSUB_DB",
+      "database_name": "dwk-conformance-microsub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "WEBSUB_DB",
+      "database_name": "dwk-conformance-websub",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "WEBMENTION_INBOX",
+      "database_name": "dwk-conformance-webmention",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+    {
+      "binding": "GC_DB",
+      "database_name": "dwk-conformance-gc",
+      "database_id": "REPLACE-AFTER-d1-create",
+    },
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "WEBMENTION_QUEUE", "queue": "conformance-webmention" },
+      { "binding": "WEBSUB_QUEUE", "queue": "conformance-websub" },
+      { "binding": "MICROSUB_QUEUE", "queue": "conformance-microsub" },
+    ],
+    "consumers": [
+      { "queue": "conformance-webmention" },
+      { "queue": "conformance-websub" },
+      { "queue": "conformance-microsub" },
+    ],
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"],
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

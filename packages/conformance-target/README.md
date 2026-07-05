@@ -1,0 +1,171 @@
+# @dwk/conformance-target
+
+The deployed conformance target for the `@dwk/workers` monorepo: every
+endpoint package composed into one Worker behind `https://conformance.dwk.io`,
+per `spec/composition-contract.md`. The hosted conformance suites
+(micropub.rocks, webmention.rocks, the Solid harness, litmus) run against it;
+`conformance/status.json` records the results. **Private — never published.**
+It doubles as the reference for "how do I compose these packages into one
+Worker".
+
+## Mount table
+
+| Path                                                                             | Package                                                        |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `/.well-known/webfinger`                                                         | `@dwk/webfinger`                                               |
+| `/.well-known/host-meta[.json]`                                                  | `@dwk/host-meta`                                               |
+| `/.well-known/oauth-authorization-server`, `/authorize`, `/token`, `/revocation` | `@dwk/indieauth`                                               |
+| `/micropub`, `/media/*`                                                          | `@dwk/micropub`                                                |
+| `/microsub`                                                                      | `@dwk/microsub`                                                |
+| `/webmention`                                                                    | `@dwk/webmention`                                              |
+| `/websub`                                                                        | `@dwk/websub`                                                  |
+| `/users/conformance*`, `/inbox`, `/.well-known/nodeinfo`, `/nodeinfo/*`          | `@dwk/activitypub`                                             |
+| `/storage/<account>/*`                                                           | `@dwk/remotestorage`                                           |
+| `/pod/*`                                                                         | `@dwk/solid-pod` (LDP door)                                    |
+| `/dav/*`                                                                         | `@dwk/solid-pod` WebDAV door — **its own pod** (litmus target) |
+| `/dav-credentials`                                                               | app-password mint/list/revoke (owner-gated)                    |
+| `/webauthn/*`                                                                    | `@dwk/webauthn`                                                |
+| `/credentials/*`                                                                 | `@dwk/vc`                                                      |
+| `/xrpc/*`, `/.well-known/atproto-did`, `/.well-known/did.json`                   | `@dwk/atproto-pds`                                             |
+| `/admin/init`                                                                    | one-time D1 schema init (owner-gated)                          |
+| `/`, `/profile/card`                                                             | test identity (h-card + WebID)                                 |
+
+The `/dav` pod is deliberately separate from `/pod`: the per-pod Durable
+Object is keyed by the configured `baseUrl`, so mounting both doors on one pod
+requires verb-based dispatch — deferred until the Solid conformance phase.
+
+Owner authentication is an interim shared-secret bearer
+(`Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN`) that resolves to the owner
+WebID `https://conformance.dwk.io/profile/card#me`. It is replaced by real
+Solid-OIDC in the Solid harness phase.
+
+## One-time setup
+
+Prereqs: the `dwk.io` zone on the Cloudflare account; `wrangler` authenticated
+(`wrangler login` locally, or `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
+in CI). All commands run from `packages/conformance-target/`.
+
+1. Create the R2 buckets and D1 databases:
+
+   ```bash
+   wrangler r2 bucket create dwk-conformance-blobs
+   wrangler r2 bucket create dwk-conformance-media
+   for db in auth micropub microsub websub webmention gc; do
+     wrangler d1 create "dwk-conformance-$db"
+   done
+   ```
+
+   Paste each printed `database_id` into `wrangler.jsonc` (replacing the
+   `REPLACE-AFTER-d1-create` placeholders) and commit.
+
+2. Create the queues:
+
+   ```bash
+   wrangler queues create conformance-webmention
+   wrangler queues create conformance-websub
+   wrangler queues create conformance-microsub
+   ```
+
+3. Set the secrets (each prompts for a value; generate long random strings —
+   `openssl rand -base64 32` — except the PEMs/JWK):
+
+   ```bash
+   wrangler secret put TOKEN_SIGNING_KEY
+   wrangler secret put CONFORMANCE_PASSWORD
+   wrangler secret put CONFORMANCE_ADMIN_TOKEN
+   wrangler secret put ATPROTO_PASSWORD
+   wrangler secret put ATPROTO_JWT_SECRET
+   # RSA keypair for the ActivityPub actor:
+   #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ap.pem
+   #   openssl pkey -in ap.pem -pubout -out ap.pub.pem
+   wrangler secret put ACTIVITYPUB_PUBLIC_KEY_PEM   # paste ap.pub.pem
+   wrangler secret put ACTIVITYPUB_PRIVATE_KEY_PEM  # paste ap.pem
+   # P-256 private JWK for the VC issuer:
+   #   node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign']).then(async k=>console.log(JSON.stringify(await crypto.subtle.exportKey('jwk',k.privateKey))))"
+   wrangler secret put VC_SIGNING_KEY
+   ```
+
+4. In the GitHub repo, add the `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit,
+   Workers Routes:Edit, D1:Edit, Queues:Edit, R2:Edit) and
+   `CLOUDFLARE_ACCOUNT_ID` secrets for the CI deploy job.
+
+## Deploy
+
+From the repo root (dependencies must be built first — wrangler bundles the
+workspace packages from their `dist/`):
+
+```bash
+pnpm build
+pnpm --filter @dwk/conformance-target deploy
+```
+
+Or trigger the `Conformance` workflow's deploy job (`workflow_dispatch`).
+
+### Initialize the D1 schemas
+
+A freshly created D1 database has no tables — the IndieAuth consent flow (and
+anything depending on it) 500s until the schemas exist. After every deploy of
+a fresh database (first deploy, or after a reset — see below), initialize
+them once via the admin-gated route:
+
+```bash
+curl -X POST https://conformance.dwk.io/admin/init \
+  -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN"
+```
+
+This calls each mounted package's public D1-store init API
+(`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`) and is idempotent —
+safe to rerun. `@dwk/websub` and `@dwk/webmention` create their schema lazily
+on first use and have no public init API to call, so the response lists them
+as `"unavailable"` rather than reaching into their internals. Run this
+**before** any suite run below.
+
+## Running litmus (WebDAV conformance)
+
+1. Mint a read-write app password:
+
+   ```bash
+   curl -sS -X POST https://conformance.dwk.io/dav-credentials \
+     -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"label":"litmus","scope":{"modes":["read","write"]}}'
+   ```
+
+   The response contains `username` and `secret` (shown once).
+
+2. Seed the pod: it is lazily materialized, so an empty pod's root 404s even
+   for the owner — PROPFIND on `/dav/` will fail until at least one resource
+   exists. Write one before running the suite:
+
+   ```bash
+   curl -sS -X PUT https://conformance.dwk.io/dav/seed.txt \
+     -u "<username>:<secret>" \
+     -H "Content-Type: text/plain" \
+     -d seed
+   ```
+
+3. Run the suite through the dispatcher (litmus must be installed —
+   `apt-get install litmus` / `brew install litmus`):
+
+   ```bash
+   node scripts/conformance/run-suite.mjs webdav \
+     --target https://conformance.dwk.io/dav/ \
+     --username <username> --password <secret>
+   ```
+
+4. On green, record the result in `conformance/status.json`
+   (`@dwk/webdav` → suites → litmus → `"passing"`, with the run date), and
+   revoke the credential:
+
+   ```bash
+   curl -sS -X DELETE "https://conformance.dwk.io/dav-credentials?id=<credentialId>" \
+     -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN"
+   ```
+
+## Resetting suite data
+
+Suite runs accumulate state in the DOs / R2 / D1 of this deployment. To reset:
+delete and recreate the D1 databases and R2 buckets (step 1 above), then
+redeploy — DO storage for `new_sqlite_classes` is dropped with
+`wrangler delete` + redeploy. Re-run `POST /admin/init` before the next suite
+run. Never point suites at a production identity.

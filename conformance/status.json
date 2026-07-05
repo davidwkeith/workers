@@ -464,6 +464,14 @@
           "dwk-serve bin + esbuild Docker bundle boot/serve/shutdown (phase 5)"
         ]
       }
+    },
+    "@dwk/conformance-target": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
     }
   }
 }

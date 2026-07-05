@@ -1,0 +1,42 @@
+{
+  "name": "@dwk/conformance-target",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Conformance-target Worker: every @dwk endpoint package composed into one deployable Worker (conformance.dwk.io) that the hosted conformance suites run against. Never published.",
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@dwk/activitypub": "workspace:*",
+    "@dwk/atproto-pds": "workspace:*",
+    "@dwk/host-meta": "workspace:*",
+    "@dwk/indieauth": "workspace:*",
+    "@dwk/micropub": "workspace:*",
+    "@dwk/microsub": "workspace:*",
+    "@dwk/remotestorage": "workspace:*",
+    "@dwk/solid-pod": "workspace:*",
+    "@dwk/vc": "workspace:*",
+    "@dwk/webauthn": "workspace:*",
+    "@dwk/webfinger": "workspace:*",
+    "@dwk/webmention": "workspace:*",
+    "@dwk/websub": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260620.1"
+  }
+}

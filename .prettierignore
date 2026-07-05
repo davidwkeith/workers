@@ -8,3 +8,6 @@ pnpm-lock.yaml
 spec/
 README.md
 LICENSE
+
+# Session scratch (subagent-driven development ledger/briefs)
+.superpowers/
