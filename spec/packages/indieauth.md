@@ -16,6 +16,37 @@ tokens that `@dwk/micropub` (and other clients) consume.
 - Support `rel=me` / **profile-URL verification**.
 - Issue **scopes**, consumed downstream by Micropub.
 
+## Implementing consent
+
+The library owns all protocol mechanics; authenticating the user and obtaining
+consent is the deployer's concern, delegated through the required
+`approveAuthorization` config hook (`ApproveAuthorization` in
+`packages/indieauth/src/config.ts`). The hook receives the parsed, **validated**
+authorization request plus the raw HTTP `Request` and returns either an
+approval (`{ me, scopes?, profile? }`) — the library mints the code and
+redirects — or a `Response` the library returns unchanged (a consent page, a
+redirect to an external IdP, …).
+
+- **The hook fires on `GET /authorize` only.** `POST /authorize` is
+  unconditionally the IndieAuth **profile-URL redemption grant** (code → `me`),
+  so a consent form MUST NOT post back to the authorization endpoint — the
+  submission would be parsed as a redemption attempt and rejected. Consent
+  submission lives on a deployer-owned endpoint, and the flow completes by
+  re-entering `GET /authorize`.
+- **Redirect-with-token (recommended):** the hook renders a form posting to a
+  deployer endpoint (e.g. `POST /consent`); that endpoint authenticates the
+  user and 303-redirects back to `GET /authorize` with the original
+  authorization params plus a **signed, short-TTL consent token**; on re-entry
+  the hook verifies the token — recomputing the signature over the _validated_
+  request fields (`clientId`, `redirectUri`, `state`, `codeChallenge`), not the
+  raw query, so it vouches for exactly what will be granted — and returns the
+  approval. Reference implementation:
+  `packages/conformance-target/src/approval.ts`.
+- **Session cookie:** the hook checks a session cookie; if absent or invalid it
+  takes over with a login redirect whose post-login destination is the original
+  `GET /authorize` URL; if present it returns the approval (optionally after a
+  consent interstitial that itself redirects back).
+
 ## Auth / security
 
 - Tokens issued here are **DPoP-bound** (see [dpop.md](dpop.md)); token
