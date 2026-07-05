@@ -39,10 +39,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** Machine-readable cause of an {@link SsrfError}. */
 export type SsrfReason =
-  | "invalid_url"
-  | "disallowed_scheme"
-  | "blocked_host"
-  | "too_many_redirects";
+  "invalid_url" | "disallowed_scheme" | "blocked_host" | "too_many_redirects";
 
 /**
  * Raised when a request is refused on SSRF grounds (blocked host, disallowed

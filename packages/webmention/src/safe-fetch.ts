@@ -42,10 +42,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  * structured field (no free-text parsing required).
  */
 export type SsrfReason =
-  | "invalid_url"
-  | "disallowed_scheme"
-  | "blocked_host"
-  | "too_many_redirects";
+  "invalid_url" | "disallowed_scheme" | "blocked_host" | "too_many_redirects";
 
 /**
  * Raised when a request is refused on SSRF grounds (blocked host, disallowed

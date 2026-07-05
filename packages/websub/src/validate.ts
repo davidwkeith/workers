@@ -28,9 +28,7 @@ export type SubscribeError =
 
 /** Machine-readable rejection codes for a publish request. */
 export type PublishError =
-  | "url_required"
-  | "url_not_url"
-  | "topic_not_supported";
+  "url_required" | "url_not_url" | "topic_not_supported";
 
 /** Parsed, validated subscribe/unsubscribe request. */
 export interface SubscribeRequest {
@@ -52,13 +50,11 @@ export interface PublishRequest {
 
 /** Result of validating a subscribe/unsubscribe request. */
 export type SubscribeResult =
-  | SubscribeRequest
-  | { readonly ok: false; readonly error: SubscribeError };
+  SubscribeRequest | { readonly ok: false; readonly error: SubscribeError };
 
 /** Result of validating a publish request. */
 export type PublishResult =
-  | PublishRequest
-  | { readonly ok: false; readonly error: PublishError };
+  PublishRequest | { readonly ok: false; readonly error: PublishError };
 
 function isHttpUrl(value: string): boolean {
   let url: URL;

@@ -67,9 +67,7 @@ export async function createDigest(
 
 /** A reason a digest header failed to verify, or `null` when it matched. */
 export type DigestRejection =
-  | "digest_missing"
-  | "digest_unsupported"
-  | "digest_mismatch";
+  "digest_missing" | "digest_unsupported" | "digest_mismatch";
 
 /**
  * Verify a received `Content-Digest` field value against `body`. The field is

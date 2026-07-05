@@ -56,11 +56,7 @@ function cborHead(major: number, n: number): Uint8Array {
 
 /** A CBOR value the test encoder accepts. */
 export type CborInput =
-  | number
-  | string
-  | Uint8Array
-  | CborInput[]
-  | Map<number | string, CborInput>;
+  number | string | Uint8Array | CborInput[] | Map<number | string, CborInput>;
 
 /** Encode the WebAuthn CBOR subset (ints, byte/text strings, arrays, maps). */
 export function encodeCbor(value: CborInput): Uint8Array {

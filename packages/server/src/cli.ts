@@ -25,9 +25,7 @@ import type { HostConfig } from "./config.js";
 
 /** A config module: a default (or named `config`) export — value or factory. */
 type ConfigExport =
-  | HostConfig
-  | (() => HostConfig | Promise<HostConfig>)
-  | undefined;
+  HostConfig | (() => HostConfig | Promise<HostConfig>) | undefined;
 interface ConfigModule {
   readonly default?: ConfigExport;
   readonly config?: ConfigExport;
