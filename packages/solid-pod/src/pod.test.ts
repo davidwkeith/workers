@@ -213,6 +213,15 @@ describe("@dwk/solid-pod DO method + body handling", () => {
     expect((await head.arrayBuffer()).byteLength).toBe(0);
   });
 
+  it("sets X-Content-Type-Options: nosniff on a served blob", async () => {
+    const stub = freshStub();
+    expect((await putBlob(stub, "/n.bin", "blobbytes")).status).toBe(201);
+
+    const res = await run(stub, "GET", "/n.bin", { webid: OWNER });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   it("accepts a bodyless PUT as an empty resource", async () => {
     const stub = freshStub();
     const res = await run(stub, "PUT", "/empty", {

@@ -83,6 +83,7 @@ describe("documents", () => {
     expect(read.headers.get("content-type")).toBe("text/plain");
     expect(read.headers.get("etag")).toBe(etag1);
     expect(read.headers.get("content-length")).toBe("5");
+    expect(read.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await read.text()).toBe("hello");
 
     const overwrite = await call("/documents/note.txt", {
