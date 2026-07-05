@@ -72,4 +72,15 @@ export class HostExecutionContext implements ExecutionContext {
   get tracing(): Tracing {
     throw new Error("Tracing is not supported on the @dwk/server Node host");
   }
+
+  /**
+   * Cloudflare's main-module self-binding, used for Worker-to-Worker RPC
+   * (added to `ExecutionContext` in `@cloudflare/workers-types` 5). There is
+   * no equivalent on the Node host — packages call each other in-process —
+   * so, like `tracing`, accessing it throws rather than silently doing
+   * nothing.
+   */
+  get exports(): Cloudflare.Exports {
+    throw new Error("exports is not supported on the @dwk/server Node host");
+  }
 }
