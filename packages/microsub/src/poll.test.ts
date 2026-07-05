@@ -6,7 +6,7 @@ import {
   type ConsumerOptions,
 } from "./consumer.js";
 import type { MicrosubEnv } from "./config.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 import type { Jf2Entry } from "./jf2.js";
 import { createMicrosubPoller } from "./poll.js";
 import type { MicrosubJob, PollJob } from "./queue.js";

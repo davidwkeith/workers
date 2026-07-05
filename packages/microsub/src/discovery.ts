@@ -19,10 +19,14 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import { readTextCapped, type FetchLike } from "./fetch.js";
 import { parseHFeed } from "./hfeed.js";
 import { parseFeed, type Jf2Entry } from "./jf2.js";
-import { safeFetch } from "./safe-fetch.js";
+import { MicrosubLogEvent } from "./log.js";
+import {
+  readBodyCapped as readTextCapped,
+  safeFetch,
+  type FetchLike,
+} from "@dwk/safe-fetch";
 
 /** Shared options for the discovery/fetch helpers. */
 export interface DiscoveryOptions {
@@ -165,7 +169,7 @@ export async function discoverFeed(
       doFetch,
       target,
       { method: "GET", headers: { accept: FEED_ACCEPT } },
-      { logger, metrics },
+      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
     );
     response = result.response;
     finalUrl = result.url;
@@ -242,7 +246,7 @@ export async function fetchFeed(
       doFetch,
       feedUrl,
       { method: "GET", headers },
-      { logger, metrics },
+      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
     );
     response = result.response;
     finalUrl = result.url;
