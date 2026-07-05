@@ -15,6 +15,8 @@
  * @see https://w3c-ccg.github.io/did-method-web/
  */
 
+import { safeFetchJson, type FetchLike } from "@dwk/safe-fetch";
+
 import type { JsonObject, VerificationMethod } from "./data-integrity.js";
 
 const DID_WEB_PREFIX = "did:web:";
@@ -203,11 +205,8 @@ export function findVerificationMethod(
   return undefined;
 }
 
-/** A minimal `fetch` used to retrieve DID documents. */
-export type FetchLike = (
-  input: string,
-  init?: { headers?: Record<string, string> },
-) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
+/** A minimal, injectable `fetch` signature (re-exported for callers). */
+export type { FetchLike } from "@dwk/safe-fetch";
 
 /** Options for {@link createDidWebResolver}. */
 export interface DidWebResolverOptions {
@@ -217,21 +216,16 @@ export interface DidWebResolverOptions {
 
 /**
  * Build a {@link VerificationMethodResolver} that resolves a `did:web`
- * verification-method id by fetching the controller's DID document over HTTPS
- * and locating the referenced method. Returns `undefined` for non-`did:web`
- * ids, fetch failures, and unknown methods — verification treats that as an
- * unresolvable key rather than throwing.
+ * verification-method id by fetching the controller's DID document over
+ * HTTPS (through `@dwk/safe-fetch`'s SSRF guardrails and timeout) and
+ * locating the referenced method. Returns `undefined` for non-`did:web` ids,
+ * a blocked/failed fetch, or unknown methods — verification treats that as
+ * an unresolvable key rather than throwing.
  */
 export function createDidWebResolver(
   options: DidWebResolverOptions = {},
 ): (id: string) => Promise<VerificationMethod | undefined> {
-  const fetchImpl =
-    options.fetch ?? (globalThis.fetch as unknown as FetchLike | undefined);
-  if (fetchImpl === undefined) {
-    throw new Error(
-      "@dwk/vc: no fetch implementation available for did:web resolution",
-    );
-  }
+  const fetchImpl = options.fetch ?? (globalThis.fetch as unknown as FetchLike);
 
   return async (id: string) => {
     const hashIndex = id.indexOf("#");
@@ -245,19 +239,14 @@ export function createDidWebResolver(
       return undefined;
     }
 
-    let response: Awaited<ReturnType<FetchLike>>;
-    try {
-      response = await fetchImpl(url, {
-        headers: { accept: "application/did+json, application/json" },
-      });
-    } catch {
-      return undefined;
-    }
-    if (!response.ok) return undefined;
-
     let document: unknown;
     try {
-      document = await response.json();
+      document = await safeFetchJson(
+        fetchImpl,
+        url,
+        { headers: { accept: "application/did+json, application/json" } },
+        { allowedSchemes: ["https:"], logEvent: "vc.ssrf.blocked" },
+      );
     } catch {
       return undefined;
     }

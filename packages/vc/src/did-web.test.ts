@@ -138,7 +138,7 @@ describe("findVerificationMethod / createDidWebResolver", () => {
     const resolve = createDidWebResolver({
       fetch: async (url) => {
         expect(url).toBe("https://example.com/.well-known/did.json");
-        return { ok: true, status: 200, json: async () => didDoc };
+        return new Response(JSON.stringify(didDoc));
       },
     });
     const vm = await resolve("did:web:example.com#key-0");
@@ -148,7 +148,7 @@ describe("findVerificationMethod / createDidWebResolver", () => {
 
   it("returns undefined on fetch failure", async () => {
     const resolve = createDidWebResolver({
-      fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+      fetch: async () => new Response("", { status: 404 }),
     });
     expect(await resolve("did:web:example.com#key-0")).toBeUndefined();
   });
