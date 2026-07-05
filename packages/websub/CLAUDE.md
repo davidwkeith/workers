@@ -20,7 +20,7 @@ publish-ping entry point for atomicity with Anglesite site builds.
   GET callback to the subscriber's callback URL with `hub.challenge`. The
   subscription is only persisted after successful verification.
 - **SSRF protection.** Intent verification and content distribution use
-  `safeFetch` with private/reserved host blocking.
+  `safeFetch` (from `@dwk/safe-fetch`) with private/reserved host blocking.
 - **HMAC-SHA256 signatures.** When a subscriber provides a `hub.secret`,
   distributed content includes an `X-Hub-Signature` header with the
   HMAC-SHA256 of the body.
@@ -53,8 +53,6 @@ src/verify.ts         # intent verification (hub.challenge callback)
 src/distribute.ts     # content fetching, HMAC signing, subscriber delivery
 src/queue.ts          # queued job shapes (verify + distribute kinds)
 src/consumer.ts       # createWebSubQueueConsumer (verification + fan-out delivery)
-src/fetch.ts          # injectable FetchLike type and body-size cap
-src/safe-fetch.ts     # SSRF-safe fetch with private IP blocking
 src/log.ts            # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts         # colocated tests
 ```
@@ -62,3 +60,5 @@ src/*.test.ts         # colocated tests
 ## Dependencies
 
 - `@dwk/log` — structured logging.
+- `@dwk/safe-fetch` — SSRF-safe fetch, capped body reads, and cross-origin
+  header stripping for intent verification and content distribution.

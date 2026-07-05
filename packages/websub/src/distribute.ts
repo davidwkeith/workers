@@ -22,11 +22,7 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
-import {
-  readBytesCapped,
-  safeFetch,
-  type FetchLike,
-} from "@dwk/safe-fetch";
+import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebSubLogEvent } from "./log.js";
 import type { Subscription } from "./store.js";
 
