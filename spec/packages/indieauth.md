@@ -38,10 +38,14 @@ redirect to an external IdP, …).
   user and 303-redirects back to `GET /authorize` with the original
   authorization params plus a **signed, short-TTL consent token**; on re-entry
   the hook verifies the token — recomputing the signature over the _validated_
-  request fields (`clientId`, `redirectUri`, `state`, `codeChallenge`), not the
-  raw query, so it vouches for exactly what will be granted — and returns the
-  approval. Reference implementation:
-  `packages/conformance-target/src/approval.ts`.
+  request fields (`clientId`, `redirectUri`, `state`, `codeChallenge`, plus the
+  granted `scopes`/`resources`, since the approval defaults to the requested
+  scopes and an unsigned `scope`/`resource` param altered after consent would
+  silently widen the grant), not the raw query, so the token vouches for
+  exactly what will be granted — and returns the approval. Reference
+  implementation: `packages/conformance-target/src/approval.ts` (a
+  fixed-behavior test identity that signs only the request-identity fields; a
+  real IdP MUST cover the grant fields too).
 - **Session cookie:** the hook checks a session cookie; if absent or invalid it
   takes over with a login redirect whose post-login destination is the original
   `GET /authorize` URL; if present it returns the approval (optionally after a
