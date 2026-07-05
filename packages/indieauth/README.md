@@ -51,7 +51,12 @@ export default {
 
 `approveAuthorization` returns either an approval (`{ me, scopes?, profile? }`)
 to mint a code and redirect, or a `Response` to take over the exchange (render a
-login/consent page, redirect to an external IdP, etc.).
+login/consent page, redirect to an external IdP, etc.). The hook fires on
+`GET /authorize` only — `POST /authorize` is the profile-URL redemption grant,
+so a consent form must post to a deployer-owned endpoint that redirects back to
+`GET /authorize`. See ["Implementing
+consent"](../../spec/packages/indieauth.md#implementing-consent) in the spec for
+the full contract and recommended patterns.
 
 ### Audience-restricted tokens (RFC 8707 / RFC 9700 §2.3)
 
