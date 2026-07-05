@@ -404,6 +404,14 @@
         "cases": []
       }
     },
+    "@dwk/safe-fetch": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/calendar": {
       "standard": "iCalendar / JSCalendar",
       "suites": {},

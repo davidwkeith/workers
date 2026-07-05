@@ -198,6 +198,12 @@ importers:
         specifier: workspace:*
         version: link:../webfinger
 
+  packages/safe-fetch:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+
   packages/server:
     dependencies:
       '@dwk/log':

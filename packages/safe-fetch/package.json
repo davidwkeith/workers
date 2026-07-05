@@ -1,0 +1,46 @@
+{
+  "name": "@dwk/safe-fetch",
+  "version": "0.1.0-beta.1",
+  "description": "SSRF-safe outbound fetch and capped body reads. Cross-standard reusable; no Workers runtime dependency.",
+  "keywords": [
+    "ssrf",
+    "fetch",
+    "security",
+    "http",
+    "redirect"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/safe-fetch#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/safe-fetch"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@dwk/log": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
