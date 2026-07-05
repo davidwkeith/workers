@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   fetchPlcData,
@@ -123,5 +123,11 @@ describe("PLC directory client", () => {
         fetchImpl,
       }),
     ).rejects.toThrow(/resolve failed.*500/s);
+  });
+
+  it("sends a timeout signal on every directory call", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () => new Response("{}"));
+    await resolvePlcDid("did:plc:abc", { fetchImpl });
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 });
