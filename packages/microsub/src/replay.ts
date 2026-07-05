@@ -50,8 +50,13 @@ export function createDpopReplayStore(env: MicrosubStoreEnv): DpopReplayStore {
     },
 
     async recordProof(jti, expiresAt, now) {
+      // Reap-then-record in a single batched transaction (one D1 roundtrip):
+      //   1. DELETE rows whose proof can no longer be accepted, so the table
+      //      tracks only the live window.
+      //   2. INSERT OR IGNORE this `jti`; `meta.changes` tells us whether it was
+      //      unseen. A `jti` is a per-proof random UUID, so a row that survives
+      //      reaping and collides is a genuine replay, not a stale entry.
       const results = await db.batch([
-        db.prepare(SCHEMA),
         db
           .prepare("DELETE FROM microsub_dpop_proofs WHERE expires_at <= ?")
           .bind(now),
@@ -61,8 +66,8 @@ export function createDpopReplayStore(env: MicrosubStoreEnv): DpopReplayStore {
           )
           .bind(jti, expiresAt),
       ]);
-      // The INSERT is the third statement; `meta.changes` is 0 on a replay.
-      return (results[2]?.meta.changes ?? 0) > 0;
+      // The INSERT is the second statement; `meta.changes` is 0 on a replay.
+      return (results[1]?.meta.changes ?? 0) > 0;
     },
   };
 }
