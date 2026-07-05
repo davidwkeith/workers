@@ -7,7 +7,7 @@ import {
   type WebmentionEnv,
   type WebmentionJob,
 } from "./index.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 import type {
   ExecutionContext,
   Message,

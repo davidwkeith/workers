@@ -16,7 +16,7 @@ import {
   type WebmentionEnv,
   type WebmentionJob,
 } from "./index.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 
 type LogRecord = {
   level: "debug" | "info" | "warn" | "error";
@@ -53,7 +53,7 @@ describe("safeFetch SSRF logging", () => {
         doFetch,
         "http://169.254.169.254/latest",
         { method: "GET" },
-        { logger },
+        { logger, logEvent: WebmentionLogEvent.SsrfBlocked },
       ),
     ).rejects.toBeInstanceOf(Error);
     const rec = find(logger.records, WebmentionLogEvent.SsrfBlocked);
@@ -80,7 +80,7 @@ describe("safeFetch SSRF logging", () => {
         doFetch,
         "https://public.example/",
         { method: "GET" },
-        { logger },
+        { logger, logEvent: WebmentionLogEvent.SsrfBlocked },
       ),
     ).rejects.toBeInstanceOf(Error);
     expect(
@@ -103,7 +103,7 @@ describe("safeFetch SSRF logging", () => {
         doFetch,
         "https://loop.example/",
         { method: "GET" },
-        { logger, maxRedirects: 2 },
+        { logger, maxRedirects: 2, logEvent: WebmentionLogEvent.SsrfBlocked },
       ),
     ).rejects.toBeInstanceOf(Error);
     expect(

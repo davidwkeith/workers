@@ -27,8 +27,8 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
+import type { FetchLike } from "@dwk/safe-fetch";
 import { createD1Inbox, type InboxStore } from "./inbox.js";
-import type { FetchLike } from "./fetch.js";
 import { WebmentionLogEvent } from "./log.js";
 import { validateWebmentionParams } from "./validate.js";
 import { verifySource } from "./verify.js";
@@ -69,7 +69,6 @@ export {
   type VerifiedMention,
   type D1InboxOptions,
 } from "./inbox.js";
-export type { FetchLike } from "./fetch.js";
 export {
   safeFetch,
   assertPublicUrl,
@@ -77,10 +76,11 @@ export {
   SsrfError,
   DEFAULT_MAX_REDIRECTS,
   DEFAULT_TIMEOUT_MS,
+  type FetchLike,
   type SafeFetchOptions,
   type SafeFetchResult,
   type SsrfReason,
-} from "./safe-fetch.js";
+} from "@dwk/safe-fetch";
 export { WebmentionLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";
 

@@ -15,10 +15,9 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
+import { safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { discoverEndpoint } from "./discovery.js";
-import type { FetchLike } from "./fetch.js";
 import { WebmentionLogEvent } from "./log.js";
-import { safeFetch } from "./safe-fetch.js";
 
 /** Options for {@link sendWebmention} / {@link sendWebmentions}. */
 export interface SendOptions {
@@ -100,7 +99,7 @@ export async function sendWebmention(
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body,
       },
-      { logger },
+      { logger, logEvent: WebmentionLogEvent.SsrfBlocked },
     );
     response = result.response;
   } catch {

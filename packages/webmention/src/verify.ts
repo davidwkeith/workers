@@ -24,10 +24,9 @@ import {
   resolveUrl,
   scanElements,
 } from "./html.js";
-import { readBodyCapped, type FetchLike } from "./fetch.js";
+import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebmentionLogEvent } from "./log.js";
 import { extractRsvp, type RsvpValue } from "./rsvp.js";
-import { safeFetch } from "./safe-fetch.js";
 
 /** Elements whose `href` may constitute a link to the target. */
 const HREF_TAGS = new Set(["a", "link", "area"]);
@@ -266,7 +265,7 @@ export async function verifySource(
       doFetch,
       source,
       { method: "GET", headers: { accept: "text/html, */*" } },
-      { logger, metrics },
+      { logger, metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
     );
     response = result.response;
     base = result.url;

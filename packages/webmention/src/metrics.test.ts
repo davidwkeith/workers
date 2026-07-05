@@ -16,7 +16,7 @@ import {
   type WebmentionEnv,
   type WebmentionJob,
 } from "./index.js";
-import type { FetchLike } from "./fetch.js";
+import type { FetchLike } from "@dwk/safe-fetch";
 
 type MetricRecord = {
   kind: "count" | "observe";
@@ -49,7 +49,7 @@ describe("safeFetch SSRF metrics", () => {
         doFetch,
         "http://169.254.169.254/latest",
         { method: "GET" },
-        { metrics },
+        { metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
       ),
     ).rejects.toBeInstanceOf(Error);
     const rec = find(metrics.records, WebmentionLogEvent.SsrfBlocked);
