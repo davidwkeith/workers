@@ -10,7 +10,6 @@
 
 import { createMicrosubQueueConsumer } from "@dwk/microsub";
 import { createSolidPodGc } from "@dwk/solid-pod";
-import type { SolidPodGcEnv } from "@dwk/solid-pod";
 import type { WebmentionJob } from "@dwk/webmention";
 import { createWebmentionQueueConsumer } from "@dwk/webmention";
 import type { WebSubJob } from "@dwk/websub";
@@ -75,16 +74,6 @@ export default {
   async scheduled(event, env, ctx): Promise<void> {
     // solid-pod and remotestorage share the @dwk/store GC schema and the same
     // BLOBS/GC_DB bindings, so one collector pass covers both packages.
-    //
-    // `GC_DB` is optional on `SolidPodEnv`/`RemoteStorageEnv` (the DO
-    // opportunistically forwards orphans only when it's bound) but required
-    // on `SolidPodGcEnv` (the cron handler needs it to run at all). This
-    // deployment always binds `GC_DB` (see vitest.config.ts's `d1Databases`
-    // / wrangler.jsonc), so the narrowing is type-only.
-    await createSolidPodGc(configsFor(env).solidPod)(
-      event,
-      env as unknown as SolidPodGcEnv,
-      ctx,
-    );
+    await createSolidPodGc(configsFor(env).solidPod)(event, env, ctx);
   },
 } satisfies ExportedHandler<ConformanceEnv, AnyJob>;

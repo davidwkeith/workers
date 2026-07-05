@@ -53,6 +53,8 @@ export interface ConformanceEnv
     AtprotoPdsEnv {
   /** Public origin of the deployment (no trailing slash), e.g. `https://conformance.dwk.io`. */
   readonly BASE_URL: string;
+  /** Always bound by this deployment; narrows the fragments' optional GC_DB. */
+  readonly GC_DB: D1Database;
   /** Password for the IndieAuth consent form (secret). */
   readonly CONFORMANCE_PASSWORD: string;
   /** Shared-secret bearer that authenticates as the pod owner (secret; interim until Solid-OIDC, P4). */
