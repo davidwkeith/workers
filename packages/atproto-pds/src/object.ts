@@ -83,6 +83,10 @@ const ACCESS_SCOPE = "com.atproto.access";
 const REFRESH_SCOPE = "com.atproto.refresh";
 const CAR_CONTENT_TYPE = "application/vnd.ipld.car";
 
+// Pseudo-codes the runtime reports for how a connection ended but that the
+// WebSocket spec forbids sending back to the peer via `ws.close()`.
+const RESERVED_CLOSE_CODES = new Set([1004, 1005, 1006, 1015]);
+
 // Firehose backfill retention: the most recent N `#commit` frames are buffered
 // in DO SQLite so a reconnecting consumer can replay from a `?cursor=` before
 // going live. Older frames are trimmed; a cursor older than the window receives
@@ -1468,7 +1472,7 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // unconditionally once auto-reply is on (a no-op) or ahead of it (already
     // wrapped for the closing-socket-throws case below).
     try {
-      ws.close(code, reason);
+      ws.close(RESERVED_CLOSE_CODES.has(code) ? 1000 : code, reason);
     } catch {
       // Closing an already-closing socket throws; nothing left to do.
     }

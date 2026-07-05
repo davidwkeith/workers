@@ -87,8 +87,12 @@ async function toBytes(data: unknown): Promise<Uint8Array> {
 function frames(ws: WebSocket): { next(): Promise<Uint8Array> } {
   const buffered: Uint8Array[] = [];
   const waiting: ((frame: Uint8Array) => void)[] = [];
+  // Chained (not fire-and-forget) so that concurrent `Blob.arrayBuffer()`
+  // resolutions can't reorder frames relative to their arrival order.
+  let chain = Promise.resolve();
   ws.addEventListener("message", (event) => {
-    void toBytes(event.data).then((data) => {
+    chain = chain.then(async () => {
+      const data = await toBytes(event.data);
       const resolve = waiting.shift();
       if (resolve) resolve(data);
       else buffered.push(data);
