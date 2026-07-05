@@ -21,7 +21,7 @@ log-event name they report under, and two small behavioral deltas:
 Separately, #215 flags four infrastructure fetches with no timeout at all:
 `@dwk/vc`'s `did-web.ts:250` (did:web DID document resolution — this one also
 has **no SSRF host-block whatsoever**, since it predates the vc-local
-safe-fetch copy added for #214's *status-list* fetch specifically) and
+safe-fetch copy added for #214's _status-list_ fetch specifically) and
 `@dwk/atproto-pds`'s `plc-directory.ts` (3 call sites) and `resolve.ts:50`.
 
 ## Goal
@@ -58,12 +58,14 @@ no-op defaults, same pattern the four existing copies already use).
 1. **`assertPublicUrl(rawUrl, options?)`** merges `assertPublicUrl` (http+https,
    used by webmention/websub/microsub) and `assertPublicHttpsUrl` (https-only,
    used by vc) into one function:
+
    ```ts
    function assertPublicUrl(
      rawUrl: string,
      options?: { allowedSchemes?: readonly string[] }, // default ["http:", "https:"]
-   ): URL
+   ): URL;
    ```
+
    `vc` passes `{ allowedSchemes: ["https:"] }` to keep its existing https-only
    behavior.
 
@@ -72,7 +74,7 @@ no-op defaults, same pattern the four existing copies already use).
      log-event enum (`WebmentionLogEvent.SsrfBlocked`,
      `WebSubLogEvent.SsrfBlocked`, etc.). The lib logs/counts under whatever
      string the caller passes, so it stays free of any package's vocabulary.
-     Callers keep passing their existing enum *value* — only the import site
+     Callers keep passing their existing enum _value_ — only the import site
      moves, log output is unchanged.
    - `stripHeadersCrossOrigin?: readonly string[]` — additional header names
      to strip on a cross-origin redirect hop, beyond the base credential set
@@ -92,7 +94,7 @@ no-op defaults, same pattern the four existing copies already use).
      rawUrl: string,
      init?: RequestInit,
      options?: SafeFetchOptions & { maxBodyBytes?: number },
-   ): Promise<unknown>
+   ): Promise<unknown>;
    ```
    Calls `safeFetch`, checks `response.ok`, reads the body via
    `readBodyCapped(response, maxBodyBytes)`, `JSON.parse`s it. Throws a plain
@@ -114,13 +116,13 @@ no-op defaults, same pattern the four existing copies already use).
 
 ## Migration (delete the duplicated code, don't just add the new lib)
 
-| Package | Change |
-|---|---|
-| `@dwk/webmention` | Delete `src/safe-fetch.ts` and `src/fetch.ts`; call sites import `safeFetch`, `readBodyCapped`, `FetchLike`, `SsrfError` etc. directly from `@dwk/safe-fetch`, passing `logEvent: WebmentionLogEvent.SsrfBlocked`. `MAX_BODY_BYTES` (2 MB) stays a webmention-local constant passed explicitly as `maxBodyBytes`. |
-| `@dwk/websub` | Same deletion; passes `stripHeadersCrossOrigin: ["x-hub-signature"]` and `logEvent: WebSubLogEvent.SsrfBlocked`. Its own `MAX_BODY_BYTES` (4 MB) stays local, passed explicitly. |
-| `@dwk/microsub` | Same deletion; `logEvent: MicrosubLogEvent.SsrfBlocked`. |
-| `@dwk/vc` | Delete the interim `src/safe-fetch.ts` from #232. `handler.ts`'s status-list fetch calls the shared `safeFetchJson` with `allowedSchemes: ["https:"]`, `maxBodyBytes: 1_048_576`, `logEvent: "vc.ssrf.blocked"`. `did-web.ts`'s `createDidWebResolver` (see #215 below) gets the same treatment. |
-| `@dwk/atproto-pds` | No prior safe-fetch copy; net-new usage (see #215 below). |
+| Package            | Change                                                                                                                                                                                                                                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@dwk/webmention`  | Delete `src/safe-fetch.ts` and `src/fetch.ts`; call sites import `safeFetch`, `readBodyCapped`, `FetchLike`, `SsrfError` etc. directly from `@dwk/safe-fetch`, passing `logEvent: WebmentionLogEvent.SsrfBlocked`. `MAX_BODY_BYTES` (2 MB) stays a webmention-local constant passed explicitly as `maxBodyBytes`. |
+| `@dwk/websub`      | Same deletion; passes `stripHeadersCrossOrigin: ["x-hub-signature"]` and `logEvent: WebSubLogEvent.SsrfBlocked`. Its own `MAX_BODY_BYTES` (4 MB) stays local, passed explicitly.                                                                                                                                  |
+| `@dwk/microsub`    | Same deletion; `logEvent: MicrosubLogEvent.SsrfBlocked`.                                                                                                                                                                                                                                                          |
+| `@dwk/vc`          | Delete the interim `src/safe-fetch.ts` from #232. `handler.ts`'s status-list fetch calls the shared `safeFetchJson` with `allowedSchemes: ["https:"]`, `maxBodyBytes: 1_048_576`, `logEvent: "vc.ssrf.blocked"`. `did-web.ts`'s `createDidWebResolver` (see #215 below) gets the same treatment.                  |
+| `@dwk/atproto-pds` | No prior safe-fetch copy; net-new usage (see #215 below).                                                                                                                                                                                                                                                         |
 
 Each migrated package adds `"@dwk/safe-fetch": "workspace:*"` to its
 `package.json` dependencies.
@@ -131,7 +133,7 @@ Each of these currently has no SSRF protection and (except the vc status-list
 path already fixed in #232) no timeout either:
 
 - **`packages/vc/src/did-web.ts:250`** (`createDidWebResolver`) — today this
-  path has *zero* guardrails (it predates #214/#232, which only hardened the
+  path has _zero_ guardrails (it predates #214/#232, which only hardened the
   separate status-list fetch). It fetches an externally-resolved `did:web`
   host during credential verification, so it gets full `safeFetch` treatment:
   `allowedSchemes: ["https:"]`, default timeout/redirect caps,
@@ -162,7 +164,7 @@ path already fixed in #232) no timeout either:
 their own `OUTBOUND_TIMEOUT_MS` convention (`packages/activitypub/src/object.ts:797-800`)
 and were not flagged as missing SSRF protection in #216's original table —
 left alone rather than folding in a sixth migration. `@dwk/activitypub`'s
-*inbound* body-size cap (#213) was already fixed in #232 via a
+_inbound_ body-size cap (#213) was already fixed in #232 via a
 package-local `body.ts`, which is a different concern (capping a request
 body being read, not a response) and isn't touched here.
 
@@ -186,7 +188,7 @@ body being read, not a response) and isn't touched here.
 
 - New package needs: `package.json`, `tsconfig.json`, `tsconfig.build.json`,
   `vitest.config.ts`, `README.md`, `src/index.ts` doc comment, and a
-  `conformance/status.json` entry — reusable libs *are* tracked there (see
+  `conformance/status.json` entry — reusable libs _are_ tracked there (see
   `@dwk/dpop`/`@dwk/rdf`/`@dwk/log`/`@dwk/oauth`, each with `"standard": null`,
   empty `suites`, and `"integration": {"status": "pending", "cases": []}`);
   `@dwk/safe-fetch` gets the same shape.

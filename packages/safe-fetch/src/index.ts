@@ -25,9 +25,5 @@ export {
   type SafeFetchResult,
 } from "./safe-fetch.js";
 export { safeFetchJson, type SafeFetchJsonOptions } from "./json.js";
-export {
-  readBodyCapped,
-  readBytesCapped,
-  MAX_BODY_BYTES,
-} from "./body.js";
+export { readBodyCapped, readBytesCapped, MAX_BODY_BYTES } from "./body.js";
 export type { Logger, Metrics } from "@dwk/log";

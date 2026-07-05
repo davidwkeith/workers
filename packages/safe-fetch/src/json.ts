@@ -5,7 +5,11 @@
  */
 
 import { readBodyCapped, MAX_BODY_BYTES } from "./body.js";
-import { safeFetch, type FetchLike, type SafeFetchOptions } from "./safe-fetch.js";
+import {
+  safeFetch,
+  type FetchLike,
+  type SafeFetchOptions,
+} from "./safe-fetch.js";
 
 /** Options for {@link safeFetchJson}, extending {@link SafeFetchOptions}. */
 export interface SafeFetchJsonOptions extends SafeFetchOptions {
@@ -32,7 +36,10 @@ export async function safeFetchJson(
     await response.body?.cancel().catch(() => undefined);
     throw new Error(`fetch status ${response.status}`);
   }
-  const text = await readBodyCapped(response, options?.maxBodyBytes ?? MAX_BODY_BYTES);
+  const text = await readBodyCapped(
+    response,
+    options?.maxBodyBytes ?? MAX_BODY_BYTES,
+  );
   if (text === null) {
     throw new Error("response body too large");
   }

@@ -41,6 +41,7 @@ package), pnpm workspaces, Changesets (pre mode, tag `beta`).
 ### Task 1: Scaffold the `@dwk/safe-fetch` package
 
 **Files:**
+
 - Create: `packages/safe-fetch/package.json`
 - Create: `packages/safe-fetch/tsconfig.json`
 - Create: `packages/safe-fetch/tsconfig.build.json`
@@ -49,6 +50,7 @@ package), pnpm workspaces, Changesets (pre mode, tag `beta`).
 - Modify: `conformance/status.json`
 
 **Interfaces:**
+
 - Produces: the package skeleton every later task in this plan writes into.
 
 - [ ] **Step 1: Create `package.json`**
@@ -58,13 +60,7 @@ package), pnpm workspaces, Changesets (pre mode, tag `beta`).
   "name": "@dwk/safe-fetch",
   "version": "0.1.0-beta.1",
   "description": "SSRF-safe outbound fetch and capped body reads. Cross-standard reusable; no Workers runtime dependency.",
-  "keywords": [
-    "ssrf",
-    "fetch",
-    "security",
-    "http",
-    "redirect"
-  ],
+  "keywords": ["ssrf", "fetch", "security", "http", "redirect"],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
@@ -83,11 +79,7 @@ package), pnpm workspaces, Changesets (pre mode, tag `beta`).
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "src",
-    "!src/**/*.test.ts"
-  ],
+  "files": ["dist", "src", "!src/**/*.test.ts"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
@@ -201,10 +193,12 @@ git commit -m "feat(safe-fetch): scaffold @dwk/safe-fetch package"
 ### Task 2: `body.ts` — capped body readers
 
 **Files:**
+
 - Create: `packages/safe-fetch/src/body.ts`
 - Test: `packages/safe-fetch/src/body.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (pure, only the DOM `Response`/`ReadableStream` types).
 - Produces: `MAX_BODY_BYTES` (number, default `2 * 1024 * 1024`),
   `readBodyCapped(response: Response, maxBytes?: number): Promise<string | null>`,
@@ -388,10 +382,12 @@ git commit -m "feat(safe-fetch): add capped body readers"
 ### Task 3: `safe-fetch.ts` core — host validation
 
 **Files:**
+
 - Create: `packages/safe-fetch/src/safe-fetch.ts`
 - Test: `packages/safe-fetch/src/safe-fetch.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `SsrfReason`, `SsrfError`, `FetchLike`, `isPrivateOrReservedHost(hostname: string): boolean`,
   `assertPublicUrl(rawUrl: string, options?: { allowedSchemes?: readonly string[] }): URL`.
@@ -403,7 +399,11 @@ git commit -m "feat(safe-fetch): add capped body readers"
 
 ```ts
 import { describe, it, expect } from "vitest";
-import { assertPublicUrl, isPrivateOrReservedHost, SsrfError } from "./safe-fetch.js";
+import {
+  assertPublicUrl,
+  isPrivateOrReservedHost,
+  SsrfError,
+} from "./safe-fetch.js";
 
 describe("isPrivateOrReservedHost", () => {
   it("blocks loopback addresses", () => {
@@ -838,10 +838,12 @@ git commit -m "feat(safe-fetch): add SSRF host validation"
 ### Task 4: `safeFetch` — the guarded fetch loop
 
 **Files:**
+
 - Modify: `packages/safe-fetch/src/safe-fetch.ts`
 - Modify: `packages/safe-fetch/src/safe-fetch.test.ts`
 
 **Interfaces:**
+
 - Consumes: `FetchLike`, `assertPublicUrl`, `SsrfError`, `DEFAULT_MAX_REDIRECTS`,
   `DEFAULT_TIMEOUT_MS` from Task 3.
 - Produces: `SafeFetchOptions`, `SafeFetchResult`,
@@ -1047,7 +1049,12 @@ describe("safeFetch", () => {
   });
 
   it("logs and counts under the caller-supplied logEvent on an SSRF block", async () => {
-    const logger = { warn: vi.fn(), debug: vi.fn(), info: vi.fn(), error: vi.fn() };
+    const logger = {
+      warn: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      error: vi.fn(),
+    };
     const metrics = { count: vi.fn() };
     const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
     await expect(
@@ -1224,11 +1231,13 @@ git commit -m "feat(safe-fetch): add safeFetch guarded fetch loop"
 ### Task 5: `safeFetchJson`
 
 **Files:**
+
 - Create: `packages/safe-fetch/src/json.ts`
 - Test: `packages/safe-fetch/src/json.test.ts`
 - Modify: `packages/safe-fetch/src/index.ts` (created in this task)
 
 **Interfaces:**
+
 - Consumes: `FetchLike`, `SafeFetchOptions`, `safeFetch` from Task 4;
   `readBodyCapped`, `MAX_BODY_BYTES` from Task 2.
 - Produces: `safeFetchJson(doFetch: FetchLike, rawUrl: string, init?: RequestInit, options?: SafeFetchOptions & { maxBodyBytes?: number }): Promise<unknown>`;
@@ -1311,7 +1320,11 @@ Expected: FAIL — `Cannot find module './json.js'`.
  */
 
 import { readBodyCapped, MAX_BODY_BYTES } from "./body.js";
-import { safeFetch, type FetchLike, type SafeFetchOptions } from "./safe-fetch.js";
+import {
+  safeFetch,
+  type FetchLike,
+  type SafeFetchOptions,
+} from "./safe-fetch.js";
 
 /** Options for {@link safeFetchJson}, extending {@link SafeFetchOptions}. */
 export interface SafeFetchJsonOptions extends SafeFetchOptions {
@@ -1338,7 +1351,10 @@ export async function safeFetchJson(
     await response.body?.cancel().catch(() => undefined);
     throw new Error(`fetch failed: ${response.status}`);
   }
-  const text = await readBodyCapped(response, options?.maxBodyBytes ?? MAX_BODY_BYTES);
+  const text = await readBodyCapped(
+    response,
+    options?.maxBodyBytes ?? MAX_BODY_BYTES,
+  );
   if (text === null) {
     throw new Error("response body too large");
   }
@@ -1381,11 +1397,7 @@ export {
   type SafeFetchResult,
 } from "./safe-fetch.js";
 export { safeFetchJson, type SafeFetchJsonOptions } from "./json.js";
-export {
-  readBodyCapped,
-  readBytesCapped,
-  MAX_BODY_BYTES,
-} from "./body.js";
+export { readBodyCapped, readBytesCapped, MAX_BODY_BYTES } from "./body.js";
 export type { Logger, Metrics } from "@dwk/log";
 ```
 
@@ -1406,9 +1418,11 @@ git commit -m "feat(safe-fetch): add safeFetchJson and public index"
 ### Task 6: Changeset for the new package
 
 **Files:**
+
 - Create: `.changeset/safe-fetch-new-package.md`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: nothing consumed by later tasks (release bookkeeping only).
 
@@ -1437,6 +1451,7 @@ git commit -m "chore: add changeset for @dwk/safe-fetch"
 ### Task 7: Migrate `@dwk/webmention`
 
 **Files:**
+
 - Delete: `packages/webmention/src/safe-fetch.ts`
 - Delete: `packages/webmention/src/safe-fetch.test.ts`
 - Delete: `packages/webmention/src/fetch.ts`
@@ -1448,6 +1463,7 @@ git commit -m "chore: add changeset for @dwk/safe-fetch"
 - Create: `.changeset/webmention-safe-fetch-migration.md`
 
 **Interfaces:**
+
 - Consumes: `safeFetch`, `readBodyCapped`, `FetchLike`, `SsrfError`,
   `isPrivateOrReservedHost`, `DEFAULT_MAX_REDIRECTS`, `DEFAULT_TIMEOUT_MS`,
   `SafeFetchOptions`, `SafeFetchResult`, `SsrfReason` from `@dwk/safe-fetch`
@@ -1470,27 +1486,31 @@ Edit `packages/webmention/package.json`:
 - [ ] **Step 2: Update `verify.ts`**
 
 Change:
+
 ```ts
 import { readBodyCapped, type FetchLike } from "./fetch.js";
 ```
+
 ```ts
 import { WebmentionLogEvent } from "./log.js";
 ```
+
 to:
+
 ```ts
-import {
-  readBodyCapped,
-  safeFetch,
-  type FetchLike,
-} from "@dwk/safe-fetch";
+import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebmentionLogEvent } from "./log.js";
 ```
+
 and delete the now-redundant `import { safeFetch } from "./safe-fetch.js";`
 line. Then change the `safeFetch` call's options object:
+
 ```ts
       { logger, metrics },
 ```
+
 to:
+
 ```ts
       { logger, metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
 ```
@@ -1498,24 +1518,27 @@ to:
 - [ ] **Step 3: Update `discovery.ts`**
 
 Change:
+
 ```ts
 import { readBodyCapped, type FetchLike } from "./fetch.js";
 import { safeFetch } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
-import {
-  readBodyCapped,
-  safeFetch,
-  type FetchLike,
-} from "@dwk/safe-fetch";
+import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebmentionLogEvent } from "./log.js";
 ```
+
 and change the `safeFetch` call's options object:
+
 ```ts
       { logger, metrics },
 ```
+
 to:
+
 ```ts
       { logger, metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
 ```
@@ -1523,16 +1546,21 @@ to:
 - [ ] **Step 4: Update `sender.ts`**
 
 Change:
+
 ```ts
 import type { FetchLike } from "./fetch.js";
 ```
+
 ```ts
 import { safeFetch } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
 import { safeFetch, type FetchLike } from "@dwk/safe-fetch";
 ```
+
 (the `WebmentionLogEvent` import is already present — see Task's grep notes)
 and add `logEvent: WebmentionLogEvent.SsrfBlocked` to that file's `safeFetch`
 options object the same way as Steps 2–3.
@@ -1540,6 +1568,7 @@ options object the same way as Steps 2–3.
 - [ ] **Step 5: Update `index.ts`**
 
 Change:
+
 ```ts
 export type { FetchLike } from "./fetch.js";
 export {
@@ -1554,7 +1583,9 @@ export {
   type SsrfReason,
 } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
 export {
   safeFetch,
@@ -1569,6 +1600,7 @@ export {
   type SsrfReason,
 } from "@dwk/safe-fetch";
 ```
+
 Any other `from "./fetch.js"` import in `index.ts` for `type FetchLike` is now
 covered by this single re-export block — remove the separate one.
 
@@ -1615,6 +1647,7 @@ git commit -m "refactor(webmention): migrate to @dwk/safe-fetch"
 ### Task 8: Migrate `@dwk/websub`
 
 **Files:**
+
 - Delete: `packages/websub/src/safe-fetch.ts`
 - Delete: `packages/websub/src/safe-fetch.test.ts`
 - Delete: `packages/websub/src/fetch.ts`
@@ -1626,6 +1659,7 @@ git commit -m "refactor(webmention): migrate to @dwk/safe-fetch"
 - Create: `.changeset/websub-safe-fetch-migration.md`
 
 **Interfaces:**
+
 - Consumes: same `@dwk/safe-fetch` surface as Task 7, plus `readBytesCapped`
   (websub reads bytes, not text) and `stripHeadersCrossOrigin`.
 - Produces: no public API change.
@@ -1644,28 +1678,32 @@ Edit `packages/websub/package.json`:
 - [ ] **Step 2: Update `verify.ts`**
 
 Change:
+
 ```ts
 import type { FetchLike } from "./fetch.js";
 import { readBytesCapped } from "./fetch.js";
 ```
+
 ```ts
 import { safeFetch } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
-import {
-  readBytesCapped,
-  safeFetch,
-  type FetchLike,
-} from "@dwk/safe-fetch";
+import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 ```
+
 (the `WebSubLogEvent` import is already present in this file). Then, for
 **both** occurrences of the `safeFetch` call's options object in this file,
 use `replace_all` to change:
+
 ```ts
       { logger, metrics },
 ```
+
 to:
+
 ```ts
       {
         logger,
@@ -1678,21 +1716,22 @@ to:
 - [ ] **Step 3: Update `distribute.ts`**
 
 Change:
+
 ```ts
 import type { FetchLike } from "./fetch.js";
 import { readBytesCapped } from "./fetch.js";
 ```
+
 ```ts
 import { safeFetch } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
-import {
-  readBytesCapped,
-  safeFetch,
-  type FetchLike,
-} from "@dwk/safe-fetch";
+import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 ```
+
 (the `WebSubLogEvent` import is already present). Then, for **both**
 occurrences of `{ logger, metrics },` in this file, apply the same
 `replace_all` change as Step 2.
@@ -1700,9 +1739,11 @@ occurrences of `{ logger, metrics },` in this file, apply the same
 - [ ] **Step 4: Update `index.ts`**
 
 Change:
+
 ```ts
 export type { FetchLike } from "./fetch.js";
 ```
+
 and the block ending `} from "./safe-fetch.js";` to re-export everything from
 `@dwk/safe-fetch` in one block, matching Task 7 Step 5's pattern (same
 symbol names: `safeFetch`, `assertPublicUrl`, `isPrivateOrReservedHost`,
@@ -1755,6 +1796,7 @@ git commit -m "refactor(websub): migrate to @dwk/safe-fetch"
 ### Task 9: Migrate `@dwk/microsub`
 
 **Files:**
+
 - Delete: `packages/microsub/src/safe-fetch.ts`
 - Delete: `packages/microsub/src/safe-fetch.test.ts`
 - Delete: `packages/microsub/src/fetch.ts`
@@ -1764,6 +1806,7 @@ git commit -m "refactor(websub): migrate to @dwk/safe-fetch"
 - Create: `.changeset/microsub-safe-fetch-migration.md`
 
 **Interfaces:**
+
 - Consumes: same `@dwk/safe-fetch` surface as Task 7 (`readBodyCapped`, not
   `readBytesCapped` — microsub parses feeds as text).
 - Produces: no public API change.
@@ -1784,13 +1827,16 @@ Edit `packages/microsub/package.json`:
 - [ ] **Step 2: Update `discovery.ts`**
 
 Change:
+
 ```ts
 import { readTextCapped, type FetchLike } from "./fetch.js";
 import { parseHFeed } from "./hfeed.js";
 import { parseFeed, type Jf2Entry } from "./jf2.js";
 import { safeFetch } from "./safe-fetch.js";
 ```
+
 to:
+
 ```ts
 import { parseHFeed } from "./hfeed.js";
 import { parseFeed, type Jf2Entry } from "./jf2.js";
@@ -1800,14 +1846,18 @@ import {
   type FetchLike,
 } from "@dwk/safe-fetch";
 ```
+
 (aliasing keeps every existing `readTextCapped(...)` call site in this file
 unchanged — no need to touch the two call sites that use it). Add the
 `MicrosubLogEvent` import (there is none in this file today):
+
 ```ts
 import { MicrosubLogEvent } from "./log.js";
 ```
+
 Then, for **both** occurrences of `{ logger, metrics },` in the `safeFetch`
 calls in this file, use `replace_all` to change to:
+
 ```ts
       { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
 ```
@@ -1858,6 +1908,7 @@ git commit -m "refactor(microsub): migrate to @dwk/safe-fetch"
 ### Task 10: Migrate `@dwk/vc`'s status-list fetch
 
 **Files:**
+
 - Delete: `packages/vc/src/safe-fetch.ts`
 - Delete: `packages/vc/src/safe-fetch.test.ts`
 - Modify: `packages/vc/src/handler.ts`
@@ -1865,11 +1916,12 @@ git commit -m "refactor(microsub): migrate to @dwk/safe-fetch"
 - Create: `.changeset/vc-safe-fetch-migration.md`
 
 **Interfaces:**
+
 - Consumes: `safeFetchJson`, `SsrfError` from `@dwk/safe-fetch`.
 - Produces: no public API change (the deleted `safe-fetch.ts` was never
   re-exported from `@dwk/vc`'s `index.ts` — confirm with
   `grep -n "safe-fetch" packages/vc/src/index.ts` before deleting; if it
-  *is* exported, re-export the same names from `@dwk/safe-fetch` instead,
+  _is_ exported, re-export the same names from `@dwk/safe-fetch` instead,
   matching Task 7 Step 5's pattern).
 
 - [ ] **Step 1: Check whether `index.ts` re-exports the local module**
@@ -1904,29 +1956,29 @@ Then update the call site (found in this task's research at
 `packages/vc/src/handler.ts` around the status-list fetch) from:
 
 ```ts
-    const listCred = (await safeFetchJson(listCredential, {
-      logger: config.logger,
-      metrics: config.metrics,
-      logEvent: VcLogEvent.SsrfBlocked,
-    })) as JsonObject;
+const listCred = (await safeFetchJson(listCredential, {
+  logger: config.logger,
+  metrics: config.metrics,
+  logEvent: VcLogEvent.SsrfBlocked,
+})) as JsonObject;
 ```
 
 to (the shared `safeFetchJson` takes `doFetch` as its first argument, unlike
 the vc-local one which defaulted to the global `fetch` internally):
 
 ```ts
-    const listCred = (await safeFetchJson(
-      globalThis.fetch.bind(globalThis),
-      listCredential,
-      { headers: { accept: "application/json" } },
-      {
-        allowedSchemes: ["https:"],
-        maxBodyBytes: 1_048_576,
-        logger: config.logger,
-        metrics: config.metrics,
-        logEvent: VcLogEvent.SsrfBlocked,
-      },
-    )) as JsonObject;
+const listCred = (await safeFetchJson(
+  globalThis.fetch.bind(globalThis),
+  listCredential,
+  { headers: { accept: "application/json" } },
+  {
+    allowedSchemes: ["https:"],
+    maxBodyBytes: 1_048_576,
+    logger: config.logger,
+    metrics: config.metrics,
+    logEvent: VcLogEvent.SsrfBlocked,
+  },
+)) as JsonObject;
 ```
 
 - [ ] **Step 4: Delete the superseded files**
@@ -1974,11 +2026,13 @@ git commit -m "refactor(vc): migrate status-list fetch to @dwk/safe-fetch"
 ### Task 11: Fold in #215 — `@dwk/vc`'s `did-web.ts` resolver
 
 **Files:**
+
 - Modify: `packages/vc/src/did-web.ts`
 - Modify: `packages/vc/src/did-web.test.ts`
 - Modify: `.changeset/vc-safe-fetch-migration.md` (bump to `minor` — see Step 5)
 
 **Interfaces:**
+
 - Consumes: `safeFetchJson`, `SsrfError` from `@dwk/safe-fetch`.
 - Produces: `DidWebResolverOptions.fetch` widens from the narrow
   `(input: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>`
@@ -2002,6 +2056,7 @@ described in this task's Step 2 below.)
 - [ ] **Step 2: Widen the type and route through `safeFetch`**
 
 Replace:
+
 ```ts
 /** A minimal `fetch` used to retrieve DID documents. */
 export type FetchLike = (
@@ -2064,6 +2119,7 @@ export function createDidWebResolver(
 ```
 
 with:
+
 ```ts
 /** A minimal, injectable `fetch` signature (re-exported for callers). */
 export type { FetchLike } from "@dwk/safe-fetch";
@@ -2113,6 +2169,7 @@ export function createDidWebResolver(
 ```
 
 Add the import at the top of the file:
+
 ```ts
 import { safeFetchJson, type FetchLike } from "@dwk/safe-fetch";
 ```
@@ -2125,10 +2182,12 @@ method) is unchanged and needs no further edit.
 - [ ] **Step 3: Update `did-web.test.ts`'s two fakes to return real `Response` objects**
 
 Change:
+
 ```ts
     const resolve = createDidWebResolver({
       fetch: async (url) => {
 ```
+
 so the fake's body still returns whatever JSON it constructed today, but
 wrapped as `new Response(JSON.stringify(doc))` instead of
 `{ ok: true, status: 200, json: async () => doc }` — read the existing fake
@@ -2174,12 +2233,14 @@ git commit -m "fix(vc): route did:web resolution through @dwk/safe-fetch (#215)"
 ### Task 12: Fold in #215 — `@dwk/atproto-pds`'s `resolve.ts`
 
 **Files:**
+
 - Modify: `packages/atproto-pds/src/resolve.ts`
 - Modify: `packages/atproto-pds/src/resolve.test.ts`
 - Modify: `packages/atproto-pds/package.json`
 - Create: `.changeset/atproto-pds-safe-fetch.md`
 
 **Interfaces:**
+
 - Consumes: `safeFetch`, `SsrfError` from `@dwk/safe-fetch`.
 - Produces: `resolveDidDocument`'s `did:web` branch now goes through
   `safeFetch`; its `FetchLike` (imported from `./plc-directory.js`) is
@@ -2201,11 +2262,14 @@ Edit `packages/atproto-pds/package.json`:
 - [ ] **Step 2: Update `resolve.ts`**
 
 Change:
+
 ```ts
 import { decodeMultikey, type DecodedMultikey } from "./crypto.js";
 import { resolvePlcDid, type FetchLike } from "./plc-directory.js";
 ```
+
 to:
+
 ```ts
 import { safeFetch } from "@dwk/safe-fetch";
 import { decodeMultikey, type DecodedMultikey } from "./crypto.js";
@@ -2213,35 +2277,38 @@ import { resolvePlcDid, type FetchLike } from "./plc-directory.js";
 ```
 
 Change:
+
 ```ts
-    const url = path
-      ? `https://${host}/${path}/did.json`
-      : `https://${host}/.well-known/did.json`;
-    const res = await fetchImpl(url);
-    if (!res.ok) {
-      throw new Error(
-        `resolve: did:web document fetch failed for ${did} (${res.status})`,
-      );
-    }
-    return (await res.json()) as DidDocument;
+const url = path
+  ? `https://${host}/${path}/did.json`
+  : `https://${host}/.well-known/did.json`;
+const res = await fetchImpl(url);
+if (!res.ok) {
+  throw new Error(
+    `resolve: did:web document fetch failed for ${did} (${res.status})`,
+  );
+}
+return (await res.json()) as DidDocument;
 ```
+
 to:
+
 ```ts
-    const url = path
-      ? `https://${host}/${path}/did.json`
-      : `https://${host}/.well-known/did.json`;
-    const { response } = await safeFetch(
-      fetchImpl,
-      url,
-      { headers: { accept: "application/did+json, application/json" } },
-      { allowedSchemes: ["https:"], logEvent: "atproto-pds.ssrf.blocked" },
-    );
-    if (!response.ok) {
-      throw new Error(
-        `resolve: did:web document fetch failed for ${did} (${response.status})`,
-      );
-    }
-    return (await response.json()) as DidDocument;
+const url = path
+  ? `https://${host}/${path}/did.json`
+  : `https://${host}/.well-known/did.json`;
+const { response } = await safeFetch(
+  fetchImpl,
+  url,
+  { headers: { accept: "application/did+json, application/json" } },
+  { allowedSchemes: ["https:"], logEvent: "atproto-pds.ssrf.blocked" },
+);
+if (!response.ok) {
+  throw new Error(
+    `resolve: did:web document fetch failed for ${did} (${response.status})`,
+  );
+}
+return (await response.json()) as DidDocument;
 ```
 
 Note this changes `resolveDidDocument`'s thrown-error behavior for a blocked
@@ -2298,11 +2365,13 @@ git commit -m "fix(atproto-pds): route did:web resolution through @dwk/safe-fetc
 ### Task 13: Fold in #215 — `@dwk/atproto-pds`'s `plc-directory.ts`
 
 **Files:**
+
 - Modify: `packages/atproto-pds/src/plc-directory.ts`
 - Modify: `packages/atproto-pds/src/plc-directory.test.ts`
 - Modify: `.changeset/atproto-pds-safe-fetch.md` (extend the note)
 
 **Interfaces:**
+
 - Consumes: `safeFetch` from `@dwk/safe-fetch`.
 - Produces: `submitPlcOperation`, `resolvePlcDid`, `fetchPlcData` each go
   through `safeFetch` (timeout + redirect handling) while keeping their
@@ -2317,6 +2386,7 @@ each call `fetchImpl(...)` directly, once each.)
 - [ ] **Step 2: Route all three call sites through `safeFetch`**
 
 Change:
+
 ```ts
 import type { SignedPlcOperation } from "./plc.js";
 
@@ -2326,7 +2396,9 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 ```
+
 to:
+
 ```ts
 import { safeFetch } from "@dwk/safe-fetch";
 import type { SignedPlcOperation } from "./plc.js";
@@ -2339,6 +2411,7 @@ export type FetchLike = (
 ```
 
 Change `submitPlcOperation`'s body:
+
 ```ts
   const { base, fetchImpl } = resolve(options);
   const res = await fetchImpl(`${base}/${did}`, {
@@ -2348,7 +2421,9 @@ Change `submitPlcOperation`'s body:
   });
   if (!res.ok) {
 ```
+
 to:
+
 ```ts
   const { base, fetchImpl } = resolve(options);
   const { response: res } = await safeFetch(
@@ -2365,39 +2440,45 @@ to:
 ```
 
 Change `resolvePlcDid`'s body:
+
 ```ts
-  const { base, fetchImpl } = resolve(options);
-  const res = await fetchImpl(`${base}/${did}`);
-  if (res.status === 404) return null;
+const { base, fetchImpl } = resolve(options);
+const res = await fetchImpl(`${base}/${did}`);
+if (res.status === 404) return null;
 ```
+
 to:
+
 ```ts
-  const { base, fetchImpl } = resolve(options);
-  const { response: res } = await safeFetch(
-    fetchImpl,
-    `${base}/${did}`,
-    {},
-    { logEvent: "atproto-pds.ssrf.blocked" },
-  );
-  if (res.status === 404) return null;
+const { base, fetchImpl } = resolve(options);
+const { response: res } = await safeFetch(
+  fetchImpl,
+  `${base}/${did}`,
+  {},
+  { logEvent: "atproto-pds.ssrf.blocked" },
+);
+if (res.status === 404) return null;
 ```
 
 Change `fetchPlcData`'s body the same way:
+
 ```ts
-  const { base, fetchImpl } = resolve(options);
-  const res = await fetchImpl(`${base}/${did}/data`);
-  if (res.status === 404) return null;
+const { base, fetchImpl } = resolve(options);
+const res = await fetchImpl(`${base}/${did}/data`);
+if (res.status === 404) return null;
 ```
+
 to:
+
 ```ts
-  const { base, fetchImpl } = resolve(options);
-  const { response: res } = await safeFetch(
-    fetchImpl,
-    `${base}/${did}/data`,
-    {},
-    { logEvent: "atproto-pds.ssrf.blocked" },
-  );
-  if (res.status === 404) return null;
+const { base, fetchImpl } = resolve(options);
+const { response: res } = await safeFetch(
+  fetchImpl,
+  `${base}/${did}/data`,
+  {},
+  { logEvent: "atproto-pds.ssrf.blocked" },
+);
+if (res.status === 404) return null;
 ```
 
 - [ ] **Step 3: Add a test confirming the timeout signal is wired**
@@ -2450,45 +2531,56 @@ git commit -m "fix(atproto-pds): route PLC directory calls through @dwk/safe-fet
 ### Task 14: Documentation and full-suite verification
 
 **Files:**
+
 - Modify: `CLAUDE.md`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: nothing (final housekeeping + verification task).
 
 - [ ] **Step 1: Update the package count and reusable-libs list**
 
 Change (`CLAUDE.md` lines 15–17):
+
 ```markdown
 **Status: implemented, unreleased.** There are **23 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/store`) and the
 ```
+
 to:
+
 ```markdown
 **Status: implemented, unreleased.** There are **24 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
 `@dwk/store`) and the
 ```
+
 (Also update every other place in `CLAUDE.md` that states an exact package
 count in prose — search first: `grep -n "23 publishable\|24 publishable" CLAUDE.md`.)
 
 - [ ] **Step 2: Update the "Cross-standard reusable libs" taxonomy bullet**
 
 Change (`CLAUDE.md` lines 119–120):
+
 ```markdown
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
   `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`. These MUST
 ```
+
 to:
+
 ```markdown
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
   `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`,
   `@dwk/safe-fetch`. These MUST
 ```
+
 and add one sentence after the existing `@dwk/oauth` description (before the
 `@dwk/calendar` sentence) introducing the new package:
+
 ```markdown
 `@dwk/safe-fetch` is the SSRF-safe outbound fetch and capped-body-read
 primitive shared by every package that fetches an attacker- or
@@ -2499,12 +2591,15 @@ user-supplied URL (`@dwk/webmention`, `@dwk/websub`, `@dwk/microsub`,
 - [ ] **Step 3: Update the "Pure libs run under Node" test-environment list**
 
 Change (`CLAUDE.md` lines 214–216):
+
 ```markdown
 - **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
   `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
   `@dwk/calendar`, `@dwk/webfinger`, `@dwk/host-meta`. They take plain-data
 ```
+
 to:
+
 ```markdown
 - **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
   `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
