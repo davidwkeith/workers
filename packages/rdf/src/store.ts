@@ -13,10 +13,7 @@ import type { Quad, Quad_Graph, Quad_Object, Term } from "n3";
 
 /** RDF term kinds representable in the store. */
 export type StoredTermType =
-  | "NamedNode"
-  | "BlankNode"
-  | "Literal"
-  | "DefaultGraph";
+  "NamedNode" | "BlankNode" | "Literal" | "DefaultGraph";
 
 /** Flat, JSON-serializable representation of a single RDF term. */
 export interface StoredTerm {

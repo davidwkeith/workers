@@ -13,12 +13,7 @@ import { CID } from "./cid.js";
 
 /** Any JSON value (records are JSON on the wire). */
 export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 function base64Encode(bytes: Uint8Array): string {
   let binary = "";

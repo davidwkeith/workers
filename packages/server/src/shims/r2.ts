@@ -50,12 +50,7 @@ const META_SUFFIX = ".r2meta";
 
 /** R2 `put` accepts these body shapes. */
 type R2PutValue =
-  | ReadableStream
-  | ArrayBuffer
-  | ArrayBufferView
-  | string
-  | Blob
-  | null;
+  ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob | null;
 
 class FsR2Bucket {
   readonly #root: string;

@@ -116,8 +116,7 @@ class SqliteD1Statement {
   async first<T = unknown>(colName?: string): Promise<T | null> {
     const stmt = this.#conn.prepareCached(this.#sql);
     const row = stmt.get(...this.#params) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (row === undefined) return null;
     if (colName !== undefined) return (row[colName] ?? null) as T | null;
     return row as T;

@@ -112,8 +112,7 @@ export function installWebSocketGlobals(): void {
     constructor(...args: never[]) {
       const body = args[0] as BodyInit | null | undefined;
       const init = args[1] as
-        | { webSocket?: EmulatedWebSocket; status?: number }
-        | undefined;
+        { webSocket?: EmulatedWebSocket; status?: number } | undefined;
       const ws = init?.webSocket;
       if (ws != null && init?.status === 101) {
         // Node forbids status 101 on Response; build a stand-in and remember it.

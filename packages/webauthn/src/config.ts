@@ -75,9 +75,7 @@ export interface WebAuthnConfig {
 
 /** WebAuthn user-verification requirement values. */
 export type UserVerificationRequirement =
-  | "required"
-  | "preferred"
-  | "discouraged";
+  "required" | "preferred" | "discouraged";
 
 /** Fully-resolved configuration with defaults applied. */
 export interface ResolvedConfig {

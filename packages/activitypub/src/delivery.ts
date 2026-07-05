@@ -16,9 +16,7 @@ import { signRequest, type SignerKey } from "./signature.js";
 
 /** Machine-readable cause of a blocked delivery target. */
 export type BlockedReason =
-  | "invalid_url"
-  | "disallowed_scheme"
-  | "blocked_host";
+  "invalid_url" | "disallowed_scheme" | "blocked_host";
 
 /** Raised when a delivery target is refused on SSRF grounds. */
 export class DeliveryBlockedError extends Error {

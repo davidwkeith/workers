@@ -141,8 +141,7 @@ describe("RFC 9421 round-trip", () => {
       created: NOW,
     });
     let seen:
-      | { keyId: string | null; alg: SignatureAlgorithm | null }
-      | undefined;
+      { keyId: string | null; alg: SignatureAlgorithm | null } | undefined;
     await verifyMessage(
       { ...message, headers: { ...message.headers, ...headers } },
       {
