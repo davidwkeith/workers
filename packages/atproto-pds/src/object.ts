@@ -1457,8 +1457,22 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   override async webSocketMessage(): Promise<void> {
     // The repo firehose is server-to-client only; inbound frames are ignored.
   }
-  // No `webSocketClose` override: the runtime closes the hibernatable socket
-  // itself, and calling `ws.close()` on a reserved code throws.
+
+  override async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    // Compat dates before 2026-04-07 don't auto-complete the close handshake;
+    // omitting this leaves the peer with a 1006 abnormal closure. Safe to call
+    // unconditionally once auto-reply is on (a no-op) or ahead of it (already
+    // wrapped for the closing-socket-throws case below).
+    try {
+      ws.close(code, reason);
+    } catch {
+      // Closing an already-closing socket throws; nothing left to do.
+    }
+  }
 
   async #getRepo(): Promise<Response> {
     const headCid = this.#kvGet("head_cid");
