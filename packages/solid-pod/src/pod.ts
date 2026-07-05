@@ -559,6 +559,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     );
     headers.set("content-length", String(blob.size));
     headers.set("wac-allow", wacAllow);
+    // User-supplied bytes served back with a user-supplied content type are a
+    // stored-XSS vector on public/shared-origin deployments; nosniff stops the
+    // browser from re-interpreting a mislabeled blob as HTML/script.
+    headers.set("x-content-type-options", "nosniff");
     if (headOnly) {
       await blob.stream.cancel();
       return new Response(null, { status: 200, headers });

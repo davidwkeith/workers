@@ -313,6 +313,10 @@ function documentHeaders(etag: string, contentType: string): Headers {
     "content-type": contentType || "application/octet-stream",
     "cache-control": "no-cache",
     allow: ALLOW,
+    // User-supplied bytes served back with a user-supplied content type are a
+    // stored-XSS vector on public/shared-origin deployments; nosniff stops the
+    // browser from re-interpreting a mislabeled document as HTML/script.
+    "x-content-type-options": "nosniff",
   });
 }
 
