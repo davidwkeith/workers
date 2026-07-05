@@ -14,6 +14,7 @@ import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
 
 import { as2ContentType, buildActorDocument, type JsonValue } from "./as2.js";
+import { readRequestBodyCapped } from "./body.js";
 import {
   buildNodeInfo20,
   buildNodeInfo21,
@@ -255,7 +256,13 @@ export function createActivityPub(
         if (isSharedInbox) return text(405, "Method Not Allowed");
         return forwardToDo(resolved, env, request.url, { method });
       }
-      const bodyBytes = new Uint8Array(await request.arrayBuffer());
+      const bodyBytes = await readRequestBodyCapped(request);
+      if (bodyBytes === null) {
+        emit(resolved, "warn", ActivityPubLogEvent.SignatureRejected, {
+          reason: "body_too_large",
+        });
+        return text(413, "Payload Too Large");
+      }
       const inbox: InboxRequest = {
         method,
         path: `${url.pathname}${url.search}`,
@@ -308,7 +315,13 @@ export function createActivityPub(
         });
         return text(401, "Unauthorized");
       }
-      const body = new Uint8Array(await request.arrayBuffer());
+      const body = await readRequestBodyCapped(request);
+      if (body === null) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "body_too_large",
+        });
+        return text(413, "Payload Too Large");
+      }
       return forwardToDo(resolved, env, request.url, {
         method,
         body: body as BufferSource,

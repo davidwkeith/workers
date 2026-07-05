@@ -29,6 +29,7 @@ import {
 import { createDidWebResolver } from "./did-web.js";
 import { checkValidityPeriod, validateCredential } from "./credential.js";
 import { VcLogEvent } from "./log.js";
+import { safeFetchJson, SsrfError } from "./safe-fetch.js";
 import {
   buildEncodedList,
   buildStatusEntry,
@@ -230,33 +231,15 @@ async function checkStatus(
   }
 
   // Foreign list: fetch the published status list credential and decode it.
-  // Only https: is fetched — a foreign `statusListCredential` is attacker-
-  // controlled, so refusing other schemes blunts SSRF into internal services.
-  let listUrl: URL;
+  // The URL is attacker-controlled (it comes straight from the credential
+  // under verification), so it goes through `safeFetchJson`: https:-only,
+  // private/reserved hosts blocked, a bounded timeout, and a capped body read.
   try {
-    listUrl = new URL(listCredential);
-  } catch {
-    return { checked: false, revoked: false, error: "status list malformed" };
-  }
-  if (listUrl.protocol !== "https:") {
-    return {
-      checked: false,
-      revoked: false,
-      error: "status list URL must use https",
-    };
-  }
-  try {
-    const response = await fetch(listUrl.toString(), {
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) {
-      return {
-        checked: false,
-        revoked: false,
-        error: "status list unreachable",
-      };
-    }
-    const listCred = (await response.json()) as JsonObject;
+    const listCred = (await safeFetchJson(listCredential, {
+      logger: config.logger,
+      metrics: config.metrics,
+      logEvent: VcLogEvent.SsrfBlocked,
+    })) as JsonObject;
     const subject = listCred.credentialSubject as JsonObject | undefined;
     const encodedList = subject?.encodedList;
     if (typeof encodedList !== "string") {
@@ -264,7 +247,14 @@ async function checkStatus(
     }
     const bits = await decodeBitstring(encodedList);
     return { checked: true, revoked: getBit(bits, index) };
-  } catch {
+  } catch (err) {
+    if (err instanceof SsrfError) {
+      return {
+        checked: false,
+        revoked: false,
+        error: `status list url rejected: ${err.reason}`,
+      };
+    }
     return { checked: false, revoked: false, error: "status list unreachable" };
   }
 }

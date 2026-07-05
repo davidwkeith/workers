@@ -241,7 +241,39 @@ describe("createVc — verify status SSRF guard", () => {
     // The proof is valid and the list was never fetched, so the credential is
     // not rejected — but the unchecked status surfaces as a warning.
     expect(body.verified).toBe(true);
-    expect(body.warnings).toContain("status list URL must use https");
+    expect(body.warnings).toContain(
+      "status list url rejected: disallowed_scheme",
+    );
+  });
+
+  it("blocks an https foreign status list pointed at a private host", async () => {
+    const handler = makeHandler();
+    const signer = await importSigner(privateJwk);
+    // https: alone isn't enough — a private/reserved host must be blocked too.
+    const credential: JsonObject = {
+      ...sampleCredential(),
+      credentialStatus: {
+        type: "BitstringStatusListEntry",
+        statusPurpose: "revocation",
+        statusListIndex: "0",
+        statusListCredential: "https://169.254.169.254/list",
+      },
+    };
+    const signed = await addProof(credential, signer, {
+      verificationMethod: VM_ID,
+    });
+
+    const res = await handler(
+      post("/credentials/verify", { verifiableCredential: signed }),
+      testEnv,
+      ctx,
+    );
+    const body = (await res.json()) as {
+      verified: boolean;
+      warnings: string[];
+    };
+    expect(body.verified).toBe(true);
+    expect(body.warnings).toContain("status list url rejected: blocked_host");
   });
 });
 

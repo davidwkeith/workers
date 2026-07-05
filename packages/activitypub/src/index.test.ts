@@ -236,6 +236,25 @@ describe("inbox", () => {
     expect(res.status).toBe(401);
   });
 
+  it("rejects an oversized POST with 413 before verifying the signature", async () => {
+    const config = makeConfig({
+      // If the body cap didn't apply first, this would run and accept it.
+      verifyInboxSignature: acceptAll,
+    });
+    const handler = createActivityPub(config);
+    const oversized = "x".repeat(3 * 1024 * 1024); // over the 2 MB cap
+    const res = await handler(
+      new Request(`${actorUrl(config)}/inbox`, {
+        method: "POST",
+        headers: { "content-length": String(oversized.length) },
+        body: oversized,
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(413);
+  });
+
   it("answers 503 + Retry-After when the signer key cannot be resolved", async () => {
     // A temporary failure (the signer's server was briefly unreachable, so the
     // key did not resolve) must ask the peer to redeliver, not drop with 401.
@@ -581,6 +600,25 @@ describe("publish endpoint", () => {
       )
     ).json()) as Record<string, unknown>;
     expect(outbox.totalItems).toBe(1);
+  });
+
+  it("rejects an oversized publish body with 413", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const oversized = "x".repeat(3 * 1024 * 1024); // over the 2 MB cap
+    const res = await handler(
+      new Request(`${actorUrl(config)}/outbox`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer s3cret",
+          "content-length": String(oversized.length),
+        },
+        body: oversized,
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(413);
   });
 });
 
