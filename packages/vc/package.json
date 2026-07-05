@@ -43,6 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@dwk/log": "workspace:*"
+    "@dwk/log": "workspace:*",
+    "@dwk/safe-fetch": "workspace:*"
   }
 }

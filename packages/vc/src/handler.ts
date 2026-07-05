@@ -29,7 +29,7 @@ import {
 import { createDidWebResolver } from "./did-web.js";
 import { checkValidityPeriod, validateCredential } from "./credential.js";
 import { VcLogEvent } from "./log.js";
-import { safeFetchJson, SsrfError } from "./safe-fetch.js";
+import { safeFetchJson, SsrfError } from "@dwk/safe-fetch";
 import {
   buildEncodedList,
   buildStatusEntry,
@@ -235,11 +235,18 @@ async function checkStatus(
   // under verification), so it goes through `safeFetchJson`: https:-only,
   // private/reserved hosts blocked, a bounded timeout, and a capped body read.
   try {
-    const listCred = (await safeFetchJson(listCredential, {
-      logger: config.logger,
-      metrics: config.metrics,
-      logEvent: VcLogEvent.SsrfBlocked,
-    })) as JsonObject;
+    const listCred = (await safeFetchJson(
+      globalThis.fetch.bind(globalThis),
+      listCredential,
+      { headers: { accept: "application/json" } },
+      {
+        allowedSchemes: ["https:"],
+        maxBodyBytes: 1_048_576,
+        logger: config.logger,
+        metrics: config.metrics,
+        logEvent: VcLogEvent.SsrfBlocked,
+      },
+    )) as JsonObject;
     const subject = listCred.credentialSubject as JsonObject | undefined;
     const encodedList = subject?.encodedList;
     if (typeof encodedList !== "string") {
