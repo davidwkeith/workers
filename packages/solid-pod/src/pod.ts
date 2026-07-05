@@ -75,6 +75,10 @@ const LDP = "http://www.w3.org/ns/ldp#";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const ACTIVITYSTREAMS = "https://www.w3.org/ns/activitystreams";
 
+// Pseudo-codes the runtime reports for how a connection ended but that the
+// WebSocket spec forbids sending back to the peer via `ws.close()`.
+const RESERVED_CLOSE_CODES = new Set([1004, 1005, 1006, 1015]);
+
 /**
  * How long a write's DPoP `jti` is remembered for replay rejection. `@dwk/dpop`
  * accepts a proof whose `iat` lands anywhere in `±DEFAULT_MAX_AGE_SECONDS` of
@@ -1500,8 +1504,19 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     if (typeof message === "string" && message === "ping") ws.send("pong");
   }
 
-  // No `webSocketClose` override: the runtime closes the hibernatable socket
-  // itself, and calling `ws.close()` here throws on reserved codes (1006).
+  override async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    // Compat dates before 2026-04-07 don't auto-complete the close handshake;
+    // omitting this leaves the peer with a 1006 abnormal closure.
+    try {
+      ws.close(RESERVED_CLOSE_CODES.has(code) ? 1000 : code, reason);
+    } catch {
+      // Closing an already-closing socket throws; nothing left to do.
+    }
+  }
 
   /** Fan a change notification out to every connected subscriber. */
   #broadcast(objectIri: string, type: ChangeType): void {

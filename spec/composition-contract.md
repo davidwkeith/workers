@@ -25,6 +25,15 @@ several packages inside one Worker (see the example in the
   consumers satisfy it in `wrangler.toml`.
 - A package MUST **fail loudly at startup** if a required binding is missing —
   no silent degradation.
+- The packages ship no `wrangler.toml` of their own — a consumer's config
+  should set `compatibility_date` to the deploy date (or later) and keep it
+  current, per [Cloudflare's Workers best practices]. Packages using the
+  WebSocket Hibernation API (`@dwk/solid-pod`, `@dwk/atproto-pds`) call
+  `ws.close()` in their `webSocketClose` handlers regardless of date, so
+  behaviour is correct both before and after the `web_socket_auto_reply_to_close`
+  flag (default-on for dates ≥ `2026-04-07`).
+
+[Cloudflare's Workers best practices]: https://developers.cloudflare.com/workers/best-practices/workers-best-practices/
 
 ## Config object
 

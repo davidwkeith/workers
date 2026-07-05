@@ -6,7 +6,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/test-harness.ts",
       miniflare: {
-        compatibilityDate: "2025-01-01",
+        compatibilityDate: "2026-07-05",
         compatibilityFlags: ["nodejs_compat"],
         durableObjects: {
           REPO: { className: "AtprotoRepoObject", useSQLite: true },

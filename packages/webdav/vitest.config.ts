@@ -11,7 +11,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/test-harness.ts",
       miniflare: {
-        compatibilityDate: "2025-01-01",
+        compatibilityDate: "2026-07-05",
         durableObjects: {
           WEBDAV_DO: { className: "WebdavTestObject", useSQLite: true },
         },

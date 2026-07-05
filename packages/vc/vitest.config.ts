@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       miniflare: {
-        compatibilityDate: "2025-01-01",
+        compatibilityDate: "2026-07-05",
         d1Databases: ["VC_STATUS_DB"],
         bindings: {
           // Replaced per-test with a real generated key; this is only a default.

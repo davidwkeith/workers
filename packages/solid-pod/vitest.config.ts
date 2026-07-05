@@ -13,7 +13,7 @@ export default defineConfig({
     cloudflareTest({
       main: "./src/test-harness.ts",
       miniflare: {
-        compatibilityDate: "2025-01-01",
+        compatibilityDate: "2026-07-05",
         // `@dwk/rdf` (N3.js) pulls in `readable-stream`, which needs Node
         // built-ins; the pod runs the parser/serializer inside the DO.
         compatibilityFlags: ["nodejs_compat"],

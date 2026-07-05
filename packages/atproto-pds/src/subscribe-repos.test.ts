@@ -75,18 +75,28 @@ async function createRecord(
   expect(res.status).toBe(200);
 }
 
+/** Normalise a WebSocket message payload to bytes (binary frames arrive as a
+ * `Blob` on compat dates >= 2026-03-17, `ArrayBuffer` on older ones). */
+async function toBytes(data: unknown): Promise<Uint8Array> {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
+  return new TextEncoder().encode(data as string);
+}
+
 /** A FIFO reader over a WebSocket's binary frames (resolves them as Uint8Array). */
 function frames(ws: WebSocket): { next(): Promise<Uint8Array> } {
   const buffered: Uint8Array[] = [];
   const waiting: ((frame: Uint8Array) => void)[] = [];
+  // Chained (not fire-and-forget) so that concurrent `Blob.arrayBuffer()`
+  // resolutions can't reorder frames relative to their arrival order.
+  let chain = Promise.resolve();
   ws.addEventListener("message", (event) => {
-    const data =
-      event.data instanceof ArrayBuffer
-        ? new Uint8Array(event.data)
-        : new TextEncoder().encode(event.data as string);
-    const resolve = waiting.shift();
-    if (resolve) resolve(data);
-    else buffered.push(data);
+    chain = chain.then(async () => {
+      const data = await toBytes(event.data);
+      const resolve = waiting.shift();
+      if (resolve) resolve(data);
+      else buffered.push(data);
+    });
   });
   return {
     next() {

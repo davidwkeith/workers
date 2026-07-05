@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       miniflare: {
-        compatibilityDate: "2025-01-01",
+        compatibilityDate: "2026-07-05",
         d1Databases: ["MICROSUB_DB", "AUTH_DB"],
         bindings: {
           TOKEN_SIGNING_KEY: "test-signing-key-not-for-production",
