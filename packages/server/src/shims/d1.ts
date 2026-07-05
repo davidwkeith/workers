@@ -32,6 +32,13 @@ type SqlValue = null | number | bigint | string | Uint8Array;
 const NUMBERED_PLACEHOLDER = /\?\d+/;
 
 /**
+ * Strips SQL string/quoted-identifier literals and comments so placeholder
+ * detection doesn't false-positive on a `?1`-shaped substring that's actually
+ * inside a literal (e.g. `WHERE note = 'is this a question?1'`).
+ */
+const SQL_STRIP_RE = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--.*|\/\*[\s\S]*?\*\//g;
+
+/**
  * Build the argument list `node:sqlite`'s `StatementSync` methods expect.
  *
  * `node:sqlite` binds anonymous `?` placeholders from a positional argument
@@ -39,13 +46,15 @@ const NUMBERED_PLACEHOLDER = /\?\d+/;
  * `@dwk/microsub` and `@dwk/websub` use) must be bound via an object keyed by
  * placeholder number — passing them positionally throws "column index out of
  * range". D1's `.bind(...)` contract is positional regardless of style, so
- * `?N` is mapped from the Nth bound value (1-indexed).
+ * `?N` is mapped from the Nth bound value (1-indexed). Keys are `?`-prefixed
+ * so the binding doesn't depend on `node:sqlite`'s (default-on but
+ * configurable) `allowBareNamedParameters` behavior.
  */
 function bindArgs(sql: string, params: SqlValue[]): SqlValue[] {
-  if (!NUMBERED_PLACEHOLDER.test(sql)) return params;
-  const named: Record<number, SqlValue> = {};
+  if (!NUMBERED_PLACEHOLDER.test(sql.replace(SQL_STRIP_RE, ""))) return params;
+  const named: Record<string, SqlValue> = {};
   params.forEach((value, index) => {
-    named[index + 1] = value;
+    named[`?${index + 1}`] = value;
   });
   return [named] as unknown as SqlValue[];
 }
