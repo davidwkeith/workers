@@ -55,6 +55,7 @@ src/jcs.ts            # JSON Canonicalization Scheme (RFC 8785)
 src/multibase.ts      # base58btc, base64url, multibase, multikey
 src/datetime.ts       # XSD dateTimeStamp validation and formatting
 src/log.ts            # structured logging/metrics event vocabulary
+src/safe-fetch.ts     # SSRF-safe fetch + capped body read for foreign status-list URLs
 src/*.test.ts         # colocated tests
 ```
 

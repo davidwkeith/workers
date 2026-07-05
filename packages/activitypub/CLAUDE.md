@@ -59,6 +59,7 @@ src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
 src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)
 src/delivery.ts     # outbound activity delivery with SSRF guard (retry lives in the DO)
 src/log.ts          # structured logging/metrics event vocabulary
+src/body.ts         # capped read for inbound request bodies (inbox/publish)
 src/test-harness.ts # test-only DO class (not published)
 src/*.test.ts       # colocated tests
 ```

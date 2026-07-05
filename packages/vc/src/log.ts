@@ -29,6 +29,12 @@ export const VcLogEvent = {
    * `unsupported`, `status_disabled`, `not_found`).
    */
   Rejected: "vc.rejected",
+  /**
+   * A foreign status-list fetch was refused on SSRF grounds. Fields: `reason`
+   * (`invalid_url`, `disallowed_scheme`, `blocked_host`, `too_many_redirects`),
+   * `host`.
+   */
+  SsrfBlocked: "vc.ssrf.blocked",
 } as const;
 
 /** Union of the event-name string literals in {@link VcLogEvent}. */
