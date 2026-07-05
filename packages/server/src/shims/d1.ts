@@ -28,6 +28,37 @@ import type {
 /** Value types `node:sqlite` accepts as a positional `?` binding. */
 type SqlValue = null | number | bigint | string | Uint8Array;
 
+/** Matches SQLite's numbered placeholder form (`?1`, `?2`, ...). */
+const NUMBERED_PLACEHOLDER = /\?\d+/;
+
+/**
+ * Strips SQL string/quoted-identifier literals and comments so placeholder
+ * detection doesn't false-positive on a `?1`-shaped substring that's actually
+ * inside a literal (e.g. `WHERE note = 'is this a question?1'`).
+ */
+const SQL_STRIP_RE = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--.*|\/\*[\s\S]*?\*\//g;
+
+/**
+ * Build the argument list `node:sqlite`'s `StatementSync` methods expect.
+ *
+ * `node:sqlite` binds anonymous `?` placeholders from a positional argument
+ * list, but numbered `?N` placeholders (D1/SQLite-valid, and what
+ * `@dwk/microsub` and `@dwk/websub` use) must be bound via an object keyed by
+ * placeholder number — passing them positionally throws "column index out of
+ * range". D1's `.bind(...)` contract is positional regardless of style, so
+ * `?N` is mapped from the Nth bound value (1-indexed). Keys are `?`-prefixed
+ * so the binding doesn't depend on `node:sqlite`'s (default-on but
+ * configurable) `allowBareNamedParameters` behavior.
+ */
+function bindArgs(sql: string, params: SqlValue[]): SqlValue[] {
+  if (!NUMBERED_PLACEHOLDER.test(sql.replace(SQL_STRIP_RE, ""))) return params;
+  const named: Record<string, SqlValue> = {};
+  params.forEach((value, index) => {
+    named[`?${index + 1}`] = value;
+  });
+  return [named] as unknown as SqlValue[];
+}
+
 /** Coerce a D1 bind value to what `node:sqlite` accepts. */
 function normalize(value: unknown): SqlValue {
   if (value === null || value === undefined) return null;
@@ -115,7 +146,7 @@ class SqliteD1Statement {
 
   async first<T = unknown>(colName?: string): Promise<T | null> {
     const stmt = this.#conn.prepareCached(this.#sql);
-    const row = stmt.get(...this.#params) as
+    const row = stmt.get(...bindArgs(this.#sql, this.#params)) as
       Record<string, unknown> | undefined;
     if (row === undefined) return null;
     if (colName !== undefined) return (row[colName] ?? null) as T | null;
@@ -132,7 +163,10 @@ class SqliteD1Statement {
 
   async raw<T = unknown[]>(options?: { columnNames?: boolean }): Promise<T[]> {
     const stmt = this.#conn.prepareCached(this.#sql);
-    const rows = stmt.all(...this.#params) as Record<string, unknown>[];
+    const rows = stmt.all(...bindArgs(this.#sql, this.#params)) as Record<
+      string,
+      unknown
+    >[];
     const values = rows.map((row) => Object.values(row) as T);
     if (options?.columnNames && rows[0]) {
       return [Object.keys(rows[0]) as unknown as T, ...values];
@@ -144,7 +178,7 @@ class SqliteD1Statement {
   #execute<T>(): D1Result<T> {
     const stmt = this.#conn.prepareCached(this.#sql);
     const start = performance.now();
-    const rows = stmt.all(...this.#params) as T[];
+    const rows = stmt.all(...bindArgs(this.#sql, this.#params)) as T[];
     const meta = makeMeta(
       this.#conn.lastChanges(),
       this.#conn.lastRowId(),
