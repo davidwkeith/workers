@@ -42,10 +42,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  * structured field (no free-text parsing required).
  */
 export type SsrfReason =
-  | "invalid_url"
-  | "disallowed_scheme"
-  | "blocked_host"
-  | "too_many_redirects";
+  "invalid_url" | "disallowed_scheme" | "blocked_host" | "too_many_redirects";
 
 /**
  * Raised when a request is refused on SSRF grounds (blocked host, disallowed
@@ -189,8 +186,7 @@ function isPrivateIPv6(groups: number[]): boolean {
   const g6 = groups[6] ?? 0;
   const g7 = groups[7] ?? 0;
   if (groups.every((group) => group === 0)) return true; // :: unspecified
-  if (groups.slice(0, 7).every((group) => group === 0) && g7 === 1)
-    return true; // ::1 loopback
+  if (groups.slice(0, 7).every((group) => group === 0) && g7 === 1) return true; // ::1 loopback
   if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
   if ((first & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local (deprecated)
   if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
