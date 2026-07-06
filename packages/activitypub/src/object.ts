@@ -109,10 +109,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Auto-`Accept` (Follow/Join) whose target inbox is not yet resolved. The
     // resolution (an outbound actor-document fetch) runs from the alarm, not
     // inline on the inbound POST — see #resolveInbox / #processPendingAccepts.
+    // `event` is only set for a `join` row (the RSVP's target), so a Leave that
+    // lands before the alarm runs can be detected without parsing `json`.
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS pending_accept (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, actor TEXT NOT NULL,
-         json TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
+         event TEXT, json TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+         next_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_pending_accept_next_at ON pending_accept (next_at)`,
     );
     // Event RSVPs (#171): one row per (event, participant). `status` is
     // 'accepted' (auto-accepted, or after a manual Accept) or 'pending'
@@ -382,7 +388,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Resolve the participant's inbox and deliver from the background alarm,
     // never inline, so the participant's POST is not blocked on our outbound
     // network (see #processPendingAccepts).
-    this.#enqueuePendingAccept("join", participant, JSON.stringify(accept));
+    this.#enqueuePendingAccept(
+      "join",
+      participant,
+      JSON.stringify(accept),
+      event,
+    );
     await this.#armAlarm();
   }
 
@@ -787,13 +798,55 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
   }
 
-  #enqueuePendingAccept(kind: "follow" | "join", actor: string, json: string) {
+  #enqueuePendingAccept(
+    kind: "follow" | "join",
+    actor: string,
+    json: string,
+    event: string | null = null,
+  ) {
     this.#sql.exec(
-      `INSERT INTO pending_accept (kind, actor, json, attempts, next_at) VALUES (?, ?, ?, 0, ?)`,
+      `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at) VALUES (?, ?, ?, ?, 0, ?)`,
       kind,
       actor,
+      event,
       json,
       Date.now(),
+    );
+  }
+
+  /**
+   * Whether a pending `Accept` is still worth delivering: the follower hasn't
+   * `Undo`ne their `Follow`, or the participant hasn't `Leave`-withdrawn (or
+   * been demoted off `accepted`) since the auto-Accept was queued. Checked
+   * before resolving the inbox so an actor who retracted in the interim costs
+   * neither the outbound lookup nor a stray `Accept` for something they no
+   * longer requested.
+   */
+  #pendingAcceptStillActive(row: {
+    kind: "follow" | "join";
+    actor: string;
+    event: string | null;
+  }): boolean {
+    if (row.kind === "follow") {
+      return (
+        this.#sql
+          .exec<{
+            n: number;
+          }>(`SELECT COUNT(*) AS n FROM followers WHERE actor = ?`, row.actor)
+          .one().n > 0
+      );
+    }
+    if (!row.event) return false;
+    return (
+      this.#sql
+        .exec<{
+          n: number;
+        }>(
+          `SELECT COUNT(*) AS n FROM attendees WHERE event = ? AND actor = ? AND status = 'accepted'`,
+          row.event,
+          row.actor,
+        )
+        .one().n > 0
     );
   }
 
@@ -813,10 +866,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         seq: number;
         kind: "follow" | "join";
         actor: string;
+        event: string | null;
         json: string;
         attempts: number;
       }>(
-        `SELECT seq, kind, actor, json, attempts FROM pending_accept WHERE next_at <= ?
+        `SELECT seq, kind, actor, event, json, attempts FROM pending_accept WHERE next_at <= ?
            ORDER BY next_at ASC LIMIT ?`,
         now,
         DELIVERY_BATCH,
@@ -824,6 +878,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray();
 
     for (const row of due) {
+      if (!this.#pendingAcceptStillActive(row)) {
+        this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
+        continue;
+      }
       const inbox = await this.#resolveInbox(row.actor);
       if (!inbox) {
         this.#rescheduleOrDrop("pending_accept", row.seq, row.attempts);

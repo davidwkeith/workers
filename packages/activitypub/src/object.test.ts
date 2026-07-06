@@ -560,6 +560,119 @@ describe("Follow inbox resolution stays off the inbound critical path (#220)", (
   });
 });
 
+describe("auto-Accept skips a retracted Follow/Join before resolving (#220)", () => {
+  it("drops a pending Accept for a follower who Undo'd before the alarm ran, without an inbox lookup", async () => {
+    const { username, iris, stub } = freshUser();
+    let lookups = 0;
+    await runInDurableObject(stub, async (instance, state) =>
+      withFetch(
+        async () => {
+          lookups += 1;
+          throw new Error("must not resolve the inbox of a retracted Follow");
+        },
+        async () => {
+          await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify({
+                id: "https://remote.example/f/1",
+                type: "Follow",
+                actor: REMOTE,
+                object: iris.id,
+              }),
+            ),
+          );
+          // The follower unfollows before the alarm resolves their inbox.
+          await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify({
+                id: "https://remote.example/u/1",
+                type: "Undo",
+                actor: REMOTE,
+                object: {
+                  type: "Follow",
+                  actor: REMOTE,
+                  object: iris.id,
+                },
+              }),
+            ),
+          );
+
+          const res = await instance.fetch(
+            new Request(`${iris.id}/__resolve`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+          expect(res.status).toBe(200);
+          expect(lookups).toBe(0);
+
+          const pending = state.storage.sql
+            .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+            .one().n;
+          expect(pending).toBe(0);
+          const queued = state.storage.sql
+            .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+            .one().n;
+          expect(queued).toBe(0);
+        },
+      ),
+    );
+  });
+
+  it("drops a pending Accept for a participant who Left before the alarm ran, without an inbox lookup", async () => {
+    const { username, iris, stub } = freshUser();
+    const event = `${iris.id}/events/picnic`;
+    let lookups = 0;
+    await runInDurableObject(stub, async (instance, state) =>
+      withFetch(
+        async () => {
+          lookups += 1;
+          throw new Error("must not resolve the inbox of a retracted Join");
+        },
+        async () => {
+          await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify({
+                id: "https://remote.example/j/1",
+                type: "Join",
+                actor: REMOTE,
+                object: event,
+              }),
+            ),
+          );
+          // The participant leaves before the alarm resolves their inbox.
+          await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify({
+                id: "https://remote.example/l/1",
+                type: "Leave",
+                actor: REMOTE,
+                object: event,
+              }),
+            ),
+          );
+
+          const res = await instance.fetch(
+            new Request(`${iris.id}/__resolve`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+          expect(res.status).toBe(200);
+          expect(lookups).toBe(0);
+
+          const pending = state.storage.sql
+            .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+            .one().n;
+          expect(pending).toBe(0);
+        },
+      ),
+    );
+  });
+});
+
 describe("auto-accept resolveInbox", () => {
   it("ignores a follower whose actor IRI is an unsafe target", async () => {
     const { username, stub } = freshUser();
