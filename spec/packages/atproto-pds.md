@@ -70,6 +70,14 @@ secp256k1 signing curve):
   by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
   incremental node splitting and is trivially correct/interoperable. Records live
   in DO SQLite; node blocks are recomputed for commits and CAR export.
+  **Known scaling boundary** (#219): `#entries()` (`object.ts`) loads the entire
+  `records` table into memory on every `#commit()` and `#getRepo()` to rebuild
+  the tree, so its memory and CPU cost grows linearly with account size against
+  the DO's 128 MB limit. Fine at today's scale; large accounts would need
+  incremental MST maintenance (persist nodes, update only the path from a
+  changed leaf to root) instead of a full rebuild per commit. Deferred rather
+  than built, since this package is exploratory/strategic and a documented
+  boundary is the right answer until a real scale need appears.
 - **Storage core is self-contained.** DAG-CBOR, CIDv1, the MST, CAR, and commit
   signing are implemented directly on WebCrypto in this package — it shares
   neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
