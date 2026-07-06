@@ -61,6 +61,13 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   stay `401`.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request.
+- Auto-`Accept`-on-`Follow`/`Join` inbox resolution is queued, not inline
+  (#220): the DO is single-threaded, so resolving a remote actor's inbox
+  (an outbound fetch, up to `OUTBOUND_TIMEOUT_MS`) while handling the inbound
+  POST would hold the object's input gate for every other request to that
+  actor. A `pending_accept` row records the actor + built `Accept` and the DO
+  returns immediately; the alarm resolves the inbox and hands the `Accept` to
+  the ordinary delivery queue, with the same backoff/max-attempts policy.
 
 ### Events & RSVPs (calendar/events epic #167 / #171)
 

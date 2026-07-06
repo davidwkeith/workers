@@ -909,9 +909,22 @@ describe("Event RSVP (Join/Leave)", () => {
       try {
         // First Join: accepted, one Accept enqueued, one inbox lookup.
         await join("https://remote.example/activities/join-a");
+        // Inbox resolution is alarm-driven (not inline); resolve without also
+        // running a delivery attempt, so the queued-but-undelivered count below
+        // still reflects a single Accept.
+        await instance.fetch(
+          new Request(`${iris.id}/__resolve`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
         // A distinct Join activity (new id, bypasses activity-id dedup) for the
         // same already-accepted participant must be a no-op.
         await join("https://remote.example/activities/join-b");
+        await instance.fetch(
+          new Request(`${iris.id}/__resolve`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
 
         const row = state.storage.sql
           .exec<{

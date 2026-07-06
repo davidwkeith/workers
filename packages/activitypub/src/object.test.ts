@@ -493,6 +493,15 @@ async function followWith(
           }),
         }),
       );
+      // Inbox resolution is alarm-driven (not inline); drive it explicitly so
+      // these branch tests can inspect the resulting queue state.
+      await instance.fetch(
+        new Request(`${iris.id}/__resolve`, {
+          headers: {
+            [INTERNAL_HEADERS.config]: cfgHeader(username, { privateKeyPem }),
+          },
+        }),
+      );
       const deliveries = state.storage.sql
         .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
         .one().n;
@@ -500,6 +509,56 @@ async function followWith(
     }),
   );
 }
+
+describe("Follow inbox resolution stays off the inbound critical path (#220)", () => {
+  it("202s a Follow without ever fetching the actor document inline", async () => {
+    const { username, iris, stub } = freshUser();
+    let lookups = 0;
+    await runInDurableObject(stub, async (instance, state) =>
+      withFetch(
+        async () => {
+          lookups += 1;
+          throw new Error("the inbound POST must not reach outbound fetch");
+        },
+        async () => {
+          const res = await instance.fetch(
+            new Request(iris.inbox, {
+              method: "POST",
+              headers: {
+                "content-type": "application/activity+json",
+                [INTERNAL_HEADERS.config]: cfgHeader(username, {
+                  privateKeyPem,
+                }),
+              },
+              body: JSON.stringify({
+                id: `https://remote.example/f/${crypto.randomUUID()}`,
+                type: "Follow",
+                actor: REMOTE,
+                object: iris.id,
+              }),
+            }),
+          );
+          expect(res.status).toBe(202);
+          expect(lookups).toBe(0);
+
+          // The follower is recorded with its inbox still unresolved, and the
+          // resolution is queued (not attempted) until the alarm-driven pass.
+          const follower = state.storage.sql
+            .exec<{
+              inbox: string | null;
+            }>(`SELECT inbox FROM followers WHERE actor = ?`, REMOTE)
+            .one();
+          expect(follower.inbox).toBeNull();
+          const pending = state.storage.sql
+            .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+            .one().n;
+          expect(pending).toBe(1);
+          expect(lookups).toBe(0);
+        },
+      ),
+    );
+  });
+});
 
 describe("auto-accept resolveInbox", () => {
   it("ignores a follower whose actor IRI is an unsafe target", async () => {
