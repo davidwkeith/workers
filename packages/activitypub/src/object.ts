@@ -60,6 +60,16 @@ function text(status: number, body: string): Response {
   });
 }
 
+/** Cheap, local (no network) check so an unsafe actor IRI never reaches the queue. */
+function isSafeTarget(actor: string): boolean {
+  try {
+    assertPublicHttpsTarget(actor);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   readonly #sql: SqlStorage;
   #config: ForwardedConfig | null = null;
@@ -96,6 +106,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          seq INTEGER PRIMARY KEY AUTOINCREMENT, inbox TEXT NOT NULL, json TEXT NOT NULL,
          attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
     );
+    // Auto-`Accept` (Follow/Join) whose target inbox is not yet resolved. The
+    // resolution (an outbound actor-document fetch) runs from the alarm, not
+    // inline on the inbound POST — see #resolveInbox / #processPendingAccepts.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS pending_accept (
+         seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, actor TEXT NOT NULL,
+         json TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
+    );
     // Event RSVPs (#171): one row per (event, participant). `status` is
     // 'accepted' (auto-accepted, or after a manual Accept) or 'pending'
     // (awaiting manual approval). A Leave deletes the row.
@@ -119,9 +137,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
     // Internal routes the front door constructs (never reachable externally).
     if (path === `${pathOf(iris.id)}/__stats`) return this.#stats();
+    if (path === `${pathOf(iris.id)}/__resolve`) {
+      const resolved = await this.#processPendingAccepts();
+      return json(200, { processed: resolved });
+    }
     if (path === `${pathOf(iris.id)}/__deliver`) {
+      // Resolve due auto-Accepts first so a newly-resolved inbox is attempted
+      // in this same pass (see `alarm()`).
+      const resolved = await this.#processPendingAccepts();
       const due = await this.#processDeliveries();
-      return json(200, { processed: due });
+      return json(200, { processed: due + resolved });
     }
 
     if (path === pathOf(iris.followers)) {
@@ -248,8 +273,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
   /**
    * Record the follower and, unless the actor manually approves, auto-`Accept`
-   * by enqueuing a signed `Accept` delivered to the follower's inbox. The
-   * follower's inbox is resolved from its actor document.
+   * by queuing the follower's inbox for resolution and the signed `Accept` for
+   * delivery once it resolves — both run from the alarm (see
+   * {@link #processPendingAccepts}), never inline, so a slow or hung remote
+   * actor never holds this DO's single input gate open against the peer's POST
+   * (or any other request to this actor).
    */
   async #onFollow(
     activity: ActivityObject,
@@ -270,14 +298,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
 
     if (config.manuallyApprovesFollowers) return;
-
-    const inbox = await this.#resolveInbox(follower);
-    if (!inbox) return;
-    this.#sql.exec(
-      `UPDATE followers SET inbox = ? WHERE actor = ?`,
-      inbox,
-      follower,
-    );
+    // An unsafe target is rejected synchronously (no network, no queue row) —
+    // matches the guard #resolveInbox itself applies before ever fetching.
+    if (!isSafeTarget(follower)) return;
 
     const accept: Record<string, JsonValue> = {
       "@context": "https://www.w3.org/ns/activitystreams",
@@ -286,10 +309,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       actor: config.iris.id,
       object: activityAsObject(activity),
     };
-    this.#enqueueDelivery(inbox, JSON.stringify(accept));
-    // Don't deliver inline — that would block the peer's POST on our outbound
-    // network. Arm the alarm; the single alarm worker is the only delivery
-    // driver, so retries never race a second concurrent pass.
+    this.#enqueuePendingAccept("follow", follower, JSON.stringify(accept));
     await this.#armAlarm();
   }
 
@@ -350,9 +370,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
 
     if (config.manuallyApprovesJoins) return;
+    if (!isSafeTarget(participant)) return;
 
-    const inbox = await this.#resolveInbox(participant);
-    if (!inbox) return;
     const accept: Record<string, JsonValue> = {
       "@context": "https://www.w3.org/ns/activitystreams",
       id: `${config.iris.id}#accepts/${crypto.randomUUID()}`,
@@ -360,9 +379,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       actor: config.iris.id,
       object: activityAsObject(activity),
     };
-    this.#enqueueDelivery(inbox, JSON.stringify(accept));
-    // Deliver from the background alarm, never inline, so the participant's POST
-    // is not blocked on our outbound network.
+    // Resolve the participant's inbox and deliver from the background alarm,
+    // never inline, so the participant's POST is not blocked on our outbound
+    // network (see #processPendingAccepts).
+    this.#enqueuePendingAccept("join", participant, JSON.stringify(accept));
     await this.#armAlarm();
   }
 
@@ -730,14 +750,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         if (result.ok || !result.retryable) {
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
         } else {
-          this.#rescheduleOrDrop(row.seq, row.attempts);
+          this.#rescheduleOrDrop("delivery", row.seq, row.attempts);
         }
       } catch (error) {
         if (error instanceof DeliveryBlockedError) {
           // Unsafe target — never reachable; drop it.
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
         } else {
-          this.#rescheduleOrDrop(row.seq, row.attempts);
+          this.#rescheduleOrDrop("delivery", row.seq, row.attempts);
         }
       }
     }
@@ -746,35 +766,104 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return due.length;
   }
 
-  #rescheduleOrDrop(seq: number, attempts: number): void {
+  #rescheduleOrDrop(
+    table: "delivery" | "pending_accept",
+    seq: number,
+    attempts: number,
+  ): void {
     const next = attempts + 1;
     const max = this.#deliveryPolicy("deliveryMaxAttempts", 8);
     if (next >= max) {
-      this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, seq);
+      this.#sql.exec(`DELETE FROM ${table} WHERE seq = ?`, seq);
       return;
     }
     const base = this.#deliveryPolicy("deliveryBaseDelayMs", 60_000);
     const delay = base * 2 ** attempts;
     this.#sql.exec(
-      `UPDATE delivery SET attempts = ?, next_at = ? WHERE seq = ?`,
+      `UPDATE ${table} SET attempts = ?, next_at = ? WHERE seq = ?`,
       next,
       Date.now() + delay,
       seq,
     );
   }
 
-  /** Schedule the alarm for the earliest pending delivery, if any. */
+  #enqueuePendingAccept(kind: "follow" | "join", actor: string, json: string) {
+    this.#sql.exec(
+      `INSERT INTO pending_accept (kind, actor, json, attempts, next_at) VALUES (?, ?, ?, 0, ?)`,
+      kind,
+      actor,
+      json,
+      Date.now(),
+    );
+  }
+
+  /**
+   * Resolve every due auto-`Accept`'s target inbox once: on success, record the
+   * resolved inbox for a `follow` (so future fan-out reaches this follower
+   * without re-resolving) and hand the `Accept` to the ordinary delivery queue;
+   * on failure, reschedule with the same backoff {@link #processDeliveries}
+   * uses, or drop after the max-attempts ceiling. This is what keeps the
+   * outbound actor-document fetch off the inbound POST's critical path — see
+   * `#onFollow` / `#onJoin`.
+   */
+  async #processPendingAccepts(): Promise<number> {
+    const now = Date.now();
+    const due = this.#sql
+      .exec<{
+        seq: number;
+        kind: "follow" | "join";
+        actor: string;
+        json: string;
+        attempts: number;
+      }>(
+        `SELECT seq, kind, actor, json, attempts FROM pending_accept WHERE next_at <= ?
+           ORDER BY next_at ASC LIMIT ?`,
+        now,
+        DELIVERY_BATCH,
+      )
+      .toArray();
+
+    for (const row of due) {
+      const inbox = await this.#resolveInbox(row.actor);
+      if (!inbox) {
+        this.#rescheduleOrDrop("pending_accept", row.seq, row.attempts);
+        continue;
+      }
+      if (row.kind === "follow") {
+        this.#sql.exec(
+          `UPDATE followers SET inbox = ? WHERE actor = ?`,
+          inbox,
+          row.actor,
+        );
+      }
+      this.#enqueueDelivery(inbox, row.json);
+      this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
+    }
+
+    return due.length;
+  }
+
+  /** Schedule the alarm for the earliest pending delivery or accept, if any. */
   async #armAlarm(): Promise<void> {
     const next = this.#sql
       .exec<{
         next_at: number | null;
-      }>(`SELECT MIN(next_at) AS next_at FROM delivery`)
+      }>(
+        `SELECT MIN(next_at) AS next_at FROM (
+           SELECT next_at FROM delivery
+           UNION ALL
+           SELECT next_at FROM pending_accept
+         )`,
+      )
       .one().next_at;
     if (next === null) return;
     await this.ctx.storage.setAlarm(next);
   }
 
   override async alarm(): Promise<void> {
+    // Resolve any due auto-Accepts first so a newly-resolved inbox is attempted
+    // in this same pass, not deferred to the next wake.
+    await this.#processPendingAccepts();
     await this.#processDeliveries();
   }
 
