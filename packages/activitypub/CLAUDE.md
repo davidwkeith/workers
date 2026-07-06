@@ -25,6 +25,11 @@ Serves actor documents, collection pages, and NodeInfo for fediverse discovery.
   the DO's SQLite store to prevent replay.
 - **Delivery retries.** Outbound delivery failures trigger DO alarm-based retries
   with exponential backoff. Failed deliveries are not silently dropped.
+- **Inbox resolution off the critical path.** Auto-`Accept`-on-`Follow`/`Join`
+  never resolves the remote actor's inbox inline — that's an outbound fetch
+  that would hold the single-threaded DO's input gate open against every other
+  request to that actor. It's queued (`pending_accept`) and resolved from the
+  alarm alongside ordinary delivery retries (`object.ts` `#processPendingAccepts`).
 - **JSON-LD AS2 content type.** Requests and responses use
   `application/activity+json` or `application/ld+json; profile="https://www.w3.org/ns/activitystreams"`.
   The `wantsActivityJson` helper detects Accept header preference.
