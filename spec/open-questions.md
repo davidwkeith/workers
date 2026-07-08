@@ -60,6 +60,34 @@ litmus conformance run against a deployed Worker. Spec in
 [`packages/webdav.md`](packages/webdav.md). Tracked in
 [#169](https://github.com/davidwkeith/workers/issues/169).
 
+## 6. Email endpoint package (JMAP)
+
+A review of Cloudflare's
+[agentic-inbox](https://github.com/cloudflare/agentic-inbox) (an email client
+built on Email Routing → per-mailbox Durable Object SQLite → R2 attachments)
+showed its storage layer is almost exactly this repo's per-entity DO pattern —
+but its client API is proprietary REST, so the code itself doesn't fit the
+"packages named for the standard" taxonomy. The standards-native shape of the
+same idea is **JMAP** ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) core ·
+[RFC 8621](https://www.rfc-editor.org/rfc/rfc8621) mail): Email Routing
+ingress, a per-mailbox DO built on [`@dwk/store`](packages/store.md), R2 for
+blobs/attachments, JMAP as the client API, and the Email Service binding for
+outbound send — a textbook endpoint package (`@dwk/jmap`) by the existing
+conventions.
+
+**Deferred, not planned.** JMAP is an epic on the scale of
+[`@dwk/atproto-pds`](packages/atproto-pds.md), not an incremental package, and
+outbound send depends on Cloudflare's still-young Email Service. Two smaller
+increments are worth considering first if email pressure appears: a
+receive-only ingest (Email Routing → DO, no JMAP client API), and a
+JMAP→jf2 bridge that surfaces a mailbox as a
+[`@dwk/microsub`](packages/microsub.md) channel so email lands in the same
+unified inbox as feeds and notifications. The agent-facing half of the
+agentic-inbox review is tracked separately as the MCP surface
+([packages/mcp.md](packages/mcp.md),
+[#240](https://github.com/davidwkeith/workers/issues/240)); any embedded AI
+agent stays at the app layer (Anglesite) per §3.
+
 ---
 
 ## Reference links
