@@ -56,16 +56,27 @@ endpoint package, never the lib).
   supplied by the composing developer. Endpoint packages export factories —
   e.g. `@dwk/micropub` adds `createMicropubMcpTools(config)` — whose returned
   definitions carry the JSON Schema `inputSchema`, MCP **annotations**
-  (`readOnlyHint`, `destructiveHint`, …), a required scope string, and a
-  handler closure over the package's existing machinery.
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), a
+  required scope string, and a handler closure over the package's existing
+  machinery.
 - **Auth bridge.** MCP authorization is OAuth 2.1-shaped, so reuse what the
   repo owns rather than inventing anything: bearer + **DPoP-bound** access
   tokens validated via [`@dwk/dpop`](dpop.md), introspection/metadata via
   [`@dwk/oauth`](oauth.md), issuance by [`@dwk/indieauth`](indieauth.md).
   `401` responses advertise the protected-resource metadata
   (RFC 9728-style) so MCP clients can discover the authorization server.
+  The metadata document itself lives at the RFC 9728 well-known URI derived
+  from the resource identifier (e.g.
+  `/.well-known/oauth-protected-resource/mcp`), **outside the handler's
+  mount** — like `@dwk/oauth`'s RFC 8414 document it is static, config-derived
+  JSON, so Anglesite (or the composing Worker's root router) serves it.
   Every `tools/call` is checked against the token's granted scopes ∩ the
   tool's required scope — **per-tool least privilege, not a perimeter**.
+  DPoP `jti` replay tracking is delegated to a strongly-consistent store
+  supplied by the composing package (DO SQLite / D1, as the existing
+  endpoint packages already do for their DPoP-protected routes) — never KV,
+  and never a per-isolate in-memory cache, which provides no replay
+  protection across Worker isolates.
 
 ## Design constraints
 
@@ -75,12 +86,17 @@ endpoint package, never the lib).
   `createMcp` HTTP shell touches `Request`/`Response`.
 - **Stateless by default.** Streamable HTTP sessions (`Mcp-Session-Id`) and
   SSE resumability are **not** offered in v1; each POST is independent, which
-  suits the stateless-front-door architecture. If session state is ever
+  suits the stateless-front-door architecture. Per the Streamable HTTP
+  transport rules, a `GET` of the endpoint (which would open a
+  server-initiated SSE stream) is answered with `405 Method Not Allowed`, as
+  is `DELETE` (session termination) — there are no sessions to terminate. If
+  session state is ever
   added, it lives in a strongly-consistent store — **never KV**
   ([non-functional-requirements.md](../non-functional-requirements.md)).
 - **Side-effect posture.** Tools that publish, send, or deliver
-  (Micropub create, Webmention send, AP delivery) MUST set
-  `readOnlyHint: false` / `destructiveHint` truthfully and SHOULD offer a
+  (Micropub create, Webmention send, AP delivery) MUST set their annotations
+  (`readOnlyHint: false`, `destructiveHint`, `idempotentHint`,
+  `openWorldHint`) truthfully and SHOULD offer a
   dry-run parameter; the default composition separates read scopes from
   write scopes so an owner can mint a read-only agent token.
 - **Prompt-injection surface is documented per tool.** Inbox-reading tools
