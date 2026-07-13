@@ -437,6 +437,14 @@
         "cases": []
       }
     },
+    "@dwk/esi": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/http-signatures": {
       "standard": null,
       "suites": {},

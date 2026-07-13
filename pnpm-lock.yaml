@@ -122,6 +122,15 @@ importers:
 
   packages/dpop: {}
 
+  packages/esi:
+    dependencies:
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
+
   packages/host-meta:
     dependencies:
       '@dwk/log':
