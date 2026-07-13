@@ -144,6 +144,8 @@ importers:
 
   packages/log: {}
 
+  packages/mcp: {}
+
   packages/micropub:
     dependencies:
       '@dwk/calendar':

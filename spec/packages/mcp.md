@@ -6,12 +6,11 @@
 | **Ships a DO?** | no |
 | **Used by** | tool contributions from the endpoint packages (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention` first; `@dwk/solid-pod`, `@dwk/ldn`, `@dwk/activitypub` later) |
 | **Standard** | [Model Context Protocol](https://modelcontextprotocol.io/specification) (JSON-RPC 2.0 over Streamable HTTP) |
-| **Status** | **proposed — spec sketch, not implemented.** Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
+| **Status** | **in progress.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz) is implemented and unit-tested. The auth bridge (real DPoP/OAuth token validation feeding `authenticate`) and the per-package tool contributions are the remaining increments. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
 
-> **This is a pre-implementation sketch.** The load-bearing decisions below
-> (tools-only subset, auth bridge, side-effect posture) should be reviewed on
-> [#240](https://github.com/davidwkeith/workers/issues/240) before any code
-> lands.
+> The load-bearing decisions below (tools-only subset, auth bridge shape,
+> side-effect posture) were sketched here before implementation, per
+> [#240](https://github.com/davidwkeith/workers/issues/240).
 
 An MCP (Model Context Protocol) server surface for the composed Worker, so an
 AI agent authorized by the owner can **operate the infrastructure the owner
