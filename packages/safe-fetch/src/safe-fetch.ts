@@ -215,14 +215,22 @@ function isPrivateIPv6(groups: number[]): boolean {
   return false;
 }
 
-/** Hostnames (non-IP) that are never public and must never be fetched. */
+/**
+ * Hostnames (non-IP) that are never fetchable from the Worker: names that are
+ * never public (`localhost`, `.local`, `.internal`) plus the RFC 7686
+ * special-use TLD `.onion`, which MUST NOT resolve in public DNS — the Workers
+ * runtime has no Tor client, so blocking it up front turns an inevitable
+ * network failure into a structured `blocked_host` signal.
+ */
 function isBlockedHostname(host: string): boolean {
   const lower = host.toLowerCase();
   return (
     lower === "localhost" ||
     lower.endsWith(".localhost") ||
     lower.endsWith(".local") ||
-    lower.endsWith(".internal")
+    lower.endsWith(".internal") ||
+    lower === "onion" ||
+    lower.endsWith(".onion")
   );
 }
 

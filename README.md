@@ -122,6 +122,29 @@ npx wrangler deploy
 Each package's [spec](spec/packages/) lists the exact bindings it needs; a
 missing binding fails loudly at startup.
 
+**Tor / Onion Routing (optional).** Cloudflare's
+[Onion Routing](https://developers.cloudflare.com/network/onion-routing/) lets
+Tor Browser users reach your zone over Tor without exiting through a
+(potentially hostile) exit node. It is a zone-level toggle, free on every plan,
+and fully transparent to the Worker — the Host header and SNI are preserved, so
+every identity URL (IndieAuth issuer, ActivityPub actor, WebFinger subject)
+stays your canonical `https://` origin. Enable it under **Network → Onion
+Routing** in the dashboard, or via the API:
+
+```sh
+curl -X PATCH \
+  "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/opportunistic_onion" \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"value":"on"}'
+```
+
+The reverse direction is out of scope: Workers cannot make outbound fetches to
+`.onion` hosts (RFC 7686 keeps them out of public DNS), so `@dwk/safe-fetch`
+rejects `.onion` URLs up front as `blocked_host` — a `.onion` Webmention
+source, WebSub callback, or ActivityPub inbox is dropped cleanly rather than
+failing as an opaque network error.
+
 ### Self-hosted (Node: Docker or the `dwk-serve` bin)
 
 [`@dwk/server`](packages/server/README.md) runs every package on a single

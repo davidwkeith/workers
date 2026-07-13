@@ -68,6 +68,18 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("")).toBe(true);
   });
 
+  it("blocks .onion hosts (RFC 7686 — unreachable from Workers)", () => {
+    expect(
+      isPrivateOrReservedHost(
+        "duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion",
+      ),
+    ).toBe(true);
+    expect(isPrivateOrReservedHost("sub.example.ONION")).toBe(true);
+    expect(isPrivateOrReservedHost("example.onion.")).toBe(true);
+    expect(isPrivateOrReservedHost("onion")).toBe(true);
+    expect(isPrivateOrReservedHost("onion.example.com")).toBe(false);
+  });
+
   it("blocks names with a trailing dot (FQDN form)", () => {
     expect(isPrivateOrReservedHost("localhost.")).toBe(true);
     expect(isPrivateOrReservedHost("db.internal.")).toBe(true);
@@ -108,6 +120,16 @@ describe("assertPublicUrl", () => {
       SsrfError,
     );
     expect(() => assertPublicUrl("http://127.0.0.1:8080/")).toThrow(SsrfError);
+  });
+
+  it("rejects a .onion URL as a blocked host", () => {
+    try {
+      assertPublicUrl("http://example.onion/inbox");
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(SsrfError);
+      expect((error as SsrfError).reason).toBe("blocked_host");
+    }
   });
 
   it("rejects an unparseable URL", () => {
