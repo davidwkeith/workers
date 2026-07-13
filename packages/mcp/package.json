@@ -1,0 +1,46 @@
+{
+  "name": "@dwk/mcp",
+  "version": "0.0.0",
+  "description": "Model Context Protocol server core: dependency-free JSON-RPC 2.0 + Streamable HTTP, tools-only v1 subset. Cross-standard reusable; no Workers runtime dependency.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "json-rpc",
+    "jsonrpc",
+    "streamable-http",
+    "agent",
+    "tools",
+    "cloudflare-workers"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/mcp"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

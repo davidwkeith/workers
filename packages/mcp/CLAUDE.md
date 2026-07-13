@@ -1,0 +1,78 @@
+# @dwk/mcp
+
+Model Context Protocol server core — a cross-standard reusable lib.
+
+## What this is
+
+A dependency-free JSON-RPC 2.0 + Streamable HTTP server implementing the MCP
+tools-only v1 subset (`initialize`, `ping`, `tools/list`, `tools/call`), so
+the composed Worker can expose itself as agent-operable tools. Endpoint
+packages contribute `ToolDefinition`s (e.g. `@dwk/micropub`'s eventual
+`createMicropubMcpTools`); this lib owns only the wire protocol, the tool
+registry, and per-tool scope-intersection authorization — never any
+IndieWeb/Solid/ActivityPub semantics. **Status: protocol core implemented**;
+the auth bridge (real DPoP/OAuth token validation feeding the
+`authenticate` hook) and the endpoint packages' tool contributions are
+separate increments tracked in
+[#240](https://github.com/davidwkeith/workers/issues/240).
+
+## Spec
+
+`spec/packages/mcp.md` — authoritative requirements (the load-bearing
+decisions — tools-only subset, auth bridge shape, side-effect posture — were
+sketched there before implementation).
+
+## Key constraints
+
+- **Zero cohort-standard knowledge.** No IndieWeb/Solid/ActivityPub imports
+  or assumptions — hard constraint for cross-standard libs, same as
+  `@dwk/oauth`/`@dwk/http-signatures`. Tool definitions are supplied by the
+  composing developer; this package only dispatches by name.
+- **Plain-data core, thin HTTP shell.** `jsonrpc.ts`/`lifecycle.ts`/
+  `registry.ts`/`server.ts` take parsed messages in, return plain objects —
+  no `Request`/`Response`, unit-tested under Node. Only `handler.ts`'s
+  `createMcp` touches the Fetch API types.
+- **Stateless Streamable HTTP.** Each `POST` is independent; no
+  `Mcp-Session-Id`, no SSE resumability. `GET`/`DELETE` are `405` — there is
+  no server-initiated stream and no session to terminate. If session state is
+  ever added it must live in a strongly-consistent store, never KV.
+- **Per-tool least privilege, not a perimeter.** Every `ToolDefinition`
+  carries a `requiredScope`; `tools/call` checks it against the caller's
+  granted scopes. This package never validates a token — `createMcp`'s
+  `authenticate(request)` hook is where the composing Worker plugs in real
+  DPoP/OAuth validation (`@dwk/dpop`/`@dwk/oauth`/`@dwk/indieauth`); omitting
+  it grants no scopes at all, so only `requiredScope: ""` tools are callable.
+- **Dependency-free.** No `@modelcontextprotocol/sdk` — same call as
+  `@dwk/rdf`'s own JSON-LD subset instead of `jsonld.js`.
+
+## Test environment
+
+Node (`environment: "node"`). No Miniflare — this package never touches a
+Cloudflare binding.
+
+```bash
+pnpm test --project @dwk/mcp
+```
+
+## File layout
+
+```
+src/index.ts          # public surface
+src/types.ts          # plain-data JSON-RPC + MCP wire types
+src/jsonrpc.ts         # JSON-RPC 2.0 envelope parsing, error codes, McpProtocolError
+src/lifecycle.ts       # protocol-version negotiation + initialize result
+src/registry.ts        # ToolRegistry: tools/list + tools/call, scope checks
+src/server.ts          # createMcpServer — plain-data message/batch dispatch
+src/handler.ts         # createMcp — the Streamable HTTP shell
+src/*.test.ts          # colocated tests
+```
+
+## Dependencies
+
+None (runtime). Pure JSON-RPC 2.0 + MCP protocol core.
+
+## Depended on by
+
+No workspace packages currently depend on `@dwk/mcp`. The v1 tool
+contributions (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`) will be
+its first consumers.
