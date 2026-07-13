@@ -59,9 +59,19 @@ export function createMcp(
       );
     }
 
-    const auth = config.authenticate
-      ? await config.authenticate(request)
-      : null;
+    let auth: McpAuthContext | null = null;
+    if (config.authenticate) {
+      try {
+        auth = await config.authenticate(request);
+      } catch {
+        // The authenticate hook rejected/threw on a malformed or invalid
+        // token — that's an authentication failure, not a server error.
+        return new Response("Unauthorized", {
+          status: 401,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+    }
     const result = await server.handleBody(body, auth ?? NO_SCOPES);
 
     if (result === null) {

@@ -102,6 +102,10 @@ export function createMcpServer(config: McpServerConfig): McpServer {
           err.data,
         );
       }
+      // An unexpected (non-protocol) error from a tool handler or the
+      // dispatcher itself — never silently swallowed, so production issues
+      // stay diagnosable even though the caller only sees "Internal error".
+      console.error("@dwk/mcp: internal error handling", message.method, err);
       return errorResponse(
         message.id ?? null,
         JsonRpcErrorCode.InternalError,

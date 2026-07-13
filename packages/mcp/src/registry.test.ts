@@ -137,4 +137,13 @@ describe("ToolRegistry#call", () => {
     const result = await registry.call("echo", undefined, NO_SCOPES);
     expect(result).toEqual({ content: [{ type: "text", text: "" }] });
   });
+
+  it("treats a malformed auth context (no scopes array) as no granted scopes rather than throwing", async () => {
+    const registry = new ToolRegistry([publishTool]);
+    await expect(
+      registry.call("publish", {}, {} as McpAuthContext),
+    ).rejects.toMatchObject({
+      code: JsonRpcErrorCode.InsufficientScope,
+    });
+  });
 });

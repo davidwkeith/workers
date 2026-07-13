@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { JsonRpcErrorCode } from "./jsonrpc.js";
 import { LATEST_PROTOCOL_VERSION } from "./lifecycle.js";
 import { createMcpServer } from "./server.js";
@@ -122,6 +122,40 @@ describe("createMcpServer#handleMessage", () => {
       { scopes: [] },
     );
     expect(response).toBeNull();
+  });
+
+  it("maps an unexpected tool-handler exception to a generic Internal error, logging it", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const boomTool: ToolDefinition = {
+      name: "boom",
+      description: "Always throws.",
+      inputSchema: { type: "object" },
+      requiredScope: "",
+      handler: () => {
+        throw new Error("boom");
+      },
+    };
+    const boomServer = createMcpServer({
+      serverInfo: { name: "test-server", version: "1.0.0" },
+      tools: [boomTool],
+    });
+    const response = (await boomServer.handleMessage(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "boom", arguments: {} },
+      },
+      { scopes: [] },
+    )) as JsonRpcErrorResponse;
+    expect(response.error).toEqual({
+      code: JsonRpcErrorCode.InternalError,
+      message: "Internal error",
+    });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });
 

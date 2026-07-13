@@ -178,4 +178,18 @@ describe("createMcp", () => {
     const body = (await response.json()) as { error: { code: number } };
     expect(body.error.code).toBe(JsonRpcErrorCode.InsufficientScope);
   });
+
+  it("returns 401 when the authenticate hook throws, instead of a 500", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new Error("invalid DPoP proof");
+      },
+    });
+    const response = await handle(
+      post({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    );
+    expect(response.status).toBe(401);
+  });
 });

@@ -65,7 +65,7 @@ export class ToolRegistry {
     }
     if (
       tool.requiredScope !== "" &&
-      !auth.scopes.includes(tool.requiredScope)
+      (!auth?.scopes || !auth.scopes.includes(tool.requiredScope))
     ) {
       throw new McpProtocolError(
         JsonRpcErrorCode.InsufficientScope,
