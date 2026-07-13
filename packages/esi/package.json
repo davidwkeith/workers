@@ -2,7 +2,13 @@
   "name": "@dwk/esi",
   "version": "0.1.0-beta.1",
   "description": "Streaming Edge Side Includes (ESI) processor for Cloudflare Workers responses. Cross-standard reusable; no Workers runtime dependency.",
-  "keywords": ["esi", "edge-side-includes", "cache", "streaming", "html"],
+  "keywords": [
+    "esi",
+    "edge-side-includes",
+    "cache",
+    "streaming",
+    "html"
+  ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
@@ -21,7 +27,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "!src/**/*.test.ts"],
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
