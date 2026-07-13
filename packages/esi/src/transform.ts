@@ -53,6 +53,13 @@ export function createEsiTransformStream(
   const maxIncludes = options.maxIncludes ?? 50;
   const concurrency = options.concurrency ?? 6;
   const logger = options.logger ?? noopLogger;
+  // Aborted when the stream is canceled (e.g. a client disconnect), so
+  // in-flight fragment fetches stop spending Workers subrequest quota on
+  // work whose output will never be read.
+  const abortController = new AbortController();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, abortController.signal])
+    : abortController.signal;
   const fragmentOptions: FragmentFetchOptions = {
     baseUrl: options.baseUrl,
     fetch: options.fetch,
@@ -60,6 +67,7 @@ export function createEsiTransformStream(
     maxFragmentBytes: options.maxFragmentBytes,
     logger,
     metrics: options.metrics,
+    signal,
   };
 
   const tokenizer = new EsiTokenizer();
@@ -82,7 +90,15 @@ export function createEsiTransformStream(
       .then(() => bytesPromise)
       .then((bytes) => {
         if (bytes.length > 0) {
-          controller.enqueue(bytes);
+          // The stream may already be canceled by the time this settles
+          // (a fragment fetch was in flight when the reader disconnected);
+          // enqueueing on a canceled controller throws, which would
+          // otherwise surface as an unhandled rejection.
+          try {
+            controller.enqueue(bytes);
+          } catch {
+            // Stream already closed/canceled; nothing left to deliver to.
+          }
         }
       });
   }
@@ -138,6 +154,9 @@ export function createEsiTransformStream(
         handleToken(token, controller);
       }
       await tail;
+    },
+    cancel(reason) {
+      abortController.abort(reason);
     },
   });
 }

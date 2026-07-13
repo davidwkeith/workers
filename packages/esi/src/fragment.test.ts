@@ -132,4 +132,70 @@ describe("resolveFragment", () => {
     expect(fetchFn).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a fragment whose Content-Type is binary/non-textual", async () => {
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    const logger = fakeLogger();
+    const body = await resolveFragment(include(), { fetch: fetchFn, logger });
+    expect(body).toBe("");
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a fragment with no Content-Type header at all", async () => {
+    const fetchFn = vi.fn(async () => new Response("<p>ok</p>"));
+    const body = await resolveFragment(include(), { fetch: fetchFn });
+    expect(body).toBe("<p>ok</p>");
+  });
+
+  it("accepts text/xml/json-flavored Content-Types", async () => {
+    for (const contentType of [
+      "text/plain",
+      "application/xml; charset=utf-8",
+      "application/json",
+    ]) {
+      const fetchFn = vi.fn(
+        async () =>
+          new Response("ok", { headers: { "content-type": contentType } }),
+      );
+      const body = await resolveFragment(include(), { fetch: fetchFn });
+      expect(body).toBe("ok");
+    }
+  });
+
+  it("propagates options.signal to the underlying fetch", async () => {
+    const controller = new AbortController();
+    const fetchFn = vi.fn(async (_input: string, init?: RequestInit) => {
+      expect(init?.signal?.aborted).toBe(false);
+      return new Response("<p>ok</p>");
+    });
+    await resolveFragment(include(), {
+      fetch: fetchFn,
+      signal: controller.signal,
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves to '' when options.signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetchFn = vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return new Response("<p>ok</p>");
+    });
+    const logger = fakeLogger();
+    const body = await resolveFragment(include(), {
+      fetch: fetchFn,
+      signal: controller.signal,
+      logger,
+    });
+    expect(body).toBe("");
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
 });

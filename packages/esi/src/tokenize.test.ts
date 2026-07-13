@@ -65,7 +65,7 @@ describe("EsiTokenizer", () => {
     ]);
   });
 
-  it("captures an esi:remove block including nested plain HTML, dropping it from the text stream", () => {
+  it("drops an esi:remove block including nested plain HTML from the text stream", () => {
     const tokenizer = new EsiTokenizer();
     const tokens = [
       ...tokenizer.push(
@@ -75,11 +75,71 @@ describe("EsiTokenizer", () => {
     ];
     expect(tokens).toEqual([
       { kind: "text", value: "before" },
-      { kind: "remove-block", raw: "<div>fallback <b>html</b></div>" },
+      { kind: "remove-block" },
       { kind: "text", value: "after" },
     ]);
     // The nested markup never surfaces as its own text token.
     expect(textOf(tokens)).toBe("beforeafter");
+  });
+
+  it("drops a self-closing esi:remove", () => {
+    const tokenizer = new EsiTokenizer();
+    const tokens = [
+      ...tokenizer.push("before<esi:remove/>after"),
+      ...tokenizer.flush(),
+    ];
+    expect(tokens).toEqual([
+      { kind: "text", value: "before" },
+      { kind: "remove-block" },
+      { kind: "text", value: "after" },
+    ]);
+  });
+
+  it("streams-and-discards an esi:remove block larger than the pending-tag buffer cap, across many push() calls, without leaking any of it", () => {
+    const tokenizer = new EsiTokenizer();
+    const tokens: EsiToken[] = [];
+    tokens.push(...tokenizer.push("before<esi:remove>"));
+    // Well over MAX_PENDING_BYTES (8 KB), split across many small pushes —
+    // none of this should ever surface as a text token.
+    for (let i = 0; i < 200; i++) {
+      tokens.push(...tokenizer.push("x".repeat(100)));
+    }
+    tokens.push(...tokenizer.push("</esi:remove>after"));
+    tokens.push(...tokenizer.flush());
+
+    expect(tokens).toEqual([
+      { kind: "text", value: "before" },
+      { kind: "remove-block" },
+      { kind: "text", value: "after" },
+    ]);
+  });
+
+  it("discards an esi:remove block's closing tag split across two push() calls", () => {
+    const full = "before<esi:remove>dropped</esi:remove>after";
+    for (let cut = 1; cut < full.length - 1; cut++) {
+      const t = new EsiTokenizer();
+      const tokens = [
+        ...t.push(full.slice(0, cut)),
+        ...t.push(full.slice(cut)),
+        ...t.flush(),
+      ];
+      expect(textOf(tokens)).toBe("beforeafter");
+      expect(tokens).toContainEqual({ kind: "remove-block" });
+    }
+  });
+
+  it("discards the rest of the stream when an esi:remove block never closes", () => {
+    const tokenizer = new EsiTokenizer();
+    const tokens = [
+      ...tokenizer.push("before<esi:remove>dropped, never closed"),
+      ...tokenizer.flush(),
+    ];
+    // The marker token fires as soon as the block opens; its (never-closed)
+    // contents are discarded rather than leaked as literal text at flush.
+    expect(tokens).toEqual([
+      { kind: "text", value: "before" },
+      { kind: "remove-block" },
+    ]);
   });
 
   it("tokenizes a tag split across two push() calls", () => {

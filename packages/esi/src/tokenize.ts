@@ -15,12 +15,22 @@ export type EsiToken =
       readonly alt?: string;
       readonly onerror?: "continue";
     }
-  | { readonly kind: "remove-block"; readonly raw: string };
+  | { readonly kind: "remove-block" };
 // esi:comment is consumed and dropped by the tokenizer itself — it never
-// becomes a token, since it never contributes to output either way.
+// becomes a token, since it never contributes to output either way. Same
+// for the *contents* of an esi:remove block: only a marker token is
+// produced (see the #removing streaming-discard mode below); the block's
+// own text is never buffered as a whole, so it can be arbitrarily large.
 
 type TagParseResult =
-  "incomplete" | { readonly consumed: number; readonly token: EsiToken | null };
+  | "incomplete"
+  | {
+      readonly consumed: number;
+      readonly token: EsiToken | null;
+      /** True when an esi:remove block was opened and its (unbounded)
+       *  contents must now be streamed-and-discarded rather than buffered. */
+      readonly startRemoving?: true;
+    };
 
 /**
  * Incremental tokenizer: feed it chunks of decoded text via `push`, get
@@ -31,6 +41,11 @@ type TagParseResult =
  */
 export class EsiTokenizer {
   #buffer = "";
+  // True while inside an <esi:remove>...</esi:remove> block whose closing
+  // tag hasn't been seen yet. Content while in this mode is discarded as it
+  // arrives (never buffered as a whole), so a remove block of any size costs
+  // only the closing tag's own length in pending memory.
+  #removing = false;
 
   push(chunk: string): EsiToken[] {
     this.#buffer += chunk;
@@ -39,16 +54,35 @@ export class EsiTokenizer {
 
   flush(): EsiToken[] {
     const tokens = this.#drain(true);
-    if (this.#buffer.length > 0) {
+    if (!this.#removing && this.#buffer.length > 0) {
       tokens.push({ kind: "text", value: this.#buffer });
-      this.#buffer = "";
     }
+    this.#buffer = "";
     return tokens;
   }
 
   #drain(isFlush: boolean): EsiToken[] {
     const tokens: EsiToken[] = [];
     for (;;) {
+      if (this.#removing) {
+        const closeIdx = this.#buffer.indexOf(REMOVE_CLOSE_TAG);
+        if (closeIdx !== -1) {
+          this.#buffer = this.#buffer.slice(closeIdx + REMOVE_CLOSE_TAG.length);
+          this.#removing = false;
+          continue;
+        }
+        if (isFlush) {
+          this.#buffer = "";
+          break;
+        }
+        // Keep only a trailing partial match of the close tag (it may be
+        // split across a chunk boundary); discard everything else.
+        const partial = longestPrefixOverlap(this.#buffer, REMOVE_CLOSE_TAG);
+        this.#buffer =
+          partial > 0 ? this.#buffer.slice(this.#buffer.length - partial) : "";
+        break;
+      }
+
       const idx = this.#buffer.indexOf(TAG_PREFIX);
       if (idx === -1) {
         if (isFlush) {
@@ -82,6 +116,15 @@ export class EsiTokenizer {
         }
         this.#buffer = candidate;
         break;
+      }
+
+      if (result.startRemoving) {
+        if (result.token) {
+          tokens.push(result.token);
+        }
+        this.#removing = true;
+        this.#buffer = candidate.slice(result.consumed);
+        continue;
       }
 
       if (result.token) {
@@ -182,21 +225,12 @@ function tryParseTag(s: string): TagParseResult {
     }
     const selfClosing = s[openEnd - 1] === "/";
     if (selfClosing) {
-      return {
-        consumed: openEnd + 1,
-        token: { kind: "remove-block", raw: "" },
-      };
-    }
-    const closeIdx = s.indexOf(REMOVE_CLOSE_TAG, openEnd + 1);
-    if (closeIdx === -1) {
-      return "incomplete";
+      return { consumed: openEnd + 1, token: { kind: "remove-block" } };
     }
     return {
-      consumed: closeIdx + REMOVE_CLOSE_TAG.length,
-      token: {
-        kind: "remove-block",
-        raw: s.slice(openEnd + 1, closeIdx),
-      },
+      consumed: openEnd + 1,
+      token: { kind: "remove-block" },
+      startRemoving: true,
     };
   }
 

@@ -147,4 +147,54 @@ describe("createEsiTransformStream", () => {
     ]);
     expect(out).toBe("before<b>frag</b>after");
   });
+
+  it("aborts in-flight fragment fetches when the stream is canceled", async () => {
+    let resolveFetchStarted: () => void = () => {};
+    const fetchStarted = new Promise<void>((resolve) => {
+      resolveFetchStarted = resolve;
+    });
+    let sawSignal: AbortSignal | undefined;
+    const fetchFn: FetchLike = (_input, init) => {
+      sawSignal = init?.signal ?? undefined;
+      resolveFetchStarted();
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    };
+
+    const stream = createEsiTransformStream({ fetch: fetchFn });
+    const writer = stream.writable.getWriter();
+    const reader = stream.readable.getReader();
+    // A TransformStream's writable side starts backpressured until the
+    // readable side is actively pulled, so an idle reader (as in a real
+    // consumer that hasn't read yet) would otherwise deadlock write().
+    const readLoop = (async () => {
+      try {
+        for (;;) {
+          const { done } = await reader.read();
+          if (done) {
+            break;
+          }
+        }
+      } catch {
+        // Expected once the reader is canceled below.
+      }
+    })();
+
+    await writer.write(
+      new TextEncoder().encode('<esi:include src="https://example.com/a"/>'),
+    );
+    await fetchStarted;
+    expect(sawSignal?.aborted).toBe(false);
+
+    await reader.cancel("client disconnected");
+    await readLoop;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(sawSignal?.aborted).toBe(true);
+
+    await writer.abort().catch(() => {});
+  });
 });

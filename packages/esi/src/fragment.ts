@@ -23,6 +23,9 @@ export interface FragmentFetchOptions {
   readonly maxFragmentBytes?: number;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
+  /** Aborts in-flight fragment fetches, e.g. when the outer stream is
+   *  canceled (a client disconnect). */
+  readonly signal?: AbortSignal;
 }
 
 function resolveUrl(raw: string, baseUrl: string | undefined): string | null {
@@ -33,20 +36,37 @@ function resolveUrl(raw: string, baseUrl: string | undefined): string | null {
   }
 }
 
+/** A fragment's Content-Type must look textual/markup before its body is
+ *  spliced into an HTML stream — a missing header is allowed through, but a
+ *  declared binary type (image, zip, ...) is treated as a fetch failure. */
+function isSpliceableContentType(contentType: string | null): boolean {
+  if (contentType === null) {
+    return true;
+  }
+  const mime = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return (
+    mime.startsWith("text/") || mime.includes("xml") || mime.includes("json")
+  );
+}
+
 async function fetchFragmentBody(
   resolvedUrl: string,
   fetchFn: FetchLike,
   safeFetchOptions: SafeFetchOptions | undefined,
   maxFragmentBytes: number,
+  signal: AbortSignal | undefined,
 ): Promise<string | null> {
   try {
     const { response } = await safeFetch(
       fetchFn,
       resolvedUrl,
-      { method: "GET" },
+      { method: "GET", signal },
       safeFetchOptions,
     );
     if (!response.ok) {
+      return null;
+    }
+    if (!isSpliceableContentType(response.headers.get("content-type"))) {
       return null;
     }
     return await readBodyCapped(response, maxFragmentBytes);
@@ -75,6 +95,7 @@ export async function resolveFragment(
           fetchFn,
           options.safeFetchOptions,
           maxFragmentBytes,
+          options.signal,
         );
   if (primaryBody !== null) {
     return primaryBody;
@@ -95,6 +116,7 @@ export async function resolveFragment(
             fetchFn,
             options.safeFetchOptions,
             maxFragmentBytes,
+            options.signal,
           );
     if (altBody !== null) {
       return altBody;
