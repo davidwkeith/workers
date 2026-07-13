@@ -9,6 +9,10 @@
     "node": {
       "description": "Self-hosted Node/Express host — the @dwk/server Docker image or dwk-serve bin.",
       "host": "@dwk/server"
+    },
+    "fedify": {
+      "description": "Fedify-based ActivityPub interop peer (scripts/conformance/fedify-peer.mjs) — a second, automatable federation implementation to test @dwk/activitypub against, alongside manual testing against Mastodon (issue #246).",
+      "host": "node"
     }
   },
   "packages": {
@@ -168,6 +172,11 @@
           "lastRun": null,
           "targets": {
             "node": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            },
+            "fedify": {
               "status": "pending",
               "report": null,
               "lastRun": null

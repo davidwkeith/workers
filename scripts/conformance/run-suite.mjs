@@ -16,17 +16,19 @@
  *
  * Usage:
  *   node scripts/conformance/run-suite.mjs <standard> [--target <url>]
- *   <standard> ∈ micropub | webmention | solid | webdav
+ *   <standard> ∈ micropub | webmention | solid | webdav | activitypub
  *
- * `webdav` is special: litmus is a real CLI, so when a `--target` and Basic
- * credentials are supplied this dispatcher actually runs it and exits with its
- * status, rather than only printing the procedure.
+ * `webdav` and `activitypub` are special: litmus and the Fedify interop peer
+ * are real tooling this dispatcher can actually drive, so when a `--target`
+ * (and, for `activitypub`, a `--peer-url`) is supplied it runs them and exits
+ * with their status, rather than only printing the procedure.
  */
 
 import { spawnSync } from "node:child_process";
 import { argv, env, exit, stdout, stderr } from "node:process";
+import { runInterop, ALL_CASES as FEDIFY_CASES } from "./fedify-peer.mjs";
 
-/** @type {Record<string, { package: string, suites: string[], docs: string, howto: string[] }>} */
+/** @type {Record<string, { package: string, suites: string[], docs: string, howto: string[], defaultTargetId?: string }>} */
 const SUITES = {
   micropub: {
     package: "@dwk/micropub",
@@ -87,6 +89,31 @@ const SUITES = {
       "   date once green.",
     ],
   },
+  activitypub: {
+    package: "@dwk/activitypub",
+    suites: ["activitypub-federation"],
+    docs: "https://fedify.dev/",
+    // Recorded under suites.activitypub-federation.targets.fedify, alongside
+    // the existing manual "node" (Mastodon) target — see issue #246.
+    defaultTargetId: "fedify",
+    howto: [
+      "1. Deploy a Worker mounting createActivityPub() with its per-actor",
+      "   Durable Object bound, reachable over HTTPS.",
+      "2. Expose this script's ephemeral Fedify peer publicly, e.g. a",
+      "   Cloudflare Quick Tunnel (no account needed):",
+      "     cloudflared tunnel --url http://localhost:8765",
+      "   and pass that URL as --peer-url (only the read-only 'webfinger'",
+      "   case can run without one; the rest need the target to deliver",
+      "   back to the peer).",
+      "3. Run:",
+      "     node scripts/conformance/fedify-peer.mjs --target <actor-url> \\",
+      "       --peer-url <tunnel-url> [--publish-trigger <url>] [--event <url>]",
+      `   Cases: ${FEDIFY_CASES.join(", ")}. 'fanout' and 'rsvp' are reported`,
+      "   skipped (not silently omitted) without --publish-trigger/--event.",
+      '4. Record "activitypub-federation" -> targets -> "fedify" as "passing"',
+      "   in conformance/status.json once every non-skipped case passes.",
+    ],
+  },
 };
 
 /** Read a `--flag value` from `rest`, falling back to an env var. */
@@ -134,7 +161,46 @@ function runLitmus(target, rest) {
   exit(result.status ?? 1);
 }
 
-function main() {
+/**
+ * Run the Fedify interop peer against a deployed `@dwk/activitypub` actor and
+ * exit with its status, mirroring `runLitmus`'s "real tooling, not just a
+ * printed procedure" shape.
+ */
+async function runFedify(target, rest) {
+  const peerUrl = flagOrEnv(rest, "--peer-url", "FEDIFY_PEER_URL");
+  const portFlag = flagOrEnv(rest, "--port", "FEDIFY_PEER_PORT");
+  const caseFlag = flagOrEnv(rest, "--case", "FEDIFY_CASES");
+  const publishTrigger = flagOrEnv(
+    rest,
+    "--publish-trigger",
+    "FEDIFY_PUBLISH_TRIGGER",
+  );
+  const event = flagOrEnv(rest, "--event", "FEDIFY_EVENT");
+  const cases = caseFlag
+    ? caseFlag.split(",").map((s) => s.trim())
+    : FEDIFY_CASES;
+
+  const { results } = await runInterop({
+    target,
+    peerUrl,
+    port: portFlag ? Number(portFlag) : undefined,
+    cases,
+    publishTrigger,
+    event,
+  });
+
+  stdout.write("\nResults:\n");
+  let failed = false;
+  for (const r of results) {
+    stdout.write(
+      `  ${r.status.padEnd(8)} ${r.case}${r.detail ? ` — ${r.detail}` : ""}\n`,
+    );
+    if (r.status === "failing") failed = true;
+  }
+  exit(failed ? 1 : 0);
+}
+
+async function main() {
   const [standard, ...rest] = argv.slice(2);
   if (!standard || !SUITES[standard]) {
     stderr.write(
@@ -155,6 +221,7 @@ function main() {
   const targetId =
     (targetIdFlagIndex !== -1 ? rest[targetIdFlagIndex + 1] : undefined) ||
     env.CONFORMANCE_TARGET_ID ||
+    SUITES[standard].defaultTargetId ||
     "cloudflare";
   const column =
     targetId === "cloudflare"
@@ -180,10 +247,14 @@ function main() {
 
   stdout.write(`Target: ${target}\n`);
 
-  // litmus is a real CLI we can drive directly; the other suites are hosted
-  // web services this dispatcher only documents.
+  // litmus and the Fedify peer are real tooling we can drive directly; the
+  // other suites are hosted web services this dispatcher only documents.
   if (standard === "webdav") {
     runLitmus(target, rest);
+    return;
+  }
+  if (standard === "activitypub") {
+    await runFedify(target, rest);
     return;
   }
 
@@ -196,4 +267,7 @@ function main() {
   exit(0);
 }
 
-main();
+main().catch((error) => {
+  stderr.write(`${error?.stack ?? error}\n`);
+  exit(1);
+});

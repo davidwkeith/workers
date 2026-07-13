@@ -26,6 +26,17 @@ nice-to-have.
   (`createSolidPodWebdav`). litmus is a CLI, so the conformance dispatcher runs
   it directly (`run-suite.mjs webdav --target … `) given an app-password.
 
+## ActivityPub / Fediverse conformance
+
+- Real-world federation against Mastodon (target `node` in `status.json`,
+  tested manually) plus a [Fedify](https://fedify.dev/)-based interop peer
+  (target `fedify`) — a second, automatable federation implementation that
+  runs in CI without a full Mastodon instance (issue #246). Fedify is a
+  scripted peer here, not the implementation of `@dwk/activitypub` (see the
+  package spec's non-goals); the conformance dispatcher drives it directly
+  (`run-suite.mjs activitypub --target … --peer-url …`), the same way it
+  drives litmus for WebDAV.
+
 ## Local testing
 
 - [`wrangler dev`](https://developers.cloudflare.com/workers/wrangler/) +
