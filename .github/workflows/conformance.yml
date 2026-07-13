@@ -18,7 +18,7 @@ on:
         description: "Which hosted suite to run"
         required: true
         type: choice
-        options: [micropub, webmention, solid, webdav]
+        options: [micropub, webmention, solid, webdav, activitypub]
       target_url:
         description: "Base URL of a deployed target to test"
         required: false
@@ -27,7 +27,14 @@ on:
         required: false
         default: cloudflare
         type: choice
-        options: [cloudflare, node]
+        options: [cloudflare, node, fedify]
+      peer_url:
+        description: >-
+          activitypub only: publicly reachable URL for the ephemeral Fedify
+          peer's inbox (e.g. a Cloudflare Quick Tunnel you started yourself:
+          `cloudflared tunnel --url http://localhost:8765`). Every interop
+          case but 'webfinger' needs this to receive callbacks.
+        required: false
 
 jobs:
   # Static guard: refuses to let any package go stable (>=1.0.0) before its
@@ -115,7 +122,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        standard: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.standard)) || fromJSON('["micropub","webmention","solid","webdav"]') }}
+        standard: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.standard)) || fromJSON('["micropub","webmention","solid","webdav","activitypub"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -126,8 +133,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # litmus is a real CLI the WebDAV dispatcher shells out to; the other
-      # suites are hosted web services that need no local tooling.
+      # litmus is a real CLI the WebDAV dispatcher shells out to; the Fedify
+      # peer (activitypub) is a devDependency already installed above; the
+      # other suites are hosted web services that need no local tooling.
       - name: Install litmus (WebDAV)
         if: matrix.standard == 'webdav'
         run: sudo apt-get update && sudo apt-get install -y litmus
@@ -137,7 +145,12 @@ jobs:
           # the owner-gated endpoint); unset for the other suites.
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
           WEBDAV_PASSWORD: ${{ secrets.WEBDAV_PASSWORD }}
+          # Publicly reachable callback URL for the ephemeral Fedify peer
+          # (issue #246); the operator sets this up out-of-band (e.g. a
+          # Cloudflare Quick Tunnel) the same way target_url itself is
+          # supplied manually — this workflow does not auto-provision one.
+          FEDIFY_PEER_URL: ${{ inputs.peer_url }}
         run: |
           node scripts/conformance/run-suite.mjs "${{ matrix.standard }}" \
             ${{ inputs.target_url && format('--target {0}', inputs.target_url) || '' }} \
-            --target-id "${{ inputs.target_id || 'cloudflare' }}"
+            --target-id "${{ inputs.target_id || (matrix.standard == 'activitypub' && 'fedify' || 'cloudflare') }}"

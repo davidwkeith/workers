@@ -53,6 +53,14 @@ target is wired in — record them with
 `run-suite.mjs <standard> --target <url> --target-id node`. The gate checks every
 target's status, so a stable package must be green on each target it declares.
 
+**`fedify`** is a third kind of entry, specific to
+`@dwk/activitypub.suites.activitypub-federation.targets`: unlike `cloudflare`/
+`node` (which deployment serves the package under test), `fedify` names the
+*interop peer* the suite was run against — a scripted
+[Fedify](https://fedify.dev/) actor
+(`scripts/conformance/fedify-peer.mjs`), a second, automatable federation
+implementation alongside manually-tested Mastodon (`node`) (issue #246).
+
 ## The gate
 
 `scripts/release-gate.mjs` (run via `pnpm release:gate`) reads each package's
@@ -76,6 +84,7 @@ conformance green will fail.
 | `@dwk/webmention` | Webmention| [webmention.rocks](https://webmention.rocks/) (recv + send) |
 | `@dwk/solid-pod`  | Solid     | Solid conformance test harness + real-client interop |
 | `@dwk/webdav`     | WebDAV    | [litmus](http://www.webdav.org/neon/litmus/) (basic, copymove, props, locks) |
+| `@dwk/activitypub`| ActivityPub | Mastodon (manual, target `node`) + [Fedify](https://fedify.dev/) interop peer (target `fedify`) |
 | `@dwk/indieauth`  | IndieAuth | integration + interop (no hosted "rocks" suite)      |
 | libraries         | —         | unit/integration only                                |
 
@@ -106,6 +115,22 @@ WEBDAV_USERNAME=… WEBDAV_PASSWORD=… \
 The `hosted-suite` workflow installs litmus and supplies the credentials from the
 `WEBDAV_USERNAME` / `WEBDAV_PASSWORD` repo secrets on manual dispatch or the
 weekly schedule.
+
+**ActivityPub/Fedify is executable too.** The Fedify peer needs a public URL to
+receive callbacks (e.g. a free Cloudflare Quick Tunnel:
+`cloudflared tunnel --url http://localhost:8765`) for every case but the
+read-only `webfinger` one:
+
+```bash
+node scripts/conformance/run-suite.mjs activitypub \
+  --target https://example.com/actor --peer-url https://<tunnel>.trycloudflare.com
+```
+
+`scripts/conformance/fedify-peer.mjs` can also be run standalone (see its own
+usage comment) for `--case webfinger,follow,activities,fanout,rsvp`; `fanout`
+and `rsvp` are reported `skipped`, not silently dropped, without
+`--publish-trigger`/`--event`. Record `activitypub-federation` ->
+`targets` -> `fedify` as `passing` once every non-skipped case passes.
 
 ## Integration lifecycle tests
 
