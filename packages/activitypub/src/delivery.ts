@@ -61,7 +61,8 @@ function isPrivateIPv4(octets: [number, number, number, number]): boolean {
  * failing at the network layer).
  */
 function isBlockedHostName(host: string): boolean {
-  const lower = host.toLowerCase();
+  // Strip the FQDN trailing dot so `example.onion.` matches the suffix checks.
+  const lower = host.toLowerCase().replace(/\.$/, "");
   if (lower === "localhost") return true;
   return (
     lower.endsWith(".localhost") ||
