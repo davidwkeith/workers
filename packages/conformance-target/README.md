@@ -89,6 +89,20 @@ in CI). All commands run from `packages/conformance-target/`.
    Workers Routes:Edit, D1:Edit, Queues:Edit, R2:Edit) and
    `CLOUDFLARE_ACCOUNT_ID` secrets for the CI deploy job.
 
+5. _(Optional)_ Enable
+   [Onion Routing](https://developers.cloudflare.com/network/onion-routing/)
+   on the zone so Tor Browser users reach the target over Tor instead of an
+   exit node. It is transparent to the Worker (Host/SNI preserved) and needs
+   no config change here — dashboard **Network → Onion Routing**, or:
+
+   ```bash
+   curl -X PATCH \
+     "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/opportunistic_onion" \
+     -H "Authorization: Bearer $API_TOKEN" \
+     -H "Content-Type: application/json" \
+     --data '{"value":"on"}'
+   ```
+
 ## Deploy
 
 From the repo root (dependencies must be built first — wrangler bundles the

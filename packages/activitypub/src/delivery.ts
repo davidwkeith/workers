@@ -54,14 +54,22 @@ function isPrivateIPv4(octets: [number, number, number, number]): boolean {
   return false;
 }
 
-/** A host name that names the local host or an internal/reserved suffix. */
+/**
+ * A host name that names the local host, an internal/reserved suffix, or the
+ * RFC 7686 special-use TLD `.onion` (Tor-only — the Workers runtime cannot
+ * reach it, so a `.onion` inbox is dropped as `blocked_host` instead of
+ * failing at the network layer).
+ */
 function isBlockedHostName(host: string): boolean {
-  const lower = host.toLowerCase();
+  // Strip the FQDN trailing dot so `example.onion.` matches the suffix checks.
+  const lower = host.toLowerCase().replace(/\.$/, "");
   if (lower === "localhost") return true;
   return (
     lower.endsWith(".localhost") ||
     lower.endsWith(".internal") ||
-    lower.endsWith(".local")
+    lower.endsWith(".local") ||
+    lower === "onion" ||
+    lower.endsWith(".onion")
   );
 }
 

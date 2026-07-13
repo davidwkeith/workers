@@ -55,6 +55,9 @@ describe("assertPublicHttpsTarget", () => {
     "https://localhost/inbox",
     "https://foo.internal/inbox",
     "https://[::1]/inbox",
+    "https://example.onion/inbox",
+    "https://example.onion./inbox",
+    "https://foo.internal./inbox",
   ])("rejects private/loopback target %s", (url) => {
     expect(() => assertPublicHttpsTarget(url)).toThrow(DeliveryBlockedError);
   });

@@ -5,7 +5,8 @@ package that fetches an attacker- or user-supplied URL.
 
 Provides:
 
-- `safeFetch` / `safeFetchJson` — private/reserved-host blocking, bounded
+- `safeFetch` / `safeFetchJson` — private/reserved-host blocking (including
+  the RFC 7686 `.onion` special-use TLD, unreachable from Workers), bounded
   manual redirects with per-hop re-validation, a single overall timeout, and
   cross-origin credential-header stripping on redirect.
 - `readBodyCapped` / `readBytesCapped` — a response body reader that refuses

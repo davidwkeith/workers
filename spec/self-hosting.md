@@ -427,6 +427,15 @@ Cloudflare provided several things for free that the self-hoster now owns:
   posture deserves a self-host note.
 - **DPoP, least-privilege, no-decision-caching** — all enforced in the shared
   code, unaffected by the runtime.
+- **Tor / Onion Routing does not carry over** — Cloudflare's
+  [Onion Routing](https://developers.cloudflare.com/network/onion-routing/) is
+  an edge feature (opportunistic `Alt-Svc` onion endpoints terminated at
+  Cloudflare); the Node host has no equivalent. A self-hoster who wants Tor
+  reachability runs their own onion service (e.g. `tor` + `HiddenServicePort`)
+  in front of the reverse proxy — out of scope for these packages, and note
+  that identity stays HTTPS-rooted at the canonical `baseUrl` either way
+  (`resolveOrigin` rejects a non-loopback `http://` `baseUrl`, `.onion`
+  included, outside dev mode).
 - **Filesystem permissions** — the data directory holds keys and all pod data;
   the host MUST create it `0700` and document backup/permission expectations.
 
