@@ -21,7 +21,7 @@ stats — see `spec/overview.md` §4). ESI is the standard mechanism for
 "cache the shell, refresh the fragment": Anglesite's static build emits
 `<esi:include>` markup at the points where a page needs live data, and the
 composed Worker resolves those tags at the edge before the response goes out.
-The issue's own body flags that the *producing* side (Anglesite emitting the
+The issue's own body flags that the _producing_ side (Anglesite emitting the
 tags) is a separate feature to file against `Anglesite/Anglesite-app`; this
 design covers only the **processing** side that belongs in this repo.
 
@@ -89,6 +89,15 @@ change the public API, same rationale as the JSON-LD precedent.
 
 ```ts
 export interface EsiOptions {
+  /**
+   * Base URL to resolve a relative `src`/`alt` against (`new URL(src,
+   * baseUrl)`) before validating it. `assertPublicUrl` (and so `safeFetch`)
+   * can only parse absolute URLs, so a relative include with no `baseUrl`
+   * configured is treated as a fragment failure (dropped per the
+   * onerror/alt rules below), not silently ignored. Typically the request
+   * URL of the page being processed.
+   */
+  readonly baseUrl?: string;
   /** Underlying fetch to use for fragments; defaults to global fetch. */
   readonly fetch?: FetchLike; // from @dwk/safe-fetch
   /** Passed through to every fragment's safeFetch call. */
@@ -136,10 +145,25 @@ after the fact once the response has started flushing past it, and fragments
 before a slow one still don't block index order (results are held until
 their turn, not necessarily returned in fetch-completion order).
 
+Two implementation details that matter for correctness, not just style:
+
+- **One `TextDecoder({ stream: true })` per response, not per chunk.** A
+  multi-byte UTF-8 character (an emoji, accented text) can straddle a chunk
+  boundary; `TextDecoder`'s `stream: true` mode carries a partial trailing
+  byte sequence forward internally, but only if the _same instance_ sees
+  every chunk in order. Constructing a fresh decoder per chunk would corrupt
+  any character split across two chunks.
+- **The tokenizer's "possible partial tag" buffer is itself capped** (e.g.
+  8 KB). An unclosed or malformed `<esi:` sequence must not let the
+  tokenizer accumulate the rest of the body into memory waiting for a `>`
+  that never comes — past the cap, the buffered bytes are flushed as
+  literal text and scanning resumes, the same "degrade to pass-through"
+  behavior malformed markup already gets.
+
 Per `spec/non-functional-requirements.md`'s runtime budget: this must never
-buffer the whole body — only the small "possible partial tag" tail buffer
-that the reference implementation also needs, plus the (capped,
-individually small) fragment bodies in flight at once.
+buffer the whole body — only the small, now explicitly bounded "possible
+partial tag" tail buffer that the reference implementation also needs, plus
+the (capped, individually small) fragment bodies in flight at once.
 
 ### Security
 
@@ -190,7 +214,7 @@ and out of scope here.
 
 - New package needs `package.json`, `tsconfig.json`, `tsconfig.build.json`,
   `vitest.config.ts`, `README.md`, `src/index.ts` doc comment (`@see
-  docs/superpowers/specs/2026-07-13-esi-design.md` — no `spec/packages/esi.md`
+docs/superpowers/specs/2026-07-13-esi-design.md` — no `spec/packages/esi.md`
   is planned, matching `@dwk/safe-fetch`'s precedent of a design doc instead
   of a full per-package spec for a smaller reusable lib), and a
   `conformance/status.json` entry (`"standard": null`, empty `suites`,
