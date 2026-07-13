@@ -209,6 +209,11 @@ async function caseWebfinger({ ctx, target, log }) {
   const raw = await fetch(target, {
     headers: { accept: "application/activity+json" },
   });
+  if (!raw.ok) {
+    throw new Error(
+      `fetching the actor failed: ${raw.status} ${raw.statusText}`,
+    );
+  }
   const rawActor = await raw.json();
   const backLink = rawActor.webfinger;
   if (typeof backLink !== "string" || !backLink.startsWith("acct:")) {
@@ -246,8 +251,13 @@ async function caseFollow({ ctx, target, received, timeoutMs, log }) {
   const targetActor = await ctx.lookupObject(target);
   if (!targetActor) throw new Error(`could not resolve target actor ${target}`);
 
+  // A unique id per run: @dwk/activitypub dedups inbound activities by `id`
+  // for 7 days, so a static fragment would make every rerun against the same
+  // persistent target within that window a silent no-op.
   const follow = new Follow({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#follow`),
+    id: new URL(
+      `${ctx.getActorUri(IDENTIFIER).href}#follow-${crypto.randomUUID()}`,
+    ),
     actor: ctx.getActorUri(IDENTIFIER),
     object: targetActor.id,
   });
@@ -271,13 +281,17 @@ async function caseActivities({ ctx, target, log }) {
   const targetActor = await ctx.lookupObject(target);
   if (!targetActor) throw new Error(`could not resolve target actor ${target}`);
 
+  // One id per run (see the comment in caseFollow): every activity below
+  // gets a distinct, run-scoped id so reruns against a persistent target
+  // aren't silently swallowed by the target's 7-day activity dedup cache.
+  const runId = crypto.randomUUID();
   const note = new Note({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#note`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#note-${runId}`),
     attributedTo: ctx.getActorUri(IDENTIFIER),
     content: "Fedify interop peer test note (issue #246)",
   });
   const create = new Create({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#create`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#create-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: note,
   });
@@ -287,7 +301,7 @@ async function caseActivities({ ctx, target, log }) {
   log(`sent Create ${create.id.href}`);
 
   const like = new Like({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#like`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#like-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: note.id,
   });
@@ -297,7 +311,7 @@ async function caseActivities({ ctx, target, log }) {
   log(`sent Like ${like.id.href}`);
 
   const announce = new Announce({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#announce`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#announce-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: note.id,
   });
@@ -307,7 +321,7 @@ async function caseActivities({ ctx, target, log }) {
   log(`sent Announce ${announce.id.href}`);
 
   const undo = new Undo({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#undo-like`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#undo-like-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: like,
   });
@@ -364,8 +378,10 @@ async function caseRsvp({ ctx, event, received, timeoutMs, log }) {
   const eventActor = await ctx.lookupObject(event);
   if (!eventActor) throw new Error(`could not resolve event ${event}`);
 
+  // Run-scoped ids, same reasoning as caseFollow/caseActivities.
+  const runId = crypto.randomUUID();
   const join = new Join({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#join`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#join-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: eventActor.id ?? new URL(event),
   });
@@ -384,7 +400,7 @@ async function caseRsvp({ ctx, event, received, timeoutMs, log }) {
   }
 
   const leave = new Leave({
-    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#leave`),
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#leave-${runId}`),
     actor: ctx.getActorUri(IDENTIFIER),
     object: eventActor.id ?? new URL(event),
   });
@@ -484,7 +500,12 @@ export async function runInterop({
       }
     }
   } finally {
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) {
+      // Close pending keep-alive sockets too, so a peer that never sends
+      // another request doesn't leave `server.close()` hanging.
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   }
 
   return { results };
