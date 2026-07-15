@@ -22,6 +22,9 @@
     "directory": "packages/mcp"
   },
   "sideEffects": false,
+  "dependencies": {
+    "@dwk/dpop": "workspace:*"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

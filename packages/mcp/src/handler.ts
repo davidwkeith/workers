@@ -21,6 +21,15 @@ export interface McpHandlerConfig extends McpServerConfig {
    * deliberately does not perform it itself.
    */
   authenticate?: (request: Request) => Promise<McpAuthContext | null>;
+
+  /**
+   * The RFC 9728 protected-resource-metadata URL to advertise on a `401`
+   * (`WWW-Authenticate: Bearer resource_metadata="…"`), so an MCP client can
+   * discover the authorization server. The document itself is built with
+   * this package's `buildProtectedResourceMetadata` and served outside this
+   * handler's mount (spec/packages/mcp.md "Auth bridge").
+   */
+  protectedResourceMetadataUrl?: string;
 }
 
 const JSON_HEADERS = { "content-type": "application/json" } as const;
@@ -66,10 +75,7 @@ export function createMcp(
       } catch {
         // The authenticate hook rejected/threw on a malformed or invalid
         // token — that's an authentication failure, not a server error.
-        return new Response("Unauthorized", {
-          status: 401,
-          headers: { "content-type": "text/plain" },
-        });
+        return unauthorized(config.protectedResourceMetadataUrl);
       }
     }
     const result = await server.handleBody(body, auth ?? NO_SCOPES);
@@ -86,5 +92,23 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
     headers: JSON_HEADERS,
+  });
+}
+
+/**
+ * `401` with a `WWW-Authenticate` challenge. When a protected-resource
+ * metadata URL is configured, the challenge carries `resource_metadata`
+ * (RFC 9728 §5.1) so an MCP client can discover the authorization server.
+ */
+function unauthorized(resourceMetadataUrl?: string): Response {
+  const challenge = resourceMetadataUrl
+    ? `Bearer resource_metadata="${resourceMetadataUrl}"`
+    : "Bearer";
+  return new Response("Unauthorized", {
+    status: 401,
+    headers: {
+      "content-type": "text/plain",
+      "www-authenticate": challenge,
+    },
   });
 }

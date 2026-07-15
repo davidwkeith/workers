@@ -6,7 +6,7 @@
 | **Ships a DO?** | no |
 | **Used by** | tool contributions from the endpoint packages (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention` first; `@dwk/solid-pod`, `@dwk/ldn`, `@dwk/activitypub` later) |
 | **Standard** | [Model Context Protocol](https://modelcontextprotocol.io/specification) (JSON-RPC 2.0 over Streamable HTTP) |
-| **Status** | **in progress.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz) is implemented and unit-tested. The auth bridge (real DPoP/OAuth token validation feeding `authenticate`) and the per-package tool contributions are the remaining increments. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
+| **Status** | **in progress.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz) and the auth bridge (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via `@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`) are implemented and unit-tested. The per-package tool contributions are the remaining increment. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
 
 > The load-bearing decisions below (tools-only subset, auth bridge shape,
 > side-effect posture) were sketched here before implementation, per
@@ -58,24 +58,34 @@ endpoint package, never the lib).
   (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), a
   required scope string, and a handler closure over the package's existing
   machinery.
-- **Auth bridge.** MCP authorization is OAuth 2.1-shaped, so reuse what the
-  repo owns rather than inventing anything: bearer + **DPoP-bound** access
-  tokens validated via [`@dwk/dpop`](dpop.md), introspection/metadata via
-  [`@dwk/oauth`](oauth.md), issuance by [`@dwk/indieauth`](indieauth.md).
-  `401` responses advertise the protected-resource metadata
-  (RFC 9728-style) so MCP clients can discover the authorization server.
-  The metadata document itself lives at the RFC 9728 well-known URI derived
-  from the resource identifier (e.g.
-  `/.well-known/oauth-protected-resource/mcp`), **outside the handler's
-  mount** — like `@dwk/oauth`'s RFC 8414 document it is static, config-derived
-  JSON, so Anglesite (or the composing Worker's root router) serves it.
-  Every `tools/call` is checked against the token's granted scopes ∩ the
-  tool's required scope — **per-tool least privilege, not a perimeter**.
-  DPoP `jti` replay tracking is delegated to a strongly-consistent store
-  supplied by the composing package (DO SQLite / D1, as the existing
-  endpoint packages already do for their DPoP-protected routes) — never KV,
-  and never a per-isolate in-memory cache, which provides no replay
-  protection across Worker isolates.
+- **Auth bridge — implemented.** MCP authorization is OAuth 2.1-shaped, so
+  this reuses what the repo owns rather than inventing anything:
+  `createDpopBearerAuthenticator` (`src/auth.ts`) builds the `authenticate`
+  hook `createMcp` accepts, verifying bearer + **DPoP-bound** access tokens
+  via [`@dwk/dpop`](dpop.md)'s `verifyDpopProof`. It never validates a token
+  itself — the composing package supplies a `TokenIntrospector` closure (e.g.
+  `@dwk/indieauth`'s `verifyAccessToken`, or a remote RFC 7662 call built on
+  [`@dwk/oauth`](oauth.md)) that resolves a token to its active-state, scope,
+  subject, and `cnf.jkt` binding. `401` responses advertise the
+  protected-resource metadata (RFC 9728-style) via a `WWW-Authenticate: Bearer
+  resource_metadata="…"` challenge (`McpHandlerConfig.protectedResourceMetadataUrl`)
+  so MCP clients can discover the authorization server; `buildProtectedResourceMetadata`
+  (`src/metadata.ts`) builds the plain-data document. The metadata document
+  itself lives at the RFC 9728 well-known URI derived from the resource
+  identifier (e.g. `/.well-known/oauth-protected-resource/mcp`), **outside
+  the handler's mount** — like `@dwk/oauth`'s RFC 8414 document it is static,
+  config-derived JSON, so Anglesite (or the composing Worker's root router)
+  serves it. Every `tools/call` is checked against the token's granted scopes
+  ∩ the tool's required scope — **per-tool least privilege, not a
+  perimeter**. DPoP `jti` replay tracking is delegated to a
+  strongly-consistent `DpopReplayStore` supplied by the composing package (DO
+  SQLite / D1, as the existing endpoint packages already do for their
+  DPoP-protected routes — see `@dwk/micropub`'s `replay.ts`) — never KV, and
+  never a per-isolate in-memory cache, which provides no replay protection
+  across Worker isolates. **Remaining:** the endpoint packages still need to
+  wire a concrete `TokenIntrospector` (over `@dwk/indieauth`) and a concrete
+  `DpopReplayStore` into a deployed composition — this package only ships the
+  bridge's plain-data core.
 
 ## Design constraints
 

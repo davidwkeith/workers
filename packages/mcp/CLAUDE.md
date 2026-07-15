@@ -10,10 +10,13 @@ the composed Worker can expose itself as agent-operable tools. Endpoint
 packages contribute `ToolDefinition`s (e.g. `@dwk/micropub`'s eventual
 `createMicropubMcpTools`); this lib owns only the wire protocol, the tool
 registry, and per-tool scope-intersection authorization — never any
-IndieWeb/Solid/ActivityPub semantics. **Status: protocol core implemented**;
-the auth bridge (real DPoP/OAuth token validation feeding the
-`authenticate` hook) and the endpoint packages' tool contributions are
-separate increments tracked in
+IndieWeb/Solid/ActivityPub semantics. **Status: protocol core and auth bridge
+implemented**; `createDpopBearerAuthenticator` (`auth.ts`) builds the
+`authenticate` hook from a caller-supplied token introspector plus
+`@dwk/dpop` proof-of-possession verification, and `buildProtectedResourceMetadata`
+(`metadata.ts`) builds the RFC 9728 discovery document for the `401`
+challenge. The endpoint packages' tool contributions are the remaining
+increment, tracked in
 [#240](https://github.com/davidwkeith/workers/issues/240).
 
 ## Spec
@@ -38,12 +41,27 @@ sketched there before implementation).
   ever added it must live in a strongly-consistent store, never KV.
 - **Per-tool least privilege, not a perimeter.** Every `ToolDefinition`
   carries a `requiredScope`; `tools/call` checks it against the caller's
-  granted scopes. This package never validates a token — `createMcp`'s
-  `authenticate(request)` hook is where the composing Worker plugs in real
-  DPoP/OAuth validation (`@dwk/dpop`/`@dwk/oauth`/`@dwk/indieauth`); omitting
-  it grants no scopes at all, so only `requiredScope: ""` tools are callable.
-- **Dependency-free.** No `@modelcontextprotocol/sdk` — same call as
-  `@dwk/rdf`'s own JSON-LD subset instead of `jsonld.js`.
+  granted scopes. `createMcp`'s `authenticate(request)` hook is where the
+  composing Worker plugs in real token validation; omitting it grants no
+  scopes at all, so only `requiredScope: ""` tools are callable.
+- **Auth bridge, not a token verifier.** `createDpopBearerAuthenticator`
+  (`auth.ts`) builds the `authenticate` hook: it extracts the bearer token,
+  calls a caller-supplied `TokenIntrospector` (e.g. `@dwk/indieauth`'s
+  `verifyAccessToken`, or a remote RFC 7662 call), completes the DPoP
+  proof-of-possession binding via `@dwk/dpop`, and records the proof `jti` in
+  a caller-supplied strongly-consistent `DpopReplayStore` (never KV — see
+  `@dwk/micropub`'s `replay.ts` for a D1-backed example). This package still
+  never verifies a bearer token's signature/introspection itself — that stays
+  the composing package's concern, same purity rule as everywhere else.
+- **No plain bearer.** DPoP is mandatory everywhere a token is used
+  (spec/non-functional-requirements.md); `createDpopBearerAuthenticator`
+  always requires a `DPoP` proof header, and
+  `buildProtectedResourceMetadata`'s `bearer_methods_supported` is always
+  `["DPoP"]`.
+- **Dependency-free except `@dwk/dpop`.** No `@modelcontextprotocol/sdk` —
+  same call as `@dwk/rdf`'s own JSON-LD subset instead of `jsonld.js`.
+  `@dwk/dpop` is a cross-standard lib like this one, so depending on it does
+  not leak cohort-standard knowledge in.
 
 ## Test environment
 
@@ -64,12 +82,14 @@ src/lifecycle.ts       # protocol-version negotiation + initialize result
 src/registry.ts        # ToolRegistry: tools/list + tools/call, scope checks
 src/server.ts          # createMcpServer — plain-data message/batch dispatch
 src/handler.ts         # createMcp — the Streamable HTTP shell
+src/auth.ts            # createDpopBearerAuthenticator — the MCP auth bridge
+src/metadata.ts        # buildProtectedResourceMetadata — RFC 9728 discovery document
 src/*.test.ts          # colocated tests
 ```
 
 ## Dependencies
 
-None (runtime). Pure JSON-RPC 2.0 + MCP protocol core.
+- `@dwk/dpop` — DPoP (RFC 9449) proof-of-possession verification for the auth bridge.
 
 ## Depended on by
 

@@ -192,4 +192,37 @@ describe("createMcp", () => {
     );
     expect(response.status).toBe(401);
   });
+
+  it("challenges with a bare Bearer WWW-Authenticate when no metadata URL is configured", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new Error("invalid DPoP proof");
+      },
+    });
+    const response = await handle(
+      post({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    );
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  it("advertises the RFC 9728 protected-resource-metadata URL on 401", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new Error("invalid DPoP proof");
+      },
+      protectedResourceMetadataUrl:
+        "https://example.com/.well-known/oauth-protected-resource/mcp",
+    });
+    const response = await handle(
+      post({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource/mcp"',
+    );
+  });
 });

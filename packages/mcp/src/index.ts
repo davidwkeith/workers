@@ -19,9 +19,11 @@
  * runtime; only the thin `createMcp` HTTP shell (`handler.ts`) touches
  * `Request`/`Response`. Authentication is a caller-supplied
  * `authenticate(request)` hook — this lib never validates a bearer/DPoP token
- * itself; it only intersects the resolved scopes against each tool's
- * `requiredScope`. Wiring real token validation via `@dwk/dpop`/`@dwk/oauth`/
- * `@dwk/indieauth` is the separate MCP auth-bridge increment tracked in #240.
+ * itself; `auth.ts`'s `createDpopBearerAuthenticator` builds that hook from a
+ * caller-supplied token introspector (`@dwk/indieauth`'s JWT verify, or a
+ * remote RFC 7662 call) plus `@dwk/dpop` proof-of-possession binding. Per-tool
+ * tool contributions from the endpoint packages are the remaining increment
+ * tracked in #240.
  *
  * @see spec/packages/mcp.md
  * @packageDocumentation
@@ -36,6 +38,22 @@ export {
 } from "./server.js";
 
 export { ToolRegistry } from "./registry.js";
+
+export {
+  createDpopBearerAuthenticator,
+  tokenFromAuthHeader,
+  McpAuthError,
+  type DpopReplayStore,
+  type IntrospectedToken,
+  type McpAuthBridgeConfig,
+  type TokenIntrospector,
+} from "./auth.js";
+
+export {
+  buildProtectedResourceMetadata,
+  type ProtectedResourceMetadata,
+  type ProtectedResourceMetadataConfig,
+} from "./metadata.js";
 
 export {
   SUPPORTED_PROTOCOL_VERSIONS,
