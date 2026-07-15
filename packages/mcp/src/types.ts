@@ -92,12 +92,14 @@ export interface ToolCallResult {
 /**
  * The caller's granted scopes, already resolved by the composing Worker's auth
  * bridge (DPoP-bound token validated via `@dwk/dpop`/`@dwk/oauth`/
- * `@dwk/indieauth` — see spec/packages/mcp.md). This lib never validates a
- * token itself; it only intersects `scopes` against each tool's
- * `requiredScope`.
+ * `@dwk/indieauth` — see spec/packages/mcp.md, and this package's
+ * `createDpopBearerAuthenticator`). This lib never validates a token itself;
+ * it only intersects `scopes` against each tool's `requiredScope`.
  */
 export interface McpAuthContext {
   scopes: string[];
+  /** The token's subject (e.g. the owner's `me`), when the auth bridge resolved one. */
+  subject?: string;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { McpAuthError } from "./auth.js";
 import { JsonRpcErrorCode } from "./jsonrpc.js";
 import { createMcp } from "./handler.js";
 import type { ToolDefinition } from "./types.js";
@@ -179,17 +180,63 @@ describe("createMcp", () => {
     expect(body.error.code).toBe(JsonRpcErrorCode.InsufficientScope);
   });
 
-  it("returns 401 when the authenticate hook throws, instead of a 500", async () => {
+  it("returns 401 when the authenticate hook throws McpAuthError, instead of a 500", async () => {
     const handle = createMcp({
       serverInfo: { name: "s", version: "1" },
       tools: [publishTool],
       authenticate: async () => {
-        throw new Error("invalid DPoP proof");
+        throw new McpAuthError("invalid DPoP proof");
       },
     });
     const response = await handle(
       post({ jsonrpc: "2.0", id: 1, method: "ping" }),
     );
     expect(response.status).toBe(401);
+  });
+
+  it("propagates a non-McpAuthError thrown by the authenticate hook, instead of masking it as a 401", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new Error("token store database connection failed");
+      },
+    });
+    await expect(
+      handle(post({ jsonrpc: "2.0", id: 1, method: "ping" })),
+    ).rejects.toThrow("token store database connection failed");
+  });
+
+  it("challenges with a bare Bearer WWW-Authenticate when no metadata URL is configured", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new McpAuthError("invalid DPoP proof");
+      },
+    });
+    const response = await handle(
+      post({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    );
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  it("advertises the RFC 9728 protected-resource-metadata URL on 401", async () => {
+    const handle = createMcp({
+      serverInfo: { name: "s", version: "1" },
+      tools: [publishTool],
+      authenticate: async () => {
+        throw new McpAuthError("invalid DPoP proof");
+      },
+      protectedResourceMetadataUrl:
+        "https://example.com/.well-known/oauth-protected-resource/mcp",
+    });
+    const response = await handle(
+      post({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe(
+      'Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource/mcp"',
+    );
   });
 });

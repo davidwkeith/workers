@@ -159,7 +159,11 @@ importers:
 
   packages/log: {}
 
-  packages/mcp: {}
+  packages/mcp:
+    dependencies:
+      '@dwk/dpop':
+        specifier: workspace:*
+        version: link:../dpop
 
   packages/micropub:
     dependencies:
