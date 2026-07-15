@@ -1,5 +1,51 @@
 # @dwk/activitypub
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 65264d2: Federate calendar events and RSVPs over ActivityPub (the Fediverse layer of the
+  calendar/events epic, #171). Add `calendarEventToActivityStreams`, the
+  `CalendarEvent → ActivityStreams 2.0 Event` adapter that reads the canonical
+  `@dwk/calendar` model so an `h-event`, a `VEVENT`, and an AS2 `Event` are three
+  serializations of one record; the owner publishes it through the existing
+  outbox seam. The inbox now handles `Join`/`Leave` — the ActivityPub mirror of an
+  Indie RSVP — recording participation as authoritative Durable Object state for
+  events this actor owns, auto-`Accept`ing a `Join` (signed `Accept` to the
+  participant's inbox) unless the new `manuallyApprovesJoins` config holds it
+  `pending`.
+
+### Patch Changes
+
+- 7b86416: Reject `.onion` inboxes in the outbound-delivery SSRF guard
+  (`assertPublicHttpsTarget`). Workers cannot reach Tor onion services (RFC 7686
+  keeps `.onion` out of public DNS), so such targets are now dropped
+  non-retryably as `blocked_host` instead of failing at the network layer.
+- 1d13d8a: Auto-`Accept`-on-`Follow`/`Join` no longer resolves the remote actor's inbox
+  inline while handling the inbound POST. Resolving a remote actor document is
+  an outbound fetch bounded by a 10s timeout; running it inline held the
+  single-threaded Durable Object's input gate open for the duration, stalling
+  every other request to that actor (including unrelated inbox deliveries and
+  the sending server's own POST). Resolution is now queued and resolved from
+  the alarm-driven delivery pass, alongside ordinary delivery retries.
+- 18a5310: Harden two unauthenticated/attacker-controlled fetch paths found in a
+  Cloudflare Workers best-practices review:
+
+  - `@dwk/activitypub`: the inbox and owner-publish endpoints now cap the
+    request body (2 MB) before buffering it, rejecting oversized bodies with
+    413 instead of letting an unauthenticated federation peer control how much
+    memory the Worker allocates.
+  - `@dwk/vc`: verifying a foreign `credentialStatus.statusListCredential` URL
+    (attacker-controlled, taken from the credential under verification) now
+    goes through an SSRF-safe fetch — https-only, private/reserved hosts
+    blocked (previously only the scheme was checked), a bounded timeout, and a
+    capped response body read — instead of an unguarded `fetch`.
+
+- Updated dependencies [fc4f47b]
+- Updated dependencies [6d14fc3]
+  - @dwk/calendar@0.1.0-beta.1
+  - @dwk/log@0.1.0-beta.3
+
 ## 0.1.0-beta.3
 
 ### Minor Changes

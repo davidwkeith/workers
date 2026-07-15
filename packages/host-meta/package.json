@@ -1,6 +1,6 @@
 {
   "name": "@dwk/host-meta",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Web Host Metadata (RFC 6415) host-meta discovery at /.well-known/host-meta with XRD/JRD content negotiation.",
   "keywords": [
     "host-meta",

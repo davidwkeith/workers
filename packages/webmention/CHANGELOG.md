@@ -1,5 +1,41 @@
 # @dwk/webmention
 
+## 0.1.0-beta.3
+
+### Minor Changes
+
+- 9866e8d: Recognize Indie RSVPs. During asynchronous verification, a source that carries a
+  `p-rsvp` (`yes`/`no`/`maybe`/`interested`) plus a `u-in-reply-to` aimed at the
+  target is detected as an RSVP and its value persisted on the inbox record (new
+  nullable `rsvp` column, migrated additively on existing inboxes). Extraction is a
+  bounded `HTMLRewriter` read of just those two properties — no full microformats2
+  parser enters the Worker bundle. Exports `extractRsvp`, `isRsvpValue`,
+  `RSVP_VALUES`, and `RsvpValue`; `VerifyResult` and `VerifiedMention` gain an
+  optional `rsvp`. Part of the calendar/events work (#168).
+
+### Patch Changes
+
+- 6d14fc3: Fix: emit explicit `.js` extensions on relative imports so the published ESM
+  packages resolve under Node's ESM loader.
+
+  The packages were built with `moduleResolution: "Bundler"`, which let source
+  files omit extensions on relative specifiers (`export { createWebmention } from
+"./handler"`). `tsc` preserves specifiers verbatim, so the published
+  `dist/index.js` re-exported extensionless paths that Node's ESM loader cannot
+  resolve — `import("@dwk/webmention")` failed with `ERR_MODULE_NOT_FOUND` (only
+  a bundler like esbuild/wrangler papered over it). Relative specifiers across the
+  monorepo now carry explicit `.js` extensions, and `tsconfig.base.json` moves to
+  `module`/`moduleResolution: "NodeNext"` so the compiler enforces extensions and
+  this cannot silently regress.
+
+- 22c802a: Move SSRF-safe fetch and capped body reads onto the shared `@dwk/safe-fetch`
+  package instead of a package-local copy. No public API change.
+- Updated dependencies [6d14fc3]
+- Updated dependencies [7b86416]
+- Updated dependencies [22c802a]
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/safe-fetch@0.1.0-beta.2
+
 ## 0.1.0-beta.2
 
 ### Patch Changes
