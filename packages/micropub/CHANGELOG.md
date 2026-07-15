@@ -1,5 +1,49 @@
 # @dwk/micropub
 
+## 0.1.0-beta.3
+
+### Minor Changes
+
+- fc4f47b: Add `hEventToCalendarEvent(mf2)` — the IndieWeb-specific adapter from a stored
+  `h-event` microformats2 object to the canonical `CalendarEvent` model in the new
+  [`@dwk/calendar`](https://github.com/davidwkeith/workers/tree/main/packages/calendar)
+  lib, which then serializes to `.ics`/JSCalendar. It maps `uid` (falling back to
+  `url`) → identity, `name` → title, `summary`/`content` → description,
+  `dt-start`/`dt-end` → start/end, `location` → locations, `category` → keywords,
+  and `published`/`updated` → timestamps. The adapter lives here, not in
+  `@dwk/calendar`, because that cross-standard lib must stay free of IndieWeb
+  assumptions. Pure and unit-tested for the `h-event → CalendarEvent → .ics`
+  round-trip. Part of the calendar/events work (#170, epic #167).
+- 9866e8d: Support the Micropub event post type (`h=event`). Events are created and stored
+  like any other post (their `name`/`start`/`end`/`location`/`category` properties
+  round-trip through `q=source`), and a new pure `renderHEvent` helper serializes a
+  stored event's microformats2 to canonical `h-event` markup (`p-name`,
+  `dt-start`/`dt-end`, `p-location`, `p-category`, `e-content`, `u-url`) for
+  publishing. Also exports `H_EVENT` and `isEvent`. Part of the calendar/events
+  work (#168).
+
+### Patch Changes
+
+- 6d14fc3: Fix: emit explicit `.js` extensions on relative imports so the published ESM
+  packages resolve under Node's ESM loader.
+
+  The packages were built with `moduleResolution: "Bundler"`, which let source
+  files omit extensions on relative specifiers (`export { createWebmention } from
+"./handler"`). `tsc` preserves specifiers verbatim, so the published
+  `dist/index.js` re-exported extensionless paths that Node's ESM loader cannot
+  resolve — `import("@dwk/webmention")` failed with `ERR_MODULE_NOT_FOUND` (only
+  a bundler like esbuild/wrangler papered over it). Relative specifiers across the
+  monorepo now carry explicit `.js` extensions, and `tsconfig.base.json` moves to
+  `module`/`moduleResolution: "NodeNext"` so the compiler enforces extensions and
+  this cannot silently regress.
+
+- Updated dependencies [fc4f47b]
+- Updated dependencies [6d14fc3]
+  - @dwk/calendar@0.1.0-beta.1
+  - @dwk/indieauth@0.1.0-beta.3
+  - @dwk/dpop@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.3
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

@@ -1,5 +1,24 @@
 # @dwk/microsub
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- 3e7e9d2: Drop the redundant in-batch `CREATE TABLE IF NOT EXISTS` from
+  `recordProof`'s D1 batch in the DPoP replay store — `init()` already creates
+  the schema, and `@dwk/micropub`'s twin implementation never repeats it in the
+  hot path. Purely a consistency fix; behavior is unchanged since the statement
+  was idempotent.
+- 22c802a: Move SSRF-safe fetch and capped body reads onto the shared `@dwk/safe-fetch`
+  package instead of a package-local copy. No public API change.
+- Updated dependencies [6d14fc3]
+- Updated dependencies [7b86416]
+- Updated dependencies [22c802a]
+  - @dwk/indieauth@0.1.0-beta.3
+  - @dwk/dpop@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/safe-fetch@0.1.0-beta.2
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

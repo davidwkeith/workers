@@ -1,6 +1,6 @@
 {
   "name": "@dwk/remotestorage",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "remoteStorage (draft-dejong-remotestorage) personal data vault: OAuth-bearer GET/PUT/DELETE documents and folder listings over @dwk/store. Ships the per-account Durable Object.",
   "keywords": [
     "remotestorage",

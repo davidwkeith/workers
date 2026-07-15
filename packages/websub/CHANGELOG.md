@@ -1,5 +1,17 @@
 # @dwk/websub
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- 22c802a: Move SSRF-safe fetch and capped body reads onto the shared `@dwk/safe-fetch`
+  package instead of a package-local copy. No public API change.
+- Updated dependencies [6d14fc3]
+- Updated dependencies [7b86416]
+- Updated dependencies [22c802a]
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/safe-fetch@0.1.0-beta.2
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

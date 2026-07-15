@@ -1,5 +1,20 @@
 # @dwk/remotestorage
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- b9362b1: Blob/document GET and HEAD responses now carry
+  `X-Content-Type-Options: nosniff`. User-uploaded content is served back with
+  a user-supplied content type, and pods/accounts can expose public resources
+  without auth in front — without `nosniff` a mislabeled blob is a stored-XSS
+  vector on shared-origin deployments.
+- Updated dependencies [6d14fc3]
+- Updated dependencies [f64ab9b]
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/store@0.1.0-beta.3
+  - @dwk/webfinger@0.1.0-beta.3
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

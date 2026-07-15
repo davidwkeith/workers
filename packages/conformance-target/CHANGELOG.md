@@ -1,0 +1,61 @@
+# @dwk/conformance-target
+
+## 0.0.1-beta.0
+
+### Patch Changes
+
+- Updated dependencies [7b86416]
+- Updated dependencies [65264d2]
+- Updated dependencies [1d13d8a]
+- Updated dependencies [f41f353]
+- Updated dependencies [9002e6c]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [92e6617]
+- Updated dependencies [1d1ae48]
+- Updated dependencies [b22023e]
+- Updated dependencies [b63e064]
+- Updated dependencies [1b9b228]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [b051f50]
+- Updated dependencies [79d704c]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [f4c464f]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [de9272e]
+- Updated dependencies [37030fb]
+- Updated dependencies [ac2c167]
+- Updated dependencies [4c675df]
+- Updated dependencies [c2fd02f]
+- Updated dependencies [22c802a]
+- Updated dependencies [0a4bcbb]
+- Updated dependencies [6d14fc3]
+- Updated dependencies [fc4f47b]
+- Updated dependencies [9866e8d]
+- Updated dependencies [3e7e9d2]
+- Updated dependencies [22c802a]
+- Updated dependencies [18a5310]
+- Updated dependencies [7725b36]
+- Updated dependencies [87c2dd8]
+- Updated dependencies [b9362b1]
+- Updated dependencies [ca19532]
+- Updated dependencies [f64ab9b]
+- Updated dependencies [22c802a]
+- Updated dependencies [7a475e2]
+- Updated dependencies [99a01c4]
+- Updated dependencies [9866e8d]
+- Updated dependencies [22c802a]
+- Updated dependencies [22c802a]
+  - @dwk/activitypub@0.1.0-beta.4
+  - @dwk/atproto-pds@0.1.0-beta.1
+  - @dwk/indieauth@0.1.0-beta.3
+  - @dwk/micropub@0.1.0-beta.3
+  - @dwk/webmention@0.1.0-beta.3
+  - @dwk/microsub@0.1.0-beta.3
+  - @dwk/vc@0.1.0-beta.3
+  - @dwk/solid-pod@0.1.0-beta.3
+  - @dwk/remotestorage@0.1.0-beta.3
+  - @dwk/websub@0.1.0-beta.3
+  - @dwk/host-meta@0.1.0-beta.3
+  - @dwk/webauthn@0.1.0-beta.3
+  - @dwk/webfinger@0.1.0-beta.3

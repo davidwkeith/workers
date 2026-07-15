@@ -1,5 +1,118 @@
 # @dwk/solid-pod
 
+## 0.1.0-beta.3
+
+### Minor Changes
+
+- 87c2dd8: Add `calendarEventToQuads(event, subjectIri)` / `quadsToCalendarEvent(quads,
+subjectIri)` — the Solid-specific adapter between the canonical `CalendarEvent`
+  model in [`@dwk/calendar`](https://github.com/davidwkeith/workers/tree/main/packages/calendar)
+  and RDF, so calendar events live as ordinary WAC-gated LDP resources in a pod.
+  [schema.org](https://schema.org/Event) is the canonical vocabulary
+  (`schema:Event` + `startDate`/`endDate`/`location`/`keywords`/`eventStatus`/…),
+  JSON-LD-native and what Solid clients expect; the adapter emits and reads it via
+  the flat `StoredQuad` shape the DO quad store and `@dwk/rdf` already use, so a
+  client serializes with `@dwk/rdf` and PUTs Turtle/JSON-LD through the existing
+  LDP surface, then reads it back into the same record. `uid` round-trips as
+  `schema:identifier`; `start`/`end` carry `xsd:date`/`xsd:dateTime`. The same
+  event is thus a view shared with the `.ics` `VEVENT`, JSCalendar, `h-event`, and
+  AS2 `Event` serializations. The adapter lives here, not in the cross-standard
+  `@dwk/calendar` lib, which must stay free of Solid/RDF assumptions. Part of the
+  calendar/events work (#172, epic #167).
+- ca19532: Wire the `@dwk/webdav` Class 2 façade onto the live per-pod `SolidPodObject` —
+  the "second door" (#169). The pod's storage is now mountable as a network drive
+  by OS file managers over HTTP Basic app-passwords, sharing one consistency
+  domain with the Solid door.
+
+  - **`createSolidPodWebdav(config)`** — a stateless WebDAV front door that
+    resolves the per-pod DO and forwards verbs (with an `x-solid-webdav` marker
+    and the raw `Authorization` header) to it.
+  - **In-DO integration** — `SolidPodObject` now hosts the `LockStore` and
+    `CredentialStore` in its own SQLite and runs the `createWebdav` router over an
+    in-DO `WebdavBackend` adapter built on the pod's `@dwk/store` + WAC. App
+    passwords are verified in the DO; effective access is `scope ∩ WAC`. PUT/MKCOL
+    reuse the exact RDF-vs-blob routing and `ldp:contains` containment as Solid
+    writes (a `.ttl` written from Finder is a first-class quad resource), and the
+    storage root stays undeletable. Lock state lives beside the Solid write path,
+    so a WebDAV `LOCK` blocks an unkeyed Solid or WebDAV write alike (`423`).
+  - The shared write path is refactored into a request-independent
+    `#writeResolvedBody` so both doors classify and store bodies identically.
+
+  `COPY`/`MOVE` (currently `501`), the owner-gated app-password mint/revoke
+  endpoint, and the hosted litmus run land in a follow-up increment.
+
+- 7a475e2: Implement WebDAV **`COPY`/`MOVE`** on the pod's "second door" (#169) — the
+  drag-drop and rename verbs OS file managers use — replacing the prior `501`.
+
+  - `@dwk/webdav`: the router now `404`s a `COPY`/`MOVE` of a missing source and
+    `409`s copying/moving a collection into its own subtree (RFC 4918 §9.8.5 /
+    §9.9.4), ahead of the existing `Destination`/`Overwrite`/`Depth`/lock checks.
+  - `@dwk/solid-pod`: the in-DO backend implements `copy`/`move` over `@dwk/store`.
+    A data resource is copied verbatim — the content-addressed R2 blob makes a copy
+    a near-free pointer; a container is recreated fresh with its `ldp:contains`
+    rebuilt as children copy in (so membership reflects the new tree, not the
+    source). `Depth: 0` copies only the collection; `MOVE` is copy-then-drop-source
+    and is always `Depth: infinity`. Overwrite is delete-then-copy so no stale
+    destination subtree lingers, and the storage root is immovable (`405`), as it
+    is undeletable.
+
+- 99a01c4: Add the **owner-gated WebDAV app-password endpoint**
+  (`createSolidPodWebdavCredentials`) so users can mint, list, and revoke the
+  Basic-auth credentials the WebDAV door consumes (#169) — instead of seeding them
+  out of band.
+
+  Issuance is a resource-server concern guarded by the pod's existing DPoP-bound
+  **owner** token (distinct from the Basic-auth data door): the Solid front door
+  authenticates at the edge, then the per-pod `SolidPodObject` re-checks ownership
+  and serves `POST` (mint — the plaintext secret is returned exactly once), `GET`
+  (list the owner's credentials, metadata only — never the hash or secret), and
+  `DELETE ?id=…` (revoke; an owner may only revoke a credential bound to their own
+  WebID). Credentials bind to the authenticated owner's WebID and verify on the
+  same per-pod `CredentialStore` the data door reads.
+
+### Patch Changes
+
+- 7725b36: Protect the storage root container from deletion (Solid
+  `#server-delete-protect-root-container`). A `DELETE` against the storage root is
+  now refused `405` ahead of any authorization check, and the advertised `Allow`
+  (on `OPTIONS` and successful responses) omits `DELETE` for that one container.
+  The storage root is derived from the pod `baseUrl`'s pathname as a container
+  (`/` for an origin-root pod) and forwarded to the Durable Object alongside the
+  other resolved config.
+- b9362b1: Blob/document GET and HEAD responses now carry
+  `X-Content-Type-Options: nosniff`. User-uploaded content is served back with
+  a user-supplied content type, and pods/accounts can expose public resources
+  without auth in front — without `nosniff` a mislabeled blob is a stored-XSS
+  vector on shared-origin deployments.
+- f64ab9b: Track per-resource **byte size** and **last-modified time** in `@dwk/store` and
+  surface them on `ResourceMeta` (`size`, `modifiedAt`), so consumers get real
+  file metadata without an extra read (#169).
+
+  - `@dwk/store`: a `size` column is added to the `resources` table (with an
+    idempotent migration for pods predating it) and recorded on every write — the
+    blob write path measures the R2 object's byte size, and inline RDF records its
+    source byte length via a new optional `WriteOptions.size`. `mtime` reuses the
+    existing `updated_at`. `head()` and `list()` now return both. Size is `0` for
+    resources with no canonical byte body (e.g. containers).
+  - `@dwk/solid-pod`: the WebDAV adapter drops its `getlastmodified` stand-in and
+    its extra `readBlob`-for-size, reporting the store's real `size`/`modifiedAt`
+    in PROPFIND/HEAD/GET. A stable, accurate `getlastmodified` no longer makes OS
+    clients see a perpetually-changing file, and a `Depth: 1` listing is a pure
+    SQLite scan with no per-child R2 round-trip.
+
+- Updated dependencies [fc4f47b]
+- Updated dependencies [6d14fc3]
+- Updated dependencies [f64ab9b]
+- Updated dependencies [a035da5]
+- Updated dependencies [7a475e2]
+- Updated dependencies [929513f]
+- Updated dependencies [fd5a818]
+  - @dwk/calendar@0.1.0-beta.1
+  - @dwk/dpop@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/store@0.1.0-beta.3
+  - @dwk/webdav@0.1.0-beta.0
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

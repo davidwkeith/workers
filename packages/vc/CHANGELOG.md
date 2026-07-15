@@ -1,5 +1,39 @@
 # @dwk/vc
 
+## 0.1.0-beta.3
+
+### Minor Changes
+
+- 22c802a: Move the status-list SSRF-safe fetch onto the shared `@dwk/safe-fetch`
+  package instead of a package-local copy (no behavior change). Also close a
+  gap where `createDidWebResolver`'s DID-document fetch had **no** SSRF
+  protection or timeout at all (#215) — it now goes through the same
+  `safeFetch` guardrails as the status-list fetch. `DidWebResolverOptions.fetch`
+  widens from a narrow `{ ok, status, json() }` shape to a full `Response`-
+  returning `FetchLike`, matching `@dwk/safe-fetch`'s type — a minor bump for
+  any caller supplying a custom fetch implementation.
+
+### Patch Changes
+
+- 18a5310: Harden two unauthenticated/attacker-controlled fetch paths found in a
+  Cloudflare Workers best-practices review:
+
+  - `@dwk/activitypub`: the inbox and owner-publish endpoints now cap the
+    request body (2 MB) before buffering it, rejecting oversized bodies with
+    413 instead of letting an unauthenticated federation peer control how much
+    memory the Worker allocates.
+  - `@dwk/vc`: verifying a foreign `credentialStatus.statusListCredential` URL
+    (attacker-controlled, taken from the credential under verification) now
+    goes through an SSRF-safe fetch — https-only, private/reserved hosts
+    blocked (previously only the scheme was checked), a bounded timeout, and a
+    capped response body read — instead of an unguarded `fetch`.
+
+- Updated dependencies [6d14fc3]
+- Updated dependencies [7b86416]
+- Updated dependencies [22c802a]
+  - @dwk/log@0.1.0-beta.3
+  - @dwk/safe-fetch@0.1.0-beta.2
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@dwk/vc",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "did:web identity plus Verifiable Credential (VCDM 2.0) issuance, verification, and Bitstring Status List revocation.",
   "keywords": [
     "verifiable-credentials",
