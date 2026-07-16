@@ -55,6 +55,10 @@ jobs:
         run: pnpm test:gate
       - name: Enforce release gate
         run: pnpm release:gate
+      - name: Unit-test the catalog gate
+        run: pnpm test:catalog
+      - name: Enforce catalog gate (catalog.json covers every package)
+        run: pnpm catalog:check
 
   # Verb-lifecycle integration tests (authenticated GET-through-WAC; PATCH with
   # where/conflict; If-Match preconditioned writes) under workerd/Miniflare.
