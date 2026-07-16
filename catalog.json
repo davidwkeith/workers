@@ -1,6 +1,6 @@
 {
   "$schema": "./catalog.schema.json",
-  "description": "Machine-readable manifest of every mountable @dwk worker, for composing apps (Anglesite/Anglesite-app#708). Worker ids are forever-stable; groups and componentIDs are coordinated with the consuming app. Validated in CI by scripts/catalog-gate.mjs; shape documented in spec/catalog.md. Provisional while this repo is pre-1.0 — breaking changes are paired-repo coordinated.",
+  "description": "Machine-readable manifest of every mountable @dwk worker, for composing apps (Anglesite/Anglesite-app#708). Worker ids are forever-stable; groups and componentIDs are coordinated with the consuming app. Validated in CI by scripts/catalog-gate.mjs; shape documented in spec/catalog.md. Provisional while this repo is pre-1.0 \u2014 breaking changes are paired-repo coordinated.",
   "workers": [
     {
       "id": "indieauth",
@@ -8,10 +8,46 @@
       "displayName": "IndieAuth",
       "description": "Sign in to apps with your own domain: IndieAuth authorization, token, and metadata endpoints.",
       "group": "identity",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
-        { "type": "d1", "binding": "AUTH_DB" },
-        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+        {
+          "type": "d1",
+          "binding": "AUTH_DB"
+        },
+        {
+          "type": "secret",
+          "binding": "TOKEN_SIGNING_KEY"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/.well-known/oauth-authorization-server",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createIndieAuth",
+          "authorityBound": true
+        },
+        {
+          "path": "/authorize",
+          "match": "exact",
+          "methods": ["GET", "POST"],
+          "handler": "createIndieAuth"
+        },
+        {
+          "path": "/token",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createIndieAuth"
+        },
+        {
+          "path": "/revocation",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createIndieAuth"
+        }
       ]
     },
     {
@@ -20,13 +56,48 @@
       "displayName": "Micropub",
       "description": "Publish posts to this site from any Micropub client, with a media endpoint for uploads.",
       "group": "publishing",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "requires": ["indieauth"],
       "resources": [
-        { "type": "d1", "binding": "MICROPUB_DB" },
-        { "type": "d1", "binding": "AUTH_DB" },
-        { "type": "r2", "binding": "MEDIA" },
-        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+        {
+          "type": "d1",
+          "binding": "MICROPUB_DB"
+        },
+        {
+          "type": "d1",
+          "binding": "AUTH_DB"
+        },
+        {
+          "type": "r2",
+          "binding": "MEDIA"
+        },
+        {
+          "type": "secret",
+          "binding": "TOKEN_SIGNING_KEY"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/micropub",
+          "match": "exact",
+          "methods": ["GET", "POST"],
+          "handler": "createMicropub"
+        },
+        {
+          "path": "/media",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createMicropub"
+        },
+        {
+          "path": "/media/",
+          "match": "prefix",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createMicropub"
+        }
       ]
     },
     {
@@ -35,13 +106,36 @@
       "displayName": "Microsub",
       "description": "Follow feeds and read them from any Microsub reader client.",
       "group": "publishing",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "requires": ["indieauth"],
       "resources": [
-        { "type": "d1", "binding": "MICROSUB_DB" },
-        { "type": "queue", "binding": "MICROSUB_QUEUE", "consumer": true },
-        { "type": "d1", "binding": "AUTH_DB" },
-        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+        {
+          "type": "d1",
+          "binding": "MICROSUB_DB"
+        },
+        {
+          "type": "queue",
+          "binding": "MICROSUB_QUEUE",
+          "consumer": true
+        },
+        {
+          "type": "d1",
+          "binding": "AUTH_DB"
+        },
+        {
+          "type": "secret",
+          "binding": "TOKEN_SIGNING_KEY"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/microsub",
+          "match": "exact",
+          "methods": ["GET", "POST"],
+          "handler": "createMicrosub"
+        }
       ]
     },
     {
@@ -55,8 +149,23 @@
         "componentIDs": ["webmention-form"]
       },
       "resources": [
-        { "type": "queue", "binding": "WEBMENTION_QUEUE", "consumer": true },
-        { "type": "d1", "binding": "WEBMENTION_INBOX" }
+        {
+          "type": "queue",
+          "binding": "WEBMENTION_QUEUE",
+          "consumer": true
+        },
+        {
+          "type": "d1",
+          "binding": "WEBMENTION_INBOX"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/webmention",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebmention"
+        }
       ]
     },
     {
@@ -65,10 +174,27 @@
       "displayName": "WebSub",
       "description": "Push feed updates to subscribers in real time (WebSub hub).",
       "group": "social",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
-        { "type": "d1", "binding": "WEBSUB_DB" },
-        { "type": "queue", "binding": "WEBSUB_QUEUE", "consumer": true }
+        {
+          "type": "d1",
+          "binding": "WEBSUB_DB"
+        },
+        {
+          "type": "queue",
+          "binding": "WEBSUB_QUEUE",
+          "consumer": true
+        }
+      ],
+      "routes": [
+        {
+          "path": "/websub",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebSub"
+        }
       ]
     },
     {
@@ -77,13 +203,45 @@
       "displayName": "Fediverse",
       "description": "Make this site a Fediverse actor: follow and be followed from Mastodon and other ActivityPub servers.",
       "group": "social",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
         {
           "type": "durable-object",
           "binding": "ACTOR",
           "className": "ActivityPubObject",
           "sqlite": true
+        }
+      ],
+      "routes": [
+        {
+          "path": "/users/",
+          "match": "prefix",
+          "methods": ["GET", "POST"],
+          "head": true,
+          "handler": "createActivityPub"
+        },
+        {
+          "path": "/inbox",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createActivityPub"
+        },
+        {
+          "path": "/.well-known/nodeinfo",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createActivityPub",
+          "authorityBound": true
+        },
+        {
+          "path": "/nodeinfo/",
+          "match": "prefix",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createActivityPub"
         }
       ]
     },
@@ -93,8 +251,20 @@
       "displayName": "WebFinger",
       "description": "Answer WebFinger discovery lookups for accounts on this domain.",
       "group": "discovery",
-      "binding": { "kind": "settingsActivated" },
-      "resources": []
+      "binding": {
+        "kind": "settingsActivated"
+      },
+      "resources": [],
+      "routes": [
+        {
+          "path": "/.well-known/webfinger",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createWebfinger",
+          "authorityBound": true
+        }
+      ]
     },
     {
       "id": "host-meta",
@@ -102,8 +272,28 @@
       "displayName": "Host Metadata",
       "description": "Serve host-meta discovery documents for this domain.",
       "group": "discovery",
-      "binding": { "kind": "settingsActivated" },
-      "resources": []
+      "binding": {
+        "kind": "settingsActivated"
+      },
+      "resources": [],
+      "routes": [
+        {
+          "path": "/.well-known/host-meta",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createHostMeta",
+          "authorityBound": true
+        },
+        {
+          "path": "/.well-known/host-meta.json",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createHostMeta",
+          "authorityBound": true
+        }
+      ]
     },
     {
       "id": "webauthn",
@@ -111,7 +301,9 @@
       "displayName": "Passkeys",
       "description": "Sign in with passkeys: a WebAuthn relying party for this domain.",
       "group": "identity",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
         {
           "type": "durable-object",
@@ -127,10 +319,19 @@
       "displayName": "Verifiable Credentials",
       "description": "Publish a did:web identity and issue or verify W3C Verifiable Credentials.",
       "group": "identity",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
-        { "type": "secret", "binding": "VC_SIGNING_KEY" },
-        { "type": "d1", "binding": "VC_STATUS_DB", "optional": true }
+        {
+          "type": "secret",
+          "binding": "VC_SIGNING_KEY"
+        },
+        {
+          "type": "d1",
+          "binding": "VC_STATUS_DB",
+          "optional": true
+        }
       ]
     },
     {
@@ -139,7 +340,9 @@
       "displayName": "Solid Pod",
       "description": "Expose a Solid-compatible personal data store for this site.",
       "group": "storage",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
         {
           "type": "durable-object",
@@ -147,8 +350,15 @@
           "className": "SolidPodObject",
           "sqlite": true
         },
-        { "type": "r2", "binding": "BLOBS" },
-        { "type": "d1", "binding": "GC_DB", "optional": true }
+        {
+          "type": "r2",
+          "binding": "BLOBS"
+        },
+        {
+          "type": "d1",
+          "binding": "GC_DB",
+          "optional": true
+        }
       ]
     },
     {
@@ -157,7 +367,9 @@
       "displayName": "WebDAV",
       "description": "Mount the site's Solid Pod as a network drive over WebDAV, with per-app passwords.",
       "group": "storage",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "requires": ["solid-pod"],
       "resources": [
         {
@@ -166,8 +378,14 @@
           "className": "SolidPodObject",
           "sqlite": true
         },
-        { "type": "r2", "binding": "BLOBS" },
-        { "type": "secret", "binding": "WEBDAV_PEPPER" }
+        {
+          "type": "r2",
+          "binding": "BLOBS"
+        },
+        {
+          "type": "secret",
+          "binding": "WEBDAV_PEPPER"
+        }
       ]
     },
     {
@@ -176,7 +394,9 @@
       "displayName": "remoteStorage",
       "description": "Host a remoteStorage personal data vault for unhosted web apps.",
       "group": "storage",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
         {
           "type": "durable-object",
@@ -184,8 +404,15 @@
           "className": "RemoteStorageObject",
           "sqlite": true
         },
-        { "type": "r2", "binding": "BLOBS" },
-        { "type": "d1", "binding": "GC_DB", "optional": true }
+        {
+          "type": "r2",
+          "binding": "BLOBS"
+        },
+        {
+          "type": "d1",
+          "binding": "GC_DB",
+          "optional": true
+        }
       ]
     },
     {
@@ -194,7 +421,9 @@
       "displayName": "Bluesky PDS",
       "description": "Host your AT Protocol (Bluesky) account and repository on your own domain.",
       "group": "storage",
-      "binding": { "kind": "settingsActivated" },
+      "binding": {
+        "kind": "settingsActivated"
+      },
       "resources": [
         {
           "type": "durable-object",
@@ -202,22 +431,25 @@
           "className": "AtprotoRepoObject",
           "sqlite": true
         },
-        { "type": "r2", "binding": "BLOBS" }
+        {
+          "type": "r2",
+          "binding": "BLOBS"
+        }
       ]
     }
   ],
   "libraries": {
-    "@dwk/calendar": "JSCalendar/iCalendar event model and serializers — consumed by endpoint packages, not mountable.",
-    "@dwk/dpop": "DPoP proof verification primitives — consumed by endpoint packages, not mountable.",
-    "@dwk/esi": "Streaming Edge Side Includes response processor — composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
-    "@dwk/http-signatures": "HTTP Message Signatures primitives — consumed by endpoint packages, not mountable.",
-    "@dwk/ldn": "Linked Data Notifications primitives — consumed by endpoint packages, not mountable.",
-    "@dwk/log": "Injectable structured-logging seam — consumed by every package, not mountable.",
-    "@dwk/mcp": "MCP server core the composed Worker embeds — its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
-    "@dwk/oauth": "OAuth 2.0 server building blocks — consumed by endpoint packages, not mountable.",
-    "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js — consumed by endpoint packages, not mountable.",
-    "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive — consumed by endpoint packages, not mountable.",
-    "@dwk/store": "DO-SQLite + R2 storage library instantiated inside consuming packages' Durable Objects — not mountable.",
-    "@dwk/wac": "Web Access Control evaluation — consumed by @dwk/solid-pod, not mountable."
+    "@dwk/calendar": "JSCalendar/iCalendar event model and serializers \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/dpop": "DPoP proof verification primitives \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/esi": "Streaming Edge Side Includes response processor \u2014 composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
+    "@dwk/http-signatures": "HTTP Message Signatures primitives \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/ldn": "Linked Data Notifications primitives \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/log": "Injectable structured-logging seam \u2014 consumed by every package, not mountable.",
+    "@dwk/mcp": "MCP server core the composed Worker embeds \u2014 its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
+    "@dwk/oauth": "OAuth 2.0 server building blocks \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive \u2014 consumed by endpoint packages, not mountable.",
+    "@dwk/store": "DO-SQLite + R2 storage library instantiated inside consuming packages' Durable Objects \u2014 not mountable.",
+    "@dwk/wac": "Web Access Control evaluation \u2014 consumed by @dwk/solid-pod, not mountable."
   }
 }

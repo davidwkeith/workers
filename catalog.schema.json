@@ -59,6 +59,46 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Catalog ids of workers that must also be active for this one to function (e.g. webdav requires solid-pod)."
+        },
+        "routes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/route" },
+          "description": "HTTP route claims (issue #256): the canonical paths this worker's handler owns when mounted at its default location. The composing app turns the active workers' claims into selective Worker-first routing (e.g. wrangler [assets].run_worker_first). Claims from different workers must never overlap; claims within one worker may (its handler sub-routes)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "route": {
+      "type": "object",
+      "required": ["path", "match", "methods", "handler"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path, no traversal or empty segments. A prefix claim's path ends with \"/\"."
+        },
+        "match": {
+          "enum": ["exact", "prefix"],
+          "description": "exact: the path only. prefix: the whole subtree under the trailing-slash path — used only where the standard delegates a subtree, never as a convenience."
+        },
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^(?!HEAD$)[A-Z][A-Z-]*$" },
+          "description": "Allowed methods. The composer answers other methods with 405 + Allow. HEAD is declared via \"head\", never listed here."
+        },
+        "head": {
+          "type": "boolean",
+          "description": "True when HEAD is supported, mirroring GET's headers without a body. Requires GET among methods."
+        },
+        "handler": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The factory export that owns this claim (e.g. \"createWebmention\") — lets the composer correlate a claim with the handler that must be mounted for it."
+        },
+        "authorityBound": {
+          "type": "boolean",
+          "description": "True when the standard requires this path on the site's canonical origin (well-known discovery documents); the composer must not remount it under a different prefix or host."
         }
       },
       "additionalProperties": false
