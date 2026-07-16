@@ -27,6 +27,13 @@ export interface SendOptions {
   readonly logger?: Logger;
   /** Metrics sink for send-outcome counters; defaults to a no-op (see `@dwk/log`). */
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** Outcome of attempting to notify a single target. */
@@ -73,6 +80,7 @@ export async function sendWebmention(
     fetch: doFetch,
     logger,
     metrics,
+    fetchAllowedHosts: options?.fetchAllowedHosts,
   });
   // Only notify http(s) endpoints: a page could advertise a `javascript:`,
   // `file:`, or `mailto:` endpoint, which we must never fetch. `URL.protocol`
@@ -99,7 +107,11 @@ export async function sendWebmention(
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body,
       },
-      { logger, logEvent: WebmentionLogEvent.SsrfBlocked },
+      {
+        logger,
+        logEvent: WebmentionLogEvent.SsrfBlocked,
+        allowedHosts: options?.fetchAllowedHosts,
+      },
     );
     response = result.response;
   } catch {

@@ -131,3 +131,30 @@ describe("PLC directory client", () => {
     expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 });
+
+describe("fetchAllowedHosts (local-dev opt-in, issue #257)", () => {
+  it("resolves against a loopback directory when its host is allowlisted", async () => {
+    const doFetch: FetchLike = async () =>
+      new Response(JSON.stringify({ id: DID }), {
+        headers: { "content-type": "application/json" },
+      });
+    const doc = await resolvePlcDid(DID, {
+      directoryUrl: "http://localhost:2582",
+      fetchImpl: doFetch,
+      fetchAllowedHosts: ["localhost:2582"],
+    });
+    expect(doc).toEqual({ id: DID });
+  });
+
+  it("still blocks a loopback directory the allowlist does not name", async () => {
+    const doFetch: FetchLike = async () =>
+      new Response(JSON.stringify({ id: DID }));
+    await expect(
+      resolvePlcDid(DID, {
+        directoryUrl: "http://127.0.0.1:2582",
+        fetchImpl: doFetch,
+        fetchAllowedHosts: ["localhost:2582"],
+      }),
+    ).rejects.toThrow();
+  });
+});

@@ -83,6 +83,13 @@ export interface MicrosubConfig {
   readonly logger?: Logger;
   /** Metrics sink; defaults to a no-op (see `@dwk/log`). */
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** Fully resolved configuration with defaults applied and the path parsed. */
@@ -98,6 +105,7 @@ export interface ResolvedConfig {
   readonly fetch: FetchLike;
   readonly logger: Logger;
   readonly metrics: Metrics;
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -152,5 +160,8 @@ export function resolveConfig(config: MicrosubConfig): ResolvedConfig {
     fetch: config.fetch ?? ((input, init) => fetch(input, init)),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
+    ...(config.fetchAllowedHosts !== undefined
+      ? { fetchAllowedHosts: config.fetchAllowedHosts }
+      : {}),
   };
 }

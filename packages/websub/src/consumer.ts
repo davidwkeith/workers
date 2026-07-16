@@ -96,6 +96,7 @@ export function createWebSubQueueConsumer(
             fetch: resolved.fetch,
             logger: resolved.logger,
             metrics: resolved.metrics,
+            fetchAllowedHosts: resolved.fetchAllowedHosts,
           });
           if (result.confirmed) {
             if (job.mode === "subscribe") {
@@ -128,6 +129,7 @@ export function createWebSubQueueConsumer(
               fetch: resolved.fetch,
               logger: resolved.logger,
               metrics: resolved.metrics,
+              fetchAllowedHosts: resolved.fetchAllowedHosts,
             });
           }
           message.ack();
@@ -142,6 +144,7 @@ export function createWebSubQueueConsumer(
           logger: resolved.logger,
           metrics: resolved.metrics,
           defaultContentType: resolved.defaultContentType,
+          fetchAllowedHosts: resolved.fetchAllowedHosts,
         });
         if (fetched.kind === "retry") {
           // The topic was unreachable / non-2xx — retry the whole job later
@@ -169,6 +172,7 @@ export function createWebSubQueueConsumer(
               logger: resolved.logger,
               metrics: resolved.metrics,
               signatureAlgorithm: resolved.signatureAlgorithm,
+              fetchAllowedHosts: resolved.fetchAllowedHosts,
             }),
           ),
         );

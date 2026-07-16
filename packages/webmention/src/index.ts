@@ -129,6 +129,13 @@ export interface WebmentionConfig {
    * "SSRF blocks/min", "verification success rate", "queue retries by reason".
    */
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** A `fetch`-compatible Worker handler. */
@@ -279,6 +286,7 @@ export function createWebmentionQueueConsumer(
           fetch: config.fetch,
           logger,
           metrics,
+          fetchAllowedHosts: config.fetchAllowedHosts,
         });
         if (result.links) {
           await inbox.store({

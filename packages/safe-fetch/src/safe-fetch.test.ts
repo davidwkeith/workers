@@ -357,3 +357,144 @@ describe("safeFetch", () => {
     );
   });
 });
+
+describe("allowedHosts (local-dev opt-in, issue #257)", () => {
+  const recordingLog = () => ({
+    logger: { warn: vi.fn(), debug: vi.fn(), info: vi.fn(), error: vi.fn() },
+    metrics: { count: vi.fn(), observe: vi.fn() },
+  });
+
+  it("assertPublicUrl allows an exactly-allowlisted loopback host", () => {
+    const url = assertPublicUrl("http://localhost:4321/post", {
+      allowedHosts: ["localhost:4321"],
+    });
+    expect(url.href).toBe("http://localhost:4321/post");
+  });
+
+  it("matches exact host:port only — no port or prefix generalization", () => {
+    expect(() =>
+      assertPublicUrl("http://localhost/", {
+        allowedHosts: ["localhost:4321"],
+      }),
+    ).toThrow(SsrfError);
+    expect(() =>
+      assertPublicUrl("http://localhost:5000/", {
+        allowedHosts: ["localhost:4321"],
+      }),
+    ).toThrow(SsrfError);
+    expect(() =>
+      assertPublicUrl("http://localhost:4321/", {
+        allowedHosts: ["localhost"],
+      }),
+    ).toThrow(SsrfError);
+  });
+
+  it("matches case-insensitively", () => {
+    const url = assertPublicUrl("http://LOCALHOST:4321/", {
+      allowedHosts: ["LocalHost:4321"],
+    });
+    expect(url.host).toBe("localhost:4321");
+  });
+
+  it("allows a bracketed IPv6 loopback entry", () => {
+    const url = assertPublicUrl("http://[::1]:4321/", {
+      allowedHosts: ["[::1]:4321"],
+    });
+    expect(url.host).toBe("[::1]:4321");
+  });
+
+  it("still blocks other private hosts when an allowlist is present", () => {
+    expect(() =>
+      assertPublicUrl("http://192.168.1.1/", {
+        allowedHosts: ["localhost:4321"],
+      }),
+    ).toThrow(SsrfError);
+  });
+
+  it("still enforces the scheme check for an allowlisted host", () => {
+    expect(() =>
+      assertPublicUrl("ftp://localhost:4321/", {
+        allowedHosts: ["localhost:4321"],
+      }),
+    ).toThrow(SsrfError);
+  });
+
+  it("safeFetch fetches an allowlisted loopback URL and logs the use", async () => {
+    const { logger, metrics } = recordingLog();
+    const doFetch: FetchLike = vi.fn(async () => new Response("local"));
+    const { response } = await safeFetch(
+      doFetch,
+      "http://localhost:4321/post",
+      { method: "GET" },
+      { allowedHosts: ["localhost:4321"], logger, metrics },
+    );
+    expect(await response.text()).toBe("local");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "safe_fetch.ssrf.allowed_host",
+      expect.objectContaining({ host: "localhost:4321" }),
+    );
+    expect(metrics.count).toHaveBeenCalledWith(
+      "safe_fetch.ssrf.allowed_host",
+      expect.objectContaining({ host: "localhost:4321" }),
+    );
+  });
+
+  it("safeFetch does not log allowed_host for an allowlisted public host", async () => {
+    const { logger, metrics } = recordingLog();
+    const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
+    await safeFetch(
+      doFetch,
+      "https://example.com/",
+      { method: "GET" },
+      { allowedHosts: ["example.com"], logger, metrics },
+    );
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(metrics.count).not.toHaveBeenCalled();
+  });
+
+  it("safeFetch blocks a redirect to a non-allowlisted private host", async () => {
+    const doFetch = vi.fn<FetchLike>(async (url) => {
+      if (url === "http://localhost:4321/") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest" },
+        });
+      }
+      return new Response("nope");
+    });
+    await expect(
+      safeFetch(
+        doFetch,
+        "http://localhost:4321/",
+        { method: "GET" },
+        { allowedHosts: ["localhost:4321"] },
+      ),
+    ).rejects.toBeInstanceOf(SsrfError);
+    expect(doFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("safeFetch follows a redirect from a public host to an allowlisted private one, logging it", async () => {
+    const { logger } = recordingLog();
+    const doFetch = vi.fn<FetchLike>(async (url) => {
+      if (url === "https://example.com/") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://localhost:4321/final" },
+        });
+      }
+      return new Response("landed");
+    });
+    const { response, url } = await safeFetch(
+      doFetch,
+      "https://example.com/",
+      { method: "GET" },
+      { allowedHosts: ["localhost:4321"], logger },
+    );
+    expect(await response.text()).toBe("landed");
+    expect(url).toBe("http://localhost:4321/final");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "safe_fetch.ssrf.allowed_host",
+      expect.objectContaining({ host: "localhost:4321" }),
+    );
+  });
+});

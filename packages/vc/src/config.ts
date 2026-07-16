@@ -81,6 +81,13 @@ export interface VcConfig {
   readonly logger?: Logger;
   /** Metrics sink; defaults to a no-op. */
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** Fully resolved configuration with defaults applied and URLs parsed. */
@@ -102,6 +109,7 @@ export interface ResolvedVcConfig {
   readonly resolveDid?: DidResolver;
   readonly logger: Logger;
   readonly metrics: Metrics;
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 function pathOf(absoluteUrl: string, label: string): string {
@@ -157,5 +165,8 @@ export function resolveConfig(config: VcConfig): ResolvedVcConfig {
     resolveDid: config.resolveDid,
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
+    ...(config.fetchAllowedHosts !== undefined
+      ? { fetchAllowedHosts: config.fetchAllowedHosts }
+      : {}),
   };
 }

@@ -91,6 +91,7 @@ export function createMicrosubQueueConsumer(
             fetch: resolved.fetch,
             logger: resolved.logger,
             metrics: resolved.metrics,
+            fetchAllowedHosts: resolved.fetchAllowedHosts,
           },
           cache ?? undefined,
         );

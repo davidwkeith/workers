@@ -18,6 +18,7 @@ export {
   SsrfError,
   DEFAULT_MAX_REDIRECTS,
   DEFAULT_TIMEOUT_MS,
+  ALLOWED_HOST_EVENT,
   type FetchLike,
   type SsrfReason,
   type AssertPublicUrlOptions,

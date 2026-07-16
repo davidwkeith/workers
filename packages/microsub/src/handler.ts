@@ -330,6 +330,7 @@ async function handleFollow(
     fetch: config.fetch,
     logger: config.logger,
     metrics: config.metrics,
+    fetchAllowedHosts: config.fetchAllowedHosts,
   });
   const feedUrl = discovered?.feedUrl ?? url;
   await store.addFollow(channel, feedUrl, url, now());
@@ -467,6 +468,7 @@ async function handlePreview(
     fetch: config.fetch,
     logger: config.logger,
     metrics: config.metrics,
+    fetchAllowedHosts: config.fetchAllowedHosts,
   });
   const items = (discovered?.entries ?? []).slice(0, config.pageSize);
   return json({ items });
@@ -502,6 +504,7 @@ async function handleSearch(
       fetch: config.fetch,
       logger: config.logger,
       metrics: config.metrics,
+      fetchAllowedHosts: config.fetchAllowedHosts,
     });
     if (discovered) results.push({ type: "feed", url: discovered.feedUrl });
   }

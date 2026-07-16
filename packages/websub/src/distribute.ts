@@ -104,6 +104,13 @@ export interface DistributeOptions {
   readonly logger?: Logger;
   readonly metrics?: Metrics;
   /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
+  /**
    * HMAC method used for the `X-Hub-Signature` header. WebSub §8 has no
    * per-request method parameter, so this is a hub-level choice; it defaults to
    * the secure {@link DEFAULT_SIGNATURE_ALGORITHM} (`sha256`). Set it to `sha1`
@@ -165,6 +172,7 @@ export async function fetchTopicContent(
         metrics,
         logEvent: WebSubLogEvent.SsrfBlocked,
         stripHeadersCrossOrigin: ["x-hub-signature"],
+        allowedHosts: options?.fetchAllowedHosts,
       },
     );
     response = result.response;
@@ -262,6 +270,7 @@ export async function deliverToSubscriber(
         metrics,
         logEvent: WebSubLogEvent.SsrfBlocked,
         stripHeadersCrossOrigin: ["x-hub-signature"],
+        allowedHosts: options?.fetchAllowedHosts,
       },
     );
     await result.response.body?.cancel().catch(() => undefined);

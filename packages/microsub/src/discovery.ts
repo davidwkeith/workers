@@ -33,6 +33,13 @@ export interface DiscoveryOptions {
   readonly fetch?: FetchLike;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** A resolved feed: the URL to poll and the entries parsed from its first fetch. */
@@ -176,7 +183,12 @@ export async function discoverFeed(
       doFetch,
       target,
       { method: "GET", headers: { accept: FEED_ACCEPT } },
-      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
+      {
+        logger,
+        metrics,
+        logEvent: MicrosubLogEvent.SsrfBlocked,
+        allowedHosts: options?.fetchAllowedHosts,
+      },
     );
     response = result.response;
     finalUrl = result.url;
@@ -253,7 +265,12 @@ export async function fetchFeed(
       doFetch,
       feedUrl,
       { method: "GET", headers },
-      { logger, metrics, logEvent: MicrosubLogEvent.SsrfBlocked },
+      {
+        logger,
+        metrics,
+        logEvent: MicrosubLogEvent.SsrfBlocked,
+        allowedHosts: options?.fetchAllowedHosts,
+      },
     );
     response = result.response;
     finalUrl = result.url;

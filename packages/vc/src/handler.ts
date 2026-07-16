@@ -245,6 +245,7 @@ async function checkStatus(
         logger: config.logger,
         metrics: config.metrics,
         logEvent: VcLogEvent.SsrfBlocked,
+        allowedHosts: config.fetchAllowedHosts,
       },
     )) as JsonObject;
     const subject = listCred.credentialSubject as JsonObject | undefined;
@@ -425,7 +426,10 @@ export function createVc(config: VcConfig): VcHandler {
   const resolved = resolveConfig(config);
   // Default verification resolver: did:web over the global fetch.
   const resolver: VerificationMethodResolver =
-    resolved.resolveDid ?? createDidWebResolver();
+    resolved.resolveDid ??
+    createDidWebResolver({
+      fetchAllowedHosts: resolved.fetchAllowedHosts,
+    });
 
   return async (request, env, _ctx) => {
     const url = new URL(request.url);

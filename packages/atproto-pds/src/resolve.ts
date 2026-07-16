@@ -30,6 +30,13 @@ export interface ResolveOptions {
   readonly plcDirectoryUrl?: string;
   /** Injected transport. Defaults to the global `fetch`. */
   readonly fetchImpl?: FetchLike;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:2582"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** Resolve a DID to its document (`did:web` at the origin, `did:plc` via the directory). */
@@ -54,7 +61,11 @@ export async function resolveDidDocument(
         fetchImpl,
         url,
         { headers: { accept: "application/did+json, application/json" } },
-        { allowedSchemes: ["https:"], logEvent: "atproto-pds.ssrf.blocked" },
+        {
+          allowedSchemes: ["https:"],
+          logEvent: "atproto-pds.ssrf.blocked",
+          allowedHosts: options.fetchAllowedHosts,
+        },
       )) as DidDocument;
     } catch (err) {
       if (err instanceof SsrfError) throw err;
@@ -68,6 +79,7 @@ export async function resolveDidDocument(
     const doc = await resolvePlcDid(did, {
       directoryUrl: options.plcDirectoryUrl,
       fetchImpl,
+      fetchAllowedHosts: options.fetchAllowedHosts,
     });
     if (!doc) throw new Error(`resolve: did:plc ${did} not found in directory`);
     return doc as DidDocument;
