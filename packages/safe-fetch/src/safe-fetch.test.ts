@@ -498,3 +498,34 @@ describe("allowedHosts (local-dev opt-in, issue #257)", () => {
     );
   });
 });
+
+describe("allowedHosts default-port normalization", () => {
+  it("matches an entry carrying an explicit default port", () => {
+    // The URL parser strips :80/:443, so the entry is normalized per hop
+    // against the URL's own scheme before comparing.
+    const http = assertPublicUrl("http://localhost:80/x", {
+      allowedHosts: ["localhost:80"],
+    });
+    expect(http.host).toBe("localhost");
+    const https = assertPublicUrl("https://127.0.0.1/x", {
+      allowedHosts: ["127.0.0.1:443"],
+    });
+    expect(https.host).toBe("127.0.0.1");
+  });
+
+  it("does not treat a default-port entry as portless for the other scheme", () => {
+    // "localhost:80" normalizes to "localhost" only under http; under https
+    // it stays "localhost:80" and must not match https://localhost/.
+    expect(() =>
+      assertPublicUrl("https://localhost/x", {
+        allowedHosts: ["localhost:80"],
+      }),
+    ).toThrow(SsrfError);
+  });
+
+  it("ignores an unparseable allowlist entry", () => {
+    expect(() =>
+      assertPublicUrl("http://127.0.0.1/", { allowedHosts: ["not a host"] }),
+    ).toThrow(SsrfError);
+  });
+});

@@ -286,18 +286,31 @@ export interface AssertPublicUrlOptions {
 }
 
 /**
- * True when `host` (a URL's `host`, i.e. hostname plus any non-default port)
- * is exactly listed in `allowedHosts`, compared case-insensitively.
+ * True when `url`'s host is exactly listed in `allowedHosts`, compared
+ * case-insensitively. Each entry is also normalized through the URL parser
+ * under `url`'s own scheme, so an entry carrying an explicit default port
+ * (`localhost:80` for http, `127.0.0.1:443` for https) still matches the
+ * parser-normalized `url.host`, which strips default ports. Unparseable
+ * entries never match.
  */
 function isAllowedHost(
-  host: string,
+  url: URL,
   allowedHosts: readonly string[] | undefined,
 ): boolean {
   if (allowedHosts === undefined || allowedHosts.length === 0) {
     return false;
   }
-  const lower = host.toLowerCase();
-  return allowedHosts.some((entry) => entry.toLowerCase() === lower);
+  const lowerHost = url.host.toLowerCase();
+  return allowedHosts.some((entry) => {
+    if (entry.toLowerCase() === lowerHost) {
+      return true;
+    }
+    try {
+      return new URL(`${url.protocol}//${entry}`).host === lowerHost;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -326,7 +339,7 @@ export function assertPublicUrl(
   }
   if (
     isPrivateOrReservedHost(url.hostname) &&
-    !isAllowedHost(url.host, options?.allowedHosts)
+    !isAllowedHost(url, options?.allowedHosts)
   ) {
     throw new SsrfError(
       `blocked host: ${url.hostname}`,
@@ -417,7 +430,7 @@ export async function safeFetch(
     const url = assertPublicUrl(raw, options);
     if (
       isPrivateOrReservedHost(url.hostname) &&
-      isAllowedHost(url.host, options?.allowedHosts)
+      isAllowedHost(url, options?.allowedHosts)
     ) {
       const fields = { host: url.host };
       logger.warn(ALLOWED_HOST_EVENT, fields);
