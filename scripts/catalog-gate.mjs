@@ -142,10 +142,20 @@ export function evaluateCatalog({ catalog, packages }) {
     violations.push('catalog.json: "workers" must be an array.');
     return violations;
   }
-  const libraries =
-    catalog.libraries && typeof catalog.libraries === "object"
-      ? catalog.libraries
-      : {};
+  let libraries = {};
+  if (catalog.libraries !== undefined) {
+    if (
+      typeof catalog.libraries === "object" &&
+      catalog.libraries !== null &&
+      !Array.isArray(catalog.libraries)
+    ) {
+      libraries = catalog.libraries;
+    } else {
+      violations.push(
+        'catalog.json: "libraries" must be an object mapping package name to reason.',
+      );
+    }
+  }
 
   const workspaceNames = new Set(packages.map((p) => p.name));
   const ids = new Set();

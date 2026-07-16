@@ -194,6 +194,16 @@ test("a libraries entry naming a package outside the workspace is a violation", 
   assert.match(violations[0], /@dwk\/imaginary/);
 });
 
+test("a non-object libraries value (e.g. an array) is a violation", () => {
+  const input = fixture();
+  input.catalog.libraries = ["@dwk/rdf"];
+  const violations = evaluateCatalog(input);
+  // The bad shape itself, plus @dwk/rdf losing its catalog decision.
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /"libraries" must be an object/);
+  assert.match(violations[1], /@dwk\/rdf/);
+});
+
 test("the live catalog.json validates against the live workspace", () => {
   const violations = evaluateCatalog({
     catalog: loadCatalog(),
