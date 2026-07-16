@@ -260,10 +260,57 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
   return isBlockedHostname(host);
 }
 
+/**
+ * Event logged/counted whenever a fetch reaches a host that only passed
+ * validation because it was allowlisted via
+ * {@link AssertPublicUrlOptions.allowedHosts} — so an allowlist that leaks
+ * into a production composition stays visible in logs.
+ */
+export const ALLOWED_HOST_EVENT = "safe_fetch.ssrf.allowed_host";
+
 /** Options for {@link assertPublicUrl}. */
 export interface AssertPublicUrlOptions {
   /** Schemes to accept (default `["http:", "https:"]`). */
   readonly allowedSchemes?: readonly string[];
+  /**
+   * **Local-development opt-in** (issue #257): exact `host` / `host:port`
+   * entries (case-insensitive; bracketed IPv6, e.g. `[::1]:4321`) exempted
+   * from the private/loopback host block, so a composed Worker running under
+   * `wrangler dev --local` can fetch the local dev site it sits next to
+   * (e.g. `["localhost:4321"]`). No wildcards, no CIDR ranges, and never
+   * read from the environment — composers inject it, and only into local
+   * dev compositions. Scheme checks, redirect caps, timeouts, and body caps
+   * still apply; every redirect hop is re-validated against the same list.
+   */
+  readonly allowedHosts?: readonly string[];
+}
+
+/**
+ * True when `url`'s host is exactly listed in `allowedHosts`, compared
+ * case-insensitively. Each entry is also normalized through the URL parser
+ * under `url`'s own scheme, so an entry carrying an explicit default port
+ * (`localhost:80` for http, `127.0.0.1:443` for https) still matches the
+ * parser-normalized `url.host`, which strips default ports. Unparseable
+ * entries never match.
+ */
+function isAllowedHost(
+  url: URL,
+  allowedHosts: readonly string[] | undefined,
+): boolean {
+  if (allowedHosts === undefined || allowedHosts.length === 0) {
+    return false;
+  }
+  const lowerHost = url.host.toLowerCase();
+  return allowedHosts.some((entry) => {
+    if (entry.toLowerCase() === lowerHost) {
+      return true;
+    }
+    try {
+      return new URL(`${url.protocol}//${entry}`).host === lowerHost;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -290,7 +337,10 @@ export function assertPublicUrl(
       url.hostname,
     );
   }
-  if (isPrivateOrReservedHost(url.hostname)) {
+  if (
+    isPrivateOrReservedHost(url.hostname) &&
+    !isAllowedHost(url, options?.allowedHosts)
+  ) {
     throw new SsrfError(
       `blocked host: ${url.hostname}`,
       "blocked_host",
@@ -374,8 +424,23 @@ export async function safeFetch(
       ? AbortSignal.any([init.signal, timeoutSignal])
       : timeoutSignal;
 
+  // Validate one hop; when a private/reserved host passed only because it is
+  // allowlisted (a local-dev composition), leave an audit trail.
+  const validateHop = (raw: string): URL => {
+    const url = assertPublicUrl(raw, options);
+    if (
+      isPrivateOrReservedHost(url.hostname) &&
+      isAllowedHost(url, options?.allowedHosts)
+    ) {
+      const fields = { host: url.host };
+      logger.warn(ALLOWED_HOST_EVENT, fields);
+      metrics.count(ALLOWED_HOST_EVENT, fields);
+    }
+    return url;
+  };
+
   try {
-    let currentUrl = assertPublicUrl(rawUrl, options).toString();
+    let currentUrl = validateHop(rawUrl).toString();
     let currentInit: RequestInit = { ...init };
     for (let hop = 0; ; hop++) {
       const response = await doFetch(currentUrl, {
@@ -400,10 +465,7 @@ export async function safeFetch(
         );
       }
 
-      const next = assertPublicUrl(
-        new URL(location, currentUrl).toString(),
-        options,
-      );
+      const next = validateHop(new URL(location, currentUrl).toString());
       await response.body?.cancel().catch(() => undefined);
 
       if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {

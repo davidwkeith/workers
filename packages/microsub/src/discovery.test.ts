@@ -201,3 +201,24 @@ describe("fetchFeed", () => {
     expect(result?.entries[0]?.name).toBe("X");
   });
 });
+
+describe("fetchAllowedHosts (local-dev opt-in, issue #257)", () => {
+  it("fetches a loopback feed when its host is allowlisted", async () => {
+    const doFetch: FetchLike = vi.fn(async () => jsonResponse(JSON_FEED));
+    const result = await fetchFeed("http://localhost:4321/feed.json", {
+      fetch: doFetch,
+      fetchAllowedHosts: ["localhost:4321"],
+    });
+    expect(result?.entries.length).toBeGreaterThan(0);
+  });
+
+  it("still blocks a loopback feed the allowlist does not name", async () => {
+    const doFetch: FetchLike = vi.fn(async () => jsonResponse(JSON_FEED));
+    const result = await fetchFeed("http://127.0.0.1/feed.json", {
+      fetch: doFetch,
+      fetchAllowedHosts: ["localhost:4321"],
+    });
+    expect(result).toBeNull();
+    expect(doFetch).not.toHaveBeenCalled();
+  });
+});

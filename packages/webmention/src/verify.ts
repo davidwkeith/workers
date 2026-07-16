@@ -196,6 +196,13 @@ export interface VerifyOptions {
   readonly logger?: Logger;
   /** Metrics sink for verification-outcome counters; defaults to a no-op. */
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /**
@@ -265,7 +272,12 @@ export async function verifySource(
       doFetch,
       source,
       { method: "GET", headers: { accept: "text/html, */*" } },
-      { logger, metrics, logEvent: WebmentionLogEvent.SsrfBlocked },
+      {
+        logger,
+        metrics,
+        logEvent: WebmentionLogEvent.SsrfBlocked,
+        allowedHosts: options?.fetchAllowedHosts,
+      },
     );
     response = result.response;
     base = result.url;

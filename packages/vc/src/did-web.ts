@@ -212,6 +212,13 @@ export type { FetchLike } from "@dwk/safe-fetch";
 export interface DidWebResolverOptions {
   /** Override the fetch implementation (defaults to the global `fetch`). */
   readonly fetch?: FetchLike;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /**
@@ -245,7 +252,11 @@ export function createDidWebResolver(
         fetchImpl,
         url,
         { headers: { accept: "application/did+json, application/json" } },
-        { allowedSchemes: ["https:"], logEvent: "vc.ssrf.blocked" },
+        {
+          allowedSchemes: ["https:"],
+          logEvent: "vc.ssrf.blocked",
+          allowedHosts: options.fetchAllowedHosts,
+        },
       );
     } catch {
       return undefined;

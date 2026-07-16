@@ -32,6 +32,13 @@ export interface PlcDirectoryOptions {
   readonly directoryUrl?: string;
   /** Injected transport. Defaults to the global `fetch`. */
   readonly fetchImpl?: FetchLike;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:2582"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 function resolve(options: PlcDirectoryOptions): {
@@ -65,7 +72,10 @@ export async function submitPlcOperation(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(op),
     },
-    { logEvent: "atproto-pds.ssrf.blocked" },
+    {
+      logEvent: "atproto-pds.ssrf.blocked",
+      allowedHosts: options.fetchAllowedHosts,
+    },
   );
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -90,7 +100,10 @@ export async function resolvePlcDid(
     fetchImpl,
     `${base}/${did}`,
     {},
-    { logEvent: "atproto-pds.ssrf.blocked" },
+    {
+      logEvent: "atproto-pds.ssrf.blocked",
+      allowedHosts: options.fetchAllowedHosts,
+    },
   );
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -113,7 +126,10 @@ export async function fetchPlcData(
     fetchImpl,
     `${base}/${did}/data`,
     {},
-    { logEvent: "atproto-pds.ssrf.blocked" },
+    {
+      logEvent: "atproto-pds.ssrf.blocked",
+      allowedHosts: options.fetchAllowedHosts,
+    },
   );
   if (res.status === 404) return null;
   if (!res.ok) {

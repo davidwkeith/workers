@@ -38,6 +38,13 @@ export interface VerifyIntentOptions {
   readonly challenge?: string;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /** Outcome of a verification-of-intent exchange. */
@@ -128,6 +135,7 @@ export async function verifyIntent(
         metrics,
         logEvent: WebSubLogEvent.SsrfBlocked,
         stripHeadersCrossOrigin: ["x-hub-signature"],
+        allowedHosts: options?.fetchAllowedHosts,
       },
     );
     response = result.response;
@@ -162,6 +170,13 @@ export interface NotifyDenialOptions {
   readonly fetch?: FetchLike;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
+  /**
+   * Local-dev opt-in passed through to `@dwk/safe-fetch`'s `allowedHosts`:
+   * exact `host[:port]` entries exempted from the SSRF private/loopback host
+   * block (e.g. `["localhost:4321"]` under `wrangler dev --local`). Never
+   * enable in a production composition.
+   */
+  readonly fetchAllowedHosts?: readonly string[];
 }
 
 /**
@@ -218,6 +233,7 @@ export async function notifyDenial(
         metrics,
         logEvent: WebSubLogEvent.SsrfBlocked,
         stripHeadersCrossOrigin: ["x-hub-signature"],
+        allowedHosts: options?.fetchAllowedHosts,
       },
     );
     notified = result.response.ok;

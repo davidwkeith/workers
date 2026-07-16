@@ -214,3 +214,32 @@ describe("verifySource", () => {
     });
   });
 });
+
+describe("verifySource fetchAllowedHosts (local-dev opt-in, issue #257)", () => {
+  it("verifies a loopback source when its host is allowlisted", async () => {
+    const localSource = "http://localhost:4321/post";
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(`<a href="${target}">x</a>`, {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    expect(
+      await verifySource(localSource, target, {
+        fetch: fetchImpl,
+        fetchAllowedHosts: ["localhost:4321"],
+      }),
+    ).toEqual({ links: true, status: 200 });
+  });
+
+  it("still blocks a loopback source when the allowlist names another host", async () => {
+    const fetchImpl = vi.fn(async () => new Response("nope"));
+    expect(
+      await verifySource("http://127.0.0.1/post", target, {
+        fetch: fetchImpl,
+        fetchAllowedHosts: ["localhost:4321"],
+      }),
+    ).toEqual({ links: false, status: 0 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

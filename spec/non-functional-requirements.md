@@ -43,6 +43,13 @@ Implications:
 - **DPoP everywhere** tokens are used.
 - **No ACL / decision caching outside strongly-consistent layers.**
 - **Least-privilege bindings** — a package gets only the bindings it declares.
+- **Outbound SSRF posture is deny-by-default** — every fetch of an attacker-
+  or user-supplied URL goes through [`@dwk/safe-fetch`](packages/safe-fetch.md),
+  which blocks private/reserved hosts. The only exception is an **explicit,
+  composer-injected local-dev allowlist** (`allowedHosts`, exposed by consuming
+  packages as `fetchAllowedHosts`): exact `host[:port]` entries, never read
+  from the environment, and audited via the `safe_fetch.ssrf.allowed_host`
+  log/metric event whenever it is actually used.
 
 ## Observability
 

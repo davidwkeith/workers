@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { JsonObject } from "./data-integrity.js";
 import {
@@ -151,5 +151,37 @@ describe("findVerificationMethod / createDidWebResolver", () => {
       fetch: async () => new Response("", { status: 404 }),
     });
     expect(await resolve("did:web:example.com#key-0")).toBeUndefined();
+  });
+});
+
+describe("createDidWebResolver fetchAllowedHosts (local-dev opt-in, issue #257)", () => {
+  const localDoc: JsonObject = {
+    id: "did:web:localhost%3A4321",
+    verificationMethod: [
+      {
+        id: "did:web:localhost%3A4321#key-0",
+        type: "Multikey",
+        publicKeyMultibase: "z6Mk",
+      },
+    ],
+  };
+
+  it("resolves a loopback did:web when its host is allowlisted", async () => {
+    const resolve = createDidWebResolver({
+      fetch: async (url) => {
+        expect(url).toBe("https://localhost:4321/.well-known/did.json");
+        return new Response(JSON.stringify(localDoc));
+      },
+      fetchAllowedHosts: ["localhost:4321"],
+    });
+    const vm = await resolve("did:web:localhost%3A4321#key-0");
+    expect(vm?.publicKeyMultibase).toBe("z6Mk");
+  });
+
+  it("still refuses a loopback did:web without the allowlist entry", async () => {
+    const doFetch = vi.fn(async () => new Response(JSON.stringify(localDoc)));
+    const resolve = createDidWebResolver({ fetch: doFetch });
+    expect(await resolve("did:web:localhost%3A4321#key-0")).toBeUndefined();
+    expect(doFetch).not.toHaveBeenCalled();
   });
 });

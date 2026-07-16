@@ -221,3 +221,38 @@ describe("verifyIntent", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe("verifyIntent fetchAllowedHosts (local-dev opt-in, issue #257)", () => {
+  it("confirms a loopback callback when its host is allowlisted", async () => {
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      const challenge = new URL(input).searchParams.get("hub.challenge");
+      return new Response(challenge, { status: 200 });
+    });
+    const result = await verifyIntent(
+      "http://localhost:4321/cb",
+      "https://example.com/feed",
+      {
+        mode: "subscribe",
+        leaseSeconds: 600,
+        fetch: fetchImpl,
+        fetchAllowedHosts: ["localhost:4321"],
+      },
+    );
+    expect(result).toEqual({ confirmed: true, status: 200 });
+  });
+
+  it("still blocks a loopback callback the allowlist does not name", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => new Response("x"));
+    const result = await verifyIntent(
+      "http://127.0.0.1/cb",
+      "https://example.com/feed",
+      {
+        mode: "subscribe",
+        fetch: fetchImpl,
+        fetchAllowedHosts: ["localhost:4321"],
+      },
+    );
+    expect(result).toEqual({ confirmed: false, status: 0 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
