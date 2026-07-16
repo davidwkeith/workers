@@ -127,6 +127,148 @@ function checkEntry(entry, label, violations) {
   }
 }
 
+/** Valid `match` values for a route claim. */
+const ROUTE_MATCH_KINDS = new Set(["exact", "prefix"]);
+
+/**
+ * True when `path` is a well-formed absolute claim path: leading slash, no
+ * empty inner segments, and no traversal segments (raw or percent-encoded).
+ * @param {string} path
+ */
+function isCleanRoutePath(path) {
+  const segments = path.slice(1).split("/");
+  return segments.every((segment, index) => {
+    if (segment === "") {
+      // Only a trailing slash (the prefix form) may leave an empty segment.
+      return index === segments.length - 1;
+    }
+    const decoded = segment.replace(/%2e/gi, ".");
+    return decoded !== "." && decoded !== "..";
+  });
+}
+
+/**
+ * Structurally validate one entry's route claims (issue #256), appending to
+ * `violations`. Returns the structurally-valid claims for cross-entry checks.
+ * @param {any} entry
+ * @param {string} label
+ * @param {string[]} violations
+ * @returns {{ path: string, match: string }[]}
+ */
+function checkRoutes(entry, label, violations) {
+  if (entry.routes === undefined) return [];
+  if (!Array.isArray(entry.routes)) {
+    violations.push(`${label}: "routes" must be an array when present.`);
+    return [];
+  }
+  /** @type {{ path: string, match: string }[]} */
+  const valid = [];
+  const seen = new Set();
+  for (const route of entry.routes) {
+    const where = `${label}: route ${JSON.stringify(route?.path ?? "(missing path)")}`;
+
+    if (!isNonEmptyString(route?.path) || !route.path.startsWith("/")) {
+      violations.push(`${where}: "path" must be an absolute path.`);
+      continue;
+    }
+    if (!isCleanRoutePath(route.path)) {
+      violations.push(
+        `${where}: path must not contain traversal or empty segments.`,
+      );
+      continue;
+    }
+    if (!ROUTE_MATCH_KINDS.has(route.match)) {
+      violations.push(
+        `${where}: "match" must be "exact" or "prefix" (got ${JSON.stringify(route.match)}).`,
+      );
+      continue;
+    }
+    if (route.match === "prefix" && !route.path.endsWith("/")) {
+      violations.push(`${where}: a prefix path needs a trailing slash.`);
+      continue;
+    }
+
+    const methods = route.methods;
+    if (!Array.isArray(methods) || methods.length === 0) {
+      violations.push(`${where}: "methods" must be a non-empty array.`);
+    } else {
+      for (const method of methods) {
+        if (method === "HEAD") {
+          violations.push(
+            `${where}: declare HEAD support via "head": true, not in methods.`,
+          );
+        } else if (
+          typeof method !== "string" ||
+          !/^[A-Z][A-Z-]*$/.test(method)
+        ) {
+          violations.push(
+            `${where}: method ${JSON.stringify(method)} must be an uppercase HTTP token.`,
+          );
+        }
+      }
+    }
+    if (
+      route.head === true &&
+      (!Array.isArray(methods) || !methods.includes("GET"))
+    ) {
+      violations.push(
+        `${where}: "head": true requires GET among the methods (HEAD mirrors GET).`,
+      );
+    }
+    if (!isNonEmptyString(route.handler)) {
+      violations.push(
+        `${where}: every route claim needs a "handler" identity (the factory export that owns it).`,
+      );
+    }
+
+    const key = `${route.match} ${route.path}`;
+    if (seen.has(key)) {
+      violations.push(`${where}: duplicate claim (${key}).`);
+      continue;
+    }
+    seen.add(key);
+    valid.push({ path: route.path, match: route.match });
+  }
+  return valid;
+}
+
+/**
+ * True when two claims overlap: equal exact paths, an exact path under the
+ * other's prefix, or nested/equal prefixes.
+ * @param {{ path: string, match: string }} ra
+ * @param {{ path: string, match: string }} rb
+ */
+function claimsClash(ra, rb) {
+  if (ra.match === "exact" && rb.match === "exact") {
+    return ra.path === rb.path;
+  }
+  if (ra.match === "prefix" && rb.match === "prefix") {
+    return ra.path.startsWith(rb.path) || rb.path.startsWith(ra.path);
+  }
+  const exact = ra.match === "exact" ? ra : rb;
+  const prefix = ra.match === "exact" ? rb : ra;
+  return exact.path.startsWith(prefix.path);
+}
+
+/**
+ * Flag overlapping claims across two different workers. Claims within one
+ * worker may overlap (its handler does its own sub-routing).
+ * @param {{ id: string, routes: { path: string, match: string }[] }} a
+ * @param {{ id: string, routes: { path: string, match: string }[] }} b
+ * @param {string[]} violations
+ */
+function checkRouteOverlap(a, b, violations) {
+  for (const ra of a.routes) {
+    for (const rb of b.routes) {
+      if (claimsClash(ra, rb)) {
+        violations.push(
+          `route claims overlap across workers "${a.id}" (${ra.match} ${ra.path}) and "${b.id}" (${rb.match} ${rb.path}).`,
+        );
+      }
+    }
+  }
+}
+
 /**
  * Validate a catalog document against the workspace's publishable packages.
  * Returns a list of human-readable violation strings (empty == gate passes).
@@ -160,6 +302,8 @@ export function evaluateCatalog({ catalog, packages }) {
   const workspaceNames = new Set(packages.map((p) => p.name));
   const ids = new Set();
   const entryPackages = new Set();
+  /** @type {{ id: string, routes: { path: string, match: string }[] }[]} */
+  const routed = [];
 
   for (const entry of workers) {
     const label = `worker ${JSON.stringify(entry?.id ?? "(missing id)")}`;
@@ -186,6 +330,18 @@ export function evaluateCatalog({ catalog, packages }) {
     }
 
     checkEntry(entry, label, violations);
+    const routes = checkRoutes(entry, label, violations);
+    if (routes.length > 0) {
+      routed.push({ id: String(entry?.id), routes });
+    }
+  }
+
+  // Route claims must not overlap across workers (issue #256): the composing
+  // app resolves each request to exactly one active worker.
+  for (let i = 0; i < routed.length; i++) {
+    for (let j = i + 1; j < routed.length; j++) {
+      checkRouteOverlap(routed[i], routed[j], violations);
+    }
   }
 
   // Second pass: `requires` can reference ids declared later in the file.

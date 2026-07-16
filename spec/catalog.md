@@ -105,12 +105,64 @@ catalog gate enforces exhaustiveness: every publishable package appears either
 as a worker entry or under `libraries`, so adding a package forces an explicit
 catalog decision.
 
+## Route claims (`routes`, issue #256)
+
+Paired with
+[Anglesite-app#746](https://github.com/Anglesite/Anglesite-app/issues/746):
+each worker entry may declare the HTTP routes its handler owns, so the
+composing app can generate **selective Worker-first routing** — only the
+active workers' claimed routes go worker-first (wrangler
+`[assets].run_worker_first`); every other path stays asset-first.
+
+```json
+{
+  "path": "/.well-known/webfinger",
+  "match": "exact",
+  "methods": ["GET"],
+  "head": true,
+  "handler": "createWebfinger",
+  "authorityBound": true
+}
+```
+
+- `path` — absolute, no traversal or empty segments.
+- `match` — `exact`, or `prefix` **only where the standard delegates a whole
+  subtree** (an ActivityPub actor space `/users/`, served media `/media/`),
+  never as a convenience. A prefix path ends with `/` and covers the subtree
+  under it (not the slash-less path itself).
+- `methods` — the allowed methods; the composer answers others with `405` +
+  `Allow`. `HEAD` is never listed: `head: true` declares it, mirroring GET's
+  headers without a body.
+- `handler` — the factory export that owns the claim, so the app can
+  correlate a route with the handler that must be mounted.
+- `authorityBound` — the standard fixes this path to the site's canonical
+  origin (`/.well-known/*` discovery documents); it must not be remounted.
+
+**Mount-prefix contract.** The composition contract lets a composer mount any
+handler under an arbitrary path prefix. Route claims are static data, so they
+declare each package's **canonical/default mount paths** — the paths the
+conformance target (`packages/conformance-target/src/mounts.ts`) composes and
+the specs assume. A composer that remounts a handler under a different prefix
+takes over rewriting that worker's claims to match; `authorityBound` claims
+are the exception and must never be remounted.
+
+**Overlap rule.** Claims from _different_ workers must never overlap (equal
+exact paths, an exact path under another's prefix, or nested prefixes) — the
+composing app resolves each request to exactly one active worker, and the
+catalog gate enforces this. Claims _within_ one worker may overlap; its
+handler does its own sub-routing.
+
+Currently populated for the packages Anglesite composes today: `indieauth`,
+`micropub`, `microsub`, `webmention`, `websub`, `activitypub`, `webfinger`,
+`host-meta`. The storage/identity workers (`solid-pod`, `webdav`,
+`remotestorage`, `atproto-pds`, `webauthn`, `vc`) omit `routes` for now:
+their mount roots are composer-chosen prefixes, and `vc`/`atproto-pds` both
+canonically want `/.well-known/did.json`, which needs an owner decision
+before both can claim it. Their claims land as a follow-up once those
+contracts are settled.
+
 ## What the catalog does not cover (yet)
 
-- **HTTP route claims** (paths, exact-vs-prefix matching, allowed methods) —
-  follow-up in [#256](https://github.com/davidwkeith/workers/issues/256),
-  paired with
-  [Anglesite-app#746](https://github.com/Anglesite/Anglesite-app/issues/746).
 - **Cron triggers** — `solid-pod`/`remotestorage` GC handlers want a scheduled
   trigger when `GC_DB` is bound; until modeled, composers copy the
   conformance target's `triggers.crons` approach.
