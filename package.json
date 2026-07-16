@@ -17,6 +17,8 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --project @dwk/solid-pod",
     "test:gate": "node --test scripts/release-gate.test.mjs",
+    "test:catalog": "node --test scripts/catalog-gate.test.mjs",
+    "catalog:check": "node scripts/catalog-gate.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

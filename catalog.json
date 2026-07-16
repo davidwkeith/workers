@@ -1,0 +1,223 @@
+{
+  "$schema": "./catalog.schema.json",
+  "description": "Machine-readable manifest of every mountable @dwk worker, for composing apps (Anglesite/Anglesite-app#708). Worker ids are forever-stable; groups and componentIDs are coordinated with the consuming app. Validated in CI by scripts/catalog-gate.mjs; shape documented in spec/catalog.md. Provisional while this repo is pre-1.0 — breaking changes are paired-repo coordinated.",
+  "workers": [
+    {
+      "id": "indieauth",
+      "package": "@dwk/indieauth",
+      "displayName": "IndieAuth",
+      "description": "Sign in to apps with your own domain: IndieAuth authorization, token, and metadata endpoints.",
+      "group": "identity",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        { "type": "d1", "binding": "AUTH_DB" },
+        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+      ]
+    },
+    {
+      "id": "micropub",
+      "package": "@dwk/micropub",
+      "displayName": "Micropub",
+      "description": "Publish posts to this site from any Micropub client, with a media endpoint for uploads.",
+      "group": "publishing",
+      "binding": { "kind": "settingsActivated" },
+      "requires": ["indieauth"],
+      "resources": [
+        { "type": "d1", "binding": "MICROPUB_DB" },
+        { "type": "d1", "binding": "AUTH_DB" },
+        { "type": "r2", "binding": "MEDIA" },
+        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+      ]
+    },
+    {
+      "id": "microsub",
+      "package": "@dwk/microsub",
+      "displayName": "Microsub",
+      "description": "Follow feeds and read them from any Microsub reader client.",
+      "group": "publishing",
+      "binding": { "kind": "settingsActivated" },
+      "requires": ["indieauth"],
+      "resources": [
+        { "type": "d1", "binding": "MICROSUB_DB" },
+        { "type": "queue", "binding": "MICROSUB_QUEUE", "consumer": true },
+        { "type": "d1", "binding": "AUTH_DB" },
+        { "type": "secret", "binding": "TOKEN_SIGNING_KEY" }
+      ]
+    },
+    {
+      "id": "webmention",
+      "package": "@dwk/webmention",
+      "displayName": "Webmentions",
+      "description": "Receive, verify, and send Webmentions for posts on this site.",
+      "group": "social",
+      "binding": {
+        "kind": "componentTied",
+        "componentIDs": ["webmention-form"]
+      },
+      "resources": [
+        { "type": "queue", "binding": "WEBMENTION_QUEUE", "consumer": true },
+        { "type": "d1", "binding": "WEBMENTION_INBOX" }
+      ]
+    },
+    {
+      "id": "websub",
+      "package": "@dwk/websub",
+      "displayName": "WebSub",
+      "description": "Push feed updates to subscribers in real time (WebSub hub).",
+      "group": "social",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        { "type": "d1", "binding": "WEBSUB_DB" },
+        { "type": "queue", "binding": "WEBSUB_QUEUE", "consumer": true }
+      ]
+    },
+    {
+      "id": "activitypub",
+      "package": "@dwk/activitypub",
+      "displayName": "Fediverse",
+      "description": "Make this site a Fediverse actor: follow and be followed from Mastodon and other ActivityPub servers.",
+      "group": "social",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "ACTOR",
+          "className": "ActivityPubObject",
+          "sqlite": true
+        }
+      ]
+    },
+    {
+      "id": "webfinger",
+      "package": "@dwk/webfinger",
+      "displayName": "WebFinger",
+      "description": "Answer WebFinger discovery lookups for accounts on this domain.",
+      "group": "discovery",
+      "binding": { "kind": "settingsActivated" },
+      "resources": []
+    },
+    {
+      "id": "host-meta",
+      "package": "@dwk/host-meta",
+      "displayName": "Host Metadata",
+      "description": "Serve host-meta discovery documents for this domain.",
+      "group": "discovery",
+      "binding": { "kind": "settingsActivated" },
+      "resources": []
+    },
+    {
+      "id": "webauthn",
+      "package": "@dwk/webauthn",
+      "displayName": "Passkeys",
+      "description": "Sign in with passkeys: a WebAuthn relying party for this domain.",
+      "group": "identity",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "WEBAUTHN",
+          "className": "WebAuthnObject",
+          "sqlite": true
+        }
+      ]
+    },
+    {
+      "id": "vc",
+      "package": "@dwk/vc",
+      "displayName": "Verifiable Credentials",
+      "description": "Publish a did:web identity and issue or verify W3C Verifiable Credentials.",
+      "group": "identity",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        { "type": "secret", "binding": "VC_SIGNING_KEY" },
+        { "type": "d1", "binding": "VC_STATUS_DB", "optional": true }
+      ]
+    },
+    {
+      "id": "solid-pod",
+      "package": "@dwk/solid-pod",
+      "displayName": "Solid Pod",
+      "description": "Expose a Solid-compatible personal data store for this site.",
+      "group": "storage",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "POD",
+          "className": "SolidPodObject",
+          "sqlite": true
+        },
+        { "type": "r2", "binding": "BLOBS" },
+        { "type": "d1", "binding": "GC_DB", "optional": true }
+      ]
+    },
+    {
+      "id": "webdav",
+      "package": "@dwk/webdav",
+      "displayName": "WebDAV",
+      "description": "Mount the site's Solid Pod as a network drive over WebDAV, with per-app passwords.",
+      "group": "storage",
+      "binding": { "kind": "settingsActivated" },
+      "requires": ["solid-pod"],
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "POD",
+          "className": "SolidPodObject",
+          "sqlite": true
+        },
+        { "type": "r2", "binding": "BLOBS" },
+        { "type": "secret", "binding": "WEBDAV_PEPPER" }
+      ]
+    },
+    {
+      "id": "remotestorage",
+      "package": "@dwk/remotestorage",
+      "displayName": "remoteStorage",
+      "description": "Host a remoteStorage personal data vault for unhosted web apps.",
+      "group": "storage",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "STORAGE",
+          "className": "RemoteStorageObject",
+          "sqlite": true
+        },
+        { "type": "r2", "binding": "BLOBS" },
+        { "type": "d1", "binding": "GC_DB", "optional": true }
+      ]
+    },
+    {
+      "id": "atproto-pds",
+      "package": "@dwk/atproto-pds",
+      "displayName": "Bluesky PDS",
+      "description": "Host your AT Protocol (Bluesky) account and repository on your own domain.",
+      "group": "storage",
+      "binding": { "kind": "settingsActivated" },
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "REPO",
+          "className": "AtprotoRepoObject",
+          "sqlite": true
+        },
+        { "type": "r2", "binding": "BLOBS" }
+      ]
+    }
+  ],
+  "libraries": {
+    "@dwk/calendar": "JSCalendar/iCalendar event model and serializers — consumed by endpoint packages, not mountable.",
+    "@dwk/dpop": "DPoP proof verification primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/esi": "Streaming Edge Side Includes response processor — composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
+    "@dwk/http-signatures": "HTTP Message Signatures primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/ldn": "Linked Data Notifications primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/log": "Injectable structured-logging seam — consumed by every package, not mountable.",
+    "@dwk/mcp": "MCP server core the composed Worker embeds — its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
+    "@dwk/oauth": "OAuth 2.0 server building blocks — consumed by endpoint packages, not mountable.",
+    "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js — consumed by endpoint packages, not mountable.",
+    "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive — consumed by endpoint packages, not mountable.",
+    "@dwk/store": "DO-SQLite + R2 storage library instantiated inside consuming packages' Durable Objects — not mountable.",
+    "@dwk/wac": "Web Access Control evaluation — consumed by @dwk/solid-pod, not mountable."
+  }
+}

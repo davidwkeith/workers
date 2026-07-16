@@ -64,22 +64,24 @@ requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 Run from the repo root (pnpm 10, Node >=20):
 
-| Task                    | Command                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| Install                 | `pnpm install`                                                  |
-| Build all packages      | `pnpm build` (runs `tsc -p tsconfig.build.json` per package)    |
-| Typecheck all (no emit) | `pnpm typecheck`                                                |
-| Run full test suite     | `pnpm test` (vitest, all package projects)                      |
-| Watch tests             | `pnpm test:watch`                                               |
-| Coverage                | `pnpm test:coverage` (vitest + istanbul)                        |
-| Integration lifecycle   | `pnpm test:integration` (`vitest run --project @dwk/solid-pod`) |
-| Unit-test release gate  | `pnpm test:gate` (`node --test scripts/release-gate.test.mjs`)  |
-| Lint                    | `pnpm lint`                                                     |
-| Format (write)          | `pnpm format`                                                   |
-| Format check (CI gate)  | `pnpm format:check`                                             |
-| Record a release        | `pnpm changeset`                                                |
-| Check release gate      | `pnpm release:gate` (`node scripts/release-gate.mjs`)           |
-| Publish (gated)         | `pnpm release` (gate → build → `changeset publish`)             |
+| Task                    | Command                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| Install                 | `pnpm install`                                                    |
+| Build all packages      | `pnpm build` (runs `tsc -p tsconfig.build.json` per package)      |
+| Typecheck all (no emit) | `pnpm typecheck`                                                  |
+| Run full test suite     | `pnpm test` (vitest, all package projects)                        |
+| Watch tests             | `pnpm test:watch`                                                 |
+| Coverage                | `pnpm test:coverage` (vitest + istanbul)                          |
+| Integration lifecycle   | `pnpm test:integration` (`vitest run --project @dwk/solid-pod`)   |
+| Unit-test release gate  | `pnpm test:gate` (`node --test scripts/release-gate.test.mjs`)    |
+| Unit-test catalog gate  | `pnpm test:catalog` (`node --test scripts/catalog-gate.test.mjs`) |
+| Check worker catalog    | `pnpm catalog:check` (`node scripts/catalog-gate.mjs`)            |
+| Lint                    | `pnpm lint`                                                       |
+| Format (write)          | `pnpm format`                                                     |
+| Format check (CI gate)  | `pnpm format:check`                                               |
+| Record a release        | `pnpm changeset`                                                  |
+| Check release gate      | `pnpm release:gate` (`node scripts/release-gate.mjs`)             |
+| Publish (gated)         | `pnpm release` (gate → build → `changeset publish`)               |
 
 Targeting a subset (this is a multi-project vitest setup, so always scope with
 `--project`; a bare file/name filter errors against projects that don't match):
@@ -274,6 +276,15 @@ conformance + integration status, validated against `conformance/status.schema.j
   `pnpm release` refuses to proceed. `evaluateReleaseGate` is pure/importable and
   unit-tested by `scripts/release-gate.test.mjs` (`pnpm test:gate`). Run
   `node scripts/release-gate.mjs --report` to print the status table only.
+- **`catalog.json`** at the repo root (issue #255) is the machine-readable
+  manifest of every mountable worker, consumed by composing apps (Anglesite's
+  Workers tab / wrangler-config generation) over the same raw-file channel as
+  `status.json`. Shape: `catalog.schema.json` + `spec/catalog.md`. Worker `id`s
+  are **forever-stable** (apps persist state against them).
+  **`scripts/catalog-gate.mjs`** (`pnpm catalog:check`, unit tests via
+  `pnpm test:catalog`) validates it and enforces that every publishable package
+  has a catalog decision (a worker entry or a `libraries` exclusion), wired
+  into the `release-gate` CI job.
 - **`scripts/conformance/run-suite.mjs`** drives the hosted suites
   (micropub/webmention/solid) against a deployed `--target` URL; it is a
   documented no-op when no target is supplied.

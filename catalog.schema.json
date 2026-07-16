@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/davidwkeith/workers/catalog.schema.json",
+  "title": "Worker catalog",
+  "description": "Machine-readable manifest of every mountable worker this monorepo ships, consumed by composing apps (e.g. Anglesite's Workers tab and wrangler-config generation). Validated by scripts/catalog-gate.mjs; documented in spec/catalog.md. Worker ids are forever-stable: composing apps persist user state against them.",
+  "type": "object",
+  "required": ["workers"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "workers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/worker" }
+    },
+    "libraries": {
+      "type": "object",
+      "description": "Publishable workspace packages that are deliberately NOT catalog workers (reusable libraries), each with a one-line reason. Every publishable package must appear either here or as a worker entry — enforced by scripts/catalog-gate.mjs.",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "worker": {
+      "type": "object",
+      "required": [
+        "id",
+        "package",
+        "displayName",
+        "description",
+        "group",
+        "binding",
+        "resources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Forever-stable kebab-case identifier. Composing apps persist activation state against it; renaming is a breaking change even pre-1.0."
+        },
+        "package": {
+          "type": "string",
+          "pattern": "^@dwk/",
+          "description": "The npm package that implements this worker."
+        },
+        "displayName": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text grouping key composing apps section by. Never an enum: apps must not hardcode group names."
+        },
+        "binding": { "$ref": "#/definitions/binding" },
+        "resources": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/resource" },
+          "description": "Cloudflare bindings the composed Worker must declare for this worker, with wrangler-config fidelity (DO class names, queue consumers, secrets). Binding names shared across entries (e.g. AUTH_DB) are the same binding, declared once in the composed config."
+        },
+        "requires": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Catalog ids of workers that must also be active for this one to function (e.g. webdav requires solid-pod)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "description": "Activation kind. componentTied workers are active iff a bound component is used on ≥1 page (computed by the composing app, never manually toggled); settingsActivated workers are toggled by the site owner.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "componentIDs"],
+          "properties": {
+            "kind": { "const": "componentTied" },
+            "componentIDs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Component identifiers in the composing app's site model (Anglesite Site Graph Explorer node IDs) — values coordinated with the app."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "settingsActivated" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "resource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "binding"],
+          "properties": {
+            "type": { "enum": ["d1", "kv", "r2"] },
+            "binding": { "type": "string", "minLength": 1 },
+            "optional": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "binding", "className"],
+          "properties": {
+            "type": { "const": "durable-object" },
+            "binding": { "type": "string", "minLength": 1 },
+            "className": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The exported Durable Object class name for the wrangler durable_objects binding and migration entry."
+            },
+            "sqlite": {
+              "type": "boolean",
+              "description": "True when the class uses DO SQLite storage — the first-deploy migration must list it under new_sqlite_classes."
+            },
+            "optional": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "binding"],
+          "properties": {
+            "type": { "const": "queue" },
+            "binding": { "type": "string", "minLength": 1 },
+            "consumer": {
+              "type": "boolean",
+              "description": "True when the package ships a queue consumer the composed Worker must register (a wrangler queues.consumers entry), in addition to the producer binding."
+            },
+            "optional": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "binding"],
+          "properties": {
+            "type": { "const": "secret" },
+            "binding": { "type": "string", "minLength": 1 },
+            "optional": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
