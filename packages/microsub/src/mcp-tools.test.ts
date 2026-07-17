@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import type { McpAuthContext, ToolCallResult } from "@dwk/mcp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMicrosubMcpTools } from "./mcp-tools.js";
 import {
@@ -91,6 +91,20 @@ describe("createMicrosubMcpTools", () => {
     );
     const body = firstTextOf(result) as { items: Jf2Entry[] };
     expect(body.items).toHaveLength(1);
+  });
+
+  it("clamps a requested limit above the configured maximum", async () => {
+    const store = createMicrosubStore(harness);
+    const channel = await store.createChannel("Reader3", 1);
+    const [, getTimeline] = createMicrosubMcpTools({ store, maxLimit: 5 });
+    const listItemsSpy = vi.spyOn(store, "listItems");
+
+    await getTimeline!.handler({ channel: channel.uid, limit: 1000 }, AUTH);
+
+    expect(listItemsSpy).toHaveBeenCalledWith(
+      channel.uid,
+      expect.objectContaining({ limit: 5 }),
+    );
   });
 
   it("returns a tool error for an unknown channel", async () => {

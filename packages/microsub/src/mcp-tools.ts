@@ -19,6 +19,12 @@ export interface MicrosubMcpToolsConfig {
   /** Default timeline page size when a caller omits `limit`. Defaults to 20. */
   readonly pageSize?: number;
   /**
+   * Ceiling on a caller-supplied `limit`, so an agent can't force an
+   * unbounded D1 read. Defaults to 100; a requested `limit` above this is
+   * clamped rather than rejected.
+   */
+  readonly maxLimit?: number;
+  /**
    * The scope a caller's token must carry to call these tools. Defaults to
    * `""` (no scope required beyond a valid, authenticated caller), matching
    * the HTTP `channels`/`timeline` `GET` actions, which require no specific
@@ -42,7 +48,7 @@ function toolError(message: string): ToolCallResult {
 export function createMicrosubMcpTools(
   options: MicrosubMcpToolsConfig,
 ): ToolDefinition[] {
-  const { store, pageSize = 20, requiredScope = "" } = options;
+  const { store, pageSize = 20, maxLimit = 100, requiredScope = "" } = options;
 
   return [
     {
@@ -105,7 +111,7 @@ export function createMicrosubMcpTools(
           limit: {
             type: "number",
             description:
-              "Maximum entries to return. Defaults to the configured page size.",
+              "Maximum entries to return. Defaults to the configured page size, capped at the configured maximum.",
           },
         },
         required: ["channel"],
@@ -141,7 +147,7 @@ export function createMicrosubMcpTools(
         }
         const limit =
           typeof rawLimit === "number" && rawLimit > 0
-            ? Math.floor(rawLimit)
+            ? Math.min(Math.floor(rawLimit), maxLimit)
             : pageSize;
 
         const page = await store.listItems(channel, {

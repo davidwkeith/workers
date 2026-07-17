@@ -10,4 +10,7 @@ both thin wrappers over the same `MicrosubStore` the HTTP `channels`/
 follows, so the tool description documents the prompt-injection surface —
 an agent must treat entry content as untrusted data, never as instructions.
 Defaults `requiredScope` to `""`, matching the HTTP `GET` actions, which
-require no specific scope beyond a valid, authenticated caller.
+require no specific scope beyond a valid, authenticated caller. A
+caller-supplied `limit` on `microsub_get_timeline` is clamped to a
+configurable `maxLimit` (default 100) so an agent can't force an unbounded
+D1 read.
