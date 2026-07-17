@@ -13,4 +13,8 @@ outright when the caller has no resolved subject, since the pod's write
 path requires proof of an authenticated identity. `forwardedConfig` is now
 exported from `handler.ts`, and `resolveConfig`/`ResolvedConfig` from
 `index.ts`, so the tool factory can build the same wire format without
-duplicating it.
+duplicating it. `solid_pod_read` rejects a protocol-relative path (a
+leading `//`, which `new URL` would otherwise resolve off-origin) and caps
+the response body via `@dwk/safe-fetch`'s `readBodyCapped` (2 MB) so a
+large pod resource can't be read into unbounded Worker memory through an
+LLM-bound tool call.

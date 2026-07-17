@@ -13,10 +13,23 @@
  */
 
 import type { ToolCallResult, ToolDefinition } from "@dwk/mcp";
+import { readBodyCapped } from "@dwk/safe-fetch";
 
 import { forwardedConfig } from "./handler.js";
 import { INTERNAL_HEADERS, type ResolvedConfig } from "./config.js";
 import type { SolidPodObject } from "./pod.js";
+
+/** Rejects a caller-supplied resource path that isn't a plain absolute path under this pod's origin. */
+function isValidPath(path: unknown): path is string {
+  // `new URL(path, origin)` treats a leading "//" as protocol-relative,
+  // resolving the authority from `path` itself rather than `origin` (e.g.
+  // `//evil.example/x` against `https://pod.example` resolves to
+  // `https://evil.example/x`) — reject it so a resource path can never
+  // redirect the DO fetch off this pod's own origin.
+  return (
+    typeof path === "string" && path.startsWith("/") && !path.startsWith("//")
+  );
+}
 
 /** Configuration for {@link createSolidPodMcpTools}. */
 export interface SolidPodMcpToolsConfig {
@@ -99,8 +112,10 @@ export function createSolidPodMcpTools(
       requiredScope: requiredReadScope,
       handler: async (args, auth) => {
         const path = args.path;
-        if (typeof path !== "string" || !path.startsWith("/")) {
-          return toolError('`path` must be a string starting with "/".');
+        if (!isValidPath(path)) {
+          return toolError(
+            '`path` must be a string starting with a single "/".',
+          );
         }
         const accept = args.accept;
         if (accept !== undefined && typeof accept !== "string") {
@@ -108,17 +123,26 @@ export function createSolidPodMcpTools(
         }
 
         const headers = new Headers({ accept: accept ?? "text/turtle" });
-        if (auth.subject) headers.set(INTERNAL_HEADERS.webid, auth.subject);
+        if (auth?.subject) headers.set(INTERNAL_HEADERS.webid, auth.subject);
         headers.set(INTERNAL_HEADERS.config, forwardedConfig(config));
 
         const target = new URL(path, config.origin).toString();
         const response = await podStub(config, pod).fetch(
           new Request(target, { method: "GET", headers }),
         );
-        const body = await response.text();
         if (!response.ok) {
+          const errorBody = await response.text();
           return toolError(
-            `solid_pod_read failed: ${response.status} ${body}`.trim(),
+            `solid_pod_read failed: ${response.status} ${errorBody}`.trim(),
+          );
+        }
+        // Cap the read so an LLM-bound tool call can't be made to buffer an
+        // arbitrarily large pod resource (e.g. a large R2-backed blob) into
+        // Worker memory; @dwk/safe-fetch's default cap is 2 MB.
+        const body = await readBodyCapped(response);
+        if (body === null) {
+          return toolError(
+            "solid_pod_read failed: resource is too large to read via MCP.",
           );
         }
         const contentType = response.headers.get("content-type") ?? undefined;
@@ -177,8 +201,10 @@ export function createSolidPodMcpTools(
       requiredScope: requiredWriteScope,
       handler: async (args, auth) => {
         const path = args.path;
-        if (typeof path !== "string" || !path.startsWith("/")) {
-          return toolError('`path` must be a string starting with "/".');
+        if (!isValidPath(path)) {
+          return toolError(
+            '`path` must be a string starting with a single "/".',
+          );
         }
         const content = args.content;
         if (typeof content !== "string") {
@@ -210,7 +236,7 @@ export function createSolidPodMcpTools(
         // is the only documented exception); a caller with no resolved WebID has no
         // owner-issued identity to write as, so refuse rather than let a synthetic
         // jti (below) paper over what should be a hard failure.
-        if (!auth.subject) {
+        if (!auth?.subject) {
           return toolError(
             "solid_pod_write requires an authenticated MCP token with a resolved subject (WebID).",
           );

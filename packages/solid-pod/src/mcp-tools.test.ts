@@ -128,6 +128,43 @@ describe("createSolidPodMcpTools", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("rejects a protocol-relative path (leading //) to prevent off-origin resolution", async () => {
+    const { read, write } = tools(freshConfig());
+    const readResult = await read.handler(
+      { path: "//evil.example/x" },
+      { scopes: ["read"], subject: OWNER },
+    );
+    expect(readResult.isError).toBe(true);
+
+    const writeResult = await write.handler(
+      { path: "//evil.example/x", content: "hi" },
+      { scopes: ["write"], subject: OWNER },
+    );
+    expect(writeResult.isError).toBe(true);
+  });
+
+  it("refuses to read a resource over the capped size limit", async () => {
+    const config = freshConfig();
+    const { read, write } = tools(config);
+    const ownerAuth: McpAuthContext = {
+      scopes: ["write", "read"],
+      subject: OWNER,
+    };
+
+    const oversized = "x".repeat(3 * 1024 * 1024);
+    const writeResult = await write.handler(
+      { path: "/big", content: oversized, contentType: "text/plain" },
+      ownerAuth,
+    );
+    expect(writeResult.isError).toBeUndefined();
+
+    const readResult = await read.handler({ path: "/big" }, ownerAuth);
+    expect(readResult.isError).toBe(true);
+    expect((readResult.content[0] as { text: string }).text).toContain(
+      "too large",
+    );
+  });
+
   it("dryRun reports the target URL without persisting anything", async () => {
     const config = freshConfig();
     const { read, write } = tools(config);

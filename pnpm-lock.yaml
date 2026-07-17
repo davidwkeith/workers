@@ -330,6 +330,9 @@ importers:
       '@dwk/rdf':
         specifier: workspace:*
         version: link:../rdf
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
       '@dwk/store':
         specifier: workspace:*
         version: link:../store

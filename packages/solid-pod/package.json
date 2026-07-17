@@ -51,6 +51,7 @@
     "@dwk/log": "workspace:*",
     "@dwk/mcp": "workspace:*",
     "@dwk/rdf": "workspace:*",
+    "@dwk/safe-fetch": "workspace:*",
     "@dwk/store": "workspace:*",
     "@dwk/wac": "workspace:*",
     "@dwk/webdav": "workspace:*"
