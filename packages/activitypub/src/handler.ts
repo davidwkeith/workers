@@ -78,8 +78,13 @@ function text(status: number, body: string): Response {
   });
 }
 
-/** Build the config subset the DO needs (including signing key material). */
-function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
+/**
+ * Build the config subset the DO needs (including signing key material).
+ * Exported so `mcp-tools.ts` can build the same internal request shape this
+ * front door sends, without duplicating (and risking drift from) this wire
+ * format.
+ */
+export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
   return {
     iris: config.iris,
     actorName: config.actor.name ?? config.actor.username,

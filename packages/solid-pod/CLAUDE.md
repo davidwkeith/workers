@@ -10,7 +10,10 @@ notification authority. The DO uses SQLite for the quad store and R2 for large
 blob bodies via `@dwk/store`. Implements full LDP resource/container semantics,
 Turtle/JSON-LD content negotiation, N3 Patch with `solid:where` matching, WAC
 evaluation, DPoP-bound access tokens, If-Match/ETag TOCTOU-free writes,
-oversized RDF → R2 copy-on-write, and WebSocket notifications.
+oversized RDF → R2 copy-on-write, and WebSocket notifications. Also
+contributes `@dwk/mcp` tools (`createSolidPodMcpTools` → `solid_pod_read`/
+`solid_pod_write`) that dispatch through the same DO the HTTP door uses, so
+WAC is a second, resource-level gate beneath the MCP scope check.
 
 ## Spec
 
@@ -71,6 +74,7 @@ src/jwt.ts          # JWT decode + JWKS signature verification (asymmetric only)
 src/encoding.ts     # base64url/UTF-8 helpers for the edge auth path
 src/wac.ts          # effective-.acl resolution, decision deferred to @dwk/wac
 src/event.ts        # schema.org RDF ↔ @dwk/calendar CalendarEvent adapter (#172)
+src/mcp-tools.ts    # createSolidPodMcpTools — solid_pod_read/solid_pod_write @dwk/mcp tools
 src/log.ts          # structured logging/metrics event vocabulary
 src/test-harness.ts # test-only DO class (not published)
 src/*.test.ts       # colocated tests
@@ -82,6 +86,7 @@ src/*.test.ts       # colocated tests
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/ldn` — inbox discovery and LDN primitives.
 - `@dwk/log` — structured logging.
+- `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
 - `@dwk/rdf` — RDF parsing/serialization.
 - `@dwk/store` — DO SQLite + R2 storage layer.
 - `@dwk/wac` — Web Access Control evaluation.

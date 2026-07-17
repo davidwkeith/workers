@@ -46,6 +46,7 @@
   "dependencies": {
     "@dwk/calendar": "workspace:*",
     "@dwk/ldn": "workspace:*",
-    "@dwk/log": "workspace:*"
+    "@dwk/log": "workspace:*",
+    "@dwk/mcp": "workspace:*"
   }
 }

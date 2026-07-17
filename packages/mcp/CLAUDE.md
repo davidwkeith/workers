@@ -12,14 +12,15 @@ packages contribute `ToolDefinition`s (`@dwk/micropub`'s
 `@dwk/webmention`'s `createWebmentionMcpTools`); this lib owns only the wire
 protocol, the tool registry, and per-tool scope-intersection authorization —
 never any IndieWeb/Solid/ActivityPub semantics. **Status: protocol core, auth
-bridge, and the v1 tool contributions are implemented**;
+bridge, and both the v1 and v2 tool contributions are implemented**;
 `createDpopBearerAuthenticator` (`auth.ts`) builds the `authenticate` hook
 from a caller-supplied token introspector plus `@dwk/dpop`
 proof-of-possession verification, and `buildProtectedResourceMetadata`
 (`metadata.ts`) builds the RFC 9728 discovery document for the `401`
-challenge. The v2 tool contributions (`@dwk/solid-pod` pod CRUD,
-`@dwk/ldn`/`@dwk/activitypub` inbox reads) remain future work, tracked in
-[#240](https://github.com/davidwkeith/workers/issues/240).
+challenge. `@dwk/solid-pod`'s pod CRUD (`solid_pod_read`/`solid_pod_write`)
+and `@dwk/activitypub`'s inbox read (`activitypub_list_inbox`) — the v2
+scope — shipped in
+[#262](https://github.com/davidwkeith/workers/issues/262).
 
 ## Spec
 
@@ -95,8 +96,10 @@ src/*.test.ts          # colocated tests
 
 ## Depended on by
 
-`@dwk/micropub`, `@dwk/microsub`, and `@dwk/webmention` — each ships a
-`src/mcp-tools.ts` (`createMicropubMcpTools`/`createMicrosubMcpTools`/
-`createWebmentionMcpTools`) contributing `ToolDefinition`s built from types
-imported from this package. `@dwk/solid-pod`, `@dwk/ldn`, and
-`@dwk/activitypub` are expected v2 consumers.
+`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`, `@dwk/solid-pod`, and
+`@dwk/activitypub` — each ships a `src/mcp-tools.ts`
+(`createMicropubMcpTools`/`createMicrosubMcpTools`/`createWebmentionMcpTools`/
+`createSolidPodMcpTools`/`createActivitypubMcpTools`) contributing
+`ToolDefinition`s built from types imported from this package. `@dwk/ldn`
+contributes no tool of its own — it has no store/DO to close over; its inbox
+primitives back `@dwk/activitypub`'s tool instead.

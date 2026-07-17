@@ -24,12 +24,16 @@ export {
 } from "./handler.js";
 export { createSolidPodGc, type SolidPodGcHandler } from "./gc.js";
 export { SolidPodObject } from "./pod.js";
+export { createSolidPodMcpTools } from "./mcp-tools.js";
+export type { SolidPodMcpToolsConfig } from "./mcp-tools.js";
 
 export {
+  resolveConfig,
   type SolidPodConfig,
   type SolidPodEnv,
   type SolidPodGcEnv,
   type AuthContext,
+  type ResolvedConfig,
   type Jwks,
 } from "./config.js";
 

@@ -49,6 +49,7 @@
     "@dwk/dpop": "workspace:*",
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",
+    "@dwk/mcp": "workspace:*",
     "@dwk/rdf": "workspace:*",
     "@dwk/store": "workspace:*",
     "@dwk/wac": "workspace:*",

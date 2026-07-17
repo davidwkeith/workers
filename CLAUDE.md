@@ -58,9 +58,11 @@ v1 endpoint-package tool contributions (`@dwk/micropub`'s
 `createMicropubMcpTools` → `micropub_publish`; `@dwk/microsub`'s
 `createMicrosubMcpTools` → `microsub_list_channels`/`microsub_get_timeline`;
 `@dwk/webmention`'s `createWebmentionMcpTools` → `webmention_list_received`)
-are implemented; v2 contributions (`@dwk/solid-pod`, `@dwk/ldn`/
-`@dwk/activitypub`) remain future work (see `spec/packages/mcp.md`, tracked in
-#240).
+and the v2 contributions (`@dwk/solid-pod`'s `createSolidPodMcpTools` →
+`solid_pod_read`/`solid_pod_write`, gated by the pod's existing WAC
+authorization as a second, resource-level check beneath the MCP scope;
+`@dwk/activitypub`'s `createActivitypubMcpTools` → `activitypub_list_inbox`)
+are all implemented (see `spec/packages/mcp.md`, tracked in #240/#262).
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
