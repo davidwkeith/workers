@@ -6,7 +6,7 @@
 | **Ships a DO?** | no |
 | **Used by** | tool contributions from the endpoint packages (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention` first; `@dwk/solid-pod`, `@dwk/ldn`, `@dwk/activitypub` later) |
 | **Standard** | [Model Context Protocol](https://modelcontextprotocol.io/specification) (JSON-RPC 2.0 over Streamable HTTP) |
-| **Status** | **in progress.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz) and the auth bridge (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via `@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`) are implemented and unit-tested. The per-package tool contributions are the remaining increment. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
+| **Status** | **v1 implemented.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz), the auth bridge (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via `@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`), and the v1 tool contributions (`@dwk/micropub`'s `createMicropubMcpTools`, `@dwk/microsub`'s `createMicrosubMcpTools`, `@dwk/webmention`'s `createWebmentionMcpTools`) are implemented and unit-tested. The v2 tool contributions (`@dwk/solid-pod`, `@dwk/ldn`/`@dwk/activitypub`) remain future work. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
 
 > The load-bearing decisions below (tools-only subset, auth bridge shape,
 > side-effect posture) were sketched here before implementation, per
@@ -58,6 +58,17 @@ endpoint package, never the lib).
   (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), a
   required scope string, and a handler closure over the package's existing
   machinery.
+- **v1 tool contributions — implemented.** `@dwk/micropub`'s
+  `createMicropubMcpTools` adds `micropub_publish` (side-effecting,
+  `readOnlyHint: false`, supports a `dryRun` preview), closing over the same
+  `publishPost` path the HTTP `create` action uses so both share identical
+  slug-generation and collision-retry behavior. `@dwk/microsub`'s
+  `createMicrosubMcpTools` adds the read-only `microsub_list_channels` and
+  `microsub_get_timeline`. `@dwk/webmention`'s `createWebmentionMcpTools` adds
+  the read-only `webmention_list_received`. Each factory takes the package's
+  existing store (or resolved config) directly — no HTTP `Request`/`Response`
+  in the tool path — so the composing Worker builds the tool list per-request
+  from the already-bound `env`, then passes it into `createMcp`.
 - **Auth bridge — implemented.** MCP authorization is OAuth 2.1-shaped, so
   this reuses what the repo owns rather than inventing anything:
   `createDpopBearerAuthenticator` (`src/auth.ts`) builds the `authenticate`

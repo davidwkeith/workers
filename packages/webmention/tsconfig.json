@@ -7,6 +7,7 @@
     // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
     "paths": {
       "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/mcp": ["../mcp/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [

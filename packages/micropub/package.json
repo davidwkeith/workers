@@ -44,6 +44,7 @@
     "@dwk/calendar": "workspace:*",
     "@dwk/dpop": "workspace:*",
     "@dwk/indieauth": "workspace:*",
-    "@dwk/log": "workspace:*"
+    "@dwk/log": "workspace:*",
+    "@dwk/mcp": "workspace:*"
   }
 }

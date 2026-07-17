@@ -22,6 +22,9 @@
 export { createMicrosub } from "./handler.js";
 export type { MicrosubHandler } from "./handler.js";
 
+export { createMicrosubMcpTools } from "./mcp-tools.js";
+export type { MicrosubMcpToolsConfig } from "./mcp-tools.js";
+
 export { createMicrosubPoller } from "./poll.js";
 export type { MicrosubScheduledHandler } from "./poll.js";
 
