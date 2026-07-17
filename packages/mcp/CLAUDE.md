@@ -7,16 +7,18 @@ Model Context Protocol server core — a cross-standard reusable lib.
 A dependency-free JSON-RPC 2.0 + Streamable HTTP server implementing the MCP
 tools-only v1 subset (`initialize`, `ping`, `tools/list`, `tools/call`), so
 the composed Worker can expose itself as agent-operable tools. Endpoint
-packages contribute `ToolDefinition`s (e.g. `@dwk/micropub`'s eventual
-`createMicropubMcpTools`); this lib owns only the wire protocol, the tool
-registry, and per-tool scope-intersection authorization — never any
-IndieWeb/Solid/ActivityPub semantics. **Status: protocol core and auth bridge
-implemented**; `createDpopBearerAuthenticator` (`auth.ts`) builds the
-`authenticate` hook from a caller-supplied token introspector plus
-`@dwk/dpop` proof-of-possession verification, and `buildProtectedResourceMetadata`
+packages contribute `ToolDefinition`s (`@dwk/micropub`'s
+`createMicropubMcpTools`, `@dwk/microsub`'s `createMicrosubMcpTools`,
+`@dwk/webmention`'s `createWebmentionMcpTools`); this lib owns only the wire
+protocol, the tool registry, and per-tool scope-intersection authorization —
+never any IndieWeb/Solid/ActivityPub semantics. **Status: protocol core, auth
+bridge, and the v1 tool contributions are implemented**;
+`createDpopBearerAuthenticator` (`auth.ts`) builds the `authenticate` hook
+from a caller-supplied token introspector plus `@dwk/dpop`
+proof-of-possession verification, and `buildProtectedResourceMetadata`
 (`metadata.ts`) builds the RFC 9728 discovery document for the `401`
-challenge. The endpoint packages' tool contributions are the remaining
-increment, tracked in
+challenge. The v2 tool contributions (`@dwk/solid-pod` pod CRUD,
+`@dwk/ldn`/`@dwk/activitypub` inbox reads) remain future work, tracked in
 [#240](https://github.com/davidwkeith/workers/issues/240).
 
 ## Spec
@@ -93,6 +95,8 @@ src/*.test.ts          # colocated tests
 
 ## Depended on by
 
-No workspace packages currently depend on `@dwk/mcp`. The v1 tool
-contributions (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`) will be
-its first consumers.
+`@dwk/micropub`, `@dwk/microsub`, and `@dwk/webmention` — each ships a
+`src/mcp-tools.ts` (`createMicropubMcpTools`/`createMicrosubMcpTools`/
+`createWebmentionMcpTools`) contributing `ToolDefinition`s built from types
+imported from this package. `@dwk/solid-pod`, `@dwk/ldn`, and
+`@dwk/activitypub` are expected v2 consumers.

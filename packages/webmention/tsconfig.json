@@ -6,7 +6,13 @@
     // typecheck ahead of build), which would otherwise trip the
     // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
     "paths": {
+      // `@dwk/dpop` isn't a direct dependency of this package, but `@dwk/mcp`'s
+      // own source (path-mapped below) imports it for its auth bridge, and
+      // that import resolves under THIS program's paths — so it needs an
+      // entry here too, or typecheck fails before `@dwk/dpop` is built.
+      "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/mcp": ["../mcp/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [

@@ -51,12 +51,16 @@ and `@dwk/store` tracking per-resource byte size + mtime (so PROPFIND
 remaining increment. `@dwk/mcp` is the newest — a Model Context Protocol server
 core (JSON-RPC 2.0 + Streamable HTTP, tools-only v1 subset) exposing the composed
 Worker as agent-operable tools; the protocol core (`createMcp`, tool registry
-with scope-intersection authz) and the auth bridge
+with scope-intersection authz), the auth bridge
 (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via
-`@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`) are
-implemented, but the endpoint packages' tool contributions (`@dwk/micropub`,
-`@dwk/microsub`, `@dwk/webmention` first) are still to land (see
-`spec/packages/mcp.md`, tracked in #240).
+`@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`), and the
+v1 endpoint-package tool contributions (`@dwk/micropub`'s
+`createMicropubMcpTools` → `micropub_publish`; `@dwk/microsub`'s
+`createMicrosubMcpTools` → `microsub_list_channels`/`microsub_get_timeline`;
+`@dwk/webmention`'s `createWebmentionMcpTools` → `webmention_list_received`)
+are implemented; v2 contributions (`@dwk/solid-pod`, `@dwk/ldn`/
+`@dwk/activitypub`) remain future work (see `spec/packages/mcp.md`, tracked in
+#240).
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 

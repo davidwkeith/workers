@@ -17,8 +17,15 @@
  * @packageDocumentation
  */
 
-export { createMicropub } from "./handler.js";
-export type { MicropubEnv, MicropubHandler } from "./handler.js";
+export { createMicropub, absoluteUrl, publishPost } from "./handler.js";
+export type {
+  MicropubEnv,
+  MicropubHandler,
+  PublishPostResult,
+} from "./handler.js";
+
+export { createMicropubMcpTools } from "./mcp-tools.js";
+export type { MicropubMcpToolsConfig } from "./mcp-tools.js";
 
 export { resolveConfig } from "./config.js";
 export type {

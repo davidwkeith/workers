@@ -45,6 +45,7 @@
     "@dwk/dpop": "workspace:*",
     "@dwk/indieauth": "workspace:*",
     "@dwk/log": "workspace:*",
+    "@dwk/mcp": "workspace:*",
     "@dwk/safe-fetch": "workspace:*"
   }
 }

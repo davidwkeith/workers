@@ -9,6 +9,9 @@ form-encoded and JSON request bodies, parses Microformats 2 (mf2) objects,
 and stores posts in D1. Includes an R2-backed media endpoint for file uploads.
 Requires IndieAuth access tokens with scope-based authorization — `create`,
 `update`, `delete`, `media` scopes. Supports `q=config` and `q=source` queries.
+Also contributes a `@dwk/mcp` tool (`createMicropubMcpTools` →
+`micropub_publish`) so an authorized agent can publish through the same
+`publishPost` path the HTTP `create` action uses.
 
 ## Spec
 
@@ -43,9 +46,10 @@ pnpm test --project @dwk/micropub
 ## File layout
 
 ```
-src/index.ts       # public surface: createMicropub, store, mf2 parsing, auth, types
+src/index.ts       # public surface: createMicropub, store, mf2 parsing, auth, mcp tools, types
 src/config.ts      # MicropubConfig type and Env fragment
-src/handler.ts     # createMicropub factory (create/update/delete/query/media routes)
+src/handler.ts     # createMicropub factory (create/update/delete/query/media routes); exports publishPost
+src/mcp-tools.ts   # createMicropubMcpTools — the `micropub_publish` @dwk/mcp tool
 src/store.ts       # createMicropubStore (D1-backed post persistence)
 src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
@@ -61,3 +65,5 @@ src/*.test.ts      # colocated tests
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/indieauth` — access token verification and signing.
 - `@dwk/log` — structured logging.
+- `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`'s
+  `micropub_publish` tool.

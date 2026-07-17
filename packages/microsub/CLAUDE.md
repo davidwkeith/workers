@@ -8,7 +8,10 @@ Manages feed subscriptions organized into channels, polls and parses sources
 server-side (Atom, RSS, JSON Feed, h-feed via mf2), and serves normalized JF2
 timelines to reader clients (Monocle, Together, Indigenous). Supports channel
 CRUD with reordering, feed discovery, timeline pagination (before/after cursors),
-per-channel unread counts, and scheduled polling via queue with dedup.
+per-channel unread counts, and scheduled polling via queue with dedup. Also
+contributes read-only `@dwk/mcp` tools (`createMicrosubMcpTools` →
+`microsub_list_channels`, `microsub_get_timeline`) over the same store the
+HTTP `GET` actions use.
 
 ## Spec
 
@@ -43,9 +46,10 @@ pnpm test --project @dwk/microsub
 ## File layout
 
 ```
-src/index.ts        # public surface: createMicrosub, poller, queue consumer, store, feed parsing
+src/index.ts        # public surface: createMicrosub, poller, queue consumer, store, feed parsing, mcp tools
 src/config.ts       # MicrosubConfig type and Env fragment
 src/handler.ts      # createMicrosub factory (channel/follow/timeline/search actions)
+src/mcp-tools.ts    # createMicrosubMcpTools — the `microsub_list_channels`/`microsub_get_timeline` @dwk/mcp tools
 src/store.ts        # createMicrosubStore (D1-backed channels, follows, timeline)
 src/jf2.ts          # feed → JF2 normalization (JSON Feed/Atom/RSS/h-feed entries)
 src/xml.ts          # minimal dependency-free XML reader for Atom/RSS parsing
@@ -66,6 +70,7 @@ src/*.test.ts       # colocated tests
 - `@dwk/dpop` — DPoP proof verification.
 - `@dwk/indieauth` — access token verification.
 - `@dwk/log` — structured logging.
+- `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
 - `@dwk/safe-fetch` — SSRF-safe fetch (`safeFetch`, `readBodyCapped`,
   `FetchLike`) with private/reserved IP blocking; re-exported from
   `index.ts` for backwards compatibility.

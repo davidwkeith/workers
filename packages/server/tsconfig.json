@@ -15,6 +15,7 @@
       "@dwk/ldn": ["../ldn/src/index.ts"],
       "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
       "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/mcp": ["../mcp/src/index.ts"],
       "@dwk/micropub": ["../micropub/src/index.ts"],
       "@dwk/microsub": ["../microsub/src/index.ts"],
       "@dwk/rdf": ["../rdf/src/index.ts"],

@@ -179,6 +179,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mcp':
+        specifier: workspace:*
+        version: link:../mcp
 
   packages/microsub:
     dependencies:
@@ -191,6 +194,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@dwk/safe-fetch':
         specifier: workspace:*
         version: link:../safe-fetch
@@ -368,6 +374,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@dwk/safe-fetch':
         specifier: workspace:*
         version: link:../safe-fetch

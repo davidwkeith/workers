@@ -84,6 +84,9 @@ export {
 export { WebmentionLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";
 
+export { createWebmentionMcpTools } from "./mcp-tools.js";
+export type { WebmentionMcpToolsConfig } from "./mcp-tools.js";
+
 /** A queued verification job: confirm that `source` links to `target`. */
 export interface WebmentionJob {
   readonly source: string;

@@ -9,6 +9,9 @@ parameters, returns 202 Accepted, then asynchronously verifies that the source
 actually links to the target via a queue consumer. Stores verified mentions in a
 D1 inbox. Also provides a sender module for outbound endpoint discovery and
 notification on publish. Includes documented Bridgy Fed federation support.
+Also contributes a read-only `@dwk/mcp` tool (`createWebmentionMcpTools` →
+`webmention_list_received`) over the same `InboxStore` the queue consumer
+writes into.
 
 ## Spec
 
@@ -42,12 +45,13 @@ pnpm test --project @dwk/webmention
 ## File layout
 
 ```
-src/index.ts        # public surface: createWebmention factory + queue consumer, config/Env, types
+src/index.ts        # public surface: createWebmention factory + queue consumer, config/Env, mcp tools, types
 src/validate.ts     # sync parameter validation (source, target)
 src/discovery.ts    # endpoint discovery for sending (Link header + HTML)
 src/sender.ts       # sendWebmention, sendWebmentions
 src/verify.ts       # async source verification (link checking)
 src/inbox.ts        # InboxStore interface, createD1Inbox (D1-backed mention storage)
+src/mcp-tools.ts    # createWebmentionMcpTools — the `webmention_list_received` @dwk/mcp tool
 src/rsvp.ts         # Indie RSVP recognition (p-rsvp + u-in-reply-to extraction)
 src/html.ts         # Link-header parsing + HTMLRewriter scanning helpers
 src/log.ts          # structured observability event taxonomy (@dwk/log vocabulary)
@@ -57,6 +61,7 @@ src/*.test.ts       # colocated tests
 ## Dependencies
 
 - `@dwk/log` — structured logging.
+- `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
 - `@dwk/safe-fetch` — SSRF-safe fetch (`safeFetch`, `readBodyCapped`,
   `FetchLike`) with private/reserved IP blocking; re-exported from
   `index.ts` for backwards compatibility.

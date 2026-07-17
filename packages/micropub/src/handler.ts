@@ -121,7 +121,7 @@ function scopesForAction(action: string): readonly string[] {
 }
 
 /** Resolve a possibly-relative generated post URL against the endpoint origin. */
-function absoluteUrl(value: string, base: string): string {
+export function absoluteUrl(value: string, base: string): string {
   try {
     return new URL(value, base).toString();
   } catch {
@@ -492,23 +492,40 @@ async function handleAction(
   }
 }
 
-/** Create a post: generate a unique URL, store it, return `201` + `Location`. */
-async function doCreate(
+/** The outcome of {@link publishPost}: the created post's URL, or an error to report. */
+export type PublishPostResult =
+  | { readonly ok: true; readonly url: string }
+  | {
+      readonly ok: false;
+      readonly error: string;
+      readonly description: string;
+      readonly status: number;
+    };
+
+/**
+ * Create a post: generate a unique URL, store it. Shared by the HTTP `create`
+ * action ({@link doCreate}) and `@dwk/mcp`'s `micropub_publish` tool
+ * (`mcp-tools.ts`), so both paths run identical slug-generation,
+ * collision-retry, and persistence logic.
+ */
+export async function publishPost(
   mf2: Mf2Object,
   commands: MicropubCommands,
   config: ResolvedConfig,
   store: MicropubStore,
-): Promise<Response> {
+): Promise<PublishPostResult> {
   const type = mf2.type[0];
   if (!type) {
     emit(config, "warn", MicropubLogEvent.RequestRejected, {
       reason: "missing_type",
     });
-    return error(
-      "invalid_request",
-      "a create request must include a microformats type (e.g. `h-entry`)",
-      400,
-    );
+    return {
+      ok: false,
+      error: "invalid_request",
+      description:
+        "a create request must include a microformats type (e.g. `h-entry`)",
+      status: 400,
+    };
   }
   const now = Math.floor(Date.now() / 1000);
   const properties: Record<string, unknown[]> = {};
@@ -527,21 +544,36 @@ async function doCreate(
       emit(config, "info", MicropubLogEvent.ActionCompleted, {
         action: "create",
       });
-      return new Response(null, {
-        status: 201,
-        headers: { location: url, ...CORS_HEADERS },
-      });
+      return { ok: true, url };
     }
     url = `${url}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`;
   }
   emit(config, "warn", MicropubLogEvent.RequestRejected, {
     reason: "url_conflict",
   });
-  return error(
-    "invalid_request",
-    "could not allocate a unique URL for the post",
-    409,
-  );
+  return {
+    ok: false,
+    error: "invalid_request",
+    description: "could not allocate a unique URL for the post",
+    status: 409,
+  };
+}
+
+/** Create a post via {@link publishPost}, return `201` + `Location`. */
+async function doCreate(
+  mf2: Mf2Object,
+  commands: MicropubCommands,
+  config: ResolvedConfig,
+  store: MicropubStore,
+): Promise<Response> {
+  const result = await publishPost(mf2, commands, config, store);
+  if (!result.ok) {
+    return error(result.error, result.description, result.status);
+  }
+  return new Response(null, {
+    status: 201,
+    headers: { location: result.url, ...CORS_HEADERS },
+  });
 }
 
 /** Apply a JSON `update` to an existing post. */
