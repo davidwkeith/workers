@@ -499,10 +499,10 @@
       }
     },
     "@dwk/mcp": {
-      "standard": null,
+      "standard": "Model Context Protocol",
       "suites": {},
       "integration": {
-        "status": "pending",
+        "status": "not-applicable",
         "cases": []
       }
     }

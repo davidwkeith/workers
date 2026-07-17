@@ -10,6 +10,9 @@ inbound `POST /inbox` with HTTP signature verification (RFC 9421 + draft-cavage)
 activity deduplication, and activity-type handlers (Follow, Undo, Create, Update,
 Like, Announce, Delete). Outbound delivery retries via DO alarms with backoff.
 Serves actor documents, collection pages, and NodeInfo for fediverse discovery.
+Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
+`activitypub_list_inbox`) over a new internal-only DO route — the public
+`/inbox` stays write-only to peers.
 
 ## Spec
 
@@ -63,6 +66,7 @@ src/events.ts       # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP help
 src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
 src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)
 src/delivery.ts     # outbound activity delivery with SSRF guard (retry lives in the DO)
+src/mcp-tools.ts    # createActivitypubMcpTools — activitypub_list_inbox @dwk/mcp tool
 src/log.ts          # structured logging/metrics event vocabulary
 src/body.ts         # capped read for inbound request bodies (inbox/publish)
 src/test-harness.ts # test-only DO class (not published)
@@ -74,6 +78,7 @@ src/*.test.ts       # colocated tests
 - `@dwk/calendar` — canonical event model (the AS2 `Event` adapter reads it).
 - `@dwk/ldn` — inbox discovery and notification primitives.
 - `@dwk/log` — structured logging.
+- `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
 
 (Also uses `@dwk/http-signatures` and `@dwk/webfinger` indirectly via its own
 signature and key-resolution modules.)

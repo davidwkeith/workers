@@ -4,9 +4,9 @@
 |---|---|
 | **Type** | lib (cross-standard reusable) |
 | **Ships a DO?** | no |
-| **Used by** | tool contributions from the endpoint packages (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention` first; `@dwk/solid-pod`, `@dwk/ldn`, `@dwk/activitypub` later) |
+| **Used by** | tool contributions from the endpoint packages (`@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`, `@dwk/solid-pod`, `@dwk/activitypub`) |
 | **Standard** | [Model Context Protocol](https://modelcontextprotocol.io/specification) (JSON-RPC 2.0 over Streamable HTTP) |
-| **Status** | **v1 implemented.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz), the auth bridge (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via `@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`), and the v1 tool contributions (`@dwk/micropub`'s `createMicropubMcpTools`, `@dwk/microsub`'s `createMicrosubMcpTools`, `@dwk/webmention`'s `createWebmentionMcpTools`) are implemented and unit-tested. The v2 tool contributions (`@dwk/solid-pod`, `@dwk/ldn`/`@dwk/activitypub`) remain future work. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) |
+| **Status** | **v1 and v2 tool contributions implemented.** The protocol core (`createMcp`, JSON-RPC 2.0 + Streamable HTTP lifecycle, tool registry with scope-intersection authz), the auth bridge (`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via `@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`), the v1 tool contributions (`@dwk/micropub`'s `createMicropubMcpTools`, `@dwk/microsub`'s `createMicrosubMcpTools`, `@dwk/webmention`'s `createWebmentionMcpTools`), and the v2 tool contributions (`@dwk/solid-pod`'s `createSolidPodMcpTools` → `solid_pod_read`/`solid_pod_write`; `@dwk/activitypub`'s `createActivitypubMcpTools` → `activitypub_list_inbox`) are implemented and tested. Tracked in [#240](https://github.com/davidwkeith/workers/issues/240) / [#262](https://github.com/davidwkeith/workers/issues/262) |
 
 > The load-bearing decisions below (tools-only subset, auth bridge shape,
 > side-effect posture) were sketched here before implementation, per
@@ -69,6 +69,30 @@ endpoint package, never the lib).
   existing store (or resolved config) directly — no HTTP `Request`/`Response`
   in the tool path — so the composing Worker builds the tool list per-request
   from the already-bound `env`, then passes it into `createMcp`.
+- **v2 tool contributions — implemented.** `@dwk/solid-pod`'s
+  `createSolidPodMcpTools` adds `solid_pod_read` (read-only) and
+  `solid_pod_write` (side-effecting, supports a `dryRun` preview). Unlike the
+  v1 packages, the pod has no plain-data store reachable from the Worker: its
+  authority is the per-pod `SolidPodObject` Durable Object, so both tools
+  dispatch through the same internal `Request` shape `createSolidPod`'s HTTP
+  door sends (config + `x-solid-webid` from the MCP token's resolved
+  `subject`), which means the DO's existing WAC evaluation is a **second,
+  resource-level gate** beneath the MCP scope check, exactly as the design
+  called for — a caller with the `write` scope but no WAC `Write` grant on a
+  given resource still gets refused. Because the pod's write path also
+  requires a DPoP proof `jti` to be present (`allowAnonymousWrites` is the
+  only documented exception), `solid_pod_write` synthesizes a one-time `jti`
+  per call rather than forwarding a real Solid-OIDC proof — the caller
+  already went through `@dwk/mcp`'s own DPoP replay protection to reach this
+  tool at all — and refuses outright when the auth context has no resolved
+  `subject`, so an anonymous MCP caller can never ride that synthesis into a
+  write `allowAnonymousWrites` would otherwise have blocked. `@dwk/activitypub`'s
+  `createActivitypubMcpTools` adds the read-only `activitypub_list_inbox`,
+  reading the per-actor `ActivityPubObject` Durable Object's `inbox` table
+  through a new internal-only `__inbox` route (parallel to the existing
+  `__stats`/`__resolve`/`__deliver` routes) — the public `/inbox` route stays
+  write-only to peers per ActivityPub §7.1, so this is a genuinely new,
+  owner-only read surface, not a reuse of an existing HTTP GET.
 - **Auth bridge — implemented.** MCP authorization is OAuth 2.1-shaped, so
   this reuses what the repo owns rather than inventing anything:
   `createDpopBearerAuthenticator` (`src/auth.ts`) builds the `authenticate`
@@ -142,5 +166,10 @@ endpoint package, never the lib).
   `initialize` version negotiation as revisions advance.
 - Whether `tools/list` should be filterable by the caller's scopes (hide
   tools the token can never call) or complete-but-annotated.
-- Whether an MCP conformance suite exists worth wiring into
-  `conformance/status.json`, or the package enters as `not-applicable`.
+
+Resolved: no external MCP conformance suite exists to wire into
+`conformance/status.json` (unlike micropub.rocks/webmention.rocks/the Solid
+conformance harness) — this is a protocol-core lib whose bar is its own
+unit/integration tests, the same as every other cross-standard lib in this
+repo (`@dwk/dpop`, `@dwk/oauth`, `@dwk/rdf`, …). Recorded as
+`integration: "not-applicable"`.

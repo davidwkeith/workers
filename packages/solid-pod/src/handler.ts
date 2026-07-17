@@ -57,8 +57,13 @@ function assertBindings(env: SolidPodEnv): void {
   }
 }
 
-/** The JSON-encoded config subset the DO needs, for the internal config header. */
-function forwardedConfig(config: ResolvedConfig): string {
+/**
+ * The JSON-encoded config subset the DO needs, for the internal config
+ * header. Exported so `mcp-tools.ts` can build the same internal request
+ * shape the HTTP front door sends, without duplicating (and risking drift
+ * from) this wire format.
+ */
+export function forwardedConfig(config: ResolvedConfig): string {
   return JSON.stringify({
     owners: config.owners,
     allowAnonymousWrites: config.allowAnonymousWrites,

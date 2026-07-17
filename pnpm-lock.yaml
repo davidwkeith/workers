@@ -59,6 +59,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mcp':
+        specifier: workspace:*
+        version: link:../mcp
 
   packages/atproto-pds:
     dependencies:
@@ -321,9 +324,15 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@dwk/rdf':
         specifier: workspace:*
         version: link:../rdf
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
       '@dwk/store':
         specifier: workspace:*
         version: link:../store

@@ -154,6 +154,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       const due = await this.#processDeliveries();
       return json(200, { processed: due + resolved });
     }
+    // Owner-only inbox listing for the `@dwk/mcp` tool contribution
+    // (`activitypub_list_inbox`). Distinct from `iris.inbox`, which stays
+    // write-only to peers (§7.1) — this internal route is never reachable from
+    // the public front door, only from the composing Worker's own trusted call.
+    if (path === `${pathOf(iris.id)}/__inbox`) {
+      return this.#listInbox(request);
+    }
 
     if (path === pathOf(iris.followers)) {
       return this.#serveCollection(request, iris.followers, "followers");
@@ -688,6 +695,44 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       )
       .toArray()
       .map((row) => row.actor as JsonValue);
+  }
+
+  /**
+   * List received inbox activities, newest first, for the owner-only
+   * `activitypub_list_inbox` MCP tool. Page-based like {@link #serveCollection},
+   * but returns a flat `{ items, total }` listing rather than an AS2
+   * `OrderedCollectionPage` envelope — there is no ActivityPub-federated reader
+   * of this route, only the composing Worker's own MCP tool contribution.
+   */
+  #listInbox(request: Request): Response {
+    const config = this.#config!;
+    const url = new URL(request.url);
+    const page = Math.max(
+      1,
+      Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+    );
+    const requestedPageSize = Number.parseInt(
+      url.searchParams.get("pageSize") ?? "",
+      10,
+    );
+    const pageSize =
+      Number.isFinite(requestedPageSize) && requestedPageSize > 0
+        ? Math.min(requestedPageSize, config.pageSize)
+        : config.pageSize;
+    const offset = (page - 1) * pageSize;
+
+    const total = this.#sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM inbox`)
+      .one().n;
+    const items = this.#sql
+      .exec<{ json: string }>(
+        `SELECT json FROM inbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
+        pageSize,
+        offset,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.json) as JsonValue);
+    return json(200, { items, total, page, pageSize } as JsonValue);
   }
 
   // -- dedup -----------------------------------------------------------------

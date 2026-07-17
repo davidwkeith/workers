@@ -31,6 +31,10 @@
 
 export { createActivityPub, type ActivityPubHandler } from "./handler.js";
 export { ActivityPubObject } from "./object.js";
+export {
+  createActivitypubMcpTools,
+  type ActivitypubMcpToolsConfig,
+} from "./mcp-tools.js";
 
 export {
   resolveConfig,
