@@ -37,6 +37,6 @@
     "@dwk/websub": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260713.1"
+    "@cloudflare/workers-types": "5.20260718.1"
   }
 }
