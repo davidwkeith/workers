@@ -116,7 +116,7 @@ right when adding or moving tests:
 - **Formatting:** Prettier — semicolons, double quotes, trailing commas
   (`all`), 80-column print width. `pnpm format:check` is a CI gate.
 - **TypeScript is strict** (`tsconfig.base.json`): `strict`,
-  `noUncheckedIndexedAccess`, `noUnusedLocals`/`Parameters`,
+  `noUncheckedIndexedAccess`, `noUnusedLocals`/`noUnusedParameters`,
   `verbatimModuleSyntax`, `isolatedModules`. Use `import type` for type-only
   imports. ESLint flags unused variables unless prefixed with `_`.
 - **ESM-only packages**, tree-shakeable, fully typed, `"sideEffects": false`,

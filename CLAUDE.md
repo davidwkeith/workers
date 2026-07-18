@@ -215,7 +215,7 @@ packages/<name>/
 - **Internal workspace deps** use `"workspace:*"` (e.g. `@dwk/solid-pod` depends
   on `@dwk/dpop`, `@dwk/rdf`, `@dwk/store`, and `@dwk/wac`).
 - **TypeScript is strict** via `tsconfig.base.json`: `strict`,
-  `noUncheckedIndexedAccess`, `noUnusedLocals`/`Parameters`,
+  `noUncheckedIndexedAccess`, `noUnusedLocals`/`noUnusedParameters`,
   `verbatimModuleSyntax`, `isolatedModules`. Use `import type` for type-only
   imports. ESLint flags unused vars unless prefixed with `_`.
 - **`index.ts` carries a doc comment** stating the package's role, whether it is
