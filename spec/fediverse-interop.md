@@ -141,7 +141,11 @@ non-goals). Four additive changes to `ActivityPubObject`:
 `shared_inbox`/`inbox` columns. Populated when the outbound `Follow` is
 prepared (the actor document is already fetched to resolve the inbox — same
 queued, alarm-driven pattern as `pending_accept`, never inline in the inbox
-POST path). Nothing else changes for `Person` follows.
+POST path). Rows predating the migration have `actor_type IS NULL` and are
+**lazily backfilled**: the alarm tick resolves each `NULL`-typed row's actor
+document through the same queued fetch, so a pre-existing `Group` follow
+starts qualifying for §2.2 unwrapping once backfilled — no unfollow/re-follow
+required. Nothing else changes for `Person` follows.
 
 ### 2.2 Inbound `Announce` unwrapping
 

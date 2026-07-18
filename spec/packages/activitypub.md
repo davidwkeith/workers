@@ -147,7 +147,8 @@ changes the Mastodon-facing behavior specified above.
 
 - Authoring relationship with `@dwk/micropub` (publish → `Create`) — the
   publish-shaping phase of [fediverse-interop.md](../fediverse-interop.md)
-  resolves the direction (micropub holds the adapter, outbox `POST` is the
-  seam).
+  resolves the *shape* of the seam (micropub holds the adapter, outbox `POST`
+  is the seam); the exact `PostInput` envelope on that `POST` is still open
+  there.
 - Actor identity overlap with the eventual Solid-OIDC OP rooted at the same
   domain (see [open-questions.md](../open-questions.md) §1).
