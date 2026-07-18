@@ -215,7 +215,7 @@ packages/<name>/
 - **Internal workspace deps** use `"workspace:*"` (e.g. `@dwk/solid-pod` depends
   on `@dwk/dpop`, `@dwk/rdf`, `@dwk/store`, and `@dwk/wac`).
 - **TypeScript is strict** via `tsconfig.base.json`: `strict`,
-  `noUncheckedIndexedAccess`, `noUnusedLocals`/`Parameters`,
+  `noUncheckedIndexedAccess`, `noUnusedLocals`/`noUnusedParameters`,
   `verbatimModuleSyntax`, `isolatedModules`. Use `import type` for type-only
   imports. ESLint flags unused vars unless prefixed with `_`.
 - **`index.ts` carries a doc comment** stating the package's role, whether it is
@@ -253,6 +253,10 @@ both groups in one pass.
 
 ## Conventions
 
+- **Contributor workflow:** [`CONTRIBUTING.md`](./CONTRIBUTING.md) is the
+  canonical onboarding doc (setup, the local CI gate, test targeting,
+  changesets, adding a package, security reporting). Keep it in sync when
+  commands or conventions in this file change.
 - **Formatting (Prettier):** semicolons, double quotes, trailing commas (`all`),
   80-column print width. `pnpm format:check` is a CI gate.
 - **Releases:** independent semver per package via **Changesets**. To record a
@@ -311,4 +315,6 @@ implementing standards behaviour:
 - `spec/packages/<name>.md` — one detailed spec per package.
 
 The broader requirements thread is
-[issue #1](https://github.com/davidwkeith/workers/issues/1).
+[issue #1](https://github.com/davidwkeith/workers/issues/1). For the
+human-facing contributor guide see [`CONTRIBUTING.md`](./CONTRIBUTING.md); for
+the publish runbook see [`RELEASING.md`](./RELEASING.md).
