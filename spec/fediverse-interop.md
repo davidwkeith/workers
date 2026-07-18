@@ -3,8 +3,9 @@
 **Status: design — approved direction, not yet implemented.** This document
 extends [`spec/packages/activitypub.md`](packages/activitypub.md); that spec
 remains authoritative for everything it already covers (actor model, inbox
-security, delivery, events). Tracked from the fediverse-platform-support
-thread.
+security, delivery, events). Tracked in
+[#273](https://github.com/davidwkeith/workers/issues/273), with one child
+issue per phase (#274, #275, #276).
 
 ## Motivation
 
@@ -261,11 +262,13 @@ Everything remains DO-SQLite authoritative state — never KV — per
 1. **Typed objects + publish shaping** (`objects.ts`, outbox `PostInput`,
    attachment support) — ships Pixelfed interop and improves Mastodon media
    posts. Smallest increment, no schema-migration risk beyond additive
-   columns.
+   columns. ([#274](https://github.com/davidwkeith/workers/issues/274))
 2. **FEP-1b12 participant** (follow typing, announce unwrap, `audience`
    targeting, `Dislike`) — ships Lemmy/threadiverse interop.
+   ([#275](https://github.com/davidwkeith/workers/issues/275))
 3. **Client wiring** (micropub adapter + syndication targets, MCP
    `activitypub_publish`) and the conformance-target additions.
+   ([#276](https://github.com/davidwkeith/workers/issues/276))
 
 Each phase is independently shippable and changeset-recorded; nothing here
 alters published behavior for existing Mastodon federation.
