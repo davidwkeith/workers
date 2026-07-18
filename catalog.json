@@ -401,6 +401,15 @@
           "head": true,
           "handler": "createSolidPod"
         }
+      ],
+      "triggers": [
+        {
+          "cron": "*/15 * * * *",
+          "handler": "createSolidPodGc",
+          "bindings": ["BLOBS", "GC_DB"],
+          "dedupe": "store-gc",
+          "description": "Reclaims orphaned R2 blobs the pod forwards into the shared GC_DB tracking database."
+        }
       ]
     },
     {
@@ -509,6 +518,15 @@
           "methods": ["GET", "PUT", "DELETE", "OPTIONS"],
           "head": true,
           "handler": "createRemoteStorage"
+        }
+      ],
+      "triggers": [
+        {
+          "cron": "*/15 * * * *",
+          "handler": "createRemoteStorageGc",
+          "bindings": ["BLOBS", "GC_DB"],
+          "dedupe": "store-gc",
+          "description": "Reclaims orphaned R2 blobs the vault forwards into the shared GC_DB tracking database."
         }
       ]
     },

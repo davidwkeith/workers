@@ -367,6 +367,106 @@ test("nested prefixes across entries collide", () => {
   assert.match(violations[0], /prefix/);
 });
 
+/** Fixture pair with scheduled trigger claims (issue #265). */
+function triggeredFixture() {
+  const input = fixture();
+  input.catalog.workers[1].resources.push({
+    type: "d1",
+    binding: "GC_DB",
+    optional: true,
+  });
+  input.catalog.workers[1].triggers = [
+    {
+      cron: "*/15 * * * *",
+      handler: "createSolidPodGc",
+      bindings: ["BLOBS", "GC_DB"],
+      dedupe: "store-gc",
+      description: "Reclaims orphaned R2 blobs.",
+    },
+  ];
+  return input;
+}
+
+test("a catalog with well-formed trigger claims passes", () => {
+  assert.deepEqual(evaluateCatalog(triggeredFixture()), []);
+});
+
+test("triggers must be an array when present", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers = { cron: "*/15 * * * *" };
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /"triggers" must be an array/);
+});
+
+test("every trigger needs a handler identity", () => {
+  const input = triggeredFixture();
+  delete input.catalog.workers[1].triggers[0].handler;
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /handler/);
+});
+
+test("duplicate trigger handlers within one entry are rejected", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers.push({
+    ...input.catalog.workers[1].triggers[0],
+  });
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /duplicate/i);
+});
+
+test("a trigger cron must be a five-field expression", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers[0].cron = "every 15 minutes";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /cron/);
+});
+
+test("trigger bindings must name the worker's own resources", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers[0].bindings = ["BLOBS", "AUTH_DB"];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /AUTH_DB/);
+});
+
+test("trigger bindings must be a non-empty array when present", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers[0].bindings = [];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /bindings/);
+});
+
+test("duplicate trigger bindings are rejected", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers[0].bindings = ["BLOBS", "BLOBS"];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /duplicate trigger binding "BLOBS"/);
+});
+
+test("shared-job triggers with matching crons across workers pass", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[0].triggers = [
+    { cron: "*/15 * * * *", handler: "createWebmentionGc", dedupe: "store-gc" },
+  ];
+  assert.deepEqual(evaluateCatalog(input), []);
+});
+
+test("shared-job triggers with mismatched crons across workers collide", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[0].triggers = [
+    { cron: "0 * * * *", handler: "createWebmentionGc", dedupe: "store-gc" },
+  ];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /store-gc.*same cron/);
+});
+
 test("overlapping claims within the same entry are allowed", () => {
   const input = routedFixture();
   // /media exact POST + /media/ prefix GET is the micropub shape.
