@@ -177,11 +177,50 @@ identities distinct at the static layer (e.g. `vc`'s issuer as a path-based
 `did:web:<host>:credentials` document at `/credentials/did.json`) — that
 static-generation decision belongs to the composer, not this catalog.
 
+## Scheduled triggers (`triggers`, issue #265)
+
+Each worker entry may declare the background jobs the composed Worker must run
+on a schedule whenever the worker is active — **independent of HTTP routing**:
+a `scheduled` event is never request-triggered, so trigger claims apply
+regardless of any route claims. Each claim generates a wrangler
+`triggers.crons` entry plus a `scheduled()` export wired to the named
+factory's handler (see the conformance target's `scheduled` export for a
+worked composition).
+
+```json
+{
+  "cron": "*/15 * * * *",
+  "handler": "createSolidPodGc",
+  "bindings": ["BLOBS", "GC_DB"],
+  "dedupe": "store-gc",
+  "description": "Reclaims orphaned R2 blobs the pod forwards into the shared GC_DB tracking database."
+}
+```
+
+- `cron` — the canonical five-field cron expression. A default cadence, not a
+  protocol requirement; composers may tune it.
+- `handler` — the factory export producing the `scheduled` handler, so the
+  app can correlate the trigger with the code it must wire (mirrors the
+  `handler` field on route claims).
+- `bindings` — binding names from this worker's own `resources` the handler
+  reads. When a listed binding is **optional and left unbound**, the composer
+  omits the trigger instead of binding it (the handlers fail loudly without
+  their bindings) — this is how "GC needs a cron when `GC_DB` is bound"
+  is expressed.
+- `dedupe` — shared-job key. Triggers on different active workers carrying
+  the same key are **one underlying job**: `solid-pod` and `remotestorage`
+  share the `@dwk/store` GC schema over one `BLOBS`/`GC_DB` pair, so one
+  collector pass covers both. The composer emits one cron entry and wires any
+  one of the declared handlers. Equal keys must declare equal cron
+  expressions — the catalog gate enforces this.
+- `description` — human-readable purpose, for composing-app UI.
+
+Populated for `solid-pod` (`createSolidPodGc`) and `remotestorage`
+(`createRemoteStorageGc`), the two workers whose orphan-tracking GC needs a
+cron when `GC_DB` is bound.
+
 ## What the catalog does not cover (yet)
 
-- **Cron triggers** — `solid-pod`/`remotestorage` GC handlers want a scheduled
-  trigger when `GC_DB` is bound; until modeled, composers copy the
-  conformance target's `triggers.crons` approach.
 - **Config-object requirements** — factory config (base URL, issuer, origins)
   is code-level and documented per package in `spec/packages/`; the catalog
   only describes Cloudflare bindings.

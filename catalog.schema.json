@@ -64,6 +64,44 @@
           "type": "array",
           "items": { "$ref": "#/definitions/route" },
           "description": "HTTP route claims (issue #256): the canonical paths this worker's handler owns when mounted at its default location. The composing app turns the active workers' claims into selective Worker-first routing (e.g. wrangler [assets].run_worker_first). Claims from different workers must never overlap; claims within one worker may (its handler sub-routes)."
+        },
+        "triggers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/trigger" },
+          "description": "Scheduled (cron) trigger claims (issue #265): background jobs the composed Worker must run whenever this worker is active, independent of HTTP routing — a scheduled event is never request-triggered. Each claim becomes a wrangler triggers.crons entry plus a scheduled() export wired to the named factory's handler."
+        }
+      },
+      "additionalProperties": false
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["cron", "handler"],
+      "properties": {
+        "cron": {
+          "type": "string",
+          "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$",
+          "description": "Canonical five-field cron expression for the composed wrangler triggers.crons entry. A default cadence, not a protocol requirement — composers may tune it."
+        },
+        "handler": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The factory export producing the scheduled handler (e.g. \"createSolidPodGc\") the composer must invoke from the composed Worker's scheduled() export."
+        },
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Binding names from this worker's own resources the scheduled handler reads. When a listed binding is optional and left unbound, the composer omits the trigger instead of binding it — the handler fails loudly without its bindings."
+        },
+        "dedupe": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Shared-job key: triggers on different active workers carrying the same key are one underlying job (e.g. the @dwk/store GC collector solid-pod and remotestorage share over one BLOBS/GC_DB pair). The composer emits one cron entry and wires any one of the declared handlers. Equal keys must declare equal cron expressions."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable purpose of the job, for composing-app UI."
         }
       },
       "additionalProperties": false

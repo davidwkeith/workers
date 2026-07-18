@@ -58,10 +58,12 @@ function isNonEmptyString(value) {
 }
 
 /**
- * Structurally validate one worker entry, appending to `violations`.
+ * Structurally validate one worker entry, appending to `violations`. Returns
+ * the entry's declared resource binding names, for the trigger cross-check.
  * @param {any} entry
  * @param {string} label
  * @param {string[]} violations
+ * @returns {Set<string>}
  */
 function checkEntry(entry, label, violations) {
   for (const field of ["displayName", "description", "group"]) {
@@ -93,12 +95,12 @@ function checkEntry(entry, label, violations) {
     );
   }
 
+  const seenBindings = new Set();
   const resources = entry.resources;
   if (!Array.isArray(resources)) {
     violations.push(`${label}: "resources" must be an array (may be empty).`);
-    return;
+    return seenBindings;
   }
-  const seenBindings = new Set();
   for (const resource of resources) {
     const type = resource?.type;
     if (!RESOURCE_TYPES.has(type)) {
@@ -125,6 +127,82 @@ function checkEntry(entry, label, violations) {
       );
     }
   }
+  return seenBindings;
+}
+
+/** Five whitespace-separated cron fields (the wrangler triggers.crons shape). */
+const CRON_PATTERN = /^\S+ \S+ \S+ \S+ \S+$/;
+
+/**
+ * Structurally validate one entry's scheduled trigger claims (issue #265),
+ * appending to `violations`. Returns the structurally-valid triggers for the
+ * cross-entry shared-job (dedupe) consistency check.
+ * @param {any} entry
+ * @param {string} label
+ * @param {Set<string>} resourceBindings
+ * @param {string[]} violations
+ * @returns {{ cron: string, dedupe: string | undefined }[]}
+ */
+function checkTriggers(entry, label, resourceBindings, violations) {
+  if (entry.triggers === undefined) return [];
+  if (!Array.isArray(entry.triggers)) {
+    violations.push(`${label}: "triggers" must be an array when present.`);
+    return [];
+  }
+  /** @type {{ cron: string, dedupe: string | undefined }[]} */
+  const valid = [];
+  const seenHandlers = new Set();
+  for (const trigger of entry.triggers) {
+    const where = `${label}: trigger ${JSON.stringify(trigger?.handler ?? "(missing handler)")}`;
+
+    if (!isNonEmptyString(trigger?.handler)) {
+      violations.push(
+        `${where}: every trigger needs a "handler" identity (the factory export producing the scheduled handler).`,
+      );
+      continue;
+    }
+    if (seenHandlers.has(trigger.handler)) {
+      violations.push(`${where}: duplicate trigger handler.`);
+      continue;
+    }
+    seenHandlers.add(trigger.handler);
+
+    if (!isNonEmptyString(trigger.cron) || !CRON_PATTERN.test(trigger.cron)) {
+      violations.push(
+        `${where}: "cron" must be a five-field cron expression (got ${JSON.stringify(trigger.cron)}).`,
+      );
+      continue;
+    }
+
+    if (trigger.bindings !== undefined) {
+      if (
+        !Array.isArray(trigger.bindings) ||
+        trigger.bindings.length === 0 ||
+        !trigger.bindings.every(isNonEmptyString)
+      ) {
+        violations.push(
+          `${where}: "bindings" must be a non-empty array of binding names when present.`,
+        );
+      } else {
+        for (const name of trigger.bindings) {
+          if (!resourceBindings.has(name)) {
+            violations.push(
+              `${where}: names binding "${name}" not declared in this worker's resources.`,
+            );
+          }
+        }
+      }
+    }
+
+    if (trigger.dedupe !== undefined && !isNonEmptyString(trigger.dedupe)) {
+      violations.push(
+        `${where}: "dedupe" must be a non-empty string when present.`,
+      );
+      continue;
+    }
+    valid.push({ cron: trigger.cron, dedupe: trigger.dedupe });
+  }
+  return valid;
 }
 
 /** Valid `match` values for a route claim. */
@@ -304,6 +382,8 @@ export function evaluateCatalog({ catalog, packages }) {
   const entryPackages = new Set();
   /** @type {{ id: string, routes: { path: string, match: string }[] }[]} */
   const routed = [];
+  /** @type {Map<string, { id: string, cron: string }>} */
+  const sharedJobs = new Map();
 
   for (const entry of workers) {
     const label = `worker ${JSON.stringify(entry?.id ?? "(missing id)")}`;
@@ -329,10 +409,32 @@ export function evaluateCatalog({ catalog, packages }) {
       entryPackages.add(entry.package);
     }
 
-    checkEntry(entry, label, violations);
+    const resourceBindings = checkEntry(entry, label, violations);
     const routes = checkRoutes(entry, label, violations);
     if (routes.length > 0) {
       routed.push({ id: String(entry?.id), routes });
+    }
+
+    // Shared-job triggers (equal dedupe keys) compose to one cron entry, so
+    // their schedules must agree across workers.
+    for (const trigger of checkTriggers(
+      entry,
+      label,
+      resourceBindings,
+      violations,
+    )) {
+      if (trigger.dedupe === undefined) continue;
+      const prior = sharedJobs.get(trigger.dedupe);
+      if (prior === undefined) {
+        sharedJobs.set(trigger.dedupe, {
+          id: String(entry?.id),
+          cron: trigger.cron,
+        });
+      } else if (prior.cron !== trigger.cron) {
+        violations.push(
+          `shared trigger "${trigger.dedupe}": workers "${prior.id}" ("${prior.cron}") and "${entry?.id}" ("${trigger.cron}") must declare the same cron expression.`,
+        );
+      }
     }
   }
 
