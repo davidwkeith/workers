@@ -152,14 +152,30 @@ composing app resolves each request to exactly one active worker, and the
 catalog gate enforces this. Claims _within_ one worker may overlap; its
 handler does its own sub-routing.
 
-Currently populated for the packages Anglesite composes today: `indieauth`,
+Populated for the 8 packages Anglesite composes today (`indieauth`,
 `micropub`, `microsub`, `webmention`, `websub`, `activitypub`, `webfinger`,
-`host-meta`. The storage/identity workers (`solid-pod`, `webdav`,
-`remotestorage`, `atproto-pds`, `webauthn`, `vc`) omit `routes` for now:
-their mount roots are composer-chosen prefixes, and `vc`/`atproto-pds` both
-canonically want `/.well-known/did.json`, which needs an owner decision
-before both can claim it. Their claims land as a follow-up once those
-contracts are settled.
+`host-meta`) plus the storage/identity workers (issue #264, follow-up to
+#256/#260): `solid-pod` (`/pod`, `/pod/`), `webdav` (`/dav`, `/dav/` for the
+data door; `/dav-credentials` for the app-password admin endpoint — both
+wired through `@dwk/solid-pod`'s `createSolidPodWebdav`/
+`createSolidPodWebdavCredentials`, the actual composed handlers, not
+`@dwk/webdav`'s bare `createWebdav`), `remotestorage` (`/storage/`),
+`atproto-pds` (`/xrpc/`, plus the authority-bound `/.well-known/atproto-did`
+and `/.well-known/did.json`), and `webauthn` (the four ceremony endpoints
+under `/webauthn/`).
+
+**The `vc`/`atproto-pds` `/.well-known/did.json` collision (resolved).**
+`@dwk/vc`'s handler never serves `/.well-known/did.json` — per its spec, the
+`did:web` DID document is a static artifact the composer (Anglesite)
+generates, outside this Worker's routes entirely; `createVc` only mounts the
+dynamic issue/verify/status endpoints. So `vc` has no route claim to make
+here and nothing collides: `atproto-pds` is the only package whose *handler*
+serves `/.well-known/did.json` (for its own `did:web` accounts), and it
+claims that path as `authorityBound`. A composer running both `vc` and
+`atproto-pds`'s `did:web` mode on one domain must still keep their DID
+identities distinct at the static layer (e.g. `vc`'s issuer as a path-based
+`did:web:<host>:credentials` document at `/credentials/did.json`) — that
+static-generation decision belongs to the composer, not this catalog.
 
 ## What the catalog does not cover (yet)
 

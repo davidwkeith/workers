@@ -311,6 +311,32 @@
           "className": "WebAuthnObject",
           "sqlite": true
         }
+      ],
+      "routes": [
+        {
+          "path": "/webauthn/register/options",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebAuthn"
+        },
+        {
+          "path": "/webauthn/register/verify",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebAuthn"
+        },
+        {
+          "path": "/webauthn/authenticate/options",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebAuthn"
+        },
+        {
+          "path": "/webauthn/authenticate/verify",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createWebAuthn"
+        }
       ]
     },
     {
@@ -359,6 +385,22 @@
           "binding": "GC_DB",
           "optional": true
         }
+      ],
+      "routes": [
+        {
+          "path": "/pod",
+          "match": "exact",
+          "methods": ["GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
+          "head": true,
+          "handler": "createSolidPod"
+        },
+        {
+          "path": "/pod/",
+          "match": "prefix",
+          "methods": ["GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
+          "head": true,
+          "handler": "createSolidPod"
+        }
       ]
     },
     {
@@ -385,6 +427,52 @@
         {
           "type": "secret",
           "binding": "WEBDAV_PEPPER"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/dav",
+          "match": "exact",
+          "methods": [
+            "GET",
+            "PUT",
+            "DELETE",
+            "PROPFIND",
+            "PROPPATCH",
+            "MKCOL",
+            "COPY",
+            "MOVE",
+            "LOCK",
+            "UNLOCK",
+            "OPTIONS"
+          ],
+          "head": true,
+          "handler": "createSolidPodWebdav"
+        },
+        {
+          "path": "/dav/",
+          "match": "prefix",
+          "methods": [
+            "GET",
+            "PUT",
+            "DELETE",
+            "PROPFIND",
+            "PROPPATCH",
+            "MKCOL",
+            "COPY",
+            "MOVE",
+            "LOCK",
+            "UNLOCK",
+            "OPTIONS"
+          ],
+          "head": true,
+          "handler": "createSolidPodWebdav"
+        },
+        {
+          "path": "/dav-credentials",
+          "match": "exact",
+          "methods": ["GET", "POST", "DELETE"],
+          "handler": "createSolidPodWebdavCredentials"
         }
       ]
     },
@@ -413,6 +501,15 @@
           "binding": "GC_DB",
           "optional": true
         }
+      ],
+      "routes": [
+        {
+          "path": "/storage/",
+          "match": "prefix",
+          "methods": ["GET", "PUT", "DELETE", "OPTIONS"],
+          "head": true,
+          "handler": "createRemoteStorage"
+        }
       ]
     },
     {
@@ -434,6 +531,30 @@
         {
           "type": "r2",
           "binding": "BLOBS"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/xrpc/",
+          "match": "prefix",
+          "methods": ["GET", "POST"],
+          "handler": "createAtprotoPds"
+        },
+        {
+          "path": "/.well-known/atproto-did",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createAtprotoPds",
+          "authorityBound": true
+        },
+        {
+          "path": "/.well-known/did.json",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createAtprotoPds",
+          "authorityBound": true
         }
       ]
     }
