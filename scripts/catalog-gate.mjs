@@ -184,7 +184,12 @@ function checkTriggers(entry, label, resourceBindings, violations) {
           `${where}: "bindings" must be a non-empty array of binding names when present.`,
         );
       } else {
+        const seenTriggerBindings = new Set();
         for (const name of trigger.bindings) {
+          if (seenTriggerBindings.has(name)) {
+            violations.push(`${where}: duplicate trigger binding "${name}".`);
+          }
+          seenTriggerBindings.add(name);
           if (!resourceBindings.has(name)) {
             violations.push(
               `${where}: names binding "${name}" not declared in this worker's resources.`,
@@ -424,15 +429,13 @@ export function evaluateCatalog({ catalog, packages }) {
       violations,
     )) {
       if (trigger.dedupe === undefined) continue;
+      const entryId = entry?.id ?? "(missing id)";
       const prior = sharedJobs.get(trigger.dedupe);
       if (prior === undefined) {
-        sharedJobs.set(trigger.dedupe, {
-          id: String(entry?.id),
-          cron: trigger.cron,
-        });
+        sharedJobs.set(trigger.dedupe, { id: entryId, cron: trigger.cron });
       } else if (prior.cron !== trigger.cron) {
         violations.push(
-          `shared trigger "${trigger.dedupe}": workers "${prior.id}" ("${prior.cron}") and "${entry?.id}" ("${trigger.cron}") must declare the same cron expression.`,
+          `shared trigger "${trigger.dedupe}": workers "${prior.id}" ("${prior.cron}") and "${entryId}" ("${trigger.cron}") must declare the same cron expression.`,
         );
       }
     }

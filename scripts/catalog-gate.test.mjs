@@ -441,6 +441,14 @@ test("trigger bindings must be a non-empty array when present", () => {
   assert.match(violations[0], /bindings/);
 });
 
+test("duplicate trigger bindings are rejected", () => {
+  const input = triggeredFixture();
+  input.catalog.workers[1].triggers[0].bindings = ["BLOBS", "BLOBS"];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /duplicate trigger binding "BLOBS"/);
+});
+
 test("shared-job triggers with matching crons across workers pass", () => {
   const input = triggeredFixture();
   input.catalog.workers[0].triggers = [
