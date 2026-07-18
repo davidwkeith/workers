@@ -133,8 +133,21 @@ one record.
   subset ([open-questions.md](../open-questions.md) §4). See
   [conformance-and-testing.md](../conformance-and-testing.md).
 
+## Multi-platform interop (design)
+
+v1 interop targets Mastodon. The approved design for interoperating with
+**Pixelfed**, **Lemmy**, and other fediverse platforms from the same single
+actor — a typed object model (`Note`/`Article`/`Page` + attachments),
+FEP-1b12 group *participation* (follow `Group`s, `audience` targeting,
+`Announce` unwrapping, `Dislike`), and client publish shaping — lives in
+[fediverse-interop.md](../fediverse-interop.md). It is additive; nothing in it
+changes the Mastodon-facing behavior specified above.
+
 ## Open questions
 
-- Authoring relationship with `@dwk/micropub` (publish → `Create`).
+- Authoring relationship with `@dwk/micropub` (publish → `Create`) — the
+  publish-shaping phase of [fediverse-interop.md](../fediverse-interop.md)
+  resolves the direction (micropub holds the adapter, outbox `POST` is the
+  seam).
 - Actor identity overlap with the eventual Solid-OIDC OP rooted at the same
   domain (see [open-questions.md](../open-questions.md) §1).
