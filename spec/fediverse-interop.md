@@ -103,6 +103,7 @@ New internal module `packages/activitypub/src/objects.ts`, exported from
     audience?: string; // Group actor IRI (community target)
     tags?: string[]; // hashtags
     to?: string[]; // advanced override; defaults derived
+    cc?: string[]; // advanced override — mentions / secondary audiences
   }
   ```
 
@@ -153,7 +154,12 @@ Today `Announce` is stored + maybe-forwarded. Additively:
   `audience`. The outer `Announce` is what the signature verified (the edge
   already enforces `actor === signer`); the inner activity is **relayed,
   unsigned content** — treated exactly like a boost: attribution recorded,
-  trust scoped to "the group we chose to follow relayed this".
+  trust scoped to "the group we chose to follow relayed this". Because a
+  malicious or compromised group could relay fabricated activities under any
+  author's name, relayed rows are **never confusable with verified ones**:
+  the stored row records the relaying group in a `relayed_by` column, and
+  every read surface (MCP tools, a future microsub bridge) MUST expose the
+  distinction between directly-signed activities and group-relayed content.
 - Optional hardening (config `verifyRelayedObjects`, default off in v1): fetch
   the inner object by its `id` from its origin via `@dwk/safe-fetch` before
   storing, upgrading relay trust to origin trust at the cost of an outbound
@@ -219,7 +225,12 @@ and the fedify peer script grows announce-unwrap and Page cases.
 ## Storage & config deltas (summary)
 
 - `following`: + `actor_type`, `inbox`, `shared_inbox`.
-- `inbox`: + `object_type`, `audience` (nullable, classification only).
+- `followers`: + `shared_inbox` (nullable), so the delivery queue can batch
+  fan-out per shared inbox instead of one request per follower on the same
+  instance — a delivery optimization, recorded when the `Follow` is accepted.
+- `inbox`: + `object_type`, `audience`, `relayed_by` (all nullable —
+  classification and provenance only; `relayed_by` marks group-relayed,
+  unsigned content, see §2.2).
 - `seen`: also records unwrapped inner-activity `id`s.
 - Config: + `verifyRelayedObjects?: boolean` (default `false`). No new
   bindings — attachments are **URL references**; media bytes live behind the
