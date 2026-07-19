@@ -181,9 +181,11 @@ export async function deliverFediversePost(
   post: FediversePost,
 ): Promise<SyndicationResult> {
   const fetchImpl = config.fetch ?? fetch;
-  let response: Response;
+  // The whole exchange — including reading the failure body — sits inside
+  // one try/catch: syndication is non-fatal by contract, so no network or
+  // body-read error may ever escape to the caller.
   try {
-    response = await fetchImpl(config.publishUrl, {
+    const response = await fetchImpl(config.publishUrl, {
       method: "POST",
       headers: {
         authorization: `Bearer ${config.publishToken}`,
@@ -192,23 +194,29 @@ export async function deliverFediversePost(
       body: JSON.stringify(post),
       signal: AbortSignal.timeout(10_000),
     });
+    if (!response.ok) {
+      let reason: string;
+      try {
+        reason = await response.text();
+      } catch {
+        reason = "(failed to read response body)";
+      }
+      return {
+        target,
+        ok: false,
+        error: `publish endpoint answered ${response.status}: ${reason}`,
+      };
+    }
+    return {
+      target,
+      ok: true,
+      ...(response.headers.get("location")
+        ? { location: response.headers.get("location") as string }
+        : {}),
+    };
   } catch (err) {
     return { target, ok: false, error: String(err) };
   }
-  if (!response.ok) {
-    return {
-      target,
-      ok: false,
-      error: `publish endpoint answered ${response.status}: ${await response.text()}`,
-    };
-  }
-  return {
-    target,
-    ok: true,
-    ...(response.headers.get("location")
-      ? { location: response.headers.get("location") as string }
-      : {}),
-  };
 }
 
 /**
@@ -227,29 +235,33 @@ export async function syndicateEntry(
   logger?: Logger,
 ): Promise<SyndicationResult[]> {
   const advertisedUids = new Set(advertised.map((t) => t.uid));
-  const results: SyndicationResult[] = [];
-  for (const uid of requested) {
-    const isFollowersTarget = uid === FEDIVERSE_TARGET_UID;
-    if (!isFollowersTarget && !advertisedUids.has(uid)) continue;
-    const post = entryToFediversePost(mf2, {
-      ...(isFollowersTarget ? {} : { audience: uid }),
-    });
-    if (typeof post === "string") {
-      results.push({ target: uid, ok: false, error: post });
-      logger?.warn("micropub.syndicate.rejected", {
-        target: uid,
-        reason: post,
+  // Deliveries run in parallel (each is independently bounded and non-fatal)
+  // so one slow community endpoint never serializes behind the others and
+  // delays the client's create response. `Promise.all` preserves request
+  // order in the results.
+  const outcomes = await Promise.all(
+    requested.map(async (uid): Promise<SyndicationResult | null> => {
+      const isFollowersTarget = uid === FEDIVERSE_TARGET_UID;
+      if (!isFollowersTarget && !advertisedUids.has(uid)) return null;
+      const post = entryToFediversePost(mf2, {
+        ...(isFollowersTarget ? {} : { audience: uid }),
       });
-      continue;
-    }
-    const result = await deliverFediversePost(config, uid, post);
-    results.push(result);
-    if (!result.ok) {
-      logger?.warn("micropub.syndicate.failed", {
-        target: uid,
-        reason: result.error,
-      });
-    }
-  }
-  return results;
+      if (typeof post === "string") {
+        logger?.warn("micropub.syndicate.rejected", {
+          target: uid,
+          reason: post,
+        });
+        return { target: uid, ok: false, error: post };
+      }
+      const result = await deliverFediversePost(config, uid, post);
+      if (!result.ok) {
+        logger?.warn("micropub.syndicate.failed", {
+          target: uid,
+          reason: result.error,
+        });
+      }
+      return result;
+    }),
+  );
+  return outcomes.filter((r): r is SyndicationResult => r !== null);
 }

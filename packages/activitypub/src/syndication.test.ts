@@ -2,7 +2,11 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import { resolveConfig, type ActivityPubEnv } from "./config.js";
-import { communityDisplayHandle, isHandleShaped } from "./discovery.js";
+import {
+  communityDisplayHandle,
+  fetchActorGuarded,
+  isHandleShaped,
+} from "./discovery.js";
 import { createCommunitySyndicationTargets } from "./syndication.js";
 
 const testEnv = env as unknown as ActivityPubEnv;
@@ -93,5 +97,26 @@ describe("discovery helpers", () => {
     expect(isHandleShaped("user@host.example")).toBe(true);
     expect(isHandleShaped("https://lemmy.example/c/birding")).toBe(false);
     expect(isHandleShaped("HTTP://x.example")).toBe(false);
+  });
+
+  it("caps an untrusted actor document's size", async () => {
+    const iri = "https://remote.example/users/huge";
+    // Over the 1 MiB cap, with no content-length header — the streaming
+    // reader must enforce the ceiling itself.
+    const huge = `{"id":"${iri}","pad":"${"x".repeat(2 * 1024 * 1024)}"}`;
+    const overCap = await fetchActorGuarded(
+      iri,
+      async () => new Response(huge, { status: 200 }),
+    );
+    expect(overCap).toBeNull();
+
+    const fine = await fetchActorGuarded(
+      iri,
+      async () =>
+        new Response(JSON.stringify({ id: iri, type: "Person" }), {
+          status: 200,
+        }),
+    );
+    expect(fine).toEqual({ id: iri, type: "Person" });
   });
 });

@@ -60,6 +60,51 @@ export interface ResolvedActor {
   readonly name?: string;
 }
 
+/** Ceiling on an untrusted actor document's size (bytes). */
+const MAX_ACTOR_DOC_BYTES = 1024 * 1024;
+
+/**
+ * Read a response body as JSON with a hard byte ceiling, streaming so a
+ * remote that omits (or lies about) `content-length` still cannot exceed the
+ * cap. `null` on over-cap, unreadable, or unparseable bodies.
+ */
+async function readJsonCapped(
+  response: Response,
+  cap: number,
+): Promise<unknown | null> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > cap) return null;
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > cap) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch an actor document (AS2, guarded, bounded) and read its identity facts. */
 export async function fetchActorGuarded(
   iri: string,
@@ -75,12 +120,7 @@ export async function fetchActorGuarded(
     return null;
   }
   if (!response.ok) return null;
-  let doc: unknown;
-  try {
-    doc = await response.json();
-  } catch {
-    return null;
-  }
+  const doc = await readJsonCapped(response, MAX_ACTOR_DOC_BYTES);
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
   const record = doc as Record<string, unknown>;
   if (typeof record.id !== "string") return null;

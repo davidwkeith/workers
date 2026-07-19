@@ -154,6 +154,29 @@ describe("deliverFediversePost", () => {
     expect(auth).toBe("Bearer s3cret");
   });
 
+  it("stays non-fatal when reading a failure body itself fails", async () => {
+    const result = await deliverFediversePost(
+      {
+        publishUrl: "https://social.example/users/alice/publish",
+        publishToken: "s3cret",
+        fetch: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new Error("connection cut"));
+              },
+            }),
+            { status: 500 },
+          ),
+      },
+      FEDIVERSE_TARGET_UID,
+      { kind: "note", content: "x" },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/500/);
+    expect(result.error).toMatch(/failed to read/);
+  });
+
   it("captures network failures as errors", async () => {
     const result = await deliverFediversePost(
       {
