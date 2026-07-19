@@ -191,6 +191,7 @@ export function createActivityPub(
   const actorPath = pathOf(iris.id);
   const inboxPath = pathOf(iris.inbox);
   const outboxPath = pathOf(iris.outbox);
+  const publishPath = `${actorPath}/publish`;
   const followersPath = pathOf(iris.followers);
   const followingPath = pathOf(iris.following);
   const sharedInboxPath = resolved.sharedInbox
@@ -306,8 +307,12 @@ export function createActivityPub(
       return logInboxOutcome(resolved, response);
     }
 
-    // --- Owner publish endpoint (the micropub → Create fan-out seam) --------
-    if (path === outboxPath && method === "POST") {
+    // --- Owner publish endpoints ---------------------------------------------
+    // Two seams, same token gate: `POST <actor>/outbox` takes raw AS2
+    // (activities/objects, per AP §6), and `POST <actor>/publish` takes the
+    // shaped `PostInput` (spec/fediverse-interop.md) — kept as a separate
+    // endpoint so the outbox never sniffs content types or wrapper keys.
+    if ((path === outboxPath || path === publishPath) && method === "POST") {
       if (!resolved.publishToken) {
         emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
           reason: "disabled",

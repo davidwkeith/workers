@@ -27,6 +27,11 @@ import {
 } from "./as2.js";
 import { ApOutcome, OUTCOME_ACTIVITY_HEADER, OUTCOME_HEADER } from "./log.js";
 import { participationTarget } from "./events.js";
+import {
+  buildPostActivity,
+  classifyActivity,
+  parsePostInput,
+} from "./objects.js";
 import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
 import {
   assertPublicHttpsTarget,
@@ -128,6 +133,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          event TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
          added_at INTEGER NOT NULL, PRIMARY KEY (event, actor))`,
     );
+    // Additive columns (fediverse interop phase 1, #274). Nullable by design:
+    // `object_type`/`audience` classify stored inbound activities for reads
+    // (never validation), and `shared_inbox` lets fan-out batch per instance.
+    this.#ensureColumn("inbox", "object_type", "TEXT");
+    this.#ensureColumn("inbox", "audience", "TEXT");
+    this.#ensureColumn("followers", "shared_inbox", "TEXT");
+  }
+
+  /** Add a nullable column if this object predates it (additive migration). */
+  #ensureColumn(table: string, column: string, type: string): void {
+    try {
+      this.#sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (error) {
+      // "duplicate column name" — already migrated; anything else is real.
+      if (!String(error).includes("duplicate column")) throw error;
+    }
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -171,6 +192,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (path === pathOf(iris.outbox)) {
       if (method === "POST") return this.#publish(request);
       return this.#serveCollection(request, iris.outbox, "outbox");
+    }
+    // Owner shaped-post publish (`PostInput` → Create(Note|Article|Page)); the
+    // outbox POST above stays purely AS2 (spec/fediverse-interop.md).
+    if (path === `${pathOf(iris.id)}/publish`) {
+      if (method === "POST") return this.#publishPost(request);
+      return text(405, "Method Not Allowed");
     }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
@@ -455,11 +482,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   #storeInbox(activity: ActivityObject): void {
     const id =
       typeof activity.id === "string" ? activity.id : crypto.randomUUID();
+    // Classification only (object type + community audience) so reads can
+    // filter without re-parsing JSON; never validation — unknown shapes store
+    // with NULL columns exactly as before.
+    const { objectType, audience } = classifyActivity(activity);
     this.#sql.exec(
-      `INSERT OR IGNORE INTO inbox (id, json, received_at) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO inbox (id, json, received_at, object_type, audience)
+         VALUES (?, ?, ?, ?, ?)`,
       id,
       JSON.stringify(activity),
       Date.now(),
+      objectType ?? null,
+      audience ?? null,
     );
   }
 
@@ -589,6 +623,52 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     await this.#armAlarm();
 
     return json(201, activity as JsonValue, { location: id });
+  }
+
+  /**
+   * Publish a shaped post (`PostInput`) as a `Create(Note|Article|Page)`:
+   * validate, mint server-assigned ids, store to the outbox, and fan out to
+   * followers exactly like {@link #publish}. The front door has already
+   * authorized the request via the publish token.
+   */
+  async #publishPost(request: Request): Promise<Response> {
+    const config = this.#config!;
+    if (request.headers.get(INTERNAL_HEADERS.publish) !== "1") {
+      return text(403, "Publishing is not enabled");
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return text(400, "Malformed post JSON");
+    }
+    const parsed = parsePostInput(body);
+    if (!parsed.ok) return text(400, parsed.error);
+
+    const activityId = `${config.iris.outbox}/${crypto.randomUUID()}`;
+    const activity = buildPostActivity(parsed.input, config.iris, {
+      activityId,
+      objectId: `${activityId}/object`,
+      published: new Date().toISOString(),
+    });
+    this.#sql.exec(
+      `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+      activityId,
+      JSON.stringify(activity),
+      Date.now(),
+    );
+
+    const json_ = JSON.stringify(activity);
+    for (const row of this.#sql
+      .exec<{
+        inbox: string | null;
+      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+      .toArray()) {
+      if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+    }
+    await this.#armAlarm();
+
+    return json(201, activity as JsonValue, { location: activityId });
   }
 
   /** Wrap a bare object in a `Create`, assign ids/audience, and timestamp it. */
@@ -927,19 +1007,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
         continue;
       }
-      const inbox = await this.#resolveInbox(row.actor);
-      if (!inbox) {
+      const resolved = await this.#resolveInbox(row.actor);
+      if (!resolved) {
         this.#rescheduleOrDrop("pending_accept", row.seq, row.attempts);
         continue;
       }
       if (row.kind === "follow") {
+        // Keep the shared inbox separately so future fan-out can batch
+        // deliveries per instance (spec/fediverse-interop.md storage deltas).
         this.#sql.exec(
-          `UPDATE followers SET inbox = ? WHERE actor = ?`,
-          inbox,
+          `UPDATE followers SET inbox = ?, shared_inbox = ? WHERE actor = ?`,
+          resolved.inbox,
+          resolved.sharedInbox,
           row.actor,
         );
       }
-      this.#enqueueDelivery(inbox, row.json);
+      this.#enqueueDelivery(resolved.inbox, row.json);
       this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
     }
 
@@ -977,8 +1060,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return json(200, { users: 1, localPosts } as JsonValue);
   }
 
-  /** Resolve a remote actor's `inbox` URL (sharedInbox preferred), or `null`. */
-  async #resolveInbox(actor: string): Promise<string | null> {
+  /**
+   * Resolve a remote actor's delivery inbox (sharedInbox preferred, unchanged
+   * behavior) plus the raw `endpoints.sharedInbox` so callers can persist it
+   * for per-instance fan-out batching. `null` when the actor is unreachable or
+   * carries no usable inbox.
+   */
+  async #resolveInbox(
+    actor: string,
+  ): Promise<{ inbox: string; sharedInbox: string | null } | null> {
     try {
       assertPublicHttpsTarget(actor);
     } catch {
@@ -1003,12 +1093,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
     if (!doc || typeof doc !== "object") return null;
     const record = doc as Record<string, unknown>;
+    let sharedInbox: string | null = null;
     const endpoints = record.endpoints;
     if (endpoints && typeof endpoints === "object") {
       const shared = (endpoints as Record<string, unknown>).sharedInbox;
-      if (typeof shared === "string") return shared;
+      if (typeof shared === "string") sharedInbox = shared;
     }
-    return typeof record.inbox === "string" ? record.inbox : null;
+    const personal = typeof record.inbox === "string" ? record.inbox : null;
+    const inbox = sharedInbox ?? personal;
+    return inbox === null ? null : { inbox, sharedInbox };
   }
 
   #deliverySigner(): { keyId: string; privateKeyPem: string } | null {
