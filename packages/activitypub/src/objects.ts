@@ -406,12 +406,23 @@ export interface ActivityClassification {
   readonly audience?: string;
 }
 
+/**
+ * The first IRI a value names, whether it is a string, an embedded object
+ * (its `id` — AS2 lets `audience` carry a full `Group` object), or an array
+ * of either.
+ */
 function firstIri(value: JsonValue | undefined): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
     for (const entry of value) {
-      if (typeof entry === "string") return entry;
+      const iri = firstIri(entry);
+      if (iri !== undefined) return iri;
     }
+    return undefined;
+  }
+  if (value && typeof value === "object") {
+    const id = (value as Record<string, JsonValue>).id;
+    if (typeof id === "string") return id;
   }
   return undefined;
 }

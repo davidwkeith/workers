@@ -87,7 +87,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS followers (
-         actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL)`,
+         actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL,
+         shared_inbox TEXT)`,
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS following (
@@ -99,7 +100,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS inbox (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE, json TEXT NOT NULL,
-         received_at INTEGER NOT NULL)`,
+         received_at INTEGER NOT NULL, object_type TEXT, audience TEXT)`,
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS outbox (
@@ -133,9 +134,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          event TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
          added_at INTEGER NOT NULL, PRIMARY KEY (event, actor))`,
     );
-    // Additive columns (fediverse interop phase 1, #274). Nullable by design:
-    // `object_type`/`audience` classify stored inbound activities for reads
-    // (never validation), and `shared_inbox` lets fan-out batch per instance.
+    // Additive-column migrations for objects created before fediverse interop
+    // phase 1 (#274); fresh objects already get these from the CREATE TABLEs
+    // above. Nullable by design: `object_type`/`audience` classify stored
+    // inbound activities for reads (never validation), and `shared_inbox`
+    // lets fan-out batch per instance.
     this.#ensureColumn("inbox", "object_type", "TEXT");
     this.#ensureColumn("inbox", "audience", "TEXT");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");

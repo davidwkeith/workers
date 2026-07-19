@@ -254,6 +254,23 @@ describe("classifyActivity", () => {
     ).toEqual({ objectType: "Note" });
   });
 
+  it("resolves an object-shaped audience to its id", () => {
+    expect(
+      classifyActivity({
+        type: "Create",
+        audience: { type: "Group", id: GROUP },
+        object: { type: "Page" },
+      }),
+    ).toEqual({ objectType: "Page", audience: GROUP });
+    expect(
+      classifyActivity({
+        type: "Create",
+        audience: [{ type: "Group", id: GROUP }],
+        object: { type: "Page" },
+      }),
+    ).toEqual({ objectType: "Page", audience: GROUP });
+  });
+
   it("reads the audience from the activity or the embedded object", () => {
     expect(
       classifyActivity({
