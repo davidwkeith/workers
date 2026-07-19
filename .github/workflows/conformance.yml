@@ -31,9 +31,10 @@ on:
       peer_url:
         description: >-
           activitypub only: publicly reachable URL for the ephemeral Fedify
-          peer's inbox (e.g. a Cloudflare Quick Tunnel you started yourself:
-          `cloudflared tunnel --url http://localhost:8765`). Every interop
-          case but 'webfinger' needs this to receive callbacks.
+          peer's inbox. Usually left empty — the job auto-provisions a
+          Cloudflare Quick Tunnel on the runner. Supply one only to override
+          (e.g. a tunnel you started yourself against a peer running
+          elsewhere).
         required: false
 
 jobs:
@@ -143,6 +144,39 @@ jobs:
       - name: Install litmus (WebDAV)
         if: matrix.standard == 'webdav'
         run: sudo apt-get update && sudo apt-get install -y litmus
+      # ActivityPub: the ephemeral Fedify peer needs a publicly reachable
+      # callback URL. Unless the operator supplied peer_url themselves,
+      # auto-provision a Cloudflare Quick Tunnel (no account needed —
+      # Cloudflare is already this project's deploy target) forwarding to the
+      # peer's port on this runner. Failure to come up is non-fatal: the
+      # callback cases then report `skipped` loudly, and `webfinger` still
+      # runs.
+      - name: Provision Quick Tunnel (ActivityPub)
+        id: tunnel
+        if: >-
+          matrix.standard == 'activitypub' &&
+          inputs.target_url != '' &&
+          inputs.peer_url == ''
+        timeout-minutes: 3
+        run: |
+          curl -fsSL -o /tmp/cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x /tmp/cloudflared
+          /tmp/cloudflared tunnel --url http://localhost:8765 --no-autoupdate \
+            > /tmp/cloudflared.log 2>&1 &
+          url=""
+          for _ in $(seq 1 30); do
+            url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -1 || true)
+            [ -n "$url" ] && break
+            sleep 2
+          done
+          if [ -z "$url" ]; then
+            echo "::warning::Quick Tunnel did not come up; callback cases will be skipped."
+            cat /tmp/cloudflared.log || true
+          else
+            echo "peer_url=$url" >> "$GITHUB_OUTPUT"
+            echo "Quick Tunnel ready: $url"
+          fi
       - name: Run hosted conformance suite
         env:
           # Basic credentials for the WebDAV mount (an app password minted via
@@ -150,10 +184,16 @@ jobs:
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
           WEBDAV_PASSWORD: ${{ secrets.WEBDAV_PASSWORD }}
           # Publicly reachable callback URL for the ephemeral Fedify peer
-          # (issue #246); the operator sets this up out-of-band (e.g. a
-          # Cloudflare Quick Tunnel) the same way target_url itself is
-          # supplied manually — this workflow does not auto-provision one.
-          FEDIFY_PEER_URL: ${{ inputs.peer_url }}
+          # (issue #246): the operator's peer_url override when given, else
+          # the Quick Tunnel provisioned above (empty when neither — the
+          # callback cases then report `skipped`, never silently dropped).
+          FEDIFY_PEER_URL: ${{ inputs.peer_url || steps.tunnel.outputs.peer_url }}
+          # Owner publish channel for the fanout/announce-unwrap cases
+          # (fediverse interop #273): the deployed target's outbox URL plus
+          # its ACTIVITYPUB_PUBLISH_TOKEN (mirrored into this repo secret).
+          # Unset ⇒ those cases report `skipped`.
+          FEDIFY_PUBLISH_URL: ${{ secrets.FEDIFY_PUBLISH_TOKEN != '' && inputs.target_url != '' && format('{0}/outbox', inputs.target_url) || '' }}
+          FEDIFY_PUBLISH_TOKEN: ${{ secrets.FEDIFY_PUBLISH_TOKEN }}
         run: |
           node scripts/conformance/run-suite.mjs "${{ matrix.standard }}" \
             ${{ inputs.target_url && format('--target {0}', inputs.target_url) || '' }} \

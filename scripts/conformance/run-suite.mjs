@@ -176,6 +176,15 @@ async function runFedify(target, rest) {
     "FEDIFY_PUBLISH_TRIGGER",
   );
   const event = flagOrEnv(rest, "--event", "FEDIFY_EVENT");
+  // For the announce-unwrap (FEP-1b12 group relay) case: the target's owner
+  // publish endpoint + bearer token, so the target can be made to follow the
+  // peer's Group actor. The token is a secret — prefer the env var.
+  const publishUrl = flagOrEnv(rest, "--publish-url", "FEDIFY_PUBLISH_URL");
+  const publishToken = flagOrEnv(
+    rest,
+    "--publish-token",
+    "FEDIFY_PUBLISH_TOKEN",
+  );
   const cases = caseFlag
     ? caseFlag.split(",").map((s) => s.trim())
     : FEDIFY_CASES;
@@ -186,6 +195,8 @@ async function runFedify(target, rest) {
     port: portFlag ? Number(portFlag) : undefined,
     cases,
     publishTrigger,
+    publishUrl,
+    publishToken,
     event,
   });
 

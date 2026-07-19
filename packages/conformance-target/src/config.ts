@@ -62,6 +62,13 @@ export interface ConformanceEnv
   /** ActivityPub actor keypair (PEM; private half is a secret). */
   readonly ACTIVITYPUB_PUBLIC_KEY_PEM: string;
   readonly ACTIVITYPUB_PRIVATE_KEY_PEM: string;
+  /**
+   * Bearer for the owner publish endpoints (`POST <actor>/outbox` and
+   * `/publish`) — the fedify suite's fanout/announce-unwrap cases drive them
+   * (secret; optional: when unset, owner publishing stays disabled and those
+   * cases report `skipped`).
+   */
+  readonly ACTIVITYPUB_PUBLISH_TOKEN?: string;
   /** atproto session credentials (secrets). */
   readonly ATPROTO_PASSWORD: string;
   readonly ATPROTO_JWT_SECRET: string;
@@ -156,6 +163,9 @@ export function configsFor(env: ConformanceEnv): TargetConfigs {
       actor: { username: USERNAME, name: "Conformance Target" },
       publicKeyPem: env.ACTIVITYPUB_PUBLIC_KEY_PEM,
       privateKeyPem: env.ACTIVITYPUB_PRIVATE_KEY_PEM,
+      ...(env.ACTIVITYPUB_PUBLISH_TOKEN
+        ? { publishToken: env.ACTIVITYPUB_PUBLISH_TOKEN }
+        : {}),
     },
     remotestorage: {
       baseUrl: base,
