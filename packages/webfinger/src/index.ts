@@ -40,5 +40,14 @@ export {
 
 export { normalizeResource, isWellFormedResource } from "./resource.js";
 
+export {
+  parseHandle,
+  webfingerQueryUrl,
+  selectActorLink,
+  resolveHandle,
+  type ParsedHandle,
+  type ResolveHandleOptions,
+} from "./lookup.js";
+
 export { WebfingerLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";

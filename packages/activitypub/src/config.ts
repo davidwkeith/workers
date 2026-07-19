@@ -32,6 +32,9 @@ export interface ActivityPubEnv {
   readonly ACTOR: DurableObjectNamespace<ActivityPubObject>;
 }
 
+/** How group-relayed (`Announce`-unwrapped) activities are origin-verified. */
+export type RelayVerificationMode = "tiered" | "immediate" | "off";
+
 /** An override for inbound signature verification (see `@dwk/http-signatures`, #59). */
 export type InboxVerifier = (
   request: InboxRequest,
@@ -99,6 +102,20 @@ export interface ActivityPubConfig {
    */
   readonly manuallyApprovesJoins?: boolean;
 
+  /**
+   * Origin verification for group-relayed (FEP-1b12 `Announce`-unwrapped)
+   * activities — always asynchronous, never in the inbox POST path
+   * (spec/fediverse-interop.md §2.2):
+   *
+   * - `"tiered"` (default): content (`Create`/`Update`/`Delete`) is verified
+   *   on the next alarm tick; votes (`Like`/`Dislike`) are verified in
+   *   periodic batched sweeps and stay provisional until swept.
+   * - `"immediate"`: every relayed activity verifies on the next alarm tick.
+   * - `"off"`: trust the followed group; rows stay `pending` and rely on
+   *   their `relayed_by` provenance alone.
+   */
+  readonly verifyRelayedObjects?: RelayVerificationMode;
+
   /** Members served per `OrderedCollection` page. Defaults to 50. */
   readonly pageSize?: number;
 
@@ -151,6 +168,7 @@ export interface ResolvedConfig {
   readonly sharedInbox?: string;
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
   readonly manuallyApprovesJoins: boolean;
+  readonly verifyRelayedObjects: RelayVerificationMode;
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -190,6 +208,8 @@ export interface ForwardedConfig {
   readonly manuallyApprovesFollowers: boolean;
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
   readonly manuallyApprovesJoins: boolean;
+  /** Origin-verification mode for group-relayed activities (§2.2). */
+  readonly verifyRelayedObjects: RelayVerificationMode;
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
   readonly deliveryBaseDelayMs: number;
@@ -307,6 +327,7 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     webfinger,
     sharedInbox,
     manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
+    verifyRelayedObjects: config.verifyRelayedObjects ?? "tiered",
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
     publishToken: config.publishToken,

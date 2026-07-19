@@ -75,6 +75,7 @@ function cfgHeader(
     actorName: username,
     manuallyApprovesFollowers: false,
     manuallyApprovesJoins: false,
+    verifyRelayedObjects: "tiered",
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
@@ -1097,6 +1098,596 @@ describe("inbox classification", () => {
         .one();
       expect(row.object_type).toBeNull();
       expect(row.audience).toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FEP-1b12 group participation (fediverse interop phase 2 #275)
+// ---------------------------------------------------------------------------
+
+const GROUP = "https://lemmy.example/c/birding";
+const AUTHOR = "https://lemmy.example/u/carol";
+
+/** Seed a followed community: an accepted `following` row typed `Group`. */
+function seedFollowedGroup(
+  state: DurableObjectState,
+  inbox: string | null = null,
+): void {
+  state.storage.sql.exec(
+    `INSERT INTO following (actor, state, added_at, actor_type, inbox, shared_inbox)
+       VALUES (?, 'accepted', 1, 'Group', ?, NULL)`,
+    GROUP,
+    inbox,
+  );
+}
+
+/** An inbound POST of `activity` signed by `signer`, as the front door forwards it. */
+function signedInboxRequest(
+  username: string,
+  activity: Record<string, unknown>,
+  signer: string,
+  overrides: Partial<ForwardedConfig> = {},
+): Request {
+  const iris = deriveIris(BASE, username);
+  return new Request(iris.inbox, {
+    method: "POST",
+    headers: {
+      "content-type": "application/activity+json",
+      [INTERNAL_HEADERS.config]: cfgHeader(username, overrides),
+      [INTERNAL_HEADERS.signedActor]: signer,
+    },
+    body: JSON.stringify(activity),
+  });
+}
+
+/** A group announce wrapping an embedded member activity. */
+function groupAnnounce(
+  innerType: string,
+  innerId: string,
+  innerObject: Record<string, unknown> | string,
+): Record<string, unknown> {
+  return {
+    id: `${GROUP}/activities/${crypto.randomUUID()}`,
+    type: "Announce",
+    actor: GROUP,
+    to: ["https://www.w3.org/ns/activitystreams#Public"],
+    object: {
+      id: innerId,
+      type: innerType,
+      actor: AUTHOR,
+      attributedTo: AUTHOR,
+      object: innerObject,
+    },
+  };
+}
+
+describe("announce unwrapping (FEP-1b12)", () => {
+  it("stores the inner activity with relayed_by, audience fallback, and a content-tier verify row", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      const innerId = `${AUTHOR}/activities/1`;
+      const before = Date.now();
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Create", innerId, {
+            id: `${AUTHOR}/post/1`,
+            type: "Page",
+            name: "Herons",
+            attributedTo: AUTHOR,
+          }),
+          GROUP,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const rows = state.storage.sql
+        .exec<{
+          id: string;
+          object_type: string | null;
+          audience: string | null;
+          relayed_by: string | null;
+          verify_state: string | null;
+        }>(
+          `SELECT id, object_type, audience, relayed_by, verify_state FROM inbox ORDER BY seq`,
+        )
+        .toArray();
+      // Outer Announce + unwrapped inner Create.
+      expect(rows).toHaveLength(2);
+      const inner = rows.find((r) => r.id === innerId);
+      expect(inner).toBeDefined();
+      expect(inner?.relayed_by).toBe(GROUP);
+      expect(inner?.verify_state).toBe("pending");
+      expect(inner?.object_type).toBe("Page");
+      // No audience on the inner activity ⇒ the relaying group is recorded.
+      expect(inner?.audience).toBe(GROUP);
+      // Content tier: the verify row is due immediately.
+      const verify = state.storage.sql
+        .exec<{ target: string; expect: string; next_at: number }>(
+          `SELECT target, expect, next_at FROM verify_queue`,
+        )
+        .one();
+      expect(verify.target).toBe(`${AUTHOR}/post/1`);
+      expect(verify.expect).toBe("present");
+      expect(verify.next_at).toBeLessThanOrEqual(Date.now());
+      expect(verify.next_at).toBeGreaterThanOrEqual(before - 1000);
+    });
+  });
+
+  it("defers relayed votes to the batched sweep in tiered mode", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce(
+            "Like",
+            `${AUTHOR}/activities/like-1`,
+            `${AUTHOR}/post/1`,
+          ),
+          GROUP,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const verify = state.storage.sql
+        .exec<{ target: string; next_at: number }>(
+          `SELECT target, next_at FROM verify_queue`,
+        )
+        .one();
+      // Votes verify at the activity id, after the sweep delay.
+      expect(verify.target).toBe(`${AUTHOR}/activities/like-1`);
+      expect(verify.next_at).toBeGreaterThan(Date.now() + 60_000);
+    });
+  });
+
+  it("queues no verification in off mode but still marks provenance", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Create", `${AUTHOR}/activities/2`, {
+            id: `${AUTHOR}/post/2`,
+            type: "Note",
+            attributedTo: AUTHOR,
+          }),
+          GROUP,
+          { verifyRelayedObjects: "off" },
+        ),
+      );
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM verify_queue`)
+        .one().n;
+      expect(queued).toBe(0);
+      const inner = state.storage.sql
+        .exec<{ relayed_by: string | null; verify_state: string | null }>(
+          `SELECT relayed_by, verify_state FROM inbox WHERE id = ?`,
+          `${AUTHOR}/activities/2`,
+        )
+        .one();
+      expect(inner.relayed_by).toBe(GROUP);
+      expect(inner.verify_state).toBe("pending");
+    });
+  });
+
+  it("does not unwrap when the announcer is not a followed Group", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // No following row at all.
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Create", `${AUTHOR}/activities/3`, {
+            id: `${AUTHOR}/post/3`,
+            type: "Note",
+            attributedTo: AUTHOR,
+          }),
+          GROUP,
+        ),
+      );
+      const rows = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM inbox`)
+        .one().n;
+      // Only the outer Announce stored.
+      expect(rows).toBe(1);
+    });
+  });
+
+  it("dedups on the inner activity id across repeated announces", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      const innerId = `${AUTHOR}/activities/4`;
+      const inner = {
+        id: `${AUTHOR}/post/4`,
+        type: "Note",
+        attributedTo: AUTHOR,
+      };
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Create", innerId, inner),
+          GROUP,
+        ),
+      );
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Create", innerId, inner),
+          GROUP,
+        ),
+      );
+      const copies = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one().n;
+      expect(copies).toBe(1);
+    });
+  });
+});
+
+describe("dislike", () => {
+  it("stores an inbound Dislike like a Like", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/dislike-1`,
+            type: "Dislike",
+            actor: REMOTE,
+            object: "https://social.example/notes/1",
+          },
+          REMOTE,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const stored = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM inbox`)
+        .one().n;
+      expect(stored).toBe(1);
+    });
+  });
+});
+
+describe("outbound relationship activities", () => {
+  it("records a pending following row and targets the Follow at the followee", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // A follower with a known inbox must NOT receive the Follow.
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Follow", object: GROUP }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const following = state.storage.sql
+        .exec<{ state: string }>(
+          `SELECT state FROM following WHERE actor = ?`,
+          GROUP,
+        )
+        .one();
+      expect(following.state).toBe("pending");
+      const pending = state.storage.sql
+        .exec<{ kind: string; actor: string }>(
+          `SELECT kind, actor FROM pending_accept`,
+        )
+        .one();
+      expect(pending.kind).toBe("deliver");
+      expect(pending.actor).toBe(GROUP);
+      const fanout = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(fanout).toBe(0);
+    });
+  });
+
+  it("drops the following row on Undo(Follow) and delivers the Undo", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Undo",
+            object: { type: "Follow", object: GROUP },
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const rows = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
+        .one().n;
+      expect(rows).toBe(0);
+      const pending = state.storage.sql
+        .exec<{ kind: string; actor: string }>(
+          `SELECT kind, actor FROM pending_accept`,
+        )
+        .one();
+      expect(pending.kind).toBe("deliver");
+      expect(pending.actor).toBe(GROUP);
+    });
+  });
+});
+
+describe("community post delivery", () => {
+  it("delivers directly when the group inbox is known", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state, `${GROUP}/inbox`);
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "page",
+            content: "<p>body</p>",
+            name: "Title",
+            audience: GROUP,
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const targets = state.storage.sql
+        .exec<{ inbox: string }>(`SELECT inbox FROM delivery`)
+        .toArray()
+        .map((r) => r.inbox);
+      expect(targets).toEqual([`${GROUP}/inbox`]);
+    });
+  });
+
+  it("queues an alarm-resolved delivery when the group inbox is unknown", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "page",
+            content: "<p>body</p>",
+            name: "Title",
+            audience: GROUP,
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const pending = state.storage.sql
+        .exec<{ kind: string; actor: string }>(
+          `SELECT kind, actor FROM pending_accept`,
+        )
+        .one();
+      expect(pending.kind).toBe("deliver");
+      expect(pending.actor).toBe(GROUP);
+    });
+  });
+});
+
+describe("follow-target typing and backfill", () => {
+  it("records actor_type/inboxes when a queued delivery resolves, and delivers", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'pending', 1)`,
+        GROUP,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at)
+           VALUES ('deliver', ?, NULL, '{"type":"Follow"}', 0, 0)`,
+        GROUP,
+      );
+      await withFetch(
+        async (url) => {
+          expect(String(url)).toBe(GROUP);
+          return new Response(
+            JSON.stringify({
+              id: GROUP,
+              type: "Group",
+              inbox: `${GROUP}/inbox`,
+              endpoints: { sharedInbox: "https://lemmy.example/inbox" },
+            }),
+            { status: 200 },
+          );
+        },
+        async () => {
+          const res = await instance.fetch(
+            new Request(`${iris.id}/__resolve`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+          expect(res.status).toBe(200);
+        },
+      );
+      const row = state.storage.sql
+        .exec<{
+          actor_type: string | null;
+          inbox: string | null;
+          shared_inbox: string | null;
+        }>(
+          `SELECT actor_type, inbox, shared_inbox FROM following WHERE actor = ?`,
+          GROUP,
+        )
+        .one();
+      expect(row.actor_type).toBe("Group");
+      expect(row.shared_inbox).toBe("https://lemmy.example/inbox");
+      const delivery = state.storage.sql
+        .exec<{ inbox: string }>(`SELECT inbox FROM delivery`)
+        .one();
+      expect(delivery.inbox).toBe("https://lemmy.example/inbox");
+    });
+  });
+
+  it("lazily backfills a NULL actor_type following row without delivering", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'accepted', 1)`,
+        REMOTE,
+      );
+      await withFetch(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: REMOTE,
+              type: "Person",
+              inbox: `${REMOTE}/inbox`,
+            }),
+            { status: 200 },
+          ),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__resolve`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      const row = state.storage.sql
+        .exec<{ actor_type: string | null }>(
+          `SELECT actor_type FROM following WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.actor_type).toBe("Person");
+      const deliveries = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(deliveries).toBe(0);
+      const leftover = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+        .one().n;
+      expect(leftover).toBe(0);
+    });
+  });
+});
+
+describe("relayed-object verification", () => {
+  /** Store a relayed row + verify_queue entry via a real announce unwrap. */
+  async function seedRelayed(
+    instance: { fetch(req: Request): Promise<Response> },
+    state: DurableObjectState,
+    username: string,
+  ): Promise<string> {
+    seedFollowedGroup(state);
+    const innerId = `${AUTHOR}/activities/v1`;
+    await instance.fetch(
+      signedInboxRequest(
+        username,
+        groupAnnounce("Create", innerId, {
+          id: `${AUTHOR}/post/v1`,
+          type: "Note",
+          attributedTo: AUTHOR,
+        }),
+        GROUP,
+      ),
+    );
+    return innerId;
+  }
+
+  it("marks the row verified when the origin serves the object", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const innerId = await seedRelayed(instance, state, username);
+      await withFetch(
+        async (url) => {
+          expect(String(url)).toBe(`${AUTHOR}/post/v1`);
+          return new Response(
+            JSON.stringify({ id: `${AUTHOR}/post/v1`, type: "Note" }),
+            { status: 200 },
+          );
+        },
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      const row = state.storage.sql
+        .exec<{ verify_state: string | null }>(
+          `SELECT verify_state FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one();
+      expect(row.verify_state).toBe("verified");
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM verify_queue`)
+        .one().n;
+      expect(queued).toBe(0);
+    });
+  });
+
+  it("deletes a refuted relayed row when the origin answers 404", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const innerId = await seedRelayed(instance, state, username);
+      await withFetch(
+        async () => new Response("gone", { status: 404 }),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      const copies = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one().n;
+      expect(copies).toBe(0);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM verify_queue`)
+        .one().n;
+      expect(queued).toBe(0);
+    });
+  });
+
+  it("reschedules on a transient origin failure and leaves the row pending", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const innerId = await seedRelayed(instance, state, username);
+      await withFetch(
+        async () => new Response("busy", { status: 503 }),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      const row = state.storage.sql
+        .exec<{ verify_state: string | null }>(
+          `SELECT verify_state FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one();
+      expect(row.verify_state).toBe("pending");
+      const verify = state.storage.sql
+        .exec<{ attempts: number; next_at: number }>(
+          `SELECT attempts, next_at FROM verify_queue`,
+        )
+        .one();
+      expect(verify.attempts).toBe(1);
+      expect(verify.next_at).toBeGreaterThan(Date.now());
     });
   });
 });

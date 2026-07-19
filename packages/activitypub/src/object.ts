@@ -46,6 +46,16 @@ const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DELIVERY_BATCH = 20;
 /** Timeout (ms) bounding any single outbound fetch (actor lookup / delivery). */
 const OUTBOUND_TIMEOUT_MS = 10_000;
+/** The embedded activity kinds a FEP-1b12 group announce may relay (§2.2). */
+const RELAYED_ACTIVITY_TYPES = [
+  "Create",
+  "Update",
+  "Delete",
+  "Like",
+  "Dislike",
+];
+/** How long relayed votes wait for their batched verification sweep (§2.2). */
+const VOTE_SWEEP_MS = 10 * 60_000;
 
 function json(
   status: number,
@@ -90,17 +100,28 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL,
          shared_inbox TEXT)`,
     );
+    // `actor_type` is the followed actor's AS2 type (`Person`, `Group`, …),
+    // resolved from its actor document off the critical path; a `Group` row is
+    // what qualifies its Announces for FEP-1b12 unwrapping (§2.2). NULL means
+    // "not yet resolved" (lazily backfilled); 'Unknown' means resolution
+    // permanently failed (never re-tried, never a Group).
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS following (
-         actor TEXT PRIMARY KEY, state TEXT NOT NULL, added_at INTEGER NOT NULL)`,
+         actor TEXT PRIMARY KEY, state TEXT NOT NULL, added_at INTEGER NOT NULL,
+         actor_type TEXT, inbox TEXT, shared_inbox TEXT)`,
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)`,
     );
+    // `relayed_by` marks group-relayed (Announce-unwrapped) content — never
+    // confusable with directly-signed activities — and `verify_state` tracks
+    // its async origin verification: NULL (direct), 'pending', or 'verified'
+    // (a failed verification deletes the row). See §2.2.
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS inbox (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE, json TEXT NOT NULL,
-         received_at INTEGER NOT NULL, object_type TEXT, audience TEXT)`,
+         received_at INTEGER NOT NULL, object_type TEXT, audience TEXT,
+         relayed_by TEXT, verify_state TEXT)`,
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS outbox (
@@ -134,14 +155,35 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          event TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
          added_at INTEGER NOT NULL, PRIMARY KEY (event, actor))`,
     );
+    // Async origin verification of group-relayed activities (§2.2): one row
+    // per stored relayed activity awaiting verification. `target` is the IRI
+    // fetched from its origin; `expect` is 'present' (2xx + id match) or
+    // 'gone' (404/410 confirms a relayed Delete). Terminal outcomes delete
+    // the row; a verification *failure* also deletes the inbox row.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS verify_queue (
+         seq INTEGER PRIMARY KEY AUTOINCREMENT, activity_id TEXT NOT NULL,
+         target TEXT NOT NULL, expect TEXT NOT NULL,
+         attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_verify_queue_next_at ON verify_queue (next_at)`,
+    );
     // Additive-column migrations for objects created before fediverse interop
-    // phase 1 (#274); fresh objects already get these from the CREATE TABLEs
-    // above. Nullable by design: `object_type`/`audience` classify stored
-    // inbound activities for reads (never validation), and `shared_inbox`
-    // lets fan-out batch per instance.
+    // phases 1–2 (#274/#275); fresh objects already get these from the CREATE
+    // TABLEs above. Nullable by design: `object_type`/`audience` classify
+    // stored inbound activities for reads (never validation), `relayed_by`/
+    // `verify_state` carry relay provenance (§2.2), `shared_inbox` lets
+    // fan-out batch per instance, and the `following` columns type the follow
+    // target for FEP-1b12 (§2.1).
     this.#ensureColumn("inbox", "object_type", "TEXT");
     this.#ensureColumn("inbox", "audience", "TEXT");
+    this.#ensureColumn("inbox", "relayed_by", "TEXT");
+    this.#ensureColumn("inbox", "verify_state", "TEXT");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
+    this.#ensureColumn("following", "actor_type", "TEXT");
+    this.#ensureColumn("following", "inbox", "TEXT");
+    this.#ensureColumn("following", "shared_inbox", "TEXT");
   }
 
   /** Add a nullable column if this object predates it (additive migration). */
@@ -176,7 +218,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       // in this same pass (see `alarm()`).
       const resolved = await this.#processPendingAccepts();
       const due = await this.#processDeliveries();
-      return json(200, { processed: due + resolved });
+      const verified = await this.#processVerifications();
+      return json(200, { processed: due + resolved + verified });
     }
     // Owner-only inbox listing for the `@dwk/mcp` tool contribution
     // (`activitypub_list_inbox`). Distinct from `iris.inbox`, which stays
@@ -295,9 +338,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         await this.#maybeForward(activity, firstSeen, config);
         break;
       case "Like":
+      case "Dislike":
+        this.#storeInbox(activity);
+        await this.#maybeForward(activity, firstSeen, config);
+        break;
       case "Announce":
         this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
+        // FEP-1b12: a followed Group relays member activities wrapped in its
+        // own Announce — unwrap and store the inner activity too (§2.2).
+        await this.#maybeUnwrapAnnounce(activity, config);
         break;
       default:
         // Be liberal: an unknown activity is accepted (and ignored) so we do not
@@ -482,7 +532,81 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (gone) this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, gone);
   }
 
-  #storeInbox(activity: ActivityObject): void {
+  /**
+   * FEP-1b12 group-relay unwrapping (§2.2). When an `Announce` comes from a
+   * `Group` we follow (accepted) and wraps an embedded activity of a known
+   * kind, store that inner activity attributed to its real author — deduped
+   * by the INNER activity id, tagged with the group as `audience` fallback
+   * and `relayed_by` provenance, and queued for async origin verification per
+   * the configured mode. The outer `Announce` is what the edge signature
+   * verified; the inner activity is relayed, unsigned content and is never
+   * confusable with directly-signed rows (it always carries `relayed_by`).
+   */
+  async #maybeUnwrapAnnounce(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const announcer = actorIri(activity.actor);
+    if (!announcer) return;
+    const group = this.#sql
+      .exec<{ actor_type: string | null }>(
+        `SELECT actor_type FROM following WHERE actor = ? AND state = 'accepted'`,
+        announcer,
+      )
+      .toArray()[0];
+    if (!group || group.actor_type !== "Group") return;
+
+    const inner = activity.object;
+    if (!inner || typeof inner !== "object" || Array.isArray(inner)) return;
+    const innerActivity = inner as ActivityObject;
+    const innerType =
+      typeof innerActivity.type === "string" ? innerActivity.type : "";
+    if (!RELAYED_ACTIVITY_TYPES.includes(innerType)) return;
+    const innerId =
+      typeof innerActivity.id === "string" ? innerActivity.id : "";
+    if (!innerId) return;
+    // Dedup on the INNER id: the same member activity reaches us once per
+    // group announce (and possibly directly); only the first copy stores.
+    if (this.#alreadySeen(innerId)) return;
+    this.#recordSeen(innerId);
+
+    const mode = this.#verifyMode(config);
+    const verifyTarget = relayedVerificationTarget(innerActivity);
+    const verifiable = mode !== "off" && verifyTarget !== null;
+    this.#storeInbox(innerActivity, {
+      relayedBy: announcer,
+      verifyState: "pending",
+      audienceFallback: announcer,
+    });
+    if (verifiable) {
+      // Content verifies on the next alarm tick; votes wait for the periodic
+      // batched sweep unless the mode forces everything immediate.
+      const isVote = innerType === "Like" || innerType === "Dislike";
+      const dueAt =
+        mode === "tiered" && isVote ? Date.now() + VOTE_SWEEP_MS : Date.now();
+      this.#sql.exec(
+        `INSERT INTO verify_queue (activity_id, target, expect, attempts, next_at)
+           VALUES (?, ?, ?, 0, ?)`,
+        innerId,
+        verifyTarget.target,
+        verifyTarget.expect,
+        dueAt,
+      );
+      await this.#armAlarm();
+    }
+  }
+
+  #storeInbox(
+    activity: ActivityObject,
+    relay?: {
+      /** The Group actor that relayed this activity (provenance, §2.2). */
+      relayedBy: string;
+      /** Initial verification state (`pending`; async verification advances it). */
+      verifyState: "pending";
+      /** Audience recorded when the activity itself names none (the group). */
+      audienceFallback: string;
+    },
+  ): void {
     const id =
       typeof activity.id === "string" ? activity.id : crypto.randomUUID();
     // Classification only (object type + community audience) so reads can
@@ -490,13 +614,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // with NULL columns exactly as before.
     const { objectType, audience } = classifyActivity(activity);
     this.#sql.exec(
-      `INSERT OR IGNORE INTO inbox (id, json, received_at, object_type, audience)
-         VALUES (?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO inbox
+         (id, json, received_at, object_type, audience, relayed_by, verify_state)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       id,
       JSON.stringify(activity),
       Date.now(),
       objectType ?? null,
-      audience ?? null,
+      audience ?? relay?.audienceFallback ?? null,
+      relay?.relayedBy ?? null,
+      relay?.verifyState ?? null,
     );
   }
 
@@ -614,6 +741,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
 
     const body = JSON.stringify(activity);
+    // An owner Follow (or Undo-Follow) targets one actor, not our followers:
+    // record the relationship and deliver to the target's inbox — resolved
+    // from the alarm like every other outbound actor fetch (§2.1).
+    if (this.#routeRelationshipActivity(activity, body)) {
+      await this.#armAlarm();
+      return json(201, activity as JsonValue, { location: id });
+    }
+
     for (const row of this.#sql
       .exec<{
         inbox: string | null;
@@ -626,6 +761,55 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     await this.#armAlarm();
 
     return json(201, activity as JsonValue, { location: id });
+  }
+
+  /**
+   * Route an owner-published relationship activity (`Follow`, `Undo(Follow)`)
+   * to its single target: upsert/delete the `following` row (state `pending`
+   * until the remote `Accept` arrives) and queue a targeted delivery whose
+   * inbox resolution — which also records the target's `actor_type` for
+   * FEP-1b12 group detection — runs from the alarm. Returns whether the
+   * activity was routed here (in which case follower fan-out is skipped).
+   */
+  #routeRelationshipActivity(
+    activity: Record<string, JsonValue>,
+    body: string,
+  ): boolean {
+    if (activity.type === "Follow") {
+      const target = objectId(activity.object as JsonValue);
+      if (!target || !isSafeTarget(target)) return true; // routed (dropped)
+      this.#sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'pending', ?)
+           ON CONFLICT(actor) DO NOTHING`,
+        target,
+        Date.now(),
+      );
+      this.#enqueuePendingDelivery(target, body);
+      return true;
+    }
+    if (
+      activity.type === "Undo" &&
+      objectType(activity.object as JsonValue) === "Follow"
+    ) {
+      const followed = activity.object as Record<string, JsonValue>;
+      const target = objectId(followed.object);
+      if (!target) return true;
+      this.#sql.exec(`DELETE FROM following WHERE actor = ?`, target);
+      if (isSafeTarget(target)) this.#enqueuePendingDelivery(target, body);
+      return true;
+    }
+    return false;
+  }
+
+  /** Queue a delivery to one actor whose inbox resolves from the alarm. */
+  #enqueuePendingDelivery(actor: string, body: string): void {
+    this.#sql.exec(
+      `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at)
+         VALUES ('deliver', ?, NULL, ?, 0, ?)`,
+      actor,
+      body,
+      Date.now(),
+    );
   }
 
   /**
@@ -669,6 +853,24 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray()) {
       if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
     }
+    // A community post is additionally delivered to the Group's own inbox —
+    // the group then Announces it to members per FEP-1b12 (§2.3); we never
+    // fan out to the community's members ourselves.
+    const audience = parsed.input.audience;
+    if (audience && isSafeTarget(audience)) {
+      const known = this.#sql
+        .exec<{ inbox: string | null; shared_inbox: string | null }>(
+          `SELECT inbox, shared_inbox FROM following WHERE actor = ?`,
+          audience,
+        )
+        .toArray()[0];
+      const groupInbox = known?.shared_inbox ?? known?.inbox;
+      if (groupInbox) {
+        this.#enqueueDelivery(groupInbox, json_);
+      } else {
+        this.#enqueuePendingDelivery(audience, json_);
+      }
+    }
     await this.#armAlarm();
 
     return json(201, activity as JsonValue, { location: activityId });
@@ -681,9 +883,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   ): Record<string, JsonValue> {
     const isActivity =
       typeof input.type === "string" &&
-      ["Create", "Update", "Delete", "Announce", "Like", "Follow"].includes(
-        input.type,
-      );
+      [
+        "Create",
+        "Update",
+        "Delete",
+        "Announce",
+        "Like",
+        "Dislike",
+        "Follow",
+        "Undo",
+      ].includes(input.type);
     const published = new Date().toISOString();
     const activityId = `${iris.outbox}/${crypto.randomUUID()}`;
 
@@ -905,8 +1114,117 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return due.length;
   }
 
+  /**
+   * Process due origin verifications of group-relayed activities (§2.2): one
+   * bounded fetch per row, coalesced by origin within the batch (rows for a
+   * host that already failed this pass are rescheduled without a fetch).
+   * Outcomes: `verified` advances the inbox row; a definitive refutation
+   * (present-when-expected-gone, gone-when-expected-present, or an id
+   * mismatch) DELETES the inbox row and bumps the persisted failure counter;
+   * transient errors back off and — at the attempts ceiling — leave the row
+   * `pending` (unreachable is not refuted).
+   */
+  async #processVerifications(): Promise<number> {
+    const now = Date.now();
+    const due = this.#sql
+      .exec<{
+        seq: number;
+        activity_id: string;
+        target: string;
+        expect: string;
+        attempts: number;
+      }>(
+        `SELECT seq, activity_id, target, expect, attempts FROM verify_queue
+           WHERE next_at <= ? ORDER BY next_at ASC LIMIT ?`,
+        now,
+        DELIVERY_BATCH,
+      )
+      .toArray();
+
+    const failedOrigins = new Set<string>();
+    for (const row of due) {
+      if (!isSafeTarget(row.target)) {
+        // Never verifiable — refuse to keep unverifiable relayed content.
+        this.#dropRelayedRow(row.seq, row.activity_id);
+        continue;
+      }
+      const origin = new URL(row.target).origin;
+      if (failedOrigins.has(origin)) {
+        this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
+        continue;
+      }
+      let response: Response | null;
+      try {
+        response = await fetch(row.target, {
+          headers: { accept: "application/activity+json" },
+          signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+        });
+      } catch {
+        response = null;
+      }
+      if (response === null) {
+        failedOrigins.add(origin);
+        this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
+        continue;
+      }
+      const gone = response.status === 404 || response.status === 410;
+      if (row.expect === "gone") {
+        if (gone) {
+          this.#markVerified(row.seq, row.activity_id);
+        } else if (response.ok) {
+          // The relayed Delete claims an object its origin still serves.
+          this.#dropRelayedRow(row.seq, row.activity_id);
+        } else {
+          this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
+        }
+        continue;
+      }
+      // expect === "present"
+      if (response.ok) {
+        let doc: unknown;
+        try {
+          doc = await response.json();
+        } catch {
+          doc = null;
+        }
+        const id =
+          doc && typeof doc === "object" && !Array.isArray(doc)
+            ? (doc as Record<string, unknown>).id
+            : undefined;
+        if (doc !== null && (id === undefined || id === row.target)) {
+          this.#markVerified(row.seq, row.activity_id);
+        } else {
+          this.#dropRelayedRow(row.seq, row.activity_id);
+        }
+      } else if (gone) {
+        this.#dropRelayedRow(row.seq, row.activity_id);
+      } else {
+        this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
+      }
+    }
+
+    await this.#armAlarm();
+    return due.length;
+  }
+
+  #markVerified(seq: number, activityId: string): void {
+    this.#sql.exec(
+      `UPDATE inbox SET verify_state = 'verified' WHERE id = ?`,
+      activityId,
+    );
+    this.#sql.exec(`DELETE FROM verify_queue WHERE seq = ?`, seq);
+  }
+
+  /** A refuted relayed activity: remove it and count the failure. */
+  #dropRelayedRow(seq: number, activityId: string): void {
+    this.#sql.exec(`DELETE FROM inbox WHERE id = ?`, activityId);
+    this.#sql.exec(`DELETE FROM verify_queue WHERE seq = ?`, seq);
+    const failed = Number(this.#kvGet("verifyFailed") ?? "0");
+    this.#kvPut("verifyFailed", String(failed + 1));
+  }
+
   #rescheduleOrDrop(
-    table: "delivery" | "pending_accept",
+    table: "delivery" | "pending_accept" | "verify_queue",
     seq: number,
     attempts: number,
   ): void {
@@ -951,10 +1269,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * longer requested.
    */
   #pendingAcceptStillActive(row: {
-    kind: "follow" | "join";
+    kind: string;
     actor: string;
     event: string | null;
   }): boolean {
+    // A targeted delivery ('deliver') is always worth attempting; a profile
+    // resolution ('profile') only while the following row still exists.
+    if (row.kind === "deliver") return true;
+    if (row.kind === "profile") {
+      return (
+        this.#sql
+          .exec<{
+            n: number;
+          }>(`SELECT COUNT(*) AS n FROM following WHERE actor = ?`, row.actor)
+          .one().n > 0
+      );
+    }
     if (row.kind === "follow") {
       return (
         this.#sql
@@ -988,11 +1318,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * `#onFollow` / `#onJoin`.
    */
   async #processPendingAccepts(): Promise<number> {
+    // Lazily backfill follow-target typing first (§2.1): following rows that
+    // predate the typing columns get a queued profile resolution, so existing
+    // Group follows start qualifying for announce unwrapping — no re-follow.
+    this.#backfillFollowingTypes();
+
     const now = Date.now();
     const due = this.#sql
       .exec<{
         seq: number;
-        kind: "follow" | "join";
+        kind: string;
         actor: string;
         event: string | null;
         json: string;
@@ -1012,6 +1347,19 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       const resolved = await this.#resolveInbox(row.actor);
       if (!resolved) {
+        // A profile resolution that is about to hit the attempts ceiling
+        // marks the following row 'Unknown' so the backfill never re-queues
+        // it (and it never qualifies as a Group).
+        if (
+          row.attempts + 1 >=
+          this.#deliveryPolicy("deliveryMaxAttempts", 8)
+        ) {
+          this.#sql.exec(
+            `UPDATE following SET actor_type = 'Unknown'
+               WHERE actor = ? AND actor_type IS NULL`,
+            row.actor,
+          );
+        }
         this.#rescheduleOrDrop("pending_accept", row.seq, row.attempts);
         continue;
       }
@@ -1025,11 +1373,51 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           row.actor,
         );
       }
-      this.#enqueueDelivery(resolved.inbox, row.json);
+      // Any resolution doubles as follow-target typing (§2.1) when we follow
+      // the resolved actor: record its AS2 type + inboxes on the row.
+      this.#sql.exec(
+        `UPDATE following SET actor_type = ?, inbox = ?, shared_inbox = ?
+           WHERE actor = ?`,
+        resolved.actorType ?? "Unknown",
+        resolved.inbox,
+        resolved.sharedInbox,
+        row.actor,
+      );
+      if (row.kind !== "profile") {
+        this.#enqueueDelivery(resolved.inbox, row.json);
+      }
       this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
     }
 
     return due.length;
+  }
+
+  /**
+   * Queue a profile resolution for following rows whose `actor_type` is still
+   * NULL (pre-#275 rows, or rows whose Follow predates typing) — at most a
+   * small batch per pass, and never while a resolution for that actor is
+   * already queued. Terminal failures mark the row 'Unknown' (see above), so
+   * this converges instead of churning.
+   */
+  #backfillFollowingTypes(): void {
+    const rows = this.#sql
+      .exec<{ actor: string }>(
+        `SELECT actor FROM following
+           WHERE actor_type IS NULL
+             AND actor NOT IN (
+               SELECT actor FROM pending_accept WHERE kind IN ('profile', 'deliver')
+             )
+           LIMIT 5`,
+      )
+      .toArray();
+    for (const row of rows) {
+      this.#sql.exec(
+        `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at)
+           VALUES ('profile', ?, NULL, '{}', 0, ?)`,
+        row.actor,
+        Date.now(),
+      );
+    }
   }
 
   /** Schedule the alarm for the earliest pending delivery or accept, if any. */
@@ -1042,6 +1430,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
            SELECT next_at FROM delivery
            UNION ALL
            SELECT next_at FROM pending_accept
+           UNION ALL
+           SELECT next_at FROM verify_queue
          )`,
       )
       .one().next_at;
@@ -1054,6 +1444,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // in this same pass, not deferred to the next wake.
     await this.#processPendingAccepts();
     await this.#processDeliveries();
+    await this.#processVerifications();
   }
 
   // -- helpers ---------------------------------------------------------------
@@ -1069,9 +1460,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * for per-instance fan-out batching. `null` when the actor is unreachable or
    * carries no usable inbox.
    */
-  async #resolveInbox(
-    actor: string,
-  ): Promise<{ inbox: string; sharedInbox: string | null } | null> {
+  async #resolveInbox(actor: string): Promise<{
+    inbox: string;
+    sharedInbox: string | null;
+    actorType: string | null;
+  } | null> {
     try {
       assertPublicHttpsTarget(actor);
     } catch {
@@ -1104,7 +1497,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
     const personal = typeof record.inbox === "string" ? record.inbox : null;
     const inbox = sharedInbox ?? personal;
-    return inbox === null ? null : { inbox, sharedInbox };
+    const actorType = typeof record.type === "string" ? record.type : null;
+    return inbox === null ? null : { inbox, sharedInbox, actorType };
   }
 
   #deliverySigner(): { keyId: string; privateKeyPem: string } | null {
@@ -1124,6 +1518,24 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // rather than silently fall back to defaults.
     this.#kvPut("deliveryMaxAttempts", String(config.deliveryMaxAttempts));
     this.#kvPut("deliveryBaseDelayMs", String(config.deliveryBaseDelayMs));
+    // Same for the relay-verification mode: the verify sweep runs from the
+    // alarm and must honor the configured mode on a cold isolate.
+    if (config.verifyRelayedObjects) {
+      this.#kvPut("verifyRelayedObjects", config.verifyRelayedObjects);
+    }
+  }
+
+  /** The relay-verification mode: live config first, then the persisted copy. */
+  #verifyMode(config?: ForwardedConfig): "tiered" | "immediate" | "off" {
+    const live =
+      config?.verifyRelayedObjects ?? this.#config?.verifyRelayedObjects;
+    if (live === "tiered" || live === "immediate" || live === "off")
+      return live;
+    const stored = this.#kvGet("verifyRelayedObjects");
+    if (stored === "tiered" || stored === "immediate" || stored === "off") {
+      return stored;
+    }
+    return "tiered";
   }
 
   /** A numeric delivery-policy value: live config first, then the persisted copy. */
@@ -1247,6 +1659,32 @@ function isLocalResource(iri: string, iris: ActorIris): boolean {
     ? actor.pathname
     : `${actor.pathname}/`;
   return url.pathname === actor.pathname || url.pathname.startsWith(prefix);
+}
+
+/**
+ * What origin fetch verifies a relayed activity (§2.2), or `null` when the
+ * shape gives us nothing verifiable. `Create`/`Update` verify the created
+ * object at its id (expect present); `Delete` verifies the object is GONE
+ * (404/410); votes verify the vote activity itself at the author's origin.
+ */
+function relayedVerificationTarget(
+  inner: ActivityObject,
+): { target: string; expect: "present" | "gone" } | null {
+  const type = typeof inner.type === "string" ? inner.type : "";
+  if (type === "Create" || type === "Update") {
+    const target = objectId(inner.object) ?? inner.id;
+    return typeof target === "string" ? { target, expect: "present" } : null;
+  }
+  if (type === "Delete") {
+    const target = objectId(inner.object);
+    return typeof target === "string" ? { target, expect: "gone" } : null;
+  }
+  if (type === "Like" || type === "Dislike") {
+    return typeof inner.id === "string"
+      ? { target: inner.id, expect: "present" }
+      : null;
+  }
+  return null;
 }
 
 /**

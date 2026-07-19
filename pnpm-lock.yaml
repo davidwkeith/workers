@@ -62,6 +62,9 @@ importers:
       '@dwk/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@dwk/webfinger':
+        specifier: workspace:*
+        version: link:../webfinger
 
   packages/atproto-pds:
     dependencies:

@@ -80,6 +80,7 @@ src/*.test.ts       # colocated tests
 - `@dwk/ldn` — inbox discovery and notification primitives.
 - `@dwk/log` — structured logging.
 - `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
+- `@dwk/webfinger` — the `lookup.ts` client half (handle → actor IRI), wired
+  through the SSRF-guarded fetch for community discovery (#275/§2.4).
 
-(Also uses `@dwk/http-signatures` and `@dwk/webfinger` indirectly via its own
-signature and key-resolution modules.)
+(Also uses `@dwk/http-signatures` indirectly via its own signature module.)

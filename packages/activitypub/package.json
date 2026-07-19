@@ -47,6 +47,7 @@
     "@dwk/calendar": "workspace:*",
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",
-    "@dwk/mcp": "workspace:*"
+    "@dwk/mcp": "workspace:*",
+    "@dwk/webfinger": "workspace:*"
   }
 }

@@ -43,6 +43,7 @@ export {
   type ActivityPubEnv,
   type ResolvedConfig,
   type InboxVerifier,
+  type RelayVerificationMode,
 } from "./config.js";
 
 export {
