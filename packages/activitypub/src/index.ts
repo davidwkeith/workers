@@ -68,6 +68,24 @@ export {
 } from "./events.js";
 
 export {
+  ATTACHMENT_TYPES,
+  POST_KINDS,
+  POST_CONTEXT,
+  parsePostInput,
+  postAddressing,
+  buildPostObject,
+  buildPostActivity,
+  classifyActivity,
+  type PostInput,
+  type PostAttachment,
+  type PostKind,
+  type AttachmentType,
+  type ParsedPostInput,
+  type PostIds,
+  type ActivityClassification,
+} from "./objects.js";
+
+export {
   buildNodeInfoDiscovery,
   buildNodeInfo20,
   buildNodeInfo21,

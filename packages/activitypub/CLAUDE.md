@@ -62,6 +62,7 @@ src/config.ts       # ActivityPubConfig type, Env fragment, IRI derivation
 src/handler.ts      # createActivityPub factory (actor/inbox/outbox/collection routes)
 src/object.ts       # ActivityPubObject Durable Object (inbox/outbox/followers/following)
 src/as2.ts          # actor document builder, collection/page builders, AS2 helpers
+src/objects.ts      # typed post objects: PostInput → Note/Article/Page builders, inbox classification (#274)
 src/events.ts       # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP helpers (#171)
 src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
 src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)

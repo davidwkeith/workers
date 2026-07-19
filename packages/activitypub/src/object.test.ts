@@ -892,6 +892,216 @@ describe("publish endpoint", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Shaped post publish (`POST <actor>/publish`, fediverse interop phase 1 #274)
+// ---------------------------------------------------------------------------
+
+/** A POST to the shaped-post publish endpoint. */
+function publishRequest(
+  username: string,
+  body: string,
+  publish = true,
+): Request {
+  const iris = deriveIris(BASE, username);
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    [INTERNAL_HEADERS.config]: cfgHeader(username),
+  };
+  if (publish) headers[INTERNAL_HEADERS.publish] = "1";
+  return new Request(`${iris.id}/publish`, { method: "POST", headers, body });
+}
+
+describe("shaped post publish endpoint", () => {
+  it("403s when the publish header is not set", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "note", content: "x" }),
+          false,
+        ),
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it("405s a non-POST", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/publish`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(405);
+    });
+  });
+
+  it("400s malformed JSON and invalid PostInput with a precise reason", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      expect(
+        (await instance.fetch(publishRequest(username, "{bad"))).status,
+      ).toBe(400);
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "page", content: "b" }),
+        ),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.text()).toMatch(/`name`/);
+    });
+  });
+
+  it("publishes a media note: minted ids, outbox row, follower fan-out", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "note",
+            content: "<p>a bird</p>",
+            sensitive: true,
+            attachments: [
+              {
+                type: "Image",
+                url: "https://media.example/bird.jpg",
+                mediaType: "image/jpeg",
+                name: "a heron",
+              },
+            ],
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      expect(activity.type).toBe("Create");
+      expect(String(activity.id).startsWith(iris.outbox)).toBe(true);
+      expect(res.headers.get("location")).toBe(activity.id);
+      const object = activity.object as Record<string, unknown>;
+      expect(object.type).toBe("Note");
+      expect(object.sensitive).toBe(true);
+      expect(Array.isArray(object.attachment)).toBe(true);
+      // Stored in the outbox and queued for the follower.
+      const outboxed = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxed).toBe(1);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(1);
+    });
+  });
+
+  it("publishes a titled Page carrying the community audience", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "page",
+            content: "<p>body</p>",
+            name: "A title",
+            audience: "https://lemmy.example/c/birding",
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      expect(activity.audience).toBe("https://lemmy.example/c/birding");
+      const object = activity.object as Record<string, unknown>;
+      expect(object.type).toBe("Page");
+      expect(object.name).toBe("A title");
+      expect(activity.to).toEqual([
+        "https://lemmy.example/c/birding",
+        "https://www.w3.org/ns/activitystreams#Public",
+      ]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inbox classification columns (fediverse interop phase 1 #274)
+// ---------------------------------------------------------------------------
+
+describe("inbox classification", () => {
+  it("stores object_type and audience for a classified Create", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        new Request(iris.inbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username),
+            [INTERNAL_HEADERS.signedActor]: REMOTE,
+          },
+          body: JSON.stringify({
+            id: "https://remote.example/activities/1",
+            type: "Create",
+            actor: REMOTE,
+            audience: "https://lemmy.example/c/birding",
+            object: {
+              type: "Page",
+              attributedTo: REMOTE,
+              name: "hello",
+            },
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ object_type: string | null; audience: string | null }>(
+          `SELECT object_type, audience FROM inbox`,
+        )
+        .one();
+      expect(row.object_type).toBe("Page");
+      expect(row.audience).toBe("https://lemmy.example/c/birding");
+    });
+  });
+
+  it("stores NULL classification for an opaque Like", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        new Request(iris.inbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username),
+            [INTERNAL_HEADERS.signedActor]: REMOTE,
+          },
+          body: JSON.stringify({
+            id: "https://remote.example/activities/2",
+            type: "Like",
+            actor: REMOTE,
+            object: "https://social.example/notes/1",
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ object_type: string | null; audience: string | null }>(
+          `SELECT object_type, audience FROM inbox`,
+        )
+        .one();
+      expect(row.object_type).toBeNull();
+      expect(row.audience).toBeNull();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Delivery queue: drop, block, reschedule
 // ---------------------------------------------------------------------------
 
