@@ -537,19 +537,46 @@ async function caseAnnounceUnwrap({
   );
 }
 
-async function caseFanout({ received, publishTrigger, timeoutMs, log }) {
-  if (!publishTrigger) {
+async function caseFanout({
+  received,
+  publishTrigger,
+  publishUrl,
+  publishToken,
+  timeoutMs,
+  log,
+}) {
+  const before = received.length;
+  if (publishTrigger) {
+    const res = await fetch(publishTrigger, { method: "POST" });
+    if (!res.ok) {
+      throw new Error(`--publish-trigger POST failed: ${res.status}`);
+    }
+    log(`triggered owner publish via ${publishTrigger}`);
+  } else if (publishUrl && publishToken) {
+    // No bespoke trigger endpoint needed: the owner publish channel (also
+    // used by announce-unwrap) publishes a bare Note, which the target wraps
+    // in a Create addressed to Public + followers and fans out.
+    const res = await fetch(publishUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${publishToken}`,
+        "content-type": "application/activity+json",
+      },
+      body: JSON.stringify({
+        type: "Note",
+        content: `Fedify interop fanout probe ${crypto.randomUUID()}`,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`owner publish for fanout failed: ${res.status}`);
+    }
+    log(`owner-published a Note via ${publishUrl}`);
+  } else {
     log(
-      "skipped: no --publish-trigger URL given, so nothing can make the owner publish",
+      "skipped: neither --publish-trigger nor --publish-url/--publish-token given, so nothing can make the owner publish",
     );
     return "skipped";
   }
-  const before = received.length;
-  const res = await fetch(publishTrigger, { method: "POST" });
-  if (!res.ok) {
-    throw new Error(`--publish-trigger POST failed: ${res.status}`);
-  }
-  log(`triggered owner publish via ${publishTrigger}`);
 
   const arrived = await waitFor(
     received,

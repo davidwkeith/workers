@@ -80,6 +80,10 @@ in CI). All commands run from `packages/conformance-target/`.
    #   openssl pkey -in ap.pem -pubout -out ap.pub.pem
    wrangler secret put ACTIVITYPUB_PUBLIC_KEY_PEM   # paste ap.pub.pem
    wrangler secret put ACTIVITYPUB_PRIVATE_KEY_PEM  # paste ap.pem
+   # Optional: enables the owner publish endpoints (POST <actor>/outbox and
+   # /publish) that the fedify suite's fanout/announce-unwrap cases drive;
+   # mirror the same value into the FEDIFY_PUBLISH_TOKEN repo secret.
+   wrangler secret put ACTIVITYPUB_PUBLISH_TOKEN
    # P-256 private JWK for the VC issuer:
    #   node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign']).then(async k=>console.log(JSON.stringify(await crypto.subtle.exportKey('jwk',k.privateKey))))"
    wrangler secret put VC_SIGNING_KEY
@@ -87,7 +91,10 @@ in CI). All commands run from `packages/conformance-target/`.
 
 4. In the GitHub repo, add the `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit,
    Workers Routes:Edit, D1:Edit, Queues:Edit, R2:Edit) and
-   `CLOUDFLARE_ACCOUNT_ID` secrets for the CI deploy job.
+   `CLOUDFLARE_ACCOUNT_ID` secrets for the CI deploy job — plus, optionally,
+   `FEDIFY_PUBLISH_TOKEN` (the same value as `ACTIVITYPUB_PUBLISH_TOKEN`
+   above) so the hosted fedify suite can run its fanout and announce-unwrap
+   cases.
 
 5. _(Optional)_ Enable
    [Onion Routing](https://developers.cloudflare.com/network/onion-routing/)

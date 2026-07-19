@@ -117,9 +117,10 @@ The `hosted-suite` workflow installs litmus and supplies the credentials from th
 weekly schedule.
 
 **ActivityPub/Fedify is executable too.** The Fedify peer needs a public URL to
-receive callbacks (e.g. a free Cloudflare Quick Tunnel:
-`cloudflared tunnel --url http://localhost:8765`) for every case but the
-read-only `webfinger` one:
+receive callbacks for every case but the read-only `webfinger` one. The
+`hosted-suite` workflow **auto-provisions a Cloudflare Quick Tunnel on the
+runner** (override by passing `peer_url` at dispatch); for a local run start
+one yourself (`cloudflared tunnel --url http://localhost:8765`):
 
 ```bash
 node scripts/conformance/run-suite.mjs activitypub \
@@ -129,13 +130,16 @@ node scripts/conformance/run-suite.mjs activitypub \
 `scripts/conformance/fedify-peer.mjs` can also be run standalone (see its own
 usage comment) for
 `--case webfinger,follow,activities,page,announce-unwrap,fanout,rsvp`;
-`fanout` and `rsvp` are reported `skipped`, not silently dropped, without
-`--publish-trigger`/`--event`, and `announce-unwrap` (the FEP-1b12 group-relay
-lifecycle: the target follows the peer's `Group`, receives the `Accept`, then
-accepts the group's `Announce(Create(Page))`) is likewise `skipped` without
-`--publish-url` (the target's `POST <actor>/outbox`) and `--publish-token`
-(or `FEDIFY_PUBLISH_TOKEN`). Record `activitypub-federation` ->
-`targets` -> `fedify` as `passing` once every non-skipped case passes.
+`rsvp` is reported `skipped`, not silently dropped, without `--event`, and
+`fanout` + `announce-unwrap` (the FEP-1b12 group-relay lifecycle: the target
+follows the peer's `Group`, receives the `Accept`, then accepts the group's
+`Announce(Create(Page))`) are likewise `skipped` without the owner publish
+channel — `--publish-url` (the target's `POST <actor>/outbox`) and
+`--publish-token` (or `FEDIFY_PUBLISH_TOKEN`; the workflow derives the URL
+from `target_url` and reads the token from the `FEDIFY_PUBLISH_TOKEN` repo
+secret, which mirrors the target's `ACTIVITYPUB_PUBLISH_TOKEN` deploy
+secret). Record `activitypub-federation` -> `targets` -> `fedify` as
+`passing` once every non-skipped case passes.
 
 ### Manual run: Pixelfed (target `pixelfed`)
 
