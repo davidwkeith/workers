@@ -35,6 +35,18 @@ export {
   createActivitypubMcpTools,
   type ActivitypubMcpToolsConfig,
 } from "./mcp-tools.js";
+export {
+  createCommunitySyndicationTargets,
+  type CommunityTarget,
+  type CommunityTargetsOptions,
+} from "./syndication.js";
+export {
+  resolveHandleGuarded,
+  fetchActorGuarded,
+  communityDisplayHandle,
+  isHandleShaped,
+  type ResolvedActor,
+} from "./discovery.js";
 
 export {
   resolveConfig,

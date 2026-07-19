@@ -9,6 +9,7 @@
 import { canonicalizeProfileUrl } from "@dwk/indieauth";
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
+import type { FediverseSyndicationConfig } from "./fediverse.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
@@ -18,6 +19,14 @@ export interface SyndicationTarget {
   /** Human-readable name shown in the client's UI. */
   readonly name: string;
 }
+
+/**
+ * An async source of syndication targets, for lists that change at runtime —
+ * e.g. `@dwk/activitypub`'s `createCommunitySyndicationTargets`, which
+ * advertises one target per followed fediverse community (#278).
+ */
+export type SyndicationTargetsProvider = () =>
+  Promise<readonly SyndicationTarget[]> | readonly SyndicationTarget[];
 
 /**
  * Derive the canonical URL of a newly created post from its microformats2
@@ -51,8 +60,22 @@ export interface MicropubConfig {
   readonly tokenIssuer?: string;
   /** Scopes advertised in `q=config`. Informational only. */
   readonly scopesSupported?: readonly string[];
-  /** Syndication targets advertised by `q=config` / `q=syndicate-to`. */
-  readonly syndicateTo?: readonly SyndicationTarget[];
+  /**
+   * Syndication targets advertised by `q=config` / `q=syndicate-to` — a
+   * static list, or an async provider for lists that change at runtime (e.g.
+   * followed fediverse communities).
+   */
+  readonly syndicateTo?:
+    readonly SyndicationTarget[] | SyndicationTargetsProvider;
+
+  /**
+   * Fediverse syndication (#278): when set, a create whose
+   * `mp-syndicate-to` names the reserved `fediverse` uid or an advertised
+   * community target is additionally published through
+   * `@dwk/activitypub`'s `POST <actor>/publish` endpoint. Failures are
+   * logged, never fatal to the post creation.
+   */
+  readonly fediverse?: FediverseSyndicationConfig;
   /** Maximum accepted media upload size in bytes. Defaults to 25 MiB. */
   readonly maxMediaBytes?: number;
   /**
@@ -95,7 +118,9 @@ export interface ResolvedConfig {
   readonly mediaPath: string;
   readonly tokenIssuer: string;
   readonly scopesSupported: readonly string[];
-  readonly syndicateTo: readonly SyndicationTarget[];
+  /** Normalized to an async provider regardless of the configured shape. */
+  readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
+  readonly fediverse?: FediverseSyndicationConfig;
   readonly maxMediaBytes: number;
   readonly checkRevocation: boolean;
   readonly checkDpopReplay: boolean;
@@ -142,6 +167,18 @@ function defaultGeneratePostUrl(baseUrl: string): GeneratePostUrl {
   };
 }
 
+/** Normalize `syndicateTo` (static list or provider) to an async provider. */
+function normalizeSyndicateTo(
+  syndicateTo:
+    readonly SyndicationTarget[] | SyndicationTargetsProvider | undefined,
+): () => Promise<readonly SyndicationTarget[]> {
+  if (syndicateTo === undefined) return async () => [];
+  if (typeof syndicateTo === "function") {
+    return async () => syndicateTo();
+  }
+  return async () => syndicateTo;
+}
+
 function pathOf(absoluteUrl: string, label: string): string {
   try {
     return new URL(absoluteUrl).pathname;
@@ -185,7 +222,8 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       "delete",
       "media",
     ],
-    syndicateTo: config.syndicateTo ?? [],
+    syndicateTo: normalizeSyndicateTo(config.syndicateTo),
+    ...(config.fediverse ? { fediverse: config.fediverse } : {}),
     maxMediaBytes: config.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
     checkRevocation: config.checkRevocation ?? true,
     checkDpopReplay: config.checkDpopReplay ?? true,

@@ -42,7 +42,7 @@
  *   node scripts/conformance/fedify-peer.mjs \
  *     --target <actor-url> \
  *     [--peer-url <public-base-url>] [--port 8765] \
- *     [--case webfinger,follow,activities,fanout,rsvp] \
+ *     [--case webfinger,follow,activities,page,fanout,rsvp] \
  *     [--publish-trigger <url>] [--event <event-actor-url>] \
  *     [--timeout 15000]
  *
@@ -67,6 +67,7 @@ import {
   Join,
   Leave,
   Note,
+  Page,
   Endpoints,
 } from "@fedify/vocab";
 
@@ -75,6 +76,7 @@ export const ALL_CASES = [
   "webfinger",
   "follow",
   "activities",
+  "page",
   "fanout",
   "rsvp",
 ];
@@ -341,6 +343,42 @@ async function caseActivities({ ctx, target, log }) {
   log(`redelivered the same Create without error (dedup smoke check)`);
 }
 
+/**
+ * Threadiverse content shape (fediverse interop #273 phase 2): deliver a
+ * signed `Create` wrapping a titled `Page` — the Lemmy top-level-post shape —
+ * and redeliver it to confirm the classification path tolerates dedup. Like
+ * `activities`, acceptance-without-error is the externally observable
+ * contract; the stored `object_type`/`audience` classification is covered by
+ * the package's own DO tests. (The group-relay `Announce`-unwrap case needs
+ * this peer to serve a `Group` actor the target follows — tracked in #280.)
+ */
+async function casePage({ ctx, target, log }) {
+  const targetActor = await ctx.lookupObject(target);
+  if (!targetActor) throw new Error(`could not resolve target actor ${target}`);
+
+  const runId = crypto.randomUUID();
+  const page = new Page({
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#page-${runId}`),
+    attributedTo: ctx.getActorUri(IDENTIFIER),
+    name: "Fedify interop peer test page (fediverse interop #273)",
+    content: "A titled Page — the Lemmy/threadiverse top-level post shape.",
+  });
+  const create = new Create({
+    id: new URL(`${ctx.getActorUri(IDENTIFIER).href}#create-page-${runId}`),
+    actor: ctx.getActorUri(IDENTIFIER),
+    object: page,
+  });
+  await ctx.sendActivity({ identifier: IDENTIFIER }, targetActor, create, {
+    immediate: true,
+  });
+  log(`sent Create(Page) ${create.id.href}`);
+
+  await ctx.sendActivity({ identifier: IDENTIFIER }, targetActor, create, {
+    immediate: true,
+  });
+  log(`redelivered the same Create(Page) without error (dedup smoke check)`);
+}
+
 async function caseFanout({ received, publishTrigger, timeoutMs, log }) {
   if (!publishTrigger) {
     log(
@@ -414,6 +452,7 @@ const CASES = {
   webfinger: caseWebfinger,
   follow: caseFollow,
   activities: caseActivities,
+  page: casePage,
   fanout: caseFanout,
   rsvp: caseRsvp,
 };

@@ -93,6 +93,16 @@ endpoint package, never the lib).
   `__stats`/`__resolve`/`__deliver` routes) — the public `/inbox` route stays
   write-only to peers per ActivityPub §7.1, so this is a genuinely new,
   owner-only read surface, not a reuse of an existing HTTP GET.
+- **v3 tool contributions — implemented (fediverse interop phase 3, #279).**
+  `@dwk/activitypub`'s tool set grows `activitypub_publish` (write-scoped —
+  a deliberately distinct scope from the read tools, so a read-scoped agent
+  can never post as the owner) taking the canonical `PostInput` shape and
+  routing through the same internal publish path as `POST <actor>/publish`,
+  with handle-shaped community audiences (`!birding@lemmy.ml`) resolved via
+  the SSRF-guarded `@dwk/webfinger` lookup; and the read-only
+  `activitypub_resolve`, dereferencing a handle to its actor IRI + AS2 type
+  (`Person`/`Group`) + profile basics — remote-controlled data an agent MUST
+  treat as untrusted (see spec/fediverse-interop.md, Capability 3).
 - **Auth bridge — implemented.** MCP authorization is OAuth 2.1-shaped, so
   this reuses what the repo owns rather than inventing anything:
   `createDpopBearerAuthenticator` (`src/auth.ts`) builds the `authenticate`

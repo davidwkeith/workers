@@ -13,6 +13,14 @@
     "fedify": {
       "description": "Fedify-based ActivityPub interop peer (scripts/conformance/fedify-peer.mjs) — a second, automatable federation implementation to test @dwk/activitypub against, alongside manual testing against Mastodon (issue #246).",
       "host": "node"
+    },
+    "pixelfed": {
+      "description": "Manual federation run against a live Pixelfed instance (fediverse interop #273): publish {kind: note, attachments: [image]} via POST <actor>/publish and verify it renders in a Pixelfed timeline with alt text and content warning preserved; follow/like back from Pixelfed.",
+      "host": "pixelfed"
+    },
+    "lemmy": {
+      "description": "Manual federation run against a live Lemmy instance (fediverse interop #273): follow a community and receive/unwrap its announced posts, publish a titled Page into it (handle-shaped audience), reply, and vote (Like/Dislike).",
+      "host": "lemmy"
     }
   },
   "packages": {
@@ -180,6 +188,16 @@
               "status": "pending",
               "report": null,
               "lastRun": null
+            },
+            "pixelfed": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
+            },
+            "lemmy": {
+              "status": "pending",
+              "report": null,
+              "lastRun": null
             }
           }
         }
@@ -190,7 +208,10 @@
           "signed Follow accepted, follower recorded, deduped by id",
           "auto-Accept delivered to the follower inbox (signed)",
           "retryable delivery requeued with backoff",
-          "owner publish fans a Create to the outbox"
+          "owner publish fans a Create to the outbox",
+          "shaped post published via POST <actor>/publish (note with attachments, titled Page)",
+          "group Announce unwrapped with relayed_by provenance and inner-id dedup",
+          "relayed content origin-verified via the two-tier pipeline"
         ],
         "targets": {
           "node": {

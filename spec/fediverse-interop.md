@@ -313,6 +313,22 @@ Everything remains DO-SQLite authoritative state — never KV — per
 Each phase is independently shippable and changeset-recorded; nothing here
 alters published behavior for existing Mastodon federation.
 
+## Appendix: interop profiles
+
+The content shape each platform renders best — documentation, never code
+(see the design principle). Confirm/refine these rows during the manual
+conformance runs (`pixelfed` / `lemmy` targets in `conformance/status.json`,
+#280).
+
+| Platform | Post shape that renders best | Interactions | Notes |
+| --- | --- | --- | --- |
+| Mastodon | `note`; `article` renders as title + link on older versions | Like, Announce, replies | `summary` = CW; `sensitive` hides media; ≤4 attachments shown |
+| Pixelfed | `note` with **≥1 image/video attachment** (alt text on each) | Like, Announce, replies | text-only posts never appear in timelines; blurhash passed through |
+| Lemmy / PieFed / Mbin | `page` with `name` (title) + `audience` (community) | replies (`note` + `inReplyTo` + same `audience`), Like/Dislike votes | deliver to the community; it Announces to members (FEP-1b12) |
+| Friendica / Hubzilla | `article` or `note`; groups per FEP-1b12 | Like, Announce, replies | rich HTML bodies render fully |
+| PeerTube | consume-only in v1 (channels are FEP-1b12 `Group`s announcing `Video`) | Like, replies | `Video` objects classified on receipt; no video hosting |
+| Mobilizon / Gancio | `Event` (via the events layer, #167) | `Join` / `Leave` RSVPs | already covered by `events.ts` |
+
 ## Open questions
 
 - ~~Exact owner-publish envelope for `PostInput`~~ — **resolved**: a
