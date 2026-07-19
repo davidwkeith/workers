@@ -683,7 +683,9 @@ export async function runInterop({
   }
 
   if (cases.includes("webfinger") || peerUrl) {
-    peer = await buildPeer(peerUrl ?? "http://localhost");
+    // `||`, not `??`: peerUrl arrives as the EMPTY STRING (not undefined)
+    // when the workflow's env var is set but blank, and `new URL("")` throws.
+    peer = await buildPeer(peerUrl || "http://localhost");
     if (peerUrl) server = await serve(peer.federation, port);
   }
 
