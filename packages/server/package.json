@@ -58,7 +58,7 @@
     "@dwk/log": "workspace:*",
     "@worker-tools/html-rewriter": "0.1.0-pre.19",
     "express": "5.2.1",
-    "ws": "8.21.0"
+    "ws": "8.21.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260718.1",
