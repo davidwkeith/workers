@@ -1660,6 +1660,82 @@ describe("relayed-object verification", () => {
     });
   });
 
+  it("treats a 2xx non-JSON body (CDN error page) as transient, never a refutation", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const innerId = await seedRelayed(instance, state, username);
+      await withFetch(
+        async () =>
+          new Response("<html>challenge</html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      // Row survives, still pending, and the verify row backs off.
+      const row = state.storage.sql
+        .exec<{ verify_state: string | null }>(
+          `SELECT verify_state FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one();
+      expect(row.verify_state).toBe("pending");
+      const verify = state.storage.sql
+        .exec<{ attempts: number }>(`SELECT attempts FROM verify_queue`)
+        .one();
+      expect(verify.attempts).toBe(1);
+    });
+  });
+
+  it("keeps a relayed vote pending when its IRI 404s (inconclusive, not refuted)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state);
+      const voteId = `${AUTHOR}/activities/like-404`;
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          groupAnnounce("Like", voteId, `${AUTHOR}/post/1`),
+          GROUP,
+          // Immediate mode so the vote is due without waiting for the sweep.
+          { verifyRelayedObjects: "immediate" },
+        ),
+      );
+      await withFetch(
+        async () => new Response("not here", { status: 404 }),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: {
+                [INTERNAL_HEADERS.config]: cfgHeader(username, {
+                  verifyRelayedObjects: "immediate",
+                }),
+              },
+            }),
+          );
+        },
+      );
+      // The vote row survives as provisional; verification simply stops.
+      const copies = state.storage.sql
+        .exec<{ verify_state: string | null }>(
+          `SELECT verify_state FROM inbox WHERE id = ?`,
+          voteId,
+        )
+        .one();
+      expect(copies.verify_state).toBe("pending");
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM verify_queue`)
+        .one().n;
+      expect(queued).toBe(0);
+    });
+  });
+
   it("reschedules on a transient origin failure and leaves the row pending", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {

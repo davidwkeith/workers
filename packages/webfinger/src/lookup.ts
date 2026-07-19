@@ -20,11 +20,20 @@ export interface ParsedHandle {
   readonly host: string;
 }
 
-/** The AS2 media types a `self` link may carry for an ActivityPub actor. */
-const ACTOR_LINK_TYPES = [
-  "application/activity+json",
-  'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
-];
+/** Whether a `self` link's media type names an AS2 ActivityPub actor. */
+function isActorLinkType(type: string): boolean {
+  const [mediaType, ...params] = type.toLowerCase().split(";");
+  const base = (mediaType ?? "").trim();
+  if (base === "application/activity+json") return true;
+  return (
+    base === "application/ld+json" &&
+    params.some(
+      (p) =>
+        p.replace(/["\s]/g, "").startsWith("profile=") &&
+        p.includes("www.w3.org/ns/activitystreams"),
+    )
+  );
+}
 
 /**
  * Parse a fediverse handle into `user` + `host`. Accepts the bare
@@ -40,18 +49,28 @@ export function parseHandle(handle: string): ParsedHandle | null {
   const at = rest.indexOf("@");
   if (at <= 0 || at !== rest.lastIndexOf("@")) return null;
   const user = rest.slice(0, at);
-  const host = rest.slice(at + 1).toLowerCase();
-  if (user.length === 0 || host.length === 0) return null;
+  const rawHost = rest.slice(at + 1).toLowerCase();
+  if (user.length === 0 || rawHost.length === 0) return null;
   if (/\s/.test(user) || user.includes("/")) return null;
   try {
-    // Validate the host by round-tripping it through URL parsing; reject
-    // anything URL parsing mangles or that smuggles a port/path/userinfo.
-    const url = new URL(`https://${host}/`);
-    if (url.hostname !== host || url.port !== "") return null;
+    // Canonicalize the host through URL parsing — an IDN host normalizes to
+    // its punycode form (which the query URL needs anyway) — while rejecting
+    // anything that smuggles a port, credentials, path, query, or fragment.
+    const url = new URL(`https://${rawHost}/`);
+    if (
+      url.port !== "" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return null;
+    }
+    return { user, host: url.hostname };
   } catch {
     return null;
   }
-  return { user, host };
 }
 
 /** The RFC 7033 query URL for a parsed handle (`resource=acct:user@host`). */
@@ -75,12 +94,7 @@ export function selectActorLink(jrd: unknown): string | null {
     if (record.rel !== "self") continue;
     if (typeof record.href !== "string") continue;
     const type = record.type;
-    if (
-      typeof type === "string" &&
-      ACTOR_LINK_TYPES.some((t) =>
-        type.toLowerCase().startsWith(t.slice(0, 24)),
-      )
-    ) {
+    if (typeof type === "string" && isActorLinkType(type)) {
       return record.href;
     }
   }

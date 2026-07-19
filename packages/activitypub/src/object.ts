@@ -157,9 +157,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
     // Async origin verification of group-relayed activities (§2.2): one row
     // per stored relayed activity awaiting verification. `target` is the IRI
-    // fetched from its origin; `expect` is 'present' (2xx + id match) or
-    // 'gone' (404/410 confirms a relayed Delete). Terminal outcomes delete
-    // the row; a verification *failure* also deletes the inbox row.
+    // fetched from its origin; `expect` is 'present' (2xx + id match),
+    // 'gone' (404/410 confirms a relayed Delete), or 'vote' (like 'present',
+    // but a 404 is inconclusive — vote IRIs are often not public). Terminal
+    // outcomes delete the row; a *refutation* also deletes the inbox row.
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS verify_queue (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, activity_id TEXT NOT NULL,
@@ -1119,10 +1120,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * bounded fetch per row, coalesced by origin within the batch (rows for a
    * host that already failed this pass are rescheduled without a fetch).
    * Outcomes: `verified` advances the inbox row; a definitive refutation
-   * (present-when-expected-gone, gone-when-expected-present, or an id
-   * mismatch) DELETES the inbox row and bumps the persisted failure counter;
-   * transient errors back off and — at the attempts ceiling — leave the row
-   * `pending` (unreachable is not refuted).
+   * (present-when-expected-gone, content gone-when-expected-present, or an
+   * id mismatch in a parsed AS2 document) DELETES the inbox row and bumps
+   * the persisted failure counter; a vote's 404 is inconclusive (queue row
+   * dropped, inbox row stays pending — vote IRIs are often not public); a
+   * 2xx with a non-JSON body (CDN error page) and transient errors back off
+   * and — at the attempts ceiling — leave the row `pending` (unreachable is
+   * not refuted).
    */
   async #processVerifications(): Promise<number> {
     const now = Date.now();
@@ -1179,7 +1183,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         }
         continue;
       }
-      // expect === "present"
+      // expect === "present" | "vote"
       if (response.ok) {
         let doc: unknown;
         try {
@@ -1187,17 +1191,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         } catch {
           doc = null;
         }
-        const id =
-          doc && typeof doc === "object" && !Array.isArray(doc)
-            ? (doc as Record<string, unknown>).id
-            : undefined;
-        if (doc !== null && (id === undefined || id === row.target)) {
+        if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+          // A 2xx whose body is not an AS2 document (a CDN/proxy error page,
+          // a challenge interstitial) proves nothing either way — transient,
+          // never a refutation that deletes content.
+          this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
+          continue;
+        }
+        const id = (doc as Record<string, unknown>).id;
+        if (id === undefined || id === row.target) {
           this.#markVerified(row.seq, row.activity_id);
         } else {
           this.#dropRelayedRow(row.seq, row.activity_id);
         }
       } else if (gone) {
-        this.#dropRelayedRow(row.seq, row.activity_id);
+        if (row.expect === "vote") {
+          // Platforms routinely 404 vote IRIs they never serve publicly —
+          // inconclusive: stop verifying, keep the (provisional) row pending.
+          this.#sql.exec(`DELETE FROM verify_queue WHERE seq = ?`, row.seq);
+        } else {
+          this.#dropRelayedRow(row.seq, row.activity_id);
+        }
       } else {
         this.#rescheduleOrDrop("verify_queue", row.seq, row.attempts);
       }
@@ -1669,7 +1683,7 @@ function isLocalResource(iri: string, iris: ActorIris): boolean {
  */
 function relayedVerificationTarget(
   inner: ActivityObject,
-): { target: string; expect: "present" | "gone" } | null {
+): { target: string; expect: "present" | "gone" | "vote" } | null {
   const type = typeof inner.type === "string" ? inner.type : "";
   if (type === "Create" || type === "Update") {
     const target = objectId(inner.object) ?? inner.id;
@@ -1680,8 +1694,11 @@ function relayedVerificationTarget(
     return typeof target === "string" ? { target, expect: "gone" } : null;
   }
   if (type === "Like" || type === "Dislike") {
+    // Votes verify at the activity id, but many platforms never serve vote
+    // IRIs publicly — so a vote gets its own expectation kind whose 404 is
+    // INCONCLUSIVE (row stays pending) rather than a refutation.
     return typeof inner.id === "string"
-      ? { target: inner.id, expect: "present" }
+      ? { target: inner.id, expect: "vote" }
       : null;
   }
   return null;

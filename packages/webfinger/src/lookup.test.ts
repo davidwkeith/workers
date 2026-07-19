@@ -44,6 +44,13 @@ describe("parseHandle", () => {
     });
   });
 
+  it("normalizes an IDN host to its punycode form", () => {
+    expect(parseHandle("vogel@münchen.example")).toEqual({
+      user: "vogel",
+      host: "xn--mnchen-3ya.example",
+    });
+  });
+
   it("rejects malformed handles", () => {
     for (const raw of [
       "",
@@ -87,6 +94,20 @@ describe("selectActorLink", () => {
         ],
       }),
     ).toBe("https://social.example/users/alice");
+  });
+
+  it("rejects ld+json without the AS2 profile parameter", () => {
+    expect(
+      selectActorLink({
+        links: [
+          {
+            rel: "self",
+            type: "application/ld+json",
+            href: "https://social.example/users/alice",
+          },
+        ],
+      }),
+    ).toBeNull();
   });
 
   it("ignores self links without an AS2 type and malformed JRDs", () => {
