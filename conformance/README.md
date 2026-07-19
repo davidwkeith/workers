@@ -84,7 +84,7 @@ conformance green will fail.
 | `@dwk/webmention` | Webmention| [webmention.rocks](https://webmention.rocks/) (recv + send) |
 | `@dwk/solid-pod`  | Solid     | Solid conformance test harness + real-client interop |
 | `@dwk/webdav`     | WebDAV    | [litmus](http://www.webdav.org/neon/litmus/) (basic, copymove, props, locks) |
-| `@dwk/activitypub`| ActivityPub | Mastodon (manual, target `node`) + [Fedify](https://fedify.dev/) interop peer (target `fedify`) |
+| `@dwk/activitypub`| ActivityPub | Mastodon (manual, target `node`) + [Fedify](https://fedify.dev/) interop peer (target `fedify`) + Pixelfed/Lemmy (manual, targets `pixelfed`/`lemmy`, fediverse interop #273) |
 | `@dwk/indieauth`  | IndieAuth | integration + interop (no hosted "rocks" suite)      |
 | libraries         | —         | unit/integration only                                |
 
@@ -127,10 +127,59 @@ node scripts/conformance/run-suite.mjs activitypub \
 ```
 
 `scripts/conformance/fedify-peer.mjs` can also be run standalone (see its own
-usage comment) for `--case webfinger,follow,activities,fanout,rsvp`; `fanout`
-and `rsvp` are reported `skipped`, not silently dropped, without
-`--publish-trigger`/`--event`. Record `activitypub-federation` ->
+usage comment) for
+`--case webfinger,follow,activities,page,announce-unwrap,fanout,rsvp`;
+`fanout` and `rsvp` are reported `skipped`, not silently dropped, without
+`--publish-trigger`/`--event`, and `announce-unwrap` (the FEP-1b12 group-relay
+lifecycle: the target follows the peer's `Group`, receives the `Accept`, then
+accepts the group's `Announce(Create(Page))`) is likewise `skipped` without
+`--publish-url` (the target's `POST <actor>/outbox`) and `--publish-token`
+(or `FEDIFY_PUBLISH_TOKEN`). Record `activitypub-federation` ->
 `targets` -> `fedify` as `passing` once every non-skipped case passes.
+
+### Manual run: Pixelfed (target `pixelfed`)
+
+Fediverse interop #273 phase 1 acceptance, against any live Pixelfed instance
+(e.g. an account on pixelfed.social):
+
+1. From the Pixelfed account, search the actor's handle
+   (`@user@your.domain`) and **follow** it; confirm the follow is accepted
+   (the follower appears in the actor's `followers` collection).
+2. Publish a media note through the shaped-publish endpoint:
+   `POST <actor>/publish` with
+   `{"kind": "note", "content": "…", "sensitive": true, "attachments":
+   [{"type": "Image", "url": "…", "mediaType": "image/jpeg", "name": "alt
+   text"}]}` (bearer `publishToken`).
+3. Verify in the Pixelfed timeline: the post **renders with its image**
+   (text-only posts never appear in Pixelfed), the alt text is preserved on
+   the media, and the content warning (`summary`/`sensitive`) conceals it.
+4. Like and reply from Pixelfed; confirm both land in the actor's inbox
+   (`activitypub_list_inbox` or the DO's inbox table).
+5. Record `activitypub-federation` -> `targets` -> `pixelfed` as `passing`
+   with the run date.
+
+### Manual run: Lemmy (target `lemmy`)
+
+Fediverse interop #273 phase 2/3 acceptance, against any live Lemmy instance:
+
+1. **Follow a community by handle**: publish
+   `{"type": "Follow", "object": "https://<instance>/c/<community>"}` via
+   `POST <actor>/outbox`, or use the `activitypub_resolve` MCP tool to
+   resolve `!community@instance` first. Confirm the `following` row reaches
+   `accepted` with `actor_type = 'Group'`.
+2. Wait for community activity (or post something there from another
+   account): confirm announced posts are **unwrapped** — inbox rows for the
+   inner activities carrying `relayed_by` = the community IRI — and that
+   their `verify_state` advances to `verified`.
+3. **Post into the community**: `POST <actor>/publish` with
+   `{"kind": "page", "name": "Title", "content": "…", "audience":
+   "!community@instance"}`; confirm it appears as a post in the community
+   (title intact) once the community announces it.
+4. Reply to a community post (`note` + `inReplyTo` + the community
+   `audience`) and vote (publish a `Like`/`Dislike` of a community post via
+   the outbox); confirm both register on Lemmy.
+5. Record `activitypub-federation` -> `targets` -> `lemmy` as `passing` with
+   the run date.
 
 ## Integration lifecycle tests
 
