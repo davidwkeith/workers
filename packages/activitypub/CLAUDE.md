@@ -63,11 +63,13 @@ src/handler.ts      # createActivityPub factory (actor/inbox/outbox/collection r
 src/object.ts       # ActivityPubObject Durable Object (inbox/outbox/followers/following)
 src/as2.ts          # actor document builder, collection/page builders, AS2 helpers
 src/objects.ts      # typed post objects: PostInput → Note/Article/Page builders, inbox classification (#274)
+src/discovery.ts    # SSRF-guarded handle→actor resolution + actor-doc fetch (§2.4)
+src/syndication.ts  # followed-community {uid,name} provider for micropub's syndicateTo (#278)
 src/events.ts       # CalendarEvent ↔ AS2 Event adapter + Join/Leave RSVP helpers (#171)
 src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
 src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)
 src/delivery.ts     # outbound activity delivery with SSRF guard (retry lives in the DO)
-src/mcp-tools.ts    # createActivitypubMcpTools — activitypub_list_inbox @dwk/mcp tool
+src/mcp-tools.ts    # createActivitypubMcpTools — activitypub_publish (write), activitypub_resolve + activitypub_list_inbox (read)
 src/log.ts          # structured logging/metrics event vocabulary
 src/body.ts         # capped read for inbound request bodies (inbox/publish)
 src/test-harness.ts # test-only DO class (not published)

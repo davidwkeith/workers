@@ -229,6 +229,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (path === `${pathOf(iris.id)}/__inbox`) {
       return this.#listInbox(request);
     }
+    // Owner-only typed following listing (internal, like `__inbox`): accepted
+    // follows with their resolved actor_type, for the community syndication
+    // targets (§2.4 / #278) and future owner reads. `?type=Group` filters.
+    if (path === `${pathOf(iris.id)}/__following`) {
+      return this.#listFollowing(request);
+    }
 
     if (path === pathOf(iris.followers)) {
       return this.#serveCollection(request, iris.followers, "followers");
@@ -1026,6 +1032,39 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray()
       .map((row) => JSON.parse(row.json) as JsonValue);
     return json(200, { items, total, page, pageSize } as JsonValue);
+  }
+
+  /**
+   * List accepted `following` rows with their typing columns for the
+   * internal `__following` route. Flat JSON (not an AS2 collection) — the
+   * only reader is the composing Worker's own trusted call.
+   */
+  #listFollowing(request: Request): Response {
+    const url = new URL(request.url);
+    const type = url.searchParams.get("type");
+    const rows = this.#sql
+      .exec<{
+        actor: string;
+        actor_type: string | null;
+        inbox: string | null;
+        shared_inbox: string | null;
+      }>(
+        type
+          ? `SELECT actor, actor_type, inbox, shared_inbox FROM following
+               WHERE state = 'accepted' AND actor_type = ? ORDER BY added_at DESC`
+          : `SELECT actor, actor_type, inbox, shared_inbox FROM following
+               WHERE state = 'accepted' ORDER BY added_at DESC`,
+        ...(type ? [type] : []),
+      )
+      .toArray();
+    return json(200, {
+      items: rows.map((row) => ({
+        actor: row.actor,
+        actorType: row.actor_type,
+        inbox: row.inbox,
+        sharedInbox: row.shared_inbox,
+      })),
+    } as JsonValue);
   }
 
   // -- dedup -----------------------------------------------------------------

@@ -32,6 +32,7 @@ import {
   type MicropubStoreEnv,
 } from "./store.js";
 import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
+import { syndicateEntry } from "./fediverse.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
 export interface MicropubEnv extends MicropubStoreEnv, AuthEnv {
@@ -348,12 +349,12 @@ async function handleQuery(
   if (q === "config") {
     return json({
       "media-endpoint": config.mediaEndpoint,
-      "syndicate-to": config.syndicateTo,
+      "syndicate-to": await config.syndicateTo(),
       q: ["source", "config", "syndicate-to"],
     });
   }
   if (q === "syndicate-to") {
-    return json({ "syndicate-to": config.syndicateTo });
+    return json({ "syndicate-to": await config.syndicateTo() });
   }
   if (q === "source") {
     const url = params.get("url");
@@ -544,6 +545,18 @@ export async function publishPost(
       emit(config, "info", MicropubLogEvent.ActionCompleted, {
         action: "create",
       });
+      // Fediverse syndication (#278): when configured and requested, publish
+      // the entry through `@dwk/activitypub`'s shaped-publish endpoint too.
+      // Failures are logged per target, never fatal — the post is created.
+      if (config.fediverse && commands.syndicateTo.length > 0) {
+        await syndicateEntry(
+          config.fediverse,
+          mf2,
+          commands.syndicateTo,
+          await config.syndicateTo(),
+          config.logger,
+        );
+      }
       return { ok: true, url };
     }
     url = `${url}-${Math.floor(Math.random() * 36 ** 4).toString(36)}`;

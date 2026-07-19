@@ -12,9 +12,8 @@
 
 import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
-import { resolveHandle } from "@dwk/webfinger";
 
-import { assertPublicHttpsTarget } from "./delivery.js";
+import { isHandleShaped, resolveHandleGuarded } from "./discovery.js";
 
 import { as2ContentType, buildActorDocument, type JsonValue } from "./as2.js";
 import { readRequestBodyCapped } from "./body.js";
@@ -395,21 +394,11 @@ async function resolveAudienceHandle(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
   const record = parsed as Record<string, unknown>;
   const audience = record.audience;
-  if (typeof audience !== "string" || /^https?:\/\//i.test(audience)) {
+  if (typeof audience !== "string" || !isHandleShaped(audience)) {
     return {};
   }
-  const guardedFetch: typeof fetch = (input, init) => {
-    const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url;
-    assertPublicHttpsTarget(url);
-    return config.fetch(input, init);
-  };
-  const actor = await resolveHandle(audience, { fetch: guardedFetch });
-  if (!actor || !/^https:\/\//i.test(actor)) {
+  const actor = await resolveHandleGuarded(audience, config.fetch);
+  if (!actor) {
     return { error: `audience handle could not be resolved: ${audience}` };
   }
   record.audience = actor;

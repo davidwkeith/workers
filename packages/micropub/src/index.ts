@@ -32,8 +32,19 @@ export type {
   MicropubConfig,
   ResolvedConfig,
   SyndicationTarget,
+  SyndicationTargetsProvider,
   GeneratePostUrl,
 } from "./config.js";
+
+export {
+  FEDIVERSE_TARGET_UID,
+  entryToFediversePost,
+  deliverFediversePost,
+  syndicateEntry,
+  type FediverseSyndicationConfig,
+  type FediversePost,
+  type SyndicationResult,
+} from "./fediverse.js";
 
 export {
   createMicropubStore,
