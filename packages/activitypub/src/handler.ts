@@ -12,6 +12,9 @@
 
 import { inboxLinkHeader } from "@dwk/ldn/discovery";
 import { hostFromUrl, type LogFields } from "@dwk/log";
+import { resolveHandle } from "@dwk/webfinger";
+
+import { assertPublicHttpsTarget } from "./delivery.js";
 
 import { as2ContentType, buildActorDocument, type JsonValue } from "./as2.js";
 import { readRequestBodyCapped } from "./body.js";
@@ -90,6 +93,7 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     actorName: config.actor.name ?? config.actor.username,
     manuallyApprovesFollowers: config.actor.manuallyApprovesFollowers ?? false,
     manuallyApprovesJoins: config.manuallyApprovesJoins,
+    verifyRelayedObjects: config.verifyRelayedObjects,
     pageSize: config.pageSize,
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,
@@ -332,9 +336,24 @@ export function createActivityPub(
         });
         return text(413, "Payload Too Large");
       }
+      let forwardBody: BodyInit = body as BufferSource;
+      if (path === publishPath) {
+        // Community discovery (§2.4): a handle-shaped `audience`
+        // (`!birding@lemmy.ml`) resolves to its Group actor IRI here at the
+        // stateless front door — a WebFinger lookup via `@dwk/webfinger`'s
+        // JRD helper behind an SSRF guard — so the DO never fetches inline.
+        const rewritten = await resolveAudienceHandle(body, resolved);
+        if (rewritten.error !== undefined) {
+          emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+            reason: "audience_unresolved",
+          });
+          return text(400, rewritten.error);
+        }
+        if (rewritten.body !== undefined) forwardBody = rewritten.body;
+      }
       return forwardToDo(resolved, env, request.url, {
         method,
-        body: body as BufferSource,
+        body: forwardBody,
         extra: { [INTERNAL_HEADERS.publish]: "1" },
       });
     }
@@ -353,6 +372,48 @@ export function createActivityPub(
 
     return text(404, "Not Found");
   };
+}
+
+/**
+ * Rewrite a handle-shaped `audience` in a shaped-post publish body to its
+ * resolved Group actor IRI (§2.4). An IRI (or absent/non-string) `audience`
+ * passes through untouched, as does an unparseable body (the DO answers 400
+ * with a precise reason). Resolution runs through the injected `fetch`
+ * wrapped in the same SSRF guard outbound delivery uses — the host comes
+ * from the untrusted handle.
+ */
+async function resolveAudienceHandle(
+  body: Uint8Array,
+  config: ResolvedConfig,
+): Promise<{ body?: string; error?: string }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const record = parsed as Record<string, unknown>;
+  const audience = record.audience;
+  if (typeof audience !== "string" || /^https?:\/\//i.test(audience)) {
+    return {};
+  }
+  const guardedFetch: typeof fetch = (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    assertPublicHttpsTarget(url);
+    return config.fetch(input, init);
+  };
+  const actor = await resolveHandle(audience, { fetch: guardedFetch });
+  if (!actor || !/^https:\/\//i.test(actor)) {
+    return { error: `audience handle could not be resolved: ${audience}` };
+  }
+  record.audience = actor;
+  return { body: JSON.stringify(record) };
 }
 
 /** Whether a publish request carries the configured bearer token. */

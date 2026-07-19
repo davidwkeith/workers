@@ -41,6 +41,15 @@ describe("resolveConfig defaults and derivation", () => {
     expect(resolved.clockSkewSeconds).toBe(300);
     expect(resolved.software.name).toBe("dwk-activitypub");
     expect(resolved.iris).toEqual(deriveIris("https://example.com", "alice"));
+    // Relay verification (§2.2) is on by default, in the tiered mode.
+    expect(resolved.verifyRelayedObjects).toBe("tiered");
+  });
+
+  it("honors an explicit relay-verification mode", () => {
+    expect(
+      resolveConfig({ ...VALID, verifyRelayedObjects: "off" })
+        .verifyRelayedObjects,
+    ).toBe("off");
   });
 
   it("strips a trailing slash from baseUrl before deriving IRIs", () => {

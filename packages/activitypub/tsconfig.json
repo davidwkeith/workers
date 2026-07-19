@@ -11,6 +11,7 @@
       // to source too so typecheck-before-build resolves the transitive type.
       "@dwk/rdf": ["../rdf/src/index.ts"],
       "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/webfinger": ["../webfinger/src/index.ts"],
       "@dwk/calendar": ["../calendar/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
       // `@dwk/mcp`'s own source (path-mapped above) imports `@dwk/dpop` for its

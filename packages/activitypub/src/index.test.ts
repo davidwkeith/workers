@@ -637,6 +637,7 @@ function forwardedHeader(
     actorName: username,
     manuallyApprovesFollowers: false,
     manuallyApprovesJoins: overrides.manuallyApprovesJoins ?? false,
+    verifyRelayedObjects: "tiered",
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,

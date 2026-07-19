@@ -41,6 +41,7 @@ src/index.ts       # public surface: createWebfinger factory, JRD builder, resou
 src/config.ts      # config types and resolution
 src/handler.ts     # createWebfinger factory
 src/jrd.ts         # JRD building and rel filtering
+src/lookup.ts      # client half: handle parsing, remote JRD lookup, actor-link selection (#277)
 src/resource.ts    # resource URI normalization for case-insensitive matching
 src/log.ts         # structured observability event taxonomy (@dwk/log vocabulary)
 src/*.test.ts      # colocated tests
@@ -52,4 +53,6 @@ src/*.test.ts      # colocated tests
 
 ## Depended on by
 
-`@dwk/host-meta`, `@dwk/remotestorage`
+`@dwk/host-meta`, `@dwk/remotestorage`, `@dwk/activitypub` (the `lookup.ts`
+client half, for community/handle discovery — injected fetch, no network of
+its own)
