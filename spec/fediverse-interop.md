@@ -133,7 +133,8 @@ peer.
 ## Capability 2 — FEP-1b12 group participation
 
 The account participates in communities; it does **not** host them (see
-non-goals). Four additive changes to `ActivityPubObject`:
+non-goals). Five additive changes (§2.1–2.3 and §2.5 to `ActivityPubObject`;
+§2.4 spans `@dwk/webfinger` + the AP flows):
 
 ### 2.1 Follow-target typing
 
@@ -165,10 +166,23 @@ Today `Announce` is stored + maybe-forwarded. Additively:
   the stored row records the relaying group in a `relayed_by` column, and
   every read surface (MCP tools, a future microsub bridge) MUST expose the
   distinction between directly-signed activities and group-relayed content.
-- Optional hardening (config `verifyRelayedObjects`, default off in v1): fetch
-  the inner object by its `id` from its origin via `@dwk/safe-fetch` before
-  storing, upgrading relay trust to origin trust at the cost of an outbound
-  fetch per announced activity (alarm-queued, never in the inbox POST path).
+- **Async origin verification, on by default, in two tiers.** Relayed
+  activities are verified against their origin (fetch the inner object by its
+  `id` via `@dwk/safe-fetch`) — always asynchronously, never in the inbox
+  POST path:
+  - **Content tier** (`Create`/`Update`/`Delete`): enqueued for verification
+    immediately on arrival and picked up by the next alarm tick, with the
+    delivery queue's backoff/max-attempts policy. Rows carry
+    `verify_state` (`pending` → `verified` | `failed`); pending content is
+    stored and readable (already marked `relayed_by`), and a failed
+    verification deletes the row and emits a metric.
+  - **Vote tier** (`Like`/`Dislike`): accumulated and verified in periodic
+    batched sweeps, coalesced per origin instance (votes burst from the same
+    server). Counts are provisional until swept.
+
+  `verifyRelayedObjects` config: `"tiered"` (default) | `"immediate"` (all
+  activities in the content tier) | `"off"` (trust the followed group; rows
+  stay `pending` and rely on `relayed_by` provenance alone).
 - `Announce` of a bare object IRI (a Mastodon boost) keeps today's behavior.
 
 ### 2.3 Posting to a community
@@ -182,7 +196,24 @@ Replies/comments inside a community are `Note` + `inReplyTo` with the same
 `audience`, keeping the community "in the loop" (the interop failure mode of
 Mastodon replies to Lemmy).
 
-### 2.4 `Dislike`
+### 2.4 Community discovery
+
+Resolving a community handle (`!birding@lemmy.ml`) or any `acct:` handle to
+its actor IRI is a **remote WebFinger lookup**, and it lives in two layers
+per the cross-standard-lib rule:
+
+- **`@dwk/webfinger`** gains the pure client half of the protocol: build the
+  `/.well-known/webfinger?resource=acct:…` query URL, parse/validate the JRD
+  response, select the `self` link (`application/activity+json`). Plain-data
+  in/out with an **injected `fetch`** — the package stays Workers-free and
+  makes no network calls of its own.
+- **`@dwk/activitypub`** wires that helper to `@dwk/safe-fetch` (the host is
+  user-supplied — SSRF rules apply) inside its follow and publish flows, so
+  the owner can follow or target a community by handle. A read-scoped
+  `activitypub_resolve` MCP tool exposing the same resolution is a natural
+  phase-3 addition alongside `activitypub_publish`.
+
+### 2.5 `Dislike`
 
 - Inbound: handled like `Like` (stored, deduped, maybe-forwarded).
 - Outbound: `Dislike` added to the activity types `#asOutboxActivity`
@@ -200,10 +231,14 @@ The "single user account" is operated by clients through existing seams; each
 maps its native vocabulary onto `PostInput`, keeping platform knowledge out of
 the clients:
 
-- **Outbox `POST`** (owner, `publishToken`): additionally accepts
-  `{"@dwk/post": PostInput}`-shaped bodies (exact envelope TBD at
-  implementation) beside today's raw activities/objects, so any client can
-  publish shaped posts without building AS2.
+- **Publish endpoint** (owner, `publishToken`): a dedicated
+  `POST <actor>/publish` accepts a bare `PostInput` JSON body, keeping
+  `POST <actor>/outbox` purely AS2 (activities/objects, per AP §6) — no
+  content-type sniffing or wrapper keys on the outbox. The endpoint validates
+  the `PostInput`, builds the object via `objects.ts`, and hands it to the
+  same internal publish path as the outbox. Because the actor is rooted at
+  `/users/<username>`, the route is covered by the existing `/users/` prefix
+  claim in `catalog.json` — no catalog change.
 - **`@dwk/micropub`** (the designated authoring surface): the adapter lives in
   micropub (endpoint packages hold adapters, never libs). `h-entry` maps
   naturally — `photo` → `note` + attachments (Pixelfed-ready), `name` +
@@ -233,11 +268,12 @@ and the fedify peer script grows announce-unwrap and Page cases.
 - `followers`: + `shared_inbox` (nullable), so the delivery queue can batch
   fan-out per shared inbox instead of one request per follower on the same
   instance — a delivery optimization, recorded when the `Follow` is accepted.
-- `inbox`: + `object_type`, `audience`, `relayed_by` (all nullable —
-  classification and provenance only; `relayed_by` marks group-relayed,
-  unsigned content, see §2.2).
+- `inbox`: + `object_type`, `audience`, `relayed_by`, `verify_state` (all
+  nullable — classification and provenance; `relayed_by` marks group-relayed
+  content and `verify_state` tracks its async origin verification, see §2.2).
 - `seen`: also records unwrapped inner-activity `id`s.
-- Config: + `verifyRelayedObjects?: boolean` (default `false`). No new
+- Config: + `verifyRelayedObjects?: "tiered" | "immediate" | "off"` (default
+  `"tiered"`, see §2.2). No new
   bindings — attachments are **URL references**; media bytes live behind the
   micropub media endpoint / R2 as today, and the AP package still never
   buffers or hosts blobs itself.
@@ -279,14 +315,16 @@ alters published behavior for existing Mastodon federation.
 
 ## Open questions
 
-- Exact owner-publish envelope for `PostInput` on the outbox `POST`
-  (dedicated content type vs. wrapper key) — decide at implementation.
-- Should `verifyRelayedObjects` default **on** once `@dwk/safe-fetch` wiring
-  is proven, accepting the extra origin fetch per relayed activity?
-- Whether community discovery (search/resolve `!name@host` → Group IRI)
-  belongs here, in `@dwk/webfinger` (it is a webfinger `acct:` lookup), or
-  purely client-side. Leaning: client-side helper over the existing webfinger
-  package.
+- ~~Exact owner-publish envelope for `PostInput`~~ — **resolved**: a
+  dedicated `POST <actor>/publish` endpoint (see Capability 3); the outbox
+  stays purely AS2.
+- ~~Should `verifyRelayedObjects` default on?~~ — **resolved**: on by
+  default as an always-async, two-tier pipeline (content verified on the
+  next alarm tick, votes in coalesced batched sweeps; see §2.2).
+- ~~Where community discovery lives~~ — **resolved**: the pure JRD
+  lookup/parsing helper joins `@dwk/webfinger` (injected `fetch`, no network
+  of its own); `@dwk/activitypub` wires it to `@dwk/safe-fetch` in the
+  follow/publish flows (see §2.4).
 - RFC 9421 / Ed25519 signature adoption is tracked separately (#59, the
   `verifyInboxSignature` seam + `@dwk/http-signatures`); nothing in this
   design depends on it.
