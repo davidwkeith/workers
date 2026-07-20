@@ -14,6 +14,18 @@ describe("createCalendarFeed", () => {
     expect(() => createCalendarFeed({})).toThrow(/events/);
   });
 
+  it("rejects a filename that would break the Content-Disposition quoting", () => {
+    expect(() =>
+      createCalendarFeed({
+        events: () => events,
+        filename: 'evil.ics"; x="y',
+      }),
+    ).toThrow(/filename/);
+    expect(() =>
+      createCalendarFeed({ events: () => events, filename: "a\r\nX-Evil: 1" }),
+    ).toThrow(/filename/);
+  });
+
   it("serves text/calendar with subscription headers on GET", async () => {
     const handler = createCalendarFeed({ events: () => events, now: NOW });
     const res = await handler(new Request("https://example.com/calendar.ics"));

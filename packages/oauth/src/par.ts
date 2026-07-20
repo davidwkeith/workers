@@ -120,6 +120,15 @@ export function createPushedAuthorizationRequestHandler(
     // Clone before consuming the body so the authenticator can read it too.
     const authRequest = request.clone();
     const form = await readForm(request);
+    if (form === null) {
+      emit(obs, "warn", OAuthLogEvent.PushedRequestRejected, {
+        reason: "duplicate_parameter",
+      });
+      return oauthErrorResponse(
+        OAuthError.InvalidRequest,
+        "request parameters must not be included more than once",
+      );
+    }
 
     // RFC 9126 §2.1: the PAR body MUST NOT itself contain a `request_uri`.
     if (form.has("request_uri")) {

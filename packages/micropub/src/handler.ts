@@ -230,6 +230,14 @@ const EXTENSIONS: Record<string, string> = {
   "audio/mpeg": ".mp3",
 };
 
+/**
+ * Content types safe to serve inline with their declared type — the media this
+ * endpoint exists for. Anything else (notably `text/html`, `image/svg+xml`, …)
+ * is served as an opaque `application/octet-stream` attachment so a `media`-scope
+ * client cannot upload active content that renders as stored XSS on this origin.
+ */
+const SAFE_INLINE_TYPES = new Set(Object.keys(EXTENSIONS));
+
 /** Stream a file to R2 under a random key and return its public media URL. */
 async function storeMedia(
   file: File,
@@ -254,9 +262,14 @@ async function handleMediaUpload(
   // A `create`-only token authorizes creating posts (including photos folded
   // into a multipart create), not arbitrary blob uploads to the media endpoint
   // — `q=config` advertises `media` as a distinct scope.
-  const auth = await authorize(request, env, config, tokenFromHeader(request), [
-    "media",
-  ]);
+  const auth = await authorize(
+    request,
+    env,
+    config,
+    tokenFromHeader(request),
+    ["media"],
+    config.mediaEndpoint,
+  );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {
       reason: auth.error,
@@ -327,6 +340,19 @@ async function handleMediaGet(
   const headers = new Headers(CORS_HEADERS);
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
+  // The stored content type is client-controlled (from the upload). Never let
+  // the browser sniff, and only serve known media types inline; force anything
+  // else (e.g. an uploaded `text/html`) to download as an opaque blob so it
+  // cannot execute as script on this origin.
+  headers.set("x-content-type-options", "nosniff");
+  const baseType = (headers.get("content-type") ?? "")
+    .split(";")[0]
+    ?.trim()
+    .toLowerCase();
+  if (!baseType || !SAFE_INLINE_TYPES.has(baseType)) {
+    headers.set("content-type", "application/octet-stream");
+    headers.set("content-disposition", "attachment");
+  }
   return new Response(object.body, { headers });
 }
 
@@ -345,6 +371,7 @@ async function handleQuery(
     config,
     tokenFromHeader(request),
     [],
+    config.micropubEndpoint,
   );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {
@@ -485,6 +512,7 @@ async function handleAction(
     config,
     token,
     scopesForAction(action),
+    config.micropubEndpoint,
   );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {

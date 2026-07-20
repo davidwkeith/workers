@@ -83,6 +83,23 @@ const ACCESS_SCOPE = "com.atproto.access";
 const REFRESH_SCOPE = "com.atproto.refresh";
 const CAR_CONTENT_TYPE = "application/vnd.ipld.car";
 
+// Content types safe to serve inline with their declared type when a public,
+// unauthenticated blob is fetched. The upload's content type is
+// client-controlled, so anything else (notably text/html, image/svg+xml) is
+// served as an opaque downloaded blob to prevent stored XSS on the account's
+// own origin.
+const SAFE_INLINE_BLOB_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/mp4",
+]);
+
 // Pseudo-codes the runtime reports for how a connection ended but that the
 // WebSocket spec forbids sending back to the peer via `ws.close()`.
 const RESERVED_CLOSE_CODES = new Set([1004, 1005, 1006, 1015]);
@@ -1028,12 +1045,20 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const cid = CID.parse(cidParam);
     const object = await this.env.BLOBS.get(this.#blobKey(cid));
     if (!object) throw namedError(404, "BlobNotFound", "Blob not found");
-    return new Response(object.body, {
-      headers: {
-        "content-type":
-          object.httpMetadata?.contentType ?? "application/octet-stream",
-      },
-    });
+    const stored =
+      object.httpMetadata?.contentType ?? "application/octet-stream";
+    const baseType = stored.split(";")[0]?.trim().toLowerCase() ?? "";
+    // Blobs are public and served from the account's own origin; the upload's
+    // content type is client-controlled. Never sniff, and only serve known
+    // media types inline — force anything else to download as an opaque blob so
+    // an uploaded `text/html`/SVG cannot execute as script on this origin.
+    const inline = SAFE_INLINE_BLOB_TYPES.has(baseType);
+    const headers: Record<string, string> = {
+      "content-type": inline ? stored : "application/octet-stream",
+      "x-content-type-options": "nosniff",
+    };
+    if (!inline) headers["content-disposition"] = "attachment";
+    return new Response(object.body, { headers });
   }
 
   #blobKey(cid: CID): string {

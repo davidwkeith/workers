@@ -94,6 +94,37 @@ describe("authenticate (built-in JWT verifier)", () => {
     });
   });
 
+  it("negative-caches a failed JWKS fetch so a burst does not re-hit the issuer", async () => {
+    const { privateKey, base } = await setup();
+    const token = await signJwt(
+      { iss: ISSUER, sub: "alice", exp: 1_700_000_900, scope: "documents:rw" },
+      privateKey,
+    );
+    let now = 1_700_000_000_000;
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response("down", { status: 503 });
+    }) as unknown as typeof fetch;
+    const config = resolveConfig({
+      ...base,
+      jwks: undefined,
+      jwksUri: `https://issuer.example/jwks-${crypto.randomUUID()}`,
+      fetch: fetchImpl,
+      now: () => now,
+    });
+    // Three token requests during an outage → the JWKS URI is fetched once; the
+    // rest are served from the negative cache instead of re-hitting the issuer.
+    await authenticate(bearer(token), config);
+    await authenticate(bearer(token), config);
+    await authenticate(bearer(token), config);
+    expect(calls).toBe(1);
+    // After the ~30s backoff window, one more fetch is allowed.
+    now += 31_000;
+    await authenticate(bearer(token), config);
+    expect(calls).toBe(2);
+  });
+
   it("rejects a token signed by an unknown key", async () => {
     const { base } = await setup();
     const other = (await crypto.subtle.generateKey(ECDSA, true, [

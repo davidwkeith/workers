@@ -45,7 +45,13 @@ interface CachedJwks {
   fetchedAt: number;
 }
 const JWKS_TTL_MS = 5 * 60 * 1000;
+// After a failed fetch, back off this long before re-fetching. Without it, a
+// burst of (possibly bogus) token requests while the issuer is down or has no
+// cached keys re-fetches the JWKS URI once per request — an amplification/DoS
+// vector against the issuer's endpoint.
+const JWKS_NEGATIVE_TTL_MS = 30 * 1000;
 const jwksCache = new Map<string, CachedJwks>();
+const jwksFailedAt = new Map<string, number>();
 
 /** Resolve the issuer verification keys: static config first, then cached fetch. */
 async function resolveJwks(
@@ -53,22 +59,37 @@ async function resolveJwks(
 ): Promise<readonly JsonWebKey[] | null> {
   if (config.jwks && config.jwks.length > 0) return config.jwks;
   if (!config.jwksUri) return null;
+  const uri = config.jwksUri;
 
   const now = config.now();
-  const cached = jwksCache.get(config.jwksUri);
+  const cached = jwksCache.get(uri);
   if (cached && now - cached.fetchedAt < JWKS_TTL_MS) return cached.keys;
 
+  // Positive cache missing/stale: back off from re-fetching if we recently
+  // failed. While backing off, serve the last good keys if we have them (mid-
+  // outage), else reject — but do not hit the issuer on every request.
+  const failedAt = jwksFailedAt.get(uri);
+  if (failedAt !== undefined && now - failedAt < JWKS_NEGATIVE_TTL_MS) {
+    return cached?.keys ?? null;
+  }
+
   try {
-    const response = await config.fetch(config.jwksUri);
-    if (!response.ok) return cached?.keys ?? null;
-    const body = (await response.json()) as { keys?: JsonWebKey[] } | null;
+    const response = await config.fetch(uri);
+    const body = response.ok
+      ? ((await response.json()) as { keys?: JsonWebKey[] } | null)
+      : null;
     // Only cache a well-formed JWKS; a null/empty/garbled body (e.g. literal
     // JSON `null`) is ignored rather than throwing — and caching it would poison
     // verification for the whole TTL and discard the last good keys.
-    if (!body || !Array.isArray(body.keys)) return cached?.keys ?? null;
-    jwksCache.set(config.jwksUri, { keys: body.keys, fetchedAt: now });
+    if (!body || !Array.isArray(body.keys)) {
+      jwksFailedAt.set(uri, now);
+      return cached?.keys ?? null;
+    }
+    jwksCache.set(uri, { keys: body.keys, fetchedAt: now });
+    jwksFailedAt.delete(uri);
     return body.keys;
   } catch {
+    jwksFailedAt.set(uri, now);
     return cached?.keys ?? null;
   }
 }

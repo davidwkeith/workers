@@ -96,12 +96,47 @@ function pushText(
   if (value) lines.push(`${name}:${escapeText(value)}`);
 }
 
+// These values are emitted **verbatim** into content lines / parameters (unlike
+// TEXT values, which `escapeText` handles), so an unvalidated CR/LF or
+// structural character in user-derived content (e.g. an `h-event` → CalendarEvent)
+// could inject arbitrary iCalendar properties into a subscriber's calendar.
+const IANA_TZID = /^[A-Za-z0-9_+./-]+$/;
+const ICAL_DURATION =
+  /^[+-]?P(?:\d+W|(?:\d+Y)?(?:\d+M)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?)$/;
+
+/** Reject a value carrying a control character (CR/LF included). */
+function assertNoControl(value: string, field: string): void {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      throw new Error(
+        `@dwk/calendar: ${field} must not contain control characters`,
+      );
+    }
+  }
+}
+
+/** Reject a `timeZone` that is not a well-formed IANA identifier. */
+function assertTzid(timeZone: string): void {
+  if (!IANA_TZID.test(timeZone)) {
+    throw new Error(`@dwk/calendar: invalid IANA timeZone "${timeZone}"`);
+  }
+}
+
+/** Reject a value that is not a well-formed iCalendar DURATION. */
+function assertDuration(value: string, field: string): void {
+  if (!ICAL_DURATION.test(value)) {
+    throw new Error(`@dwk/calendar: invalid ${field} duration "${value}"`);
+  }
+}
+
 /** Render the start/end (or duration) lines for a `VEVENT`. */
 function pushTiming(lines: string[], event: CalendarEvent): void {
   const start = toICalDate(event.start, event.timeZone);
   lines.push(`DTSTART${start.params}:${start.value}`);
 
   if (event.duration) {
+    assertDuration(event.duration, "event");
     lines.push(`DURATION:${event.duration}`);
   } else if (event.end) {
     const end = toICalDate(event.end, event.timeZone);
@@ -115,6 +150,7 @@ function pushTiming(lines: string[], event: CalendarEvent): void {
  */
 export function toVEventLines(event: CalendarEvent, dtstamp: Date): string[] {
   assertSerializable(event);
+  if (event.timeZone) assertTzid(event.timeZone);
   const lines: string[] = ["BEGIN:VEVENT"];
 
   lines.push(`UID:${escapeText(event.uid)}`);
@@ -131,9 +167,13 @@ export function toVEventLines(event: CalendarEvent, dtstamp: Date): string[] {
     // comma does not read as a separator.
     lines.push(`CATEGORIES:${event.keywords.map(escapeText).join(",")}`);
   }
-  // URL is a URI value (not TEXT), so it is emitted unescaped.
+  // URL is a URI value (not TEXT), so it is emitted unescaped — reject any
+  // control character that would let it break out of the content line.
   const url = event.links?.[0]?.href;
-  if (url) lines.push(`URL:${url}`);
+  if (url) {
+    assertNoControl(url, "URL");
+    lines.push(`URL:${url}`);
+  }
 
   if (event.status) lines.push(`STATUS:${event.status.toUpperCase()}`);
   if (event.created) {
@@ -165,6 +205,7 @@ function wrapCalendar(eventLines: string[], options: ICalendarOptions): string {
     pushText(lines, "X-WR-CALNAME", options.calName);
   }
   if (options.refreshInterval) {
+    assertDuration(options.refreshInterval, "refreshInterval");
     lines.push(`REFRESH-INTERVAL;VALUE=DURATION:${options.refreshInterval}`);
   }
   lines.push(...eventLines, "END:VCALENDAR");

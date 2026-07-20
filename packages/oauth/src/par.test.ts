@@ -98,6 +98,19 @@ describe("createPushedAuthorizationRequestHandler", () => {
     expect(saved?.params.client_assertion_type).toBeUndefined();
   });
 
+  it("rejects a body with a duplicated parameter (RFC 6749 §3.2)", async () => {
+    // Two `client_id`s: last-wins parsing here vs first-wins in an authenticator
+    // could authenticate as one client but attribute the request to another.
+    const req = new Request(ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "client_id=https%3A%2F%2Fapp.example%2F&client_id=https%3A%2F%2Fevil.example%2F&response_type=code",
+    });
+    const res = await handler()(req);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_request" });
+  });
+
   it("rejects a body that smuggles its own request_uri", async () => {
     const res = await handler()(
       postForm({

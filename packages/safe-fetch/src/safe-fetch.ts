@@ -212,6 +212,30 @@ function isPrivateIPv6(groups: number[]): boolean {
   ) {
     return isPrivateIPv4(embeddedV4);
   }
+  const g1 = groups[1] ?? 0;
+  const g2 = groups[2] ?? 0;
+  if (first === 0x2002) {
+    // 6to4 (2002::/16): the embedded IPv4 is groups 1–2 (e.g. 2002:7f00:1::
+    // carries 127.0.0.1). A 6to4 relay would route to that embedded address, so
+    // block when it is private/reserved.
+    const sixToFour: [number, number, number, number] = [
+      g1 >> 8,
+      g1 & 0xff,
+      g2 >> 8,
+      g2 & 0xff,
+    ];
+    return isPrivateIPv4(sixToFour);
+  }
+  if (first === 0x2001 && g1 === 0x0000) {
+    // Teredo (2001:0000::/32): the client IPv4 is groups 6–7, bitwise-inverted.
+    const teredo: [number, number, number, number] = [
+      (g6 ^ 0xffff) >> 8,
+      (g6 ^ 0xffff) & 0xff,
+      (g7 ^ 0xffff) >> 8,
+      (g7 ^ 0xffff) & 0xff,
+    ];
+    return isPrivateIPv4(teredo);
+  }
   return false;
 }
 

@@ -27,16 +27,28 @@ export function methodNotAllowed(allow: string): Response {
  * malformed/empty body or wrong content-type yields empty params (never throws),
  * so the caller's own field validation reports the problem as a `400` rather
  * than the handler crashing.
+ *
+ * Returns `null` when a parameter appears more than once. RFC 6749 §3.2 forbids
+ * duplicate request parameters, and silently keeping the last (or first)
+ * occurrence lets a request diverge from what a separately-parsing
+ * authenticator sees (e.g. two `client_id`s, authenticated as A but recorded as
+ * B). The caller MUST reject a `null` result with `invalid_request`.
  */
-export async function readForm(request: Request): Promise<URLSearchParams> {
+export async function readForm(
+  request: Request,
+): Promise<URLSearchParams | null> {
   const params = new URLSearchParams();
+  const seen = new Set<string>();
   try {
     const form = await request.formData();
     for (const [key, value] of form) {
-      if (typeof value === "string") params.set(key, value);
+      if (typeof value !== "string") continue;
+      if (seen.has(key)) return null;
+      seen.add(key);
+      params.set(key, value);
     }
   } catch {
-    // Intentionally swallowed — see the doc comment.
+    // Malformed/empty body → empty params; the caller's field validation 400s.
   }
   return params;
 }

@@ -165,6 +165,7 @@ async function requireAuth(
     headerToken ?? paramToken,
     scopes,
     recordReplay,
+    config.microsubEndpoint,
   );
   if (!auth.ok) {
     emit(config, "warn", MicrosubLogEvent.AuthRejected, {

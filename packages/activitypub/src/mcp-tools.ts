@@ -298,6 +298,9 @@ export function createActivitypubMcpTools(
           INTERNAL_HEADERS.config,
           JSON.stringify(forwardedConfig(config)),
         );
+        // Mark this as a trusted internal call so the DO serves the owner-only
+        // `__inbox` route (which has no public front-door equivalent).
+        headers.set(INTERNAL_HEADERS.internal, "1");
 
         const id = actor.idFromName(config.iris.id);
         const response = await actor

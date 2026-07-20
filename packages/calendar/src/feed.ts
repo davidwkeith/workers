@@ -58,6 +58,19 @@ export function createCalendarFeed(
     );
   }
   const filename = config.filename ?? "calendar.ics";
+  // The filename is interpolated into a quoted `Content-Disposition`
+  // value, so a `"`, backslash, or control character (CR/LF) would break
+  // the quoting or inject a header.
+  if (
+    [...filename].some((ch) => {
+      const code = ch.charCodeAt(0);
+      return ch === '"' || ch === "\\" || code < 0x20 || code === 0x7f;
+    })
+  ) {
+    throw new Error(
+      "@dwk/calendar: `filename` must not contain quotes, backslashes, or control characters",
+    );
+  }
   const cacheControl = config.cacheControl ?? "public, max-age=3600";
   const serializerOptions: ICalendarOptions = {
     prodId: config.prodId,

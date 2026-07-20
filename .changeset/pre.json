@@ -81,6 +81,7 @@
     "injectable-logging",
     "ldn-extraction",
     "ldn-spec-followups",
+    "mcp-auth-bridge",
     "mcp-protocol-core",
     "metrics-analytics-engine",
     "micropub-auth-scope-conformance-gaps",

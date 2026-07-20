@@ -293,10 +293,24 @@ async function authorize(
 ): Promise<boolean> {
   const { scope } = ctx.principal.record;
   if (!scope.modes.includes(mode)) return false;
-  if (scope.pathPrefix !== undefined && !path.startsWith(scope.pathPrefix)) {
+  if (
+    scope.pathPrefix !== undefined &&
+    !isWithinPathPrefix(path, scope.pathPrefix)
+  ) {
     return false;
   }
   return ctx.backend.authorize(ctx.principal.webid, path, mode);
+}
+
+/**
+ * Whether `path` is the prefix collection itself or a descendant of it, matched
+ * on a **path-segment boundary** — not a raw `startsWith`, which would let a
+ * credential scoped to `/photos` also reach the sibling `/photos-private`.
+ */
+function isWithinPathPrefix(path: string, prefix: string): boolean {
+  const base = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
+  if (base === "") return true; // `/` or empty scopes the whole pod
+  return path === base || path.startsWith(`${base}/`);
 }
 
 // ---------------------------------------------------------------------------
