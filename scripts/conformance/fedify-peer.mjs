@@ -185,25 +185,28 @@ async function buildPeer(peerUrl) {
  * `node:http` server — Fedify ships no Node HTTP adapter of its own.
  *
  * Trusts `X-Forwarded-Proto` (which cloudflared sets on every request it
- * proxies) rather than hardcoding `http:`, defaulting to `https` when it's
- * absent — this process is only ever reached through the public Quick Tunnel
- * (always TLS-terminated at the edge), never bare over plain HTTP. Getting
- * this wrong caused a real, reproduced bug (issue #273/#315/#317/#318): this
- * peer's actor document, self-describing its `id`/`publicKey.owner` from the
- * *inbound* request's reconstructed URL, came out `http://…` (the plain-HTTP
- * scheme cloudflared uses for its local leg to `localhost:{port}`) while the
- * same peer's *outbound* signed activities carried `actor: https://…` (built
- * from the fixed, always-https context in `buildPeer`) — two different
- * self-identities for one actor, depending on direction. The target's
- * anti-impersonation check (rightly) rejected every delivery as a mismatch.
+ * proxies) rather than hardcoding `http:`, falling back to `peerUrl`'s own
+ * scheme when the header is absent — self-enforcing against whatever
+ * `buildPeer`'s fixed signing context actually uses, rather than assuming
+ * "always https" as a bare default that would silently drift out of sync if
+ * this script ever grows a plain-HTTP/no-tunnel mode. Getting this wrong
+ * caused a real, reproduced bug (issue #273/#315/#317/#318): this peer's actor
+ * document, self-describing its `id`/`publicKey.owner` from the *inbound*
+ * request's reconstructed URL, came out `http://…` (the plain-HTTP scheme
+ * cloudflared uses for its local leg to `localhost:{port}`) while the same
+ * peer's *outbound* signed activities carried `actor: https://…` (built from
+ * the fixed context in `buildPeer`) — two different self-identities for one
+ * actor, depending on direction. The target's anti-impersonation check
+ * (rightly) rejected every delivery as a mismatch.
  */
-function serve(federation, port) {
+function serve(federation, port, peerUrl) {
+  const defaultProto = new URL(peerUrl).protocol.replace(/:$/, "");
   const server = createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", async () => {
       const body = Buffer.concat(chunks);
-      const proto = req.headers["x-forwarded-proto"] ?? "https";
+      const proto = req.headers["x-forwarded-proto"] ?? defaultProto;
       const url = `${proto}://${req.headers.host ?? `localhost:${port}`}${req.url}`;
       const request = new Request(url, {
         method: req.method,
@@ -747,7 +750,7 @@ export async function runInterop({
     // when the workflow's env var is set but blank, and `new URL("")` throws.
     peer = await buildPeer(peerUrl || "http://localhost");
     if (peerUrl) {
-      server = await serve(peer.federation, port);
+      server = await serve(peer.federation, port, peerUrl);
       await waitForTunnelReady(peerUrl, log);
     }
   }
