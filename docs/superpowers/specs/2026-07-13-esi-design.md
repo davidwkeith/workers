@@ -111,6 +111,19 @@ export interface EsiOptions {
   readonly maxIncludes?: number;
   /** How many fragment fetches run concurrently (default 6). */
   readonly concurrency?: number;
+  /** Soft high-water mark on scheduled-but-not-yet-emitted output chunks
+   *  (default 256). Once exceeded — e.g. a slow head-of-line fragment holding
+   *  up the ordered tail — `transform` stops accepting input until the tail
+   *  drains, propagating backpressure so the origin body is not buffered
+   *  unboundedly (128 MB Worker limit). Note the bound is on the *count* of
+   *  scheduled chunks, not their bytes: a run of plain text (no `esi:include`)
+   *  tokenizes to one chunk per origin `transform` call regardless of its size,
+   *  so the memory ceiling is `maxBufferedChunks × the origin's chunk size`, not
+   *  a fixed byte figure. There is deliberately no per-text byte cap analogous
+   *  to `maxFragmentBytes` — plain text is passed through, never accumulated —
+   *  so this bounds buffering only to the extent the upstream hands us
+   *  reasonably-sized chunks. */
+  readonly maxBufferedChunks?: number;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
 }

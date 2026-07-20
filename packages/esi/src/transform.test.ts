@@ -197,4 +197,58 @@ describe("createEsiTransformStream", () => {
 
     await writer.abort().catch(() => {});
   });
+
+  it("applies backpressure when the buffer fills behind a slow head-of-line fragment", async () => {
+    let releaseFragment!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFragment = resolve;
+    });
+    const fetchFn: FetchLike = async () => {
+      await gate;
+      return new Response("FRAG");
+    };
+    const stream = createEsiTransformStream({
+      fetch: fetchFn,
+      maxBufferedChunks: 2,
+    });
+    const enc = new TextEncoder();
+    const writer = stream.writable.getWriter();
+    const reader = stream.readable.getReader();
+    const out: Uint8Array[] = [];
+    const readLoop = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) out.push(value);
+      }
+    })();
+
+    // A slow head-of-line include, then a run of text chunks.
+    await writer.write(
+      enc.encode('<esi:include src="https://example.com/slow"/>'),
+    );
+    let written = 0;
+    const writeRest = (async () => {
+      for (let i = 0; i < 10; i++) {
+        await writer.write(enc.encode(`t${i} `));
+        written++;
+      }
+      await writer.close();
+    })();
+
+    // Backpressure must stall the writes: the buffer cannot grow past the mark
+    // while the head-of-line fragment is pending, and nothing is emitted yet.
+    await sleep(20);
+    expect(written).toBeLessThanOrEqual(2);
+    expect(out.length).toBe(0);
+
+    // Releasing the fragment drains the tail and lets the writes complete.
+    releaseFragment();
+    await writeRest;
+    await readLoop;
+    expect(written).toBe(10);
+    expect(new TextDecoder().decode(concat(out))).toBe(
+      "FRAGt0 t1 t2 t3 t4 t5 t6 t7 t8 t9 ",
+    );
+  });
 });
