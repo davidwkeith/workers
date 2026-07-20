@@ -224,6 +224,50 @@ function serve(federation, port) {
   });
 }
 
+const TUNNEL_WARMUP_TIMEOUT_MS = 10_000;
+const TUNNEL_WARMUP_POLL_MS = 500;
+
+/**
+ * Poll the peer's own actor endpoint back through the public `peerUrl` until
+ * it responds, before letting any case run that depends on the *target*
+ * fetching back through the tunnel (issue #273/#315: a live run's `follow`
+ * case failed `key_unresolved` — the target's key resolver tried to fetch
+ * this peer's actor document immediately after the Quick Tunnel came up, and
+ * the fetch failed). cloudflared logging its assigned hostname locally
+ * doesn't mean that hostname is yet routable from every Cloudflare edge
+ * location; round-tripping a real request through the same public hostname is
+ * the best signal available from here that routing has propagated. It is not
+ * airtight — the target's own fetch happens from Cloudflare's Worker network,
+ * a different vantage point than this runner — but Quick Tunnel hostnames
+ * register centrally rather than per-PoP, so a success here is strong
+ * evidence the target's fetch will also succeed. Best-effort: logs and
+ * proceeds either way rather than failing the run, so a stubborn tunnel
+ * degrades to today's (still occasionally flaky) behavior instead of a new
+ * hard failure mode.
+ */
+async function waitForTunnelReady(peerUrl, log) {
+  const deadline = Date.now() + TUNNEL_WARMUP_TIMEOUT_MS;
+  const probeUrl = `${peerUrl}/users/${IDENTIFIER}`;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(probeUrl, {
+        headers: { accept: "application/activity+json" },
+        signal: AbortSignal.timeout(2_000),
+      });
+      if (res.ok) {
+        log(`Quick Tunnel warm: ${peerUrl} is routable`);
+        return;
+      }
+    } catch {
+      // Not yet routable (DNS/connection failure through the tunnel); retry.
+    }
+    await new Promise((r) => setTimeout(r, TUNNEL_WARMUP_POLL_MS));
+  }
+  log(
+    `::warning::Quick Tunnel did not confirm routable within ${TUNNEL_WARMUP_TIMEOUT_MS}ms; proceeding anyway`,
+  );
+}
+
 async function waitFor(received, predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -686,7 +730,10 @@ export async function runInterop({
     // `||`, not `??`: peerUrl arrives as the EMPTY STRING (not undefined)
     // when the workflow's env var is set but blank, and `new URL("")` throws.
     peer = await buildPeer(peerUrl || "http://localhost");
-    if (peerUrl) server = await serve(peer.federation, port);
+    if (peerUrl) {
+      server = await serve(peer.federation, port);
+      await waitForTunnelReady(peerUrl, log);
+    }
   }
 
   try {

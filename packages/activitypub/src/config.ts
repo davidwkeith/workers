@@ -158,6 +158,18 @@ export interface ActivityPubConfig {
   readonly logger?: Logger;
   /** Metrics seam; defaults to a no-op. */
   readonly metrics?: Metrics;
+
+  /**
+   * TEMPORARY (fediverse conformance debugging, #273/#315) — opt into the
+   * signature-rejection diagnostic block in `handler.ts`: on a failed inbound
+   * signature check, the response body additionally echoes the request's own
+   * `signature`/`signature-input`/`content-type`/`digest`/`date`/`host`
+   * headers and, for `key_unresolved`, the *parsed* (never re-fetched)
+   * `keyId`. Defaults to `false` and MUST stay off for any real deployment —
+   * an inbox is public, so this is only ever safe on a disposable debug
+   * target you are actively watching. Never set this outside that.
+   */
+  readonly debugSignatureDiagnostics?: boolean;
 }
 
 /** Fully-resolved configuration with defaults applied and IRIs derived. */
@@ -172,6 +184,8 @@ export interface ResolvedConfig {
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
   readonly manuallyApprovesJoins: boolean;
   readonly verifyRelayedObjects: RelayVerificationMode;
+  /** TEMPORARY (#273/#315) — see {@link ActivityPubConfig.debugSignatureDiagnostics}. */
+  readonly debugSignatureDiagnostics: boolean;
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -353,6 +367,7 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     webfinger,
     sharedInbox,
     manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
+    debugSignatureDiagnostics: config.debugSignatureDiagnostics ?? false,
     verifyRelayedObjects: config.verifyRelayedObjects ?? "tiered",
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,

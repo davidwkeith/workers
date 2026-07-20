@@ -37,7 +37,12 @@ import {
   OUTCOME_ACTIVITY_HEADER,
   OUTCOME_HEADER,
 } from "./log.js";
-import { verifyInboxSignature, type InboxRequest } from "./signature.js";
+import {
+  verifyInboxSignature,
+  parseSignatureHeader,
+  type InboxRequest,
+  type VerifyFailureReason,
+} from "./signature.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type ActivityPubHandler = (
@@ -180,6 +185,58 @@ async function verifySignature(config: ResolvedConfig, inbox: InboxRequest) {
   });
 }
 
+// --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging, #273/#315
+// — revert before this lingers) ---
+//
+// Off by default (`ActivityPubConfig.debugSignatureDiagnostics`) and
+// additionally self-expires at a hardcoded cutoff, so it cannot linger
+// silently even on the one disposable debug deployment that opts in.
+// Deliberately makes **zero** network calls of its own — it only echoes data
+// already present in the rejected request (its own headers, and the `keyId`
+// string parsed, never fetched, from its `Signature` header) — so a caller
+// cannot use it to turn this public inbox into a fetch oracle against
+// arbitrary third-party hosts. This piggybacks on the channel that already
+// works for debugging the live suite: the fedify-peer test case throws on a
+// non-2xx delivery and prints the response body verbatim in the workflow
+// log, so no separate log-retrieval path (`wrangler tail`, etc.) is needed.
+const DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF = Date.parse("2026-07-21T12:00:00Z");
+
+function buildSignatureDiagnostic(
+  inbox: InboxRequest,
+  reason: VerifyFailureReason,
+): string {
+  const preview = (value: string | null, max = 200): string =>
+    value === null
+      ? "MISSING"
+      : value.length > max
+        ? `${value.slice(0, max)}…`
+        : value;
+  const sigHeader = inbox.headers.get("signature");
+  const lines = [
+    `sig=${preview(sigHeader)}`,
+    `sig-input=${preview(inbox.headers.get("signature-input"))}`,
+    `content-type=${preview(inbox.headers.get("content-type"), 60)}`,
+    `digest=${preview(inbox.headers.get("digest"))}`,
+    `date=${preview(inbox.headers.get("date"), 60)}`,
+    `host=${preview(inbox.headers.get("host"), 60)}`,
+  ];
+  if (reason === "key_unresolved" && sigHeader) {
+    lines.push(
+      `parsed-keyId=${parseSignatureHeader(sigHeader).keyId ?? "unparsed"}`,
+    );
+  }
+  return lines.join(" | ");
+}
+
+/** Whether the diagnostic block is both opted-in and still within its window. */
+function signatureDiagnosticsEnabled(config: ResolvedConfig): boolean {
+  return (
+    config.debugSignatureDiagnostics &&
+    config.now() < DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF
+  );
+}
+// --- END TEMPORARY DIAGNOSTIC ---
+
 /**
  * Create the stateless ActivityPub front-door handler. The actor document and
  * NodeInfo are served here; all authoritative state lives in the
@@ -275,6 +332,7 @@ export function createActivityPub(
       const inbox: InboxRequest = {
         method,
         path: `${url.pathname}${url.search}`,
+        url: request.url,
         headers: request.headers,
         body: bodyBytes,
       };
@@ -288,8 +346,14 @@ export function createActivityPub(
         // so the peer redelivers later, rather than 401 which signals a
         // permanent rejection and drops the activity (Mastodon 4.6 behaviour).
         // Cryptographic/format failures are permanent and stay 401.
+        // --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging,
+        // #273/#315 — revert before this lingers) ---
+        const diag = signatureDiagnosticsEnabled(resolved)
+          ? `\n${buildSignatureDiagnostic(inbox, result.reason)}`
+          : "";
+        // --- END TEMPORARY DIAGNOSTIC ---
         if (result.reason === "key_unresolved") {
-          return new Response(`invalid_signature: ${result.reason}`, {
+          return new Response(`invalid_signature: ${result.reason}${diag}`, {
             status: 503,
             headers: {
               "content-type": "text/plain; charset=utf-8",
@@ -297,7 +361,7 @@ export function createActivityPub(
             },
           });
         }
-        return text(401, `invalid_signature: ${result.reason}`);
+        return text(401, `invalid_signature: ${result.reason}${diag}`);
       }
       emit(resolved, "info", ActivityPubLogEvent.SignatureAccepted, {
         actorHost: hostFromUrl(result.actor),

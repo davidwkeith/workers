@@ -17,6 +17,7 @@
       "@dwk/websub": ["../websub/src/index.ts"],
       "@dwk/calendar": ["../calendar/src/index.ts"],
       "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/http-signatures": ["../http-signatures/src/index.ts"],
       "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
