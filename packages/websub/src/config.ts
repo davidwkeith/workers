@@ -12,7 +12,7 @@
  */
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
-import type { D1Database, Queue } from "@cloudflare/workers-types";
+import type { D1Database, Queue, R2Bucket } from "@cloudflare/workers-types";
 import {
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
@@ -32,6 +32,19 @@ export interface WebSubEnv {
   readonly WEBSUB_DB: D1Database;
   /** Queue for intent verification and content-distribution fan-out + retries. */
   readonly WEBSUB_QUEUE: Queue<WebSubJob>;
+  /**
+   * R2 bucket used to stage a distribution snapshot **once** when its body is
+   * too large to inline in a queue message (> `MAX_INLINE_BODY_BYTES`), so the
+   * per-subscriber deliver jobs reference one blob instead of copying it into
+   * every message. Optional: a hub whose feeds always fit the inline limit never
+   * touches it. When a snapshot *does* exceed the limit and this binding is
+   * absent, the fan-out fails loudly (it will not silently drop or truncate the
+   * push). Stage objects are transient — configure an R2 lifecycle expiration
+   * rule (≥ the queue's message-retention window) on this bucket so read-once
+   * snapshots are reclaimed; the delivery path never deletes them (no single
+   * per-subscriber job knows it is the last reader).
+   */
+  readonly WEBSUB_CONTENT?: R2Bucket;
 }
 
 /** Configuration passed to {@link createWebSub}. */

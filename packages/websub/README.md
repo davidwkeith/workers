@@ -13,9 +13,11 @@ requests are validated **synchronously** (fast `202 Accepted`); the
 verification-of-intent callback and content fan-out run **asynchronously** on a
 queue with retries and backoff. The subscription store is **D1 (strongly
 consistent), never KV** — a stale or lost subscription is a correctness bug. On
-publish the hub fetches the topic and POSTs it to every verified callback,
-signing the body with HMAC-SHA256 (`X-Hub-Signature`) when the subscriber
-registered a secret.
+publish the hub fetches the topic **once** and fans out **one delivery job per
+subscriber**, POSTing the snapshot to each verified callback and signing the body
+with HMAC-SHA256 (`X-Hub-Signature`) when the subscriber registered a secret — so
+each subscriber retries on its own checkpoint rather than a single failure
+re-delivering to everyone.
 
 ## What this package does *not* do
 
@@ -69,18 +71,27 @@ export default {
 };
 ```
 
-The consumer handles both job kinds:
+The consumer handles three job kinds:
 
 - **verify** — issues the `hub.challenge` GET to the callback; on a confirming
   `2xx` echo it activates the subscription (subscribe) or removes it
   (unsubscribe). A subscription row is written **only after** verification
   succeeds, so an unverified callback never lands in the store.
-- **distribute** — prunes expired leases, fetches the topic's current content,
-  and POSTs it (signed per-subscriber when a secret is set) to every active
-  callback.
+- **distribute** — the fan-out **planner**: prunes expired leases, fetches the
+  topic's current content **once**, then enqueues one **deliver** job per active
+  subscriber. Small snapshots ride inline in each message (base64-encoded); a
+  body too large to inline is staged once in the optional `WEBSUB_CONTENT` R2
+  bucket and referenced by key.
+- **deliver** — POSTs the snapshot to one subscriber's callback (signed
+  per-subscriber when a secret is set). A failed POST retries on **that
+  subscriber's own** queue checkpoint, so a callback down for a while no longer
+  misses the update and a single failure no longer re-delivers to everyone.
 
-A store/queue failure — or a distribution that can't fetch the topic — is
-retried; everything else is acked.
+A store/queue failure — a distribution that can't fetch the topic, or a single
+delivery whose POST failed — is retried; everything else is acked. Delivery is
+**at-least-once** (WebSub §7 requires subscribers to tolerate duplicates): a
+`distribute` retry after a partial fan-out can re-enqueue deliver jobs for
+subscribers already reached.
 
 ### Publishing from your own write path
 
@@ -98,14 +109,23 @@ await notifyPublish(env, "https://example.com/feed.xml");
 
 ## Bindings (`Env` fragment)
 
-| Binding        | Type         | Required | Purpose                                          |
-| -------------- | ------------ | -------- | ------------------------------------------------ |
-| `WEBSUB_DB`    | `D1Database` | yes      | Strongly-consistent subscription store.          |
-| `WEBSUB_QUEUE` | `Queue`      | yes      | Verification + distribution fan-out and retries. |
+| Binding          | Type         | Required | Purpose                                                      |
+| ---------------- | ------------ | -------- | ----------------------------------------------------------- |
+| `WEBSUB_DB`      | `D1Database` | yes      | Strongly-consistent subscription store.                     |
+| `WEBSUB_QUEUE`   | `Queue`      | yes      | Verification + per-subscriber delivery fan-out and retries. |
+| `WEBSUB_CONTENT` | `R2Bucket`   | no       | Stages a distribution snapshot too large to inline.         |
 
 The subscription store **MUST** be D1 (or another strongly-consistent store),
 **never KV**: staleness here is a correctness/security bug, not a safe-to-be-stale
 cache (see [`spec/non-functional-requirements.md`](../../spec/non-functional-requirements.md)).
+
+`WEBSUB_CONTENT` is only touched when a snapshot exceeds the inline
+queue-message limit (~64 KB raw); a hub whose feeds always fit inline never needs
+it. When a snapshot **does** exceed the limit and the binding is absent, the
+fan-out **fails loudly** rather than truncating the push. Staged objects are
+transient — give the bucket an **R2 lifecycle expiration rule** (≥ the queue's
+message-retention window) so read-once snapshots are reclaimed; the delivery path
+never deletes them (no single per-subscriber job knows it is the last reader).
 
 ## Config
 

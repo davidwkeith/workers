@@ -36,7 +36,20 @@ cannot provide:
 - **Content distribution:** on publish, `POST` the updated topic to each
   verified callback. When the subscriber registered a `hub.secret`, sign the
   body with **HMAC-SHA256** and send it in the `X-Hub-Signature` header
-  (`sha256=<hex>`).
+  (`sha256=<hex>`). Fan-out is **two-stage**: a `distribute` job fetches the
+  topic snapshot once and enqueues one `deliver` job per active subscriber, so
+  each subscriber retries on its own queue checkpoint (a callback down for a
+  while no longer misses the update, a large subscriber set no longer exceeds a
+  single invocation's subrequest ceiling, and a single failure no longer
+  re-delivers to everyone). The snapshot rides inline in each `deliver` message
+  when small (base64-encoded, since Queues JSON-serialize the message and would
+  otherwise corrupt a raw byte array); a body too large to inline is staged once
+  in R2 and referenced by key. Delivery is **at-least-once**: the planner
+  enqueues per-subscriber jobs in chunked `sendBatch` calls, and if a later
+  chunk fails after earlier chunks flushed, the `distribute` job retries and may
+  re-enqueue deliver jobs for subscribers already reached. WebSub §7 requires
+  subscribers to tolerate duplicate deliveries, so this is preferred over the
+  alternative of silently dropping the unflushed subscribers' update.
 - **Publish ping:** an entry point (called by the build / Micropub write path)
   that marks a topic changed and enqueues distribution.
 
