@@ -13,10 +13,11 @@ on unauthenticated / attacker-controlled paths:
   `owner: https://victim.example/users/alice` and have signed activities
   attributed to the victim. The default resolver now binds the resolved
   `owner` to the origin that served the key (rejecting cross-origin
-  ownership), and the `keyId` fetch runs through the same public-HTTPS SSRF
-  guard outbound delivery uses — `https:`-only, private/loopback/link-local
-  hosts blocked (plaintext `http:` is no longer accepted), with a bounded,
-  size-capped body read — instead of an unguarded `fetch`.
+  ownership), and the `keyId` fetch runs through `@dwk/safe-fetch`'s
+  `safeFetch` — `https:`-only, with private/loopback/link-local hosts blocked
+  and **every redirect hop re-validated** (so a public host cannot `302` the
+  fetch onto an internal address), plaintext `http:` no longer accepted, and a
+  bounded, size-capped body read — instead of an unguarded `fetch`.
 
 - **`@dwk/vc`: credential forgery via unbound `verificationMethod` (#289).**
   Proof verification never tied the proof's `verificationMethod` to the

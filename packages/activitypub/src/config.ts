@@ -11,8 +11,10 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
+import { safeFetch } from "@dwk/safe-fetch";
+
 import type { ActorIris, ActorProfile } from "./as2.js";
-import { guardedFetch, readJsonCapped } from "./discovery.js";
+import { readJsonCapped } from "./discovery.js";
 import type {
   KeyResolver,
   ResolvedKey,
@@ -256,10 +258,13 @@ const MAX_KEY_DOC_BYTES = 1024 * 1024;
  * fetched or carries no usable key, which the verifier maps to a rejection.
  *
  * The `keyId` comes from an unauthenticated inbound `POST /inbox`, so the fetch
- * runs through the same public-HTTPS SSRF guard outbound delivery uses
- * ({@link guardedFetch}): non-`https:` schemes and private / loopback /
- * link-local hosts are refused before any request leaves. The body is read with
- * a hard byte ceiling so a hostile remote cannot exhaust memory.
+ * runs through `@dwk/safe-fetch`'s {@link safeFetch} — the repo's SSRF-safe
+ * primitive that re-validates the host on **every** redirect hop (not just the
+ * initial URL), refusing non-`https:` schemes and private / loopback /
+ * link-local targets. A plain guard on the initial URL would be bypassable via
+ * a `302` from a public host to `169.254.169.254`; hop-by-hop revalidation
+ * closes that. The body is read with a hard byte ceiling so a hostile remote
+ * cannot exhaust memory.
  *
  * Critically, the resolved `owner` is bound to the origin that served the key:
  * a key document may only speak for an actor on its **own** origin. Without this
@@ -269,7 +274,6 @@ const MAX_KEY_DOC_BYTES = 1024 * 1024;
  * since the signature is checked against *this* document's key.
  */
 function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
-  const fetchGuarded = guardedFetch(fetchImpl);
   return async (keyId: string): Promise<ResolvedKey | null> => {
     // The key IRI is the actor (or key) document URL with its fragment
     // stripped. Parse it as a URL so the fragment is removed per the URL spec
@@ -284,14 +288,16 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
     }
     let response: Response;
     try {
-      // `guardedFetch` enforces `https:`-only + a public host on the
-      // attacker-supplied `keyId` (throwing on any violation) before the
-      // request leaves; a rejection resolves to `null`.
-      response = await fetchGuarded(keyUrl.href, {
-        headers: { accept: "application/activity+json" },
-        // Bound key resolution so a slow remote cannot stall inbox verification.
-        signal: AbortSignal.timeout(10_000),
-      });
+      // `safeFetch` enforces `https:`-only + a public host on the initial URL
+      // and on every redirect hop (throwing `SsrfError` on any violation); a
+      // rejection resolves to `null`. `timeoutMs` bounds the whole chain so a
+      // slow remote cannot stall inbox verification.
+      ({ response } = await safeFetch(
+        fetchImpl,
+        keyUrl.href,
+        { headers: { accept: "application/activity+json" } },
+        { allowedSchemes: ["https:"], timeoutMs: 10_000 },
+      ));
     } catch {
       return null;
     }

@@ -48,6 +48,7 @@
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",
     "@dwk/mcp": "workspace:*",
+    "@dwk/safe-fetch": "workspace:*",
     "@dwk/webfinger": "workspace:*"
   }
 }

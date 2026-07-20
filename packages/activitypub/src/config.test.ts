@@ -232,4 +232,21 @@ describe("default key resolver", () => {
     ).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("rejects a keyId that redirects to a private host (hop-by-hop SSRF)", async () => {
+    // The initial URL is a syntactically-fine public HTTPS host (passes the
+    // first check), but it 302s to a link-local metadata address. Because the
+    // fetch re-validates every redirect hop, the private target is refused.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://169.254.169.254/latest/meta-data" },
+        }),
+    );
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://public.example/key")).toBeNull();
+    // The redirect hop to the private host was never fetched.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
