@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- Add `@dwk/mcp` — a [Model Context Protocol](https://modelcontextprotocol.io/specification)
+- e1120e8: Add `@dwk/mcp` — a [Model Context Protocol](https://modelcontextprotocol.io/specification)
   server core, so an AI agent authorized by the owner can operate the composed
   Worker on their behalf (publish via Micropub, read the Microsub timeline, list
   received Webmentions, and eventually read/write the pod). Prompted by a review
@@ -26,7 +26,7 @@
 
   Tracked in #240.
 
-- Add the MCP auth bridge (#240): `createDpopBearerAuthenticator` builds the
+- f39ebfd: Add the MCP auth bridge (#240): `createDpopBearerAuthenticator` builds the
   `authenticate(request)` hook `createMcp` accepts, wiring bearer +
   **DPoP-bound** access tokens per spec/packages/mcp.md. It never verifies a
   token's signature or looks it up itself — the composing package supplies a
