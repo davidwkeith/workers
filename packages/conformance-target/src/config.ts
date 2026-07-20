@@ -166,6 +166,12 @@ export function configsFor(env: ConformanceEnv): TargetConfigs {
       ...(env.ACTIVITYPUB_PUBLISH_TOKEN
         ? { publishToken: env.ACTIVITYPUB_PUBLISH_TOKEN }
         : {}),
+      // TEMPORARY (fediverse conformance debugging, #273/#315 — revert with
+      // the rest of that PR): this deployment is the one disposable,
+      // actively-watched debug target @dwk/activitypub's
+      // `debugSignatureDiagnostics` opt-in exists for. Never set this on a
+      // real deployment.
+      debugSignatureDiagnostics: true,
     },
     remotestorage: {
       baseUrl: base,

@@ -43,7 +43,6 @@ import {
   type InboxRequest,
   type VerifyFailureReason,
 } from "./signature.js";
-import { assertPublicHttpsTarget } from "./delivery.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type ActivityPubHandler = (
@@ -186,19 +185,26 @@ async function verifySignature(config: ResolvedConfig, inbox: InboxRequest) {
   });
 }
 
-// --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging, #273 —
-// revert before merging) ---
+// --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging, #273/#315
+// — revert before this lingers) ---
 //
-// Surfaces exactly what the request actually carried, and — for
-// `key_unresolved` — the live outcome of re-resolving the signer's key, right
-// in the rejection response body. This piggybacks on the channel that already
+// Off by default (`ActivityPubConfig.debugSignatureDiagnostics`) and
+// additionally self-expires at a hardcoded cutoff, so it cannot linger
+// silently even on the one disposable debug deployment that opts in.
+// Deliberately makes **zero** network calls of its own — it only echoes data
+// already present in the rejected request (its own headers, and the `keyId`
+// string parsed, never fetched, from its `Signature` header) — so a caller
+// cannot use it to turn this public inbox into a fetch oracle against
+// arbitrary third-party hosts. This piggybacks on the channel that already
 // works for debugging the live suite: the fedify-peer test case throws on a
-// non-2xx delivery and prints the response body verbatim in the workflow log,
-// so no separate log-retrieval path (wrangler tail, etc.) is needed.
-async function buildSignatureDiagnostic(
+// non-2xx delivery and prints the response body verbatim in the workflow
+// log, so no separate log-retrieval path (`wrangler tail`, etc.) is needed.
+const DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF = Date.parse("2026-07-21T12:00:00Z");
+
+function buildSignatureDiagnostic(
   inbox: InboxRequest,
   reason: VerifyFailureReason,
-): Promise<string> {
+): string {
   const preview = (value: string | null, max = 200): string =>
     value === null
       ? "MISSING"
@@ -215,24 +221,19 @@ async function buildSignatureDiagnostic(
     `host=${preview(inbox.headers.get("host"), 60)}`,
   ];
   if (reason === "key_unresolved" && sigHeader) {
-    const keyId = parseSignatureHeader(sigHeader).keyId;
-    lines.push(`parsed-keyId=${keyId ?? "unparsed"}`);
-    if (keyId) {
-      try {
-        const url = new URL(keyId);
-        url.hash = "";
-        assertPublicHttpsTarget(url.href);
-        const res = await fetch(url.href, {
-          headers: { accept: "application/activity+json" },
-          signal: AbortSignal.timeout(5_000),
-        });
-        lines.push(`keyId-fetch-status=${res.status} ${res.statusText}`);
-      } catch (err) {
-        lines.push(`keyId-fetch-error=${String(err)}`);
-      }
-    }
+    lines.push(
+      `parsed-keyId=${parseSignatureHeader(sigHeader).keyId ?? "unparsed"}`,
+    );
   }
   return lines.join(" | ");
+}
+
+/** Whether the diagnostic block is both opted-in and still within its window. */
+function signatureDiagnosticsEnabled(config: ResolvedConfig): boolean {
+  return (
+    config.debugSignatureDiagnostics &&
+    config.now() < DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF
+  );
 }
 // --- END TEMPORARY DIAGNOSTIC ---
 
@@ -345,11 +346,13 @@ export function createActivityPub(
         // permanent rejection and drops the activity (Mastodon 4.6 behaviour).
         // Cryptographic/format failures are permanent and stay 401.
         // --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging,
-        // #273 — revert before merging) ---
-        const diag = await buildSignatureDiagnostic(inbox, result.reason);
+        // #273/#315 — revert before this lingers) ---
+        const diag = signatureDiagnosticsEnabled(resolved)
+          ? `\n${buildSignatureDiagnostic(inbox, result.reason)}`
+          : "";
         // --- END TEMPORARY DIAGNOSTIC ---
         if (result.reason === "key_unresolved") {
-          return new Response(`invalid_signature: ${result.reason}\n${diag}`, {
+          return new Response(`invalid_signature: ${result.reason}${diag}`, {
             status: 503,
             headers: {
               "content-type": "text/plain; charset=utf-8",
@@ -357,7 +360,7 @@ export function createActivityPub(
             },
           });
         }
-        return text(401, `invalid_signature: ${result.reason}\n${diag}`);
+        return text(401, `invalid_signature: ${result.reason}${diag}`);
       }
       emit(resolved, "info", ActivityPubLogEvent.SignatureAccepted, {
         actorHost: hostFromUrl(result.actor),
