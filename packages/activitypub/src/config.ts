@@ -11,7 +11,10 @@
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
+import { safeFetch } from "@dwk/safe-fetch";
+
 import type { ActorIris, ActorProfile } from "./as2.js";
+import { readJsonCapped } from "./discovery.js";
 import type {
   KeyResolver,
   ResolvedKey,
@@ -277,10 +280,29 @@ export function deriveIris(baseUrl: string, username: string): ActorIris {
   };
 }
 
+/** Ceiling on an untrusted key/actor document's size (bytes). */
+const MAX_KEY_DOC_BYTES = 1024 * 1024;
+
 /**
  * The default key resolver: fetch the `keyId` (an actor or fragment IRI) as AS2
  * and read its embedded `publicKey`. Returns `null` when the document cannot be
  * fetched or carries no usable key, which the verifier maps to a rejection.
+ *
+ * The `keyId` comes from an unauthenticated inbound `POST /inbox`, so the fetch
+ * runs through `@dwk/safe-fetch`'s {@link safeFetch} — the repo's SSRF-safe
+ * primitive that re-validates the host on **every** redirect hop (not just the
+ * initial URL), refusing non-`https:` schemes and private / loopback /
+ * link-local targets. A plain guard on the initial URL would be bypassable via
+ * a `302` from a public host to `169.254.169.254`; hop-by-hop revalidation
+ * closes that. The body is read with a hard byte ceiling so a hostile remote
+ * cannot exhaust memory.
+ *
+ * Critically, the resolved `owner` is bound to the origin that served the key:
+ * a key document may only speak for an actor on its **own** origin. Without this
+ * an attacker could host a key document at `https://evil.example/key` declaring
+ * `owner: https://victim.example/users/alice`, sign an activity with their own
+ * key, and have the verifier attribute it to the victim (actor impersonation),
+ * since the signature is checked against *this* document's key.
  */
 function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
   return async (keyId: string): Promise<ResolvedKey | null> => {
@@ -288,36 +310,36 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
     // stripped. Parse it as a URL so the fragment is removed per the URL spec
     // (rather than by string surgery) and an unparseable `keyId` is rejected
     // before it reaches `fetch`.
-    let actorUrl: string;
+    let keyUrl: URL;
     try {
-      const url = new URL(keyId);
-      // Only ever dereference a remote actor/key document over HTTP(S); reject
-      // other schemes (`file:`, `data:`, …) outright so a crafted `keyId`
-      // cannot redirect the fetch at a non-network resource.
-      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-      url.hash = "";
-      actorUrl = url.href;
+      keyUrl = new URL(keyId);
+      keyUrl.hash = "";
     } catch {
       return null;
     }
     let response: Response;
+    // The URL the document was actually served from, after any redirects — the
+    // binding below uses THIS, not the requested `keyId`, so an open redirect on
+    // the requested origin (`keyId` on victim.example → 302 → attacker content)
+    // cannot smuggle an attacker-served key in under the victim's origin.
+    let servedUrl: string;
     try {
-      response = await fetchImpl(actorUrl, {
-        headers: { accept: "application/activity+json" },
-        // Bound key resolution so a slow remote cannot stall inbox verification.
-        signal: AbortSignal.timeout(10_000),
-      });
+      // `safeFetch` enforces `https:`-only + a public host on the initial URL
+      // and on every redirect hop (throwing `SsrfError` on any violation); a
+      // rejection resolves to `null`. `timeoutMs` bounds the whole chain so a
+      // slow remote cannot stall inbox verification.
+      ({ response, url: servedUrl } = await safeFetch(
+        fetchImpl,
+        keyUrl.href,
+        { headers: { accept: "application/activity+json" } },
+        { allowedSchemes: ["https:"], timeoutMs: 10_000 },
+      ));
     } catch {
       return null;
     }
     if (!response.ok) return null;
-    let doc: unknown;
-    try {
-      doc = await response.json();
-    } catch {
-      return null;
-    }
-    if (!doc || typeof doc !== "object") return null;
+    const doc = await readJsonCapped(response, MAX_KEY_DOC_BYTES);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
     const publicKey = (doc as Record<string, unknown>).publicKey;
     if (!publicKey || typeof publicKey !== "object") return null;
     const pem = (publicKey as Record<string, unknown>).publicKeyPem;
@@ -325,6 +347,18 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       (publicKey as Record<string, unknown>).owner ??
       (doc as Record<string, unknown>).id;
     if (typeof pem !== "string" || typeof owner !== "string") return null;
+    // Bind the key to the origin that actually served it (post-redirect): reject
+    // a document that claims ownership by an actor on a different origin (the
+    // impersonation vector).
+    let ownerUrl: URL;
+    let servedOrigin: string;
+    try {
+      ownerUrl = new URL(owner);
+      servedOrigin = new URL(servedUrl).origin;
+    } catch {
+      return null;
+    }
+    if (ownerUrl.origin !== servedOrigin) return null;
     return { owner, publicKeyPem: pem };
   };
 }

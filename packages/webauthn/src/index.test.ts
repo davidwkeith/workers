@@ -261,4 +261,53 @@ describe("@dwk/webauthn handler", () => {
       handler(request, {} as WebAuthnEnv, {} as ExecutionContext),
     ).rejects.toThrow(/missing required Durable Object binding/);
   });
+
+  it("rejects a registration the authorize hook denies, before touching the DO", async () => {
+    const seen: string[] = [];
+    // A realistic gate: allow authentication, require a session for register.
+    const { handler, origin } = rp("gated", {
+      authorize: (op, req) => {
+        seen.push(op);
+        return op.startsWith("authenticate/") || req.headers.has("x-session");
+      },
+    });
+    const res = await post(handler, origin, "/register/options", {
+      user: { id: "dXNlci0x", name: "alice", displayName: "Alice" },
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(seen).toEqual(["register/options"]);
+  });
+
+  it("lets an approved registration through the gate", async () => {
+    const { handler, origin } = rp("gated-ok", { authorize: () => true });
+    const res = await post(handler, origin, "/register/options", {
+      user: { id: "dXNlci0x", name: "alice", displayName: "Alice" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("warns loudly at startup when no authorize hook is supplied", () => {
+    const warnings: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (event: string) => warnings.push(event),
+      error: () => {},
+    };
+    rp("unguarded", { logger });
+    expect(warnings).toContain("webauthn.config.registration_unguarded");
+  });
+
+  it("does not warn when an authorize hook is supplied", () => {
+    const warnings: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (event: string) => warnings.push(event),
+      error: () => {},
+    };
+    rp("guarded-quiet", { authorize: () => true, logger });
+    expect(warnings).not.toContain("webauthn.config.registration_unguarded");
+  });
 });

@@ -65,6 +65,9 @@ importers:
       '@dwk/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@dwk/safe-fetch':
+        specifier: workspace:*
+        version: link:../safe-fetch
       '@dwk/webfinger':
         specifier: workspace:*
         version: link:../webfinger

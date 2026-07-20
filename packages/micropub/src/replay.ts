@@ -42,12 +42,32 @@ export function createDpopReplayStore(env: MicropubStoreEnv): DpopReplayStore {
   }
   const db = env.MICROPUB_DB;
 
+  // Create the schema lazily on first use so a consumer that composes the
+  // package against a fresh D1 never needs a separate migration step: the first
+  // authenticated request that records a proof materialises the table. Mirrors
+  // the lazy-schema pattern the webmention/websub/microsub stores use. The
+  // cached promise is cleared on failure so a transient D1 error during the
+  // first call doesn't permanently wedge the store.
+  let ready: Promise<void> | null = null;
+  const ensureSchema = (): Promise<void> => {
+    ready ??= db
+      .prepare(SCHEMA)
+      .run()
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        ready = null;
+        throw err;
+      });
+    return ready;
+  };
+
   return {
     async init() {
-      await db.prepare(SCHEMA).run();
+      await ensureSchema();
     },
 
     async recordProof(jti, expiresAt, now) {
+      await ensureSchema();
       // Reap-then-record in a single batched transaction (one D1 roundtrip):
       //   1. DELETE rows whose proof can no longer be accepted, so the table
       //      tracks only the live window.

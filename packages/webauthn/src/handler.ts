@@ -21,6 +21,7 @@ import {
   type WebAuthnEnv,
   type WebAuthnOperation,
 } from "./config.js";
+import { WebAuthnLogEvent } from "./log.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type WebAuthnHandler = (
@@ -111,6 +112,18 @@ function internalRequest(
 export function createWebAuthn(config: WebAuthnConfig): WebAuthnHandler {
   const resolved = resolveConfig(config);
 
+  // Loud startup warning when registration is left ungated: the default
+  // `authorize` hook allows everything, so an unauthenticated `/register/*` is
+  // an account-takeover vector unless the composing front door gates it
+  // upstream. Surface it rather than degrading silently (composition-contract
+  // "no silent degradation" posture); it's advisory since upstream gating is a
+  // valid pattern the package can't observe.
+  if (config.authorize === undefined) {
+    emit(resolved, "warn", WebAuthnLogEvent.RegistrationUnguarded, {
+      reason: "no_authorize_hook",
+    });
+  }
+
   return async (request, env, _ctx) => {
     assertBindings(env);
 
@@ -122,6 +135,20 @@ export function createWebAuthn(config: WebAuthnConfig): WebAuthnHandler {
       return new Response("Method Not Allowed", {
         status: 405,
         headers: { allow: "POST" },
+      });
+    }
+
+    // Authorization gate (runs before any DO state is touched). Registration
+    // MUST be gated to an authenticated principal by the composing front door —
+    // see `WebAuthnConfig.authorize`. The default hook allows all.
+    if (!(await resolved.authorize(op, request))) {
+      const rejected = op.startsWith("register/")
+        ? WebAuthnLogEvent.RegisterRejected
+        : WebAuthnLogEvent.AuthenticateRejected;
+      emit(resolved, "warn", rejected, { reason: "unauthorized" });
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
       });
     }
 

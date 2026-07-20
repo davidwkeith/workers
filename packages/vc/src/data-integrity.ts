@@ -287,6 +287,31 @@ export interface VerifyProofOptions {
   readonly resolveVerificationMethod: VerificationMethodResolver;
   /** Required proof purpose. Defaults to `"assertionMethod"`. */
   readonly expectedProofPurpose?: string;
+  /**
+   * The identifier the verification method must be controlled by. Defaults to
+   * the credential's own `issuer` id — the correct binding for an
+   * `assertionMethod` proof. Override only for proof purposes bound to a
+   * different party (e.g. a presentation's `authentication` proof, bound to the
+   * holder).
+   */
+  readonly expectedController?: string;
+}
+
+/** The issuer id of a document, whether `issuer` is a string or an `{ id }`. */
+function documentIssuerId(document: JsonObject): string | undefined {
+  const issuer = document.issuer;
+  if (typeof issuer === "string") return issuer;
+  if (issuer !== null && typeof issuer === "object" && !Array.isArray(issuer)) {
+    const id = (issuer as JsonObject).id;
+    if (typeof id === "string") return id;
+  }
+  return undefined;
+}
+
+/** The controller a verification method id implies: the id with its fragment removed. */
+function controllerFromMethodId(methodId: string): string {
+  const hash = methodId.indexOf("#");
+  return hash === -1 ? methodId : methodId.slice(0, hash);
 }
 
 /** The outcome of verifying a document's Data Integrity proof(s). */
@@ -371,9 +396,30 @@ async function verifySingleProof(
     return `proofValue is not valid base58-btc: ${(error as Error).message}`;
   }
 
+  // Bind the proof to the credential's issuer BEFORE trusting any resolved key:
+  // the verification method MUST be controlled by the issuer. Without this a
+  // proof naming `issuer: did:web:victim` can be signed by an attacker's own key
+  // under `verificationMethod: did:web:attacker#key-0`; the resolver would fetch
+  // the attacker's key, the signature would verify, and the forged credential
+  // would be accepted as the victim's. The controller is the method's declared
+  // `controller`, or — for foreign documents that omit it — the DID/URL portion
+  // of the verification method id (its fragment stripped).
+  const expectedController =
+    options.expectedController ?? documentIssuerId(document);
+  if (expectedController === undefined) {
+    return "cannot bind proof: document has no issuer to bind the verification method to";
+  }
+
   const vm = await options.resolveVerificationMethod(proof.verificationMethod);
   if (vm === undefined) {
     return `could not resolve verification method "${proof.verificationMethod}"`;
+  }
+  const controller =
+    typeof vm.controller === "string"
+      ? vm.controller
+      : controllerFromMethodId(proof.verificationMethod);
+  if (controller !== expectedController) {
+    return `verification method controller "${controller}" is not the credential issuer "${expectedController}"`;
   }
 
   let verifier: ImportedVerifier;

@@ -195,4 +195,88 @@ describe("default key resolver", () => {
     );
     expect(await resolve(KEY_ID)).toBeNull();
   });
+
+  it("rejects a key document that claims a cross-origin owner (impersonation)", async () => {
+    // The key is served from evil.example but declares ownership by an actor on
+    // victim.example. Attributing the signature to the victim would be actor
+    // impersonation, so the resolver must refuse the cross-origin ownership.
+    const resolve = resolverWith(
+      vi.fn(async () =>
+        jsonResponse({
+          id: "https://evil.example/key",
+          publicKey: {
+            owner: "https://victim.example/users/alice",
+            publicKeyPem: "ATTACKER-PEM",
+          },
+        }),
+      ) as unknown as typeof fetch,
+    );
+    expect(await resolve("https://evil.example/key")).toBeNull();
+  });
+
+  it("rejects a plaintext http: keyId without fetching (SSRF guard)", async () => {
+    const fetchImpl = vi.fn();
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(
+      await resolve("http://remote.example/users/bob#main-key"),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a private/loopback-host keyId without fetching (SSRF guard)", async () => {
+    const fetchImpl = vi.fn();
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://127.0.0.1/key")).toBeNull();
+    expect(
+      await resolve("https://169.254.169.254/latest/meta-data"),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a keyId that redirects to a private host (hop-by-hop SSRF)", async () => {
+    // The initial URL is a syntactically-fine public HTTPS host (passes the
+    // first check), but it 302s to a link-local metadata address. Because the
+    // fetch re-validates every redirect hop, the private target is refused.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://169.254.169.254/latest/meta-data" },
+        }),
+    );
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://public.example/key")).toBeNull();
+    // The redirect hop to the private host was never fetched.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a keyId that redirects to another public origin serving a spoofed owner", async () => {
+    // An open redirect on the victim's own origin (`keyId` on victim.example)
+    // 302s to attacker-controlled content on a *different* public origin whose
+    // document claims `owner: victim.example`. The binding must compare `owner`
+    // against the origin that actually SERVED the document (attacker.example),
+    // not the requested `keyId` origin (victim.example), or impersonation slips
+    // through.
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://victim.example")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://attacker.example/key" },
+        });
+      }
+      return jsonResponse({
+        id: "https://attacker.example/key",
+        publicKey: {
+          owner: "https://victim.example/users/alice",
+          publicKeyPem: "ATTACKER-PEM",
+        },
+      });
+    });
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://victim.example/open-redirect")).toBeNull();
+    // Both hops were fetched (both public), so it's the origin binding — not the
+    // SSRF guard — that rejects it.
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });

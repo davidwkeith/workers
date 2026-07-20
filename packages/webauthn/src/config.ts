@@ -66,12 +66,37 @@ export interface WebAuthnConfig {
   /** Injectable clock (epoch ms) for deterministic tests. Defaults to `Date.now`. */
   readonly now?: () => number;
 
+  /**
+   * Per-operation authorization hook, consulted by the front door before a
+   * ceremony reaches the Durable Object. Return `false` to reject with `401`.
+   *
+   * **You almost certainly need this to gate registration.** `register/options`
+   * and `register/verify` bind a passkey to a caller-supplied `user.id`; if they
+   * are reachable unauthenticated, anyone can register their own authenticator
+   * against another user's id and then authenticate as that user — account
+   * takeover. Require an authenticated session for the `register/*` operations
+   * (e.g. `authorize: (op, req) => op.startsWith("authenticate/") || hasSession(req)`).
+   * The default is allow-all, matching `@dwk/vc`, so the composing front door
+   * owns this decision — but leaving registration open is a footgun.
+   */
+  readonly authorize?: WebAuthnAuthorize;
+
   /** Logger for ceremony outcomes; defaults to a no-op. */
   readonly logger?: Logger;
 
   /** Metrics sink for ceremony outcomes; defaults to a no-op. */
   readonly metrics?: Metrics;
 }
+
+/**
+ * Authorization hook: decide whether a ceremony operation may proceed for this
+ * request. Runs in the front door (not the DO), so it sees the original request
+ * (cookies, `Authorization`, …). Returning `false` yields `401`.
+ */
+export type WebAuthnAuthorize = (
+  operation: WebAuthnOperation,
+  request: Request,
+) => boolean | Promise<boolean>;
 
 /** WebAuthn user-verification requirement values. */
 export type UserVerificationRequirement =
@@ -87,6 +112,7 @@ export interface ResolvedConfig {
   readonly timeoutMs: number;
   readonly userVerification: UserVerificationRequirement;
   readonly now: () => number;
+  readonly authorize: WebAuthnAuthorize;
   readonly logger: Logger;
   readonly metrics: Metrics;
 }
@@ -158,6 +184,10 @@ export function resolveConfig(config: WebAuthnConfig): ResolvedConfig {
     timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     userVerification: config.userVerification ?? "preferred",
     now: config.now ?? (() => Date.now()),
+    // Default allow-all (mirrors @dwk/vc); the composing front door is expected
+    // to supply a hook that gates the `register/*` operations. See the field
+    // doc on `WebAuthnConfig.authorize`.
+    authorize: config.authorize ?? (() => true),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
   };

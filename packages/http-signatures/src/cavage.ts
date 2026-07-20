@@ -161,9 +161,18 @@ export interface CavageVerifyParams {
   requiredComponents?: string[];
   now?: number;
   toleranceSeconds?: number;
+  /**
+   * Maximum age of a `created` timestamp, in seconds. A signature whose
+   * `created` is older than `now - maxAgeSeconds` (allowing `toleranceSeconds`
+   * of skew) is rejected as `created_stale`, so a captured proof cannot be
+   * replayed indefinitely when it carries no `expires`. Defaults to 3600 (1
+   * hour); pass `Infinity` to disable. Only applies when `created` is present.
+   */
+  maxAgeSeconds?: number;
 }
 
 const DEFAULT_TOLERANCE_SECONDS = 300;
+const DEFAULT_MAX_AGE_SECONDS = 3600;
 
 function getHeader(message: HttpMessage, name: string): string | null {
   const lower = name.toLowerCase();
@@ -251,6 +260,12 @@ export async function verifyCavage(
   const tolerance = params.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
   if (createdRaw !== undefined && createdRaw > now + tolerance)
     return fail("signature_future");
+  // Lower-bound the age so a signature without `expires` cannot be replayed
+  // indefinitely. `Infinity` disables the bound.
+  if (createdRaw !== undefined) {
+    const maxAge = params.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS;
+    if (createdRaw < now - tolerance - maxAge) return fail("created_stale");
+  }
   if (expiresRaw !== undefined && now > expiresRaw + tolerance)
     return fail("signature_expired");
   // RFC 9421 §2.3 / draft-cavage: `expires` MUST NOT precede `created`.

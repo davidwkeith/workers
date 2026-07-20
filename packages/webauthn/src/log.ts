@@ -22,4 +22,10 @@ export enum WebAuthnLogEvent {
   AuthenticateVerified = "webauthn.authenticate.verified",
   /** An authentication ceremony was rejected. */
   AuthenticateRejected = "webauthn.authenticate.rejected",
+  /**
+   * Startup warning: no `authorize` hook was supplied, so registration is open
+   * unless the composing front door gates `/register/*` upstream. See
+   * {@link WebAuthnConfig.authorize}.
+   */
+  RegistrationUnguarded = "webauthn.config.registration_unguarded",
 }

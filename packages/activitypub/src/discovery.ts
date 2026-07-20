@@ -68,7 +68,7 @@ const MAX_ACTOR_DOC_BYTES = 1024 * 1024;
  * remote that omits (or lies about) `content-length` still cannot exceed the
  * cap. `null` on over-cap, unreadable, or unparseable bodies.
  */
-async function readJsonCapped(
+export async function readJsonCapped(
   response: Response,
   cap: number,
 ): Promise<unknown | null> {

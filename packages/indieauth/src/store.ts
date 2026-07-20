@@ -182,8 +182,16 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
   }
   const db = env.AUTH_DB;
 
-  return {
-    async init() {
+  // Create the schema lazily on first use so a consumer that composes the
+  // package against a fresh D1 never needs a separate migration step: the first
+  // request to reach the store materialises the tables (and runs the RFC 8707
+  // column migration). Mirrors the lazy-schema pattern the
+  // webmention/websub/microsub stores use. The cached promise is cleared on
+  // failure so a transient D1 error during the first call doesn't permanently
+  // wedge the store.
+  let ready: Promise<void> | null = null;
+  const ensureSchema = (): Promise<void> => {
+    ready ??= (async () => {
       for (const ddl of SCHEMA) await db.prepare(ddl).run();
       // Migration: a database created before the RFC 8707 `resource` column
       // existed still has the old `authorization_codes` shape, and
@@ -191,9 +199,20 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
       // when absent so saving/redeeming a code never hits `no such column`.
       // Idempotent — a no-op once the column is present.
       await addColumnIfMissing(db, "authorization_codes", "resource", "TEXT");
+    })().catch((err: unknown) => {
+      ready = null;
+      throw err;
+    });
+    return ready;
+  };
+
+  return {
+    async init() {
+      await ensureSchema();
     },
 
     async saveAuthorizationCode(record) {
+      await ensureSchema();
       await db
         .prepare(
           `INSERT INTO authorization_codes
@@ -220,6 +239,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
     },
 
     async redeemAuthorizationCode(code, now) {
+      await ensureSchema();
       // Flip used 0→1 and read the row back in one statement so a code can only
       // ever be redeemed once, even under concurrent token requests.
       const row = await db
@@ -237,6 +257,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
     },
 
     async recordToken(record) {
+      await ensureSchema();
       await db
         .prepare(
           `INSERT INTO access_tokens
@@ -256,6 +277,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
     },
 
     async isTokenActive(jti, now) {
+      await ensureSchema();
       const row = await db
         .prepare(
           `SELECT 1 AS ok FROM access_tokens
@@ -267,6 +289,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
     },
 
     async revokeToken(jti) {
+      await ensureSchema();
       await db
         .prepare("UPDATE access_tokens SET revoked = 1 WHERE jti = ?")
         .bind(jti)
