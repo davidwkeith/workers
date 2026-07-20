@@ -130,6 +130,10 @@ target rather than a plain `curl`):
 
 ## Recording the result
 
+Fill in the **Result** table above first — date, tester, and instance — before
+touching `status.json`. A `"passing"` entry with no corresponding filled-in
+run here has no paper trail behind it.
+
 Once every step above passes, record it in `conformance/status.json`:
 
 ```
