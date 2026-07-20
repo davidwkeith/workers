@@ -1,5 +1,5 @@
 ---
-"@dwk/esi": patch
+"@dwk/esi": minor
 ---
 
 Propagate backpressure in the ESI transform stream (#307). `transform` scheduled
