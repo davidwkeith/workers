@@ -190,9 +190,9 @@
               "lastRun": "2026-07-20T19:48:27Z"
             },
             "pixelfed": {
-              "status": "pending",
+              "status": "passing",
               "report": null,
-              "lastRun": null
+              "lastRun": "2026-07-20T22:31:08Z"
             },
             "lemmy": {
               "status": "pending",

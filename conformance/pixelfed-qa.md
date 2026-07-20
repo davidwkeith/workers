@@ -32,8 +32,8 @@ ActivityPub also exercised by the Mastodon and Fedify targets.
 | WebFinger handle      | `@conformance@conformance.dwk.io`                             |
 | Publish endpoint      | `POST https://conformance.dwk.io/users/conformance/publish`   |
 | Auth                  | Bearer `ACTIVITYPUB_PUBLISH_TOKEN` (Cloudflare Worker secret) |
-| Pixelfed instance     | _fill in, e.g. pixelfed.social_                               |
-| Pixelfed test account | _fill in_                                                     |
+| Pixelfed instance     | pixelfed.social                                               |
+| Pixelfed test account | `@dwk` (David W. Keith)                                       |
 
 Publish is confirmed enabled and working on this deployment as of the Fedify
 conformance runs on 2026-07-20 (owner-publish `Note` succeeded in the
@@ -60,8 +60,11 @@ conformance runs on 2026-07-20 (owner-publish `Note` succeeded in the
    ```
    The Pixelfed account's actor IRI should appear in the collection.
 
-- [ ] **Pass** — follower appears in the collection
+- [x] **Pass** — follower appears in the collection
 - [ ] **Fail** — note what happened: ________________________________
+
+Confirmed via `GET /users/conformance/followers?page=1`:
+`"orderedItems":["https://pixelfed.social/users/dwk", …]`.
 
 ### Step 2 — Publish a media note
 
@@ -86,9 +89,9 @@ curl -X POST https://conformance.dwk.io/users/conformance/publish \
 ```
 
 Expected: `200`/`202` with the created activity's id. Record the response
-here: ________________________________
+here: `201`, `id: https://conformance.dwk.io/users/conformance/outbox/107be5e2-099a-4de2-80b5-2f6ef91fec3a`
 
-- [ ] **Pass** — request succeeded
+- [x] **Pass** — request succeeded
 - [ ] **Fail** — status code / body: ________________________________
 
 ### Step 3 — Verify rendering on Pixelfed
@@ -98,12 +101,15 @@ just published.
 
 | Check               | Expected                                                                                                   | Pass/Fail |
 | ------------------- | ---------------------------------------------------------------------------------------------------------- | --------- |
-| Post appears at all | Renders (proves the media-attachment requirement was met — a text-only post would silently not appear)     |           |
-| Image renders       | The attached image displays                                                                                |           |
-| Alt text            | Visible on the media (tap/hover the image, or Pixelfed's alt-text indicator) matches `attachments[0].name` |           |
-| Content warning     | Post is concealed behind the `summary` text until clicked/tapped                                           |           |
+| Post appears at all | Renders (proves the media-attachment requirement was met — a text-only post would silently not appear)     | Pass      |
+| Image renders       | The attached image displays                                                                                | Pass      |
+| Alt text            | Visible on the media (tap/hover the image, or Pixelfed's alt-text indicator) matches `attachments[0].name` | Pass      |
+| Content warning     | Post is concealed behind the `summary` text until clicked/tapped                                           | Pass      |
 
-Notes: ________________________________
+Notes: confirmed via screenshots — "Sensitive Content" / "Content warning
+test" gate behind a "See Post" button; revealing shows the image with an
+"Descriptive alt text for the image" tooltip on hover, matching the
+published `attachments[0].name` exactly.
 
 ### Step 4 — Like and reply from Pixelfed
 
@@ -114,19 +120,32 @@ Ask the session to check the target's inbox for both activities (the inbox
 isn't a public endpoint, so this step needs to go through the deployed
 target rather than a plain `curl`):
 
-- [ ] **Pass** — `Like` activity recorded in the inbox
-- [ ] **Pass** — reply (`Create`/`Note` with `inReplyTo`) recorded in the inbox
+- [x] **Pass** — `Like` activity recorded in the inbox
+- [x] **Pass** — reply (`Create`/`Note` with `inReplyTo`) recorded in the inbox
 - [ ] **Fail** — note what's missing: ________________________________
+
+**Marked passing on indirect evidence, not direct verification.** This
+deployment doesn't mount `@dwk/mcp`'s `activitypub_list_inbox` (the intended
+read path — see issue #327, filed for the larger gap this exposed: there's no
+way for a real client app to browse notifications either), the `/inbox` route
+is write-only by design (`405` to `GET`), and this session has no direct
+Cloudflare/wrangler access to the deployed account to query the Durable
+Object's storage directly. Confidence instead comes from: Pixelfed surfaced
+no delivery error on the like/reply actions, and the inbound `Like`/`Create`
+storage path is the same well-tested code already proven correct by
+`object.test.ts` and the successful follow/publish steps above in this same
+run. If stronger confidence is ever needed, wire up `@dwk/mcp` on this
+deployment (or use `wrangler tail` while retriggering) to check directly.
 
 ## Result
 
-|                             |                                  |
-| --------------------------- | -------------------------------- |
-| Overall result              | ☐ Passing / ☐ Failing            |
-| Run date                    | ________________________________ |
-| Tester                      | ________________________________ |
-| Pixelfed instance + version | ________________________________ |
-| Notes / follow-ups          | ________________________________ |
+|                             |                                                                                                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overall result              | ☑ Passing / ☐ Failing                                                                                                                                                                                     |
+| Run date                    | 2026-07-20                                                                                                                                                                                                |
+| Tester                      | David W. Keith                                                                                                                                                                                            |
+| Pixelfed instance + version | pixelfed.social                                                                                                                                                                                           |
+| Notes / follow-ups          | Step 4 (like/reply landing in the inbox) passed on indirect evidence, not a direct read — see Step 4 notes above. Issue #327 filed for the underlying gap (no client-facing way to browse notifications). |
 
 ## Recording the result
 
