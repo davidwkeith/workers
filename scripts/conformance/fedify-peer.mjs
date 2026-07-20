@@ -180,15 +180,31 @@ async function buildPeer(peerUrl) {
   return { federation, ctx, received, pages };
 }
 
-/** Bridge Fedify's `federation.fetch` (a WHATWG fetch handler) onto a plain
- * `node:http` server — Fedify ships no Node HTTP adapter of its own. */
+/**
+ * Bridge Fedify's `federation.fetch` (a WHATWG fetch handler) onto a plain
+ * `node:http` server — Fedify ships no Node HTTP adapter of its own.
+ *
+ * Trusts `X-Forwarded-Proto` (which cloudflared sets on every request it
+ * proxies) rather than hardcoding `http:`, defaulting to `https` when it's
+ * absent — this process is only ever reached through the public Quick Tunnel
+ * (always TLS-terminated at the edge), never bare over plain HTTP. Getting
+ * this wrong caused a real, reproduced bug (issue #273/#315/#317/#318): this
+ * peer's actor document, self-describing its `id`/`publicKey.owner` from the
+ * *inbound* request's reconstructed URL, came out `http://…` (the plain-HTTP
+ * scheme cloudflared uses for its local leg to `localhost:{port}`) while the
+ * same peer's *outbound* signed activities carried `actor: https://…` (built
+ * from the fixed, always-https context in `buildPeer`) — two different
+ * self-identities for one actor, depending on direction. The target's
+ * anti-impersonation check (rightly) rejected every delivery as a mismatch.
+ */
 function serve(federation, port) {
   const server = createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", async () => {
       const body = Buffer.concat(chunks);
-      const url = `http://${req.headers.host ?? `localhost:${port}`}${req.url}`;
+      const proto = req.headers["x-forwarded-proto"] ?? "https";
+      const url = `${proto}://${req.headers.host ?? `localhost:${port}`}${req.url}`;
       const request = new Request(url, {
         method: req.method,
         headers: new Headers(
