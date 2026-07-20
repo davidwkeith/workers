@@ -17,6 +17,12 @@ export interface EsiTransformOptions extends FragmentFetchOptions {
    * many are outstanding (e.g. a slow head-of-line fragment is holding up the
    * ordered tail), `transform` stops accepting input until the tail drains, so
    * the rest of the origin body is not buffered unboundedly. Default 256.
+   *
+   * This is a **soft** limit, not a hard cap: the check runs once per
+   * `transform` call (after all tokens from one input chunk are scheduled), so
+   * the buffer can transiently exceed it by the number of chunks a single input
+   * chunk produces. Origin chunk sizes are bounded by the underlying stream, so
+   * the overshoot is bounded in practice.
    */
   readonly maxBufferedChunks?: number;
 }

@@ -111,6 +111,12 @@ export interface EsiOptions {
   readonly maxIncludes?: number;
   /** How many fragment fetches run concurrently (default 6). */
   readonly concurrency?: number;
+  /** Soft high-water mark on scheduled-but-not-yet-emitted output chunks
+   *  (default 256). Once exceeded — e.g. a slow head-of-line fragment holding
+   *  up the ordered tail — `transform` stops accepting input until the tail
+   *  drains, propagating backpressure so the origin body is not buffered
+   *  unboundedly (128 MB Worker limit). */
+  readonly maxBufferedChunks?: number;
   readonly logger?: Logger;
   readonly metrics?: Metrics;
 }
