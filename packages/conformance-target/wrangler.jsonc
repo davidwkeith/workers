@@ -1,7 +1,3 @@
-// Deploy config for the conformance target (conformance.dwk.io).
-// One-time resource setup (D1 ids, buckets, queues, secrets) is documented in
-// README.md — the placeholder database_id values below MUST be replaced with
-// the ids `wrangler d1 create` prints before the first deploy.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dwk-conformance-target",
@@ -41,32 +37,32 @@
     {
       "binding": "AUTH_DB",
       "database_name": "dwk-conformance-auth",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "a41bb909-c292-4c27-a395-896db133ae96",
     },
     {
       "binding": "MICROPUB_DB",
       "database_name": "dwk-conformance-micropub",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "b853246a-f78c-4fb2-8202-af884fc246b8",
     },
     {
       "binding": "MICROSUB_DB",
       "database_name": "dwk-conformance-microsub",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "3187ad41-1eed-4db5-87a1-6294c4af362b",
     },
     {
       "binding": "WEBSUB_DB",
       "database_name": "dwk-conformance-websub",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "2076a697-6717-4130-883d-0df0c6468a86",
     },
     {
       "binding": "WEBMENTION_INBOX",
       "database_name": "dwk-conformance-webmention",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "2ec48dc4-7395-49a3-a63c-f207b48bb75e",
     },
     {
       "binding": "GC_DB",
       "database_name": "dwk-conformance-gc",
-      "database_id": "REPLACE-AFTER-d1-create",
+      "database_id": "a9f73a50-1ced-4efb-84ca-142e2fa90556",
     },
   ],
   "queues": {
