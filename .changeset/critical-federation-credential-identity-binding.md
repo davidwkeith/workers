@@ -12,8 +12,10 @@ on unauthenticated / attacker-controlled paths:
   document hosted at `https://evil.example/key` could declare
   `owner: https://victim.example/users/alice` and have signed activities
   attributed to the victim. The default resolver now binds the resolved
-  `owner` to the origin that served the key (rejecting cross-origin
-  ownership), and the `keyId` fetch runs through `@dwk/safe-fetch`'s
+  `owner` to the origin that **actually served** the key — the final URL after
+  any redirects, not the requested `keyId`, so an open redirect on the
+  requested origin cannot smuggle attacker-served content in under it — and the
+  `keyId` fetch runs through `@dwk/safe-fetch`'s
   `safeFetch` — `https:`-only, with private/loopback/link-local hosts blocked
   and **every redirect hop re-validated** (so a public host cannot `302` the
   fetch onto an internal address), plaintext `http:` no longer accepted, and a

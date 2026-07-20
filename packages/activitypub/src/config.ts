@@ -301,12 +301,17 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       return null;
     }
     let response: Response;
+    // The URL the document was actually served from, after any redirects — the
+    // binding below uses THIS, not the requested `keyId`, so an open redirect on
+    // the requested origin (`keyId` on victim.example → 302 → attacker content)
+    // cannot smuggle an attacker-served key in under the victim's origin.
+    let servedUrl: string;
     try {
       // `safeFetch` enforces `https:`-only + a public host on the initial URL
       // and on every redirect hop (throwing `SsrfError` on any violation); a
       // rejection resolves to `null`. `timeoutMs` bounds the whole chain so a
       // slow remote cannot stall inbox verification.
-      ({ response } = await safeFetch(
+      ({ response, url: servedUrl } = await safeFetch(
         fetchImpl,
         keyUrl.href,
         { headers: { accept: "application/activity+json" } },
@@ -325,15 +330,18 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       (publicKey as Record<string, unknown>).owner ??
       (doc as Record<string, unknown>).id;
     if (typeof pem !== "string" || typeof owner !== "string") return null;
-    // Bind the key to the origin that served it: reject a document that claims
-    // ownership by an actor on a different origin (the impersonation vector).
+    // Bind the key to the origin that actually served it (post-redirect): reject
+    // a document that claims ownership by an actor on a different origin (the
+    // impersonation vector).
     let ownerUrl: URL;
+    let servedOrigin: string;
     try {
       ownerUrl = new URL(owner);
+      servedOrigin = new URL(servedUrl).origin;
     } catch {
       return null;
     }
-    if (ownerUrl.origin !== keyUrl.origin) return null;
+    if (ownerUrl.origin !== servedOrigin) return null;
     return { owner, publicKeyPem: pem };
   };
 }

@@ -115,7 +115,14 @@ const sig = await signMessage(
   claimed algorithm, and RSA moduli must be at least 2048 bits.
 - **Signature** — over the reconstructed signature base / signing string.
 - **Window** — `created` not in the future and `expires` not in the past,
-  within `toleranceSeconds` (default 300).
+  within `toleranceSeconds` (default 300). Independently, `created` may not be
+  older than `maxAgeSeconds` (default **3600**), rejected as `created_stale`, so
+  a signature carrying `created` but no `expires` cannot be replayed forever.
+  **This bound is unconditional:** a signer who sets an `expires` further than
+  one hour past `created` is still rejected once `created` ages out of the
+  window unless the caller raises `maxAgeSeconds` (pass `Infinity` to disable).
+  If your composition issues long-lived signatures, set `maxAgeSeconds` to match
+  your `expires` policy.
 - **Coverage** — every component named in the signature is reconstructed from
   the message; `requiredComponents` lets the caller insist specific components
   were covered.

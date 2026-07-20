@@ -285,6 +285,42 @@ describe("RFC 9421 failure modes", () => {
     expect(result.reason).toBe("created_stale");
   });
 
+  it("rejects an aged created as created_stale even with a long expires still in the future", async () => {
+    // A signer set a generous `expires` (2h past `created`), but verification
+    // happens 90 min later — past the default 3600s max age. The unconditional
+    // created max-age bound rejects it despite `expires` not having passed.
+    const k = keys["ecdsa-p256-sha256"]!;
+    const message = baseMessage();
+    const headers = await signMessage(message, {
+      key: k.privateKey,
+      keyId: "k",
+      alg: "ecdsa-p256-sha256",
+      components: ["@method", "host"],
+      created: NOW,
+      expires: NOW + 7200,
+    });
+    const received = {
+      ...message,
+      headers: { ...message.headers, ...headers },
+    };
+    // Default maxAgeSeconds → created_stale…
+    const stale = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW + 5400,
+      toleranceSeconds: 5,
+    });
+    expect(stale.valid).toBe(false);
+    expect(stale.reason).toBe("created_stale");
+    // …but a caller whose maxAgeSeconds matches the expires policy accepts it.
+    const ok = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW + 5400,
+      toleranceSeconds: 5,
+      maxAgeSeconds: 7200,
+    });
+    expect(ok.valid).toBe(true);
+  });
+
   it("accepts an old created when maxAgeSeconds is Infinity (bound disabled)", async () => {
     const k = keys["ecdsa-p256-sha256"]!;
     const message = baseMessage();

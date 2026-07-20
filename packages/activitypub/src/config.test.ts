@@ -249,4 +249,34 @@ describe("default key resolver", () => {
     // The redirect hop to the private host was never fetched.
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a keyId that redirects to another public origin serving a spoofed owner", async () => {
+    // An open redirect on the victim's own origin (`keyId` on victim.example)
+    // 302s to attacker-controlled content on a *different* public origin whose
+    // document claims `owner: victim.example`. The binding must compare `owner`
+    // against the origin that actually SERVED the document (attacker.example),
+    // not the requested `keyId` origin (victim.example), or impersonation slips
+    // through.
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://victim.example")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://attacker.example/key" },
+        });
+      }
+      return jsonResponse({
+        id: "https://attacker.example/key",
+        publicKey: {
+          owner: "https://victim.example/users/alice",
+          publicKeyPem: "ATTACKER-PEM",
+        },
+      });
+    });
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://victim.example/open-redirect")).toBeNull();
+    // Both hops were fetched (both public), so it's the origin binding — not the
+    // SSRF guard — that rejects it.
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
