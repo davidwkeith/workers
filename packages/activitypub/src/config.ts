@@ -158,18 +158,6 @@ export interface ActivityPubConfig {
   readonly logger?: Logger;
   /** Metrics seam; defaults to a no-op. */
   readonly metrics?: Metrics;
-
-  /**
-   * TEMPORARY (fediverse conformance debugging, #273/#315) — opt into the
-   * signature-rejection diagnostic block in `handler.ts`: on a failed inbound
-   * signature check, the response body additionally echoes the request's own
-   * `signature`/`signature-input`/`content-type`/`digest`/`date`/`host`
-   * headers and, for `key_unresolved`, the *parsed* (never re-fetched)
-   * `keyId`. Defaults to `false` and MUST stay off for any real deployment —
-   * an inbox is public, so this is only ever safe on a disposable debug
-   * target you are actively watching. Never set this outside that.
-   */
-  readonly debugSignatureDiagnostics?: boolean;
 }
 
 /** Fully-resolved configuration with defaults applied and IRIs derived. */
@@ -184,8 +172,6 @@ export interface ResolvedConfig {
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
   readonly manuallyApprovesJoins: boolean;
   readonly verifyRelayedObjects: RelayVerificationMode;
-  /** TEMPORARY (#273/#315) — see {@link ActivityPubConfig.debugSignatureDiagnostics}. */
-  readonly debugSignatureDiagnostics: boolean;
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -233,24 +219,7 @@ export interface ForwardedConfig {
   readonly keyId: string;
   /** Private key (PKCS#8 PEM) so the DO can sign deliveries from its alarm. */
   readonly privateKeyPem?: string;
-  /**
-   * TEMPORARY (#273/#315/#317) — see {@link ActivityPubConfig.debugSignatureDiagnostics}.
-   * Forwarded so the DO's own actor/signer-mismatch diagnostic (object.ts) can
-   * gate itself the same way the front door's signature-rejection diagnostic
-   * does.
-   */
-  readonly debugSignatureDiagnostics: boolean;
 }
-
-/**
- * TEMPORARY (fediverse conformance debugging, #273/#315/#317) — hardcoded
- * cutoff shared by every temporary diagnostic block gated behind
- * {@link ActivityPubConfig.debugSignatureDiagnostics}, so none of them can
- * linger silently even on the one disposable deployment that opts in.
- */
-export const DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF = Date.parse(
-  "2026-07-21T12:00:00Z",
-);
 
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_ATTEMPTS = 8;
@@ -392,7 +361,6 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     webfinger,
     sharedInbox,
     manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
-    debugSignatureDiagnostics: config.debugSignatureDiagnostics ?? false,
     verifyRelayedObjects: config.verifyRelayedObjects ?? "tiered",
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
