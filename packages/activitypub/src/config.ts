@@ -214,6 +214,14 @@ export const INTERNAL_HEADERS = {
   config: "x-ap-config",
   /** Marks an owner-authorized publish request (`POST <actor>/outbox`). */
   publish: "x-ap-publish",
+  /**
+   * Marks a request for an owner-only **internal** DO route (`__inbox`,
+   * `__following`) that has no public front-door equivalent. Set only by the
+   * composing Worker's own trusted callers (the MCP tool / syndication
+   * provider); the DO refuses those routes without it, so a future front-door
+   * route that forwarded such a path could not expose the owner's inbox.
+   */
+  internal: "x-ap-internal",
 } as const;
 
 /** The config subset the front door forwards to the DO via {@link INTERNAL_HEADERS.config}. */

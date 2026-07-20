@@ -51,6 +51,9 @@ export function createCommunitySyndicationTargets(
       INTERNAL_HEADERS.config,
       JSON.stringify(forwardedConfig(config)),
     );
+    // Trusted internal call: the DO serves the owner-only `__following` route
+    // only with this marker set.
+    headers.set(INTERNAL_HEADERS.internal, "1");
     try {
       const id = actor.idFromName(config.iris.id);
       const response = await actor

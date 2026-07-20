@@ -321,3 +321,24 @@ describe("activitypub_resolve", () => {
     expect((await tool.handler({}, AUTH)).isError).toBe(true);
   });
 });
+
+describe("internal DO route hardening", () => {
+  it("refuses the __inbox route without the internal marker (defense in depth)", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const url = `${config.iris.id}/__inbox`;
+    const headers = new Headers();
+    headers.set(
+      INTERNAL_HEADERS.config,
+      JSON.stringify(forwardedConfig(config)),
+    );
+    // A request carrying only the (front-door-set) config header — as a
+    // regressed front-door route that forwarded this path would — is refused.
+    const denied = await stub.fetch(new Request(url, { headers }));
+    expect(denied.status).toBe(404);
+    // The trusted internal caller sets the marker and is served.
+    headers.set(INTERNAL_HEADERS.internal, "1");
+    const allowed = await stub.fetch(new Request(url, { headers }));
+    expect(allowed.status).toBe(200);
+  });
+});

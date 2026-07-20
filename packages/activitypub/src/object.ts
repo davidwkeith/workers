@@ -228,15 +228,24 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
     // Owner-only inbox listing for the `@dwk/mcp` tool contribution
     // (`activitypub_list_inbox`). Distinct from `iris.inbox`, which stays
-    // write-only to peers (§7.1) — this internal route is never reachable from
-    // the public front door, only from the composing Worker's own trusted call.
+    // write-only to peers (§7.1). This internal route has no public front-door
+    // equivalent, so it is gated by an explicit internal marker (defense in
+    // depth): even if a future front-door route forwarded this path, the DO
+    // refuses it — `404`, as if the route did not exist — without the marker
+    // the trusted MCP/syndication callers set.
     if (path === `${pathOf(iris.id)}/__inbox`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
       return this.#listInbox(request);
     }
     // Owner-only typed following listing (internal, like `__inbox`): accepted
     // follows with their resolved actor_type, for the community syndication
     // targets (§2.4 / #278) and future owner reads. `?type=Group` filters.
     if (path === `${pathOf(iris.id)}/__following`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
       return this.#listFollowing(request);
     }
 

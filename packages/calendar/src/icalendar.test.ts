@@ -227,3 +227,64 @@ describe("newline handling", () => {
     expect(ics.replace(/\r\n/g, "")).not.toContain("\r");
   });
 });
+
+describe("content-line injection guards", () => {
+  const base: CalendarEvent = { uid: "u", start: "2026-07-01T18:00:00Z" };
+
+  it("rejects a timeZone that could inject a property/parameter", () => {
+    expect(() =>
+      toVEventLines(
+        {
+          ...base,
+          start: "2026-07-01T18:00:00",
+          timeZone: "X\r\nATTENDEE:mailto:a@b",
+        },
+        NOW,
+      ),
+    ).toThrow(/timeZone/);
+    expect(() =>
+      toVEventLines(
+        { ...base, start: "2026-07-01T18:00:00", timeZone: "Foo:Bar" },
+        NOW,
+      ),
+    ).toThrow(/timeZone/);
+  });
+
+  it("rejects a malformed / injecting DURATION", () => {
+    expect(() =>
+      toVEventLines({ ...base, duration: "PT1H\r\nATTENDEE:x" }, NOW),
+    ).toThrow(/duration/);
+  });
+
+  it("rejects a URL with a control character", () => {
+    expect(() =>
+      toVEventLines(
+        { ...base, links: [{ href: "https://x/\r\nATTENDEE:mailto:a@b" }] },
+        NOW,
+      ),
+    ).toThrow(/URL/);
+  });
+
+  it("rejects a refreshInterval that could inject", () => {
+    expect(() =>
+      toICalendar(base, { now: NOW, refreshInterval: "P1D\r\nX-EVIL:1" }),
+    ).toThrow(/refreshInterval/);
+  });
+
+  it("still serializes legitimate non-TEXT values", () => {
+    const ics = toICalendar(
+      {
+        ...base,
+        start: "2026-07-01T18:00:00",
+        timeZone: "America/New_York",
+        duration: "PT90M",
+        links: [{ href: "https://example.com/a?b=c&d=e" }],
+      },
+      { now: NOW, refreshInterval: "P1W" },
+    );
+    expect(ics).toMatch(/\r\nDURATION:PT90M/);
+    expect(ics).toMatch(/TZID=America\/New_York/);
+    expect(ics).toMatch(/\r\nURL:https:\/\/example.com\/a\?b=c&d=e/);
+    expect(ics).toMatch(/REFRESH-INTERVAL;VALUE=DURATION:P1W/);
+  });
+});
