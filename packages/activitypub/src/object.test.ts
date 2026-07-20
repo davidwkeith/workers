@@ -1447,6 +1447,139 @@ describe("outbound relationship activities", () => {
   });
 });
 
+describe("outbound vote delivery (Like/Dislike audience)", () => {
+  it("delivers a Like to the named community's inbox when known", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollowedGroup(state, `${GROUP}/inbox`);
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Like",
+            object: `${GROUP}/posts/1`,
+            audience: GROUP,
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const targets = state.storage.sql
+        .exec<{ inbox: string }>(`SELECT inbox FROM delivery`)
+        .toArray()
+        .map((r) => r.inbox);
+      expect(targets).toEqual([`${GROUP}/inbox`]);
+    });
+  });
+
+  it("delivers a Dislike to the named community's shared inbox when known", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at, actor_type, inbox, shared_inbox)
+           VALUES (?, 'accepted', 1, 'Group', NULL, ?)`,
+        GROUP,
+        `${GROUP}/shared-inbox`,
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Dislike",
+            object: `${GROUP}/posts/1`,
+            audience: GROUP,
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const targets = state.storage.sql
+        .exec<{ inbox: string }>(`SELECT inbox FROM delivery`)
+        .toArray()
+        .map((r) => r.inbox);
+      expect(targets).toEqual([`${GROUP}/shared-inbox`]);
+    });
+  });
+
+  it("queues an alarm-resolved delivery when the community inbox is unknown", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Like",
+            object: `${GROUP}/posts/1`,
+            audience: GROUP,
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const pending = state.storage.sql
+        .exec<{ kind: string; actor: string }>(
+          `SELECT kind, actor FROM pending_accept`,
+        )
+        .one();
+      expect(pending.kind).toBe("deliver");
+      expect(pending.actor).toBe(GROUP);
+    });
+  });
+
+  it("still fans out to followers, in addition to the audience delivery", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      seedFollowedGroup(state, `${GROUP}/inbox`);
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Like",
+            object: `${GROUP}/posts/1`,
+            audience: GROUP,
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const targets = state.storage.sql
+        .exec<{ inbox: string }>(`SELECT inbox FROM delivery`)
+        .toArray()
+        .map((r) => r.inbox)
+        .sort();
+      expect(targets).toEqual([`${GROUP}/inbox`, `${REMOTE}/inbox`].sort());
+    });
+  });
+
+  it("does not deliver anywhere extra when no audience is given (only followers)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Like", object: `${GROUP}/posts/1` }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const rows = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+        .one().n;
+      expect(rows).toBe(0);
+      const delivered = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(delivered).toBe(0);
+    });
+  });
+});
+
 describe("community post delivery", () => {
   it("delivers directly when the group inbox is known", async () => {
     const { username, stub } = freshUser();
