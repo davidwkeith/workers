@@ -138,6 +138,41 @@ active workers' claimed routes go worker-first (wrangler
 - `authorityBound` — the standard fixes this path to the site's canonical
   origin (`/.well-known/*` discovery documents); it must not be remounted.
 
+### Route claim fields for Anglesite-app's `WorkerRouteClaim` (issue #746, paired with [Anglesite-app#829](https://github.com/Anglesite/Anglesite-app/pull/829))
+
+Three further fields are optional on every route claim, mirroring Anglesite-app's
+`WorkerRouteClaim` (`Sources/AnglesiteCore/WorkerCatalog.swift`, validated by
+`Sources/AnglesiteCore/WorkerRouteClaims.swift`). Older consumers ignore
+unrecognized JSON keys, so adding them is backward-compatible.
+
+```json
+{
+  "path": "/.well-known/oauth-authorization-server",
+  "match": "exact",
+  "methods": ["GET"],
+  "handler": "createIndieAuth",
+  "validatorID": "rfc8414",
+  "authorityBinding": true,
+  "specificationURL": "https://www.rfc-editor.org/rfc/rfc8414"
+}
+```
+
+- `validatorID` — protocol-validator registry reference (#744's registry).
+  Omitted means the route is inventory-only: no conformance claim is made
+  for it.
+- `authorityBinding` — whether responses on this route bind an
+  identity/application/policy to the whole origin. Broader than
+  `authorityBound`'s fixed well-known paths: a remountable route can still
+  be origin-identity-binding (e.g. IndieAuth's `/authorize` and `/token`
+  establish the site's IndieAuth identity even though a composer may mount
+  them elsewhere). Defaults to `false` when omitted.
+- `specificationURL` — the governing protocol specification. Anglesite-app's
+  consumer requires this on every `prefix` claim (only a specification can
+  approve child paths); recommended on `exact` claims too. Not yet
+  back-filled onto this repo's pre-existing `prefix` claims (`/users/`,
+  `/media/`, `/nodeinfo/`, `/pod/`, `/dav/`, `/storage/`, `/xrpc/`) — tracked
+  as a follow-up rather than bundled into an unrelated change.
+
 **Mount-prefix contract.** The composition contract lets a composer mount any
 handler under an arbitrary path prefix. Route claims are static data, so they
 declare each package's **canonical/default mount paths** — the paths the
@@ -151,6 +186,14 @@ exact paths, an exact path under another's prefix, or nested prefixes) — the
 composing app resolves each request to exactly one active worker, and the
 catalog gate enforces this. Claims _within_ one worker may overlap; its
 handler does its own sub-routing.
+
+**IndieAuth's claims verified against `@dwk/indieauth`'s handler (issue #829
+follow-up).** `createIndieAuth` (`packages/indieauth/src/handler.ts`) rejects
+any method other than `GET` on the metadata endpoint (no `HEAD` support,
+unlike `webfinger`/`host-meta`), accepts only `POST` on `/token` (not `GET`),
+and returns `404` for any pathname it doesn't route by exact match — consent
+is a config-injected hook invoked from inside `/authorize`, not a separate
+HTTP route, so there is no `/indieauth/consent` claim to make.
 
 Populated for the 8 packages Anglesite composes today (`indieauth`,
 `micropub`, `microsub`, `webmention`, `websub`, `activitypub`, `webfinger`,

@@ -138,6 +138,20 @@
         "authorityBound": {
           "type": "boolean",
           "description": "True when the standard requires this path on the site's canonical origin (well-known discovery documents); the composer must not remount it under a different prefix or host."
+        },
+        "validatorID": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Protocol-validator registry reference for this claim (e.g. \"rfc8414\"). Omitted means the route is inventory-only: no conformance claim is made for it. Mirrors Anglesite-app's WorkerRouteClaim.validatorID (Anglesite/Anglesite-app#829)."
+        },
+        "authorityBinding": {
+          "type": "boolean",
+          "description": "True when responses on this route bind an identity/application/policy to the whole origin — a broader notion than authorityBound's fixed well-known paths (e.g. IndieAuth's /authorize and /token establish the origin's identity even though they are remountable). Mirrors Anglesite-app's WorkerRouteClaim.authorityBinding, which defaults to false when omitted (Anglesite/Anglesite-app#829)."
+        },
+        "specificationURL": {
+          "type": "string",
+          "format": "uri",
+          "description": "The governing protocol specification for this claim. Anglesite-app's consumer (WorkerRouteClaims.validate) requires this on every prefix claim; recommended on exact claims too. Mirrors Anglesite-app's WorkerRouteClaim.specificationURL (Anglesite/Anglesite-app#829)."
         }
       },
       "additionalProperties": false
