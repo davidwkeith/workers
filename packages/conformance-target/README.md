@@ -66,27 +66,48 @@ in CI). All commands run from `packages/conformance-target/`.
    wrangler queues create conformance-microsub
    ```
 
-3. Set the secrets (each prompts for a value; generate long random strings —
-   `openssl rand -base64 32` — except the PEMs/JWK):
+3. Set the secrets. **Do not paste values into the interactive `wrangler
+   secret put NAME` prompt** — in most terminals a multi-line paste (the
+   PEMs, the JWK) submits after the first line and the rest gets typed at
+   your shell as commands. Instead, generate each value into a file (or an
+   env var) and redirect it into wrangler's stdin, which it reads
+   non-interactively:
 
    ```bash
-   wrangler secret put TOKEN_SIGNING_KEY
-   wrangler secret put CONFORMANCE_PASSWORD
-   wrangler secret put CONFORMANCE_ADMIN_TOKEN
-   wrangler secret put ATPROTO_PASSWORD
-   wrangler secret put ATPROTO_JWT_SECRET
-   # RSA keypair for the ActivityPub actor:
-   #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ap.pem
-   #   openssl pkey -in ap.pem -pubout -out ap.pub.pem
-   wrangler secret put ACTIVITYPUB_PUBLIC_KEY_PEM   # paste ap.pub.pem
-   wrangler secret put ACTIVITYPUB_PRIVATE_KEY_PEM  # paste ap.pem
+   # Simple random secrets: write to a var, pipe with printf (no trailing
+   # newline in the secret value).
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put TOKEN_SIGNING_KEY
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put CONFORMANCE_PASSWORD
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put CONFORMANCE_ADMIN_TOKEN
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put ATPROTO_PASSWORD
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put ATPROTO_JWT_SECRET
+
+   # RSA keypair for the ActivityPub actor — written straight to files, then
+   # piped in with `<` so the multi-line PEM never touches the prompt:
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ap.pem
+   openssl pkey -in ap.pem -pubout -out ap.pub.pem
+   wrangler secret put ACTIVITYPUB_PUBLIC_KEY_PEM < ap.pub.pem
+   wrangler secret put ACTIVITYPUB_PRIVATE_KEY_PEM < ap.pem
+   rm ap.pem ap.pub.pem
+
    # Optional: enables the owner publish endpoints (POST <actor>/outbox and
    # /publish) that the fedify suite's fanout/announce-unwrap cases drive;
    # mirror the same value into the FEDIFY_PUBLISH_TOKEN repo secret.
-   wrangler secret put ACTIVITYPUB_PUBLISH_TOKEN
-   # P-256 private JWK for the VC issuer:
-   #   node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign']).then(async k=>console.log(JSON.stringify(await crypto.subtle.exportKey('jwk',k.privateKey))))"
-   wrangler secret put VC_SIGNING_KEY
+   openssl rand -base64 32 | tr -d '\n' | wrangler secret put ACTIVITYPUB_PUBLISH_TOKEN
+
+   # P-256 private JWK for the VC issuer — write to a file first, same reason:
+   node -e "crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign']).then(async k=>console.log(JSON.stringify(await crypto.subtle.exportKey('jwk',k.privateKey))))" > vc.jwk
+   wrangler secret put VC_SIGNING_KEY < vc.jwk
+   rm vc.jwk
+   ```
+
+   If you already hit the interactive-paste problem and a secret looks
+   truncated or your shell ran stray commands, check what actually got set
+   and redo it with the `<` form above:
+
+   ```bash
+   wrangler secret list
+   wrangler secret delete ACTIVITYPUB_PUBLIC_KEY_PEM   # then re-run with < ap.pub.pem
    ```
 
 4. In the GitHub repo, add the `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit,
