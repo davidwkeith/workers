@@ -26,16 +26,30 @@ publish-ping entry point for atomicity with Anglesite site builds.
   HMAC-SHA256 of the body.
 - **Lease management.** Subscriptions have a bounded lease period (configurable
   min/max). Expired subscriptions are not delivered to and are eventually pruned.
-- **Queue-driven distribution.** On publish, the hub enqueues one job per
-  subscriber via Cloudflare Queue. The queue consumer
-  (`createWebSubQueueConsumer`) handles delivery with retries.
+- **Queue-driven, two-stage distribution.** On publish the hub enqueues one
+  `distribute` job. The consumer (`createWebSubQueueConsumer`) treats that as a
+  fan-out _planner_: it fetches the topic snapshot once and enqueues one
+  `deliver` job **per active subscriber**, so each subscriber retries on its own
+  queue checkpoint (a callback down for a while no longer misses the update, a
+  large subscriber set no longer blows the per-invocation subrequest ceiling, and
+  a single failure no longer re-delivers to everyone). Small snapshots ride
+  inline in each `deliver` message; a body too large to inline is staged once in
+  R2 (`WEBSUB_CONTENT`) and referenced by key.
 - **D1 for subscriptions.** All subscription state lives in D1 (`WEBSUB_DB`).
+- **R2 for large snapshots (optional).** `WEBSUB_CONTENT` stages a distribution
+  body only when it exceeds the inline queue-message limit. A hub whose feeds
+  always fit inline never needs it; when a snapshot does exceed the limit and the
+  binding is absent, the fan-out fails loudly rather than truncating the push.
+  Stage objects are transient — give the bucket an R2 lifecycle expiration rule
+  (≥ the queue's message-retention window); the delivery path never deletes them.
 
 ## Test environment
 
 Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
 
 - D1: `WEBSUB_DB`
+- Queue: `WEBSUB_QUEUE` (fan-out of per-subscriber deliver jobs)
+- R2: `WEBSUB_CONTENT` (optional; stages snapshots too large to inline)
 
 ```bash
 pnpm test --project @dwk/websub

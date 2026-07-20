@@ -22,9 +22,9 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
+import type { R2Bucket } from "@cloudflare/workers-types";
 import { readBytesCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebSubLogEvent } from "./log.js";
-import type { Subscription } from "./store.js";
 
 /** A topic's current content, as fetched from the topic URL. */
 export interface TopicContent {
@@ -58,6 +58,60 @@ export const DEFAULT_SIGNATURE_ALGORITHM: SignatureAlgorithm = "sha256";
  * accepted up to 4 MB topics and that behavior must not silently regress.
  */
 const MAX_CONTENT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Largest body carried inline in a per-subscriber queue message. Cloudflare
+ * Queue messages are capped at ~128 KB; 96 KB leaves comfortable headroom for
+ * the message's other fields (callback, secret, content type) and the queue's
+ * own serialization overhead. A snapshot over this size is staged once in R2
+ * (see {@link WebSubEnv.WEBSUB_CONTENT}) and referenced by key instead.
+ */
+export const MAX_INLINE_BODY_BYTES = 96 * 1024;
+
+/**
+ * The minimal subscription facts one delivery needs: where to POST, which topic
+ * to advertise, and the HMAC secret (or `null`). A full {@link Subscription} is
+ * assignable to this, and so is a per-subscriber {@link DeliverJob} reconstituted
+ * off the queue — the delivery path never re-reads the store.
+ */
+export interface DeliveryTarget {
+  readonly callback: string;
+  readonly topic: string;
+  readonly secret: string | null;
+}
+
+/**
+ * Stage a distribution snapshot in R2 under a fresh random key and return that
+ * key. Used by the fan-out planner when a body is too large to inline in a queue
+ * message; the per-subscriber deliver jobs read it back with
+ * {@link readStagedContent}. Only the body bytes are stored — the
+ * `Content-Type` rides in each (small) deliver job.
+ */
+export async function stageContent(
+  bucket: R2Bucket,
+  body: Uint8Array,
+): Promise<string> {
+  const key = `websub-staging/${crypto.randomUUID()}`;
+  await bucket.put(key, body);
+  return key;
+}
+
+/**
+ * Read a snapshot previously staged by {@link stageContent}. Returns `null` when
+ * the object is absent (e.g. it was reclaimed by the bucket's lifecycle rule
+ * before a slow delivery retried) — the caller drops that delivery rather than
+ * retrying forever, since re-fetching cannot conjure an expired snapshot.
+ */
+export async function readStagedContent(
+  bucket: R2Bucket,
+  key: string,
+): Promise<Uint8Array | null> {
+  const object = await bucket.get(key);
+  if (object === null) {
+    return null;
+  }
+  return new Uint8Array(await object.arrayBuffer());
+}
 
 /** Outcome of delivering content to one subscriber. */
 export interface DeliveryResult {
@@ -222,7 +276,7 @@ export async function fetchTopicContent(
  * POST is reported as `delivered: false`.
  */
 export async function deliverToSubscriber(
-  subscription: Subscription,
+  subscription: DeliveryTarget,
   content: TopicContent,
   hubUrl: string,
   options?: DistributeOptions,
