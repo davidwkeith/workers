@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   INTERNAL_HEADERS,
@@ -7,6 +7,7 @@ import {
   type ActivityPubEnv,
   type ForwardedConfig,
 } from "./config.js";
+import { ActivityPubLogEvent } from "./log.js";
 
 /**
  * Branch-focused tests over the per-actor Durable Object ({@link
@@ -2032,5 +2033,132 @@ describe("delivery queue", () => {
         .toArray()[0];
       expect(row?.attempts).toBe(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delivery outcome logging (#330): alarm-driven delivery has no HTTP response
+// to hang the front door's x-ap-outcome header off, so these go straight to
+// console.log/console.error — this is what `wrangler tail` captures.
+// ---------------------------------------------------------------------------
+
+describe("delivery outcome logging", () => {
+  it("logs a successful delivery via console.log", async () => {
+    const { username, stub } = freshUser();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) =>
+        withFetch(
+          async () => new Response(null, { status: 202 }),
+          async () => {
+            seedDelivery(state, `${REMOTE}/inbox`);
+            await instance.fetch(deliverRequest(username, { privateKeyPem }));
+          },
+        ),
+      );
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toEqual({
+        event: ActivityPubLogEvent.DeliverySucceeded,
+        targetHost: "remote.example",
+        status: 202,
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("logs a permanently-failed delivery via console.error, dropped", async () => {
+    const { username, stub } = freshUser();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) =>
+        withFetch(
+          async () => new Response("nope", { status: 404 }),
+          async () => {
+            seedDelivery(state, `${REMOTE}/inbox`);
+            await instance.fetch(deliverRequest(username, { privateKeyPem }));
+          },
+        ),
+      );
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+        event: ActivityPubLogEvent.DeliveryFailed,
+        targetHost: "remote.example",
+        status: 404,
+        attempts: 1,
+        dropped: true,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs a retryable delivery failure via console.error, not dropped", async () => {
+    const { username, stub } = freshUser();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) =>
+        withFetch(
+          async () => new Response("busy", { status: 503 }),
+          async () => {
+            seedDelivery(state, `${REMOTE}/inbox`);
+            await instance.fetch(deliverRequest(username, { privateKeyPem }));
+          },
+        ),
+      );
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+        event: ActivityPubLogEvent.DeliveryFailed,
+        targetHost: "remote.example",
+        status: 503,
+        attempts: 1,
+        dropped: false,
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs an SSRF-blocked delivery target via console.error", async () => {
+    const { username, stub } = freshUser();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) => {
+        seedDelivery(state, "https://localhost/inbox");
+        await instance.fetch(deliverRequest(username, { privateKeyPem }));
+      });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+        event: ActivityPubLogEvent.DeliveryBlocked,
+        targetHost: "localhost",
+        reason: "blocked_host",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("logs a pending-accept inbox resolution failure via console.error", async () => {
+    const { username, stub } = freshUser();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await followWith(
+        stub,
+        username,
+        REMOTE,
+        async () => new Response(null, { status: 500 }),
+      );
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+        event: ActivityPubLogEvent.DeliveryFailed,
+        targetHost: "remote.example",
+        status: 0,
+        attempts: 1,
+        dropped: false,
+        stage: "resolve",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

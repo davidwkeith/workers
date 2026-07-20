@@ -25,6 +25,8 @@ import {
   type ActorIris,
   type JsonValue,
 } from "./as2.js";
+import { hostFromUrl } from "@dwk/log";
+
 import {
   ApOutcome,
   ActivityPubLogEvent,
@@ -1137,14 +1139,6 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
   }
 
-  #hostOf(url: string): string {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "unknown";
-    }
-  }
-
   /**
    * Alarm-driven delivery has no HTTP response to hang the `x-ap-outcome`
    * header off (see `log.ts`), so these events go straight to `console`
@@ -1195,7 +1189,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
         continue;
       }
-      const targetHost = this.#hostOf(row.inbox);
+      const targetHost = hostFromUrl(row.inbox) ?? "unknown";
       try {
         const result = await deliverActivity(
           row.inbox,
@@ -1526,7 +1520,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           row.attempts,
         );
         this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
-          targetHost: this.#hostOf(row.actor),
+          targetHost: hostFromUrl(row.actor) ?? "unknown",
           status: 0,
           attempts: row.attempts + 1,
           dropped,
