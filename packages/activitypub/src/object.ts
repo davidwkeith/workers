@@ -1143,21 +1143,31 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * Alarm-driven delivery has no HTTP response to hang the `x-ap-outcome`
    * header off (see `log.ts`), so these events go straight to `console`
    * instead of through the front-door Logger — visible via `wrangler tail`.
-   * Never includes activity bodies, keys, or tokens (redaction policy).
+   * Reproduces `@dwk/log`'s `consoleLogger` record shape (`{ level, event,
+   * time, ...fields }`) and severity table (`spec/observability.md`): a
+   * blocked SSRF attempt or a will-retry failure is `warn`, not `error` —
+   * only a permanently-dropped delivery is. Never includes activity bodies,
+   * keys, or tokens (redaction policy).
    */
   #logDelivery(
     event: ActivityPubLogEvent,
     fields: Record<string, string | number | boolean>,
   ): void {
-    const line = JSON.stringify({ event, ...fields });
-    if (
-      event === ActivityPubLogEvent.DeliveryFailed ||
-      event === ActivityPubLogEvent.DeliveryBlocked
-    ) {
-      console.error(line);
-    } else {
-      console.log(line);
-    }
+    const level: "info" | "warn" | "error" =
+      event === ActivityPubLogEvent.DeliverySucceeded
+        ? "info"
+        : fields.dropped === true
+          ? "error"
+          : "warn";
+    const line = JSON.stringify({
+      level,
+      event,
+      time: new Date().toISOString(),
+      ...fields,
+    });
+    if (level === "error") console.error(line);
+    else if (level === "warn") console.warn(line);
+    else console.info(line);
   }
 
   /**

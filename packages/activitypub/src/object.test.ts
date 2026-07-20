@@ -2039,13 +2039,25 @@ describe("delivery queue", () => {
 // ---------------------------------------------------------------------------
 // Delivery outcome logging (#330): alarm-driven delivery has no HTTP response
 // to hang the front door's x-ap-outcome header off, so these go straight to
-// console.log/console.error — this is what `wrangler tail` captures.
+// console.info/warn/error — this is what `wrangler tail` captures. Mirrors
+// @dwk/log's consoleLogger record shape ({ level, event, time, ...fields })
+// and the spec/observability.md severity table (a retry or a blocked SSRF
+// attempt is `warn`; only a permanently-dropped delivery is `error`).
 // ---------------------------------------------------------------------------
 
+/** Parse a `#logDelivery` line, asserting `time` is a real timestamp. */
+function parseLogLine(raw: string): Record<string, unknown> {
+  const line = JSON.parse(raw) as Record<string, unknown>;
+  expect(typeof line.time).toBe("string");
+  expect(new Date(line.time as string).toString()).not.toBe("Invalid Date");
+  const { time: _time, ...rest } = line;
+  return rest;
+}
+
 describe("delivery outcome logging", () => {
-  it("logs a successful delivery via console.log", async () => {
+  it("logs a successful delivery via console.info at info level", async () => {
     const { username, stub } = freshUser();
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       await runInDurableObject(stub, async (instance, state) =>
         withFetch(
@@ -2056,18 +2068,19 @@ describe("delivery outcome logging", () => {
           },
         ),
       );
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(logSpy.mock.calls[0]?.[0] as string)).toEqual({
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(parseLogLine(infoSpy.mock.calls[0]?.[0] as string)).toEqual({
+        level: "info",
         event: ActivityPubLogEvent.DeliverySucceeded,
         targetHost: "remote.example",
         status: 202,
       });
     } finally {
-      logSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
-  it("logs a permanently-failed delivery via console.error, dropped", async () => {
+  it("logs a permanently-failed delivery via console.error at error level, dropped", async () => {
     const { username, stub } = freshUser();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -2081,7 +2094,8 @@ describe("delivery outcome logging", () => {
         ),
       );
       expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+      expect(parseLogLine(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+        level: "error",
         event: ActivityPubLogEvent.DeliveryFailed,
         targetHost: "remote.example",
         status: 404,
@@ -2093,9 +2107,9 @@ describe("delivery outcome logging", () => {
     }
   });
 
-  it("logs a retryable delivery failure via console.error, not dropped", async () => {
+  it("logs a retryable delivery failure via console.warn at warn level, not dropped", async () => {
     const { username, stub } = freshUser();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await runInDurableObject(stub, async (instance, state) =>
         withFetch(
@@ -2106,8 +2120,9 @@ describe("delivery outcome logging", () => {
           },
         ),
       );
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(parseLogLine(warnSpy.mock.calls[0]?.[0] as string)).toEqual({
+        level: "warn",
         event: ActivityPubLogEvent.DeliveryFailed,
         targetHost: "remote.example",
         status: 503,
@@ -2115,32 +2130,33 @@ describe("delivery outcome logging", () => {
         dropped: false,
       });
     } finally {
-      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 
-  it("logs an SSRF-blocked delivery target via console.error", async () => {
+  it("logs an SSRF-blocked delivery target via console.warn at warn level", async () => {
     const { username, stub } = freshUser();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await runInDurableObject(stub, async (instance, state) => {
         seedDelivery(state, "https://localhost/inbox");
         await instance.fetch(deliverRequest(username, { privateKeyPem }));
       });
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(parseLogLine(warnSpy.mock.calls[0]?.[0] as string)).toEqual({
+        level: "warn",
         event: ActivityPubLogEvent.DeliveryBlocked,
         targetHost: "localhost",
         reason: "blocked_host",
       });
     } finally {
-      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 
-  it("logs a pending-accept inbox resolution failure via console.error", async () => {
+  it("logs a pending-accept inbox resolution failure via console.warn, not dropped", async () => {
     const { username, stub } = freshUser();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await followWith(
         stub,
@@ -2148,8 +2164,9 @@ describe("delivery outcome logging", () => {
         REMOTE,
         async () => new Response(null, { status: 500 }),
       );
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(errorSpy.mock.calls[0]?.[0] as string)).toEqual({
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(parseLogLine(warnSpy.mock.calls[0]?.[0] as string)).toEqual({
+        level: "warn",
         event: ActivityPubLogEvent.DeliveryFailed,
         targetHost: "remote.example",
         status: 0,
@@ -2158,7 +2175,7 @@ describe("delivery outcome logging", () => {
         stage: "resolve",
       });
     } finally {
-      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 });
