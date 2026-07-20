@@ -32,11 +32,7 @@ import {
   classifyActivity,
   parsePostInput,
 } from "./objects.js";
-import {
-  DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF,
-  INTERNAL_HEADERS,
-  type ForwardedConfig,
-} from "./config.js";
+import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
 import {
   assertPublicHttpsTarget,
   deliverActivity,
@@ -292,24 +288,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const signer = request.headers.get(INTERNAL_HEADERS.signedActor);
     const author = actorIri(activity.actor);
     if (signer && author && author !== signer) {
-      // --- BEGIN TEMPORARY DIAGNOSTIC (fediverse conformance debugging,
-      // #273/#315/#317 — revert before this lingers) ---
-      // Off by default and self-expiring, same as the front door's own
-      // signature-rejection diagnostic (handler.ts) — see its comment for the
-      // full rationale. Echoes only values already computed above (the
-      // verified signer IRI and the activity's own `actor` field), no
-      // additional fetch or lookup, so it carries the same no-oracle
-      // property.
-      const diag =
-        config.debugSignatureDiagnostics &&
-        Date.now() < DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF
-          ? ` | signer=${signer} | author=${author} | activity.actor=${JSON.stringify(activity.actor)}`
-          : "";
-      // --- END TEMPORARY DIAGNOSTIC ---
-      return text(
-        403,
-        `Activity actor does not match the signing actor${diag}`,
-      );
+      return text(403, "Activity actor does not match the signing actor");
     }
 
     const id = activity.id;

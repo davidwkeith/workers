@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   createActivityPub,
@@ -297,75 +297,6 @@ describe("inbox", () => {
     );
     expect(res.status).toBe(401);
   });
-
-  // --- TEMPORARY (fediverse conformance debugging, #273/#315 — delete this
-  // block along with the diagnostic it covers) ---
-  describe("temporary signature-rejection diagnostics", () => {
-    const rejectionRequest = (config: ActivityPubConfig) =>
-      new Request(`${actorUrl(config)}/inbox`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/activity+json",
-          signature:
-            'keyId="https://remote.example/users/alice#main-key",signature="x"',
-        },
-        body: JSON.stringify({
-          id: "https://remote.example/3",
-          type: "Follow",
-        }),
-      });
-
-    it("stays off by default — no diagnostic in the body, and no extra fetch", async () => {
-      const fetchSpy = vi.fn(fetch);
-      const config = makeConfig({
-        fetch: fetchSpy,
-        verifyInboxSignature: () => ({ ok: false, reason: "key_unresolved" }),
-      });
-      const handler = createActivityPub(config);
-      const res = await handler(rejectionRequest(config), testEnv, ctx);
-      expect(res.status).toBe(503);
-      expect(await res.text()).toBe("invalid_signature: key_unresolved");
-      expect(fetchSpy).not.toHaveBeenCalled();
-    });
-
-    it("echoes request headers and the parsed keyId when opted in", async () => {
-      const config = makeConfig({
-        debugSignatureDiagnostics: true,
-        verifyInboxSignature: () => ({ ok: false, reason: "key_unresolved" }),
-      });
-      const handler = createActivityPub(config);
-      const res = await handler(rejectionRequest(config), testEnv, ctx);
-      const body = await res.text();
-      expect(body).toContain("sig=keyId=");
-      expect(body).toContain(
-        "parsed-keyId=https://remote.example/users/alice#main-key",
-      );
-    });
-
-    it("makes no outbound fetch even when opted in (no oracle)", async () => {
-      const fetchSpy = vi.fn(fetch);
-      const config = makeConfig({
-        debugSignatureDiagnostics: true,
-        fetch: fetchSpy,
-        verifyInboxSignature: () => ({ ok: false, reason: "key_unresolved" }),
-      });
-      const handler = createActivityPub(config);
-      await handler(rejectionRequest(config), testEnv, ctx);
-      expect(fetchSpy).not.toHaveBeenCalled();
-    });
-
-    it("self-expires at the hardcoded cutoff even when opted in", async () => {
-      const config = makeConfig({
-        debugSignatureDiagnostics: true,
-        now: () => Date.parse("2027-01-01T00:00:00Z"),
-        verifyInboxSignature: () => ({ ok: false, reason: "key_unresolved" }),
-      });
-      const handler = createActivityPub(config);
-      const res = await handler(rejectionRequest(config), testEnv, ctx);
-      expect(await res.text()).toBe("invalid_signature: key_unresolved");
-    });
-  });
-  // --- END TEMPORARY ---
 
   it("refuses an activity whose actor is not the verified signer", async () => {
     // acceptAll reports REMOTE as the signer; the activity claims a different
@@ -712,7 +643,6 @@ function forwardedHeader(
     deliveryBaseDelayMs: 60_000,
     keyId: iris.keyId,
     privateKeyPem,
-    debugSignatureDiagnostics: false,
   };
   return JSON.stringify(config);
 }
