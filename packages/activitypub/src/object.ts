@@ -25,7 +25,12 @@ import {
   type ActorIris,
   type JsonValue,
 } from "./as2.js";
-import { ApOutcome, OUTCOME_ACTIVITY_HEADER, OUTCOME_HEADER } from "./log.js";
+import {
+  ApOutcome,
+  ActivityPubLogEvent,
+  OUTCOME_ACTIVITY_HEADER,
+  OUTCOME_HEADER,
+} from "./log.js";
 import { participationTarget } from "./events.js";
 import {
   buildPostActivity,
@@ -1132,6 +1137,35 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
   }
 
+  #hostOf(url: string): string {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
+   * Alarm-driven delivery has no HTTP response to hang the `x-ap-outcome`
+   * header off (see `log.ts`), so these events go straight to `console`
+   * instead of through the front-door Logger — visible via `wrangler tail`.
+   * Never includes activity bodies, keys, or tokens (redaction policy).
+   */
+  #logDelivery(
+    event: ActivityPubLogEvent,
+    fields: Record<string, string | number | boolean>,
+  ): void {
+    const line = JSON.stringify({ event, ...fields });
+    if (
+      event === ActivityPubLogEvent.DeliveryFailed ||
+      event === ActivityPubLogEvent.DeliveryBlocked
+    ) {
+      console.error(line);
+    } else {
+      console.log(line);
+    }
+  }
+
   /**
    * Process every due delivery row once: sign and `POST` it, deleting on
    * success or permanent failure and rescheduling with exponential backoff on a
@@ -1161,6 +1195,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
         continue;
       }
+      const targetHost = this.#hostOf(row.inbox);
       try {
         const result = await deliverActivity(
           row.inbox,
@@ -1169,17 +1204,53 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           fetch,
           () => Date.now(),
         );
-        if (result.ok || !result.retryable) {
+        if (result.ok) {
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
+          this.#logDelivery(ActivityPubLogEvent.DeliverySucceeded, {
+            targetHost,
+            status: result.status,
+          });
+        } else if (!result.retryable) {
+          this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
+          this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
+            targetHost,
+            status: result.status,
+            attempts: row.attempts + 1,
+            dropped: true,
+          });
         } else {
-          this.#rescheduleOrDrop("delivery", row.seq, row.attempts);
+          const dropped = this.#rescheduleOrDrop(
+            "delivery",
+            row.seq,
+            row.attempts,
+          );
+          this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
+            targetHost,
+            status: result.status,
+            attempts: row.attempts + 1,
+            dropped,
+          });
         }
       } catch (error) {
         if (error instanceof DeliveryBlockedError) {
           // Unsafe target — never reachable; drop it.
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
+          this.#logDelivery(ActivityPubLogEvent.DeliveryBlocked, {
+            targetHost,
+            reason: error.reason,
+          });
         } else {
-          this.#rescheduleOrDrop("delivery", row.seq, row.attempts);
+          const dropped = this.#rescheduleOrDrop(
+            "delivery",
+            row.seq,
+            row.attempts,
+          );
+          this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
+            targetHost,
+            status: 0,
+            attempts: row.attempts + 1,
+            dropped,
+          });
         }
       }
     }
@@ -1310,16 +1381,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#kvPut("verifyFailed", String(failed + 1));
   }
 
+  /** Reschedules with backoff, or deletes at the attempts ceiling. Returns whether it dropped. */
   #rescheduleOrDrop(
     table: "delivery" | "pending_accept" | "verify_queue",
     seq: number,
     attempts: number,
-  ): void {
+  ): boolean {
     const next = attempts + 1;
     const max = this.#deliveryPolicy("deliveryMaxAttempts", 8);
     if (next >= max) {
       this.#sql.exec(`DELETE FROM ${table} WHERE seq = ?`, seq);
-      return;
+      return true;
     }
     const base = this.#deliveryPolicy("deliveryBaseDelayMs", 60_000);
     const delay = base * 2 ** attempts;
@@ -1329,6 +1401,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       Date.now() + delay,
       seq,
     );
+    return false;
   }
 
   #enqueuePendingAccept(
@@ -1447,7 +1520,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
             row.actor,
           );
         }
-        this.#rescheduleOrDrop("pending_accept", row.seq, row.attempts);
+        const dropped = this.#rescheduleOrDrop(
+          "pending_accept",
+          row.seq,
+          row.attempts,
+        );
+        this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
+          targetHost: this.#hostOf(row.actor),
+          status: 0,
+          attempts: row.attempts + 1,
+          dropped,
+          stage: "resolve",
+        });
         continue;
       }
       if (row.kind === "follow") {
