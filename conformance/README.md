@@ -167,7 +167,10 @@ is the quick reference:
 
 ### Manual run: Lemmy (target `lemmy`)
 
-Fediverse interop #273 phase 2/3 acceptance, against any live Lemmy instance:
+Fediverse interop #273 phase 2/3 acceptance, against any live Lemmy instance.
+See [`lemmy-qa.md`](./lemmy-qa.md) for the fillable, step-by-step QA runbook
+(exact commands, a results checklist, and troubleshooting) — the summary
+below is the quick reference:
 
 1. **Follow a community by handle**: publish
    `{"type": "Follow", "object": "https://<instance>/c/<community>"}` via
