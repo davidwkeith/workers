@@ -217,7 +217,15 @@ per the cross-standard-lib rule:
 
 - Inbound: handled like `Like` (stored, deduped, maybe-forwarded).
 - Outbound: `Dislike` added to the activity types `#asOutboxActivity`
-  recognizes (a Lemmy downvote).
+  recognizes (a Lemmy downvote). A vote's `object` names the content being
+  voted on, not an actor, so there is no inbox to derive from it the way a
+  `Follow`'s `object` (an actor) yields one — the raw outbox `POST
+  <actor>/outbox` therefore requires an explicit `audience` naming the
+  community, and delivers the `Like`/`Dislike` to that community's inbox (in
+  addition to the owner's own followers), the same mechanism community posts
+  already use (`#deliverToAudience`, shared by `#publish` and `#publishPost`).
+  A vote with no `audience` only reaches followers — it does not reach the
+  community at all.
 
 **Lemmy acceptance criteria:** (a) `Follow` a community from this actor and
 receive/unwrap its announced posts; (b) publish a titled `Page` into the

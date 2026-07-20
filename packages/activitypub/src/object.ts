@@ -732,8 +732,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
   /**
    * Publish an owner-supplied activity to the outbox and fan it out to every
-   * follower's inbox. A bare object (e.g. a `Note`) is wrapped in a `Create`.
-   * The front door has already authorized this request via the publish token.
+   * follower's inbox, plus a named `audience` Group's inbox when present (a
+   * Lemmy vote: `{"type": "Like"/"Dislike", "object": "<post-iri>",
+   * "audience": "<community-iri>"}` — the community is the only way such a
+   * vote reaches anyone, since a vote's `object` names content, not an actor,
+   * so there is no inbox to derive from it directly). A bare object (e.g. a
+   * `Note`) is wrapped in a `Create`. The front door has already authorized
+   * this request via the publish token.
    */
   async #publish(request: Request): Promise<Response> {
     const config = this.#config!;
@@ -771,6 +776,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
       .toArray()) {
       if (row.inbox) this.#enqueueDelivery(row.inbox, body);
+    }
+    // A vote (Like/Dislike) or any other activity naming a community
+    // `audience` (e.g. a Lemmy downvote) additionally reaches that community's
+    // inbox — the raw outbox never infers a delivery target from `object`
+    // itself (a vote's `object` is a content IRI, not an actor), so this is
+    // the only way an outbox-published Like/Dislike reaches anyone but our own
+    // followers. Same mechanism {@link #publishPost} uses for community posts.
+    if (typeof activity.audience === "string") {
+      this.#deliverToAudience(activity.audience, body);
     }
     // Fan-out runs in the background alarm worker, not inline, so a large
     // follower set never slows the owner's publish response.
@@ -829,6 +843,32 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
+   * Additionally deliver an owner-published activity to a named `audience`
+   * Group's inbox, when it resolves to a safe target (FEP-1b12 §2.3): a
+   * community post or vote reaches the community this way, which then
+   * `Announce`s it to members — we never fan out to members ourselves. Uses
+   * the resolved inbox from `following` when we already have it (we do, once
+   * the community has been followed and its `Accept` processed); otherwise
+   * queues a `pending_accept` delivery whose inbox resolution runs from the
+   * alarm, same as every other outbound actor fetch.
+   */
+  #deliverToAudience(audience: string, body: string): void {
+    if (!isSafeTarget(audience)) return;
+    const known = this.#sql
+      .exec<{ inbox: string | null; shared_inbox: string | null }>(
+        `SELECT inbox, shared_inbox FROM following WHERE actor = ?`,
+        audience,
+      )
+      .toArray()[0];
+    const groupInbox = known?.shared_inbox ?? known?.inbox;
+    if (groupInbox) {
+      this.#enqueueDelivery(groupInbox, body);
+    } else {
+      this.#enqueuePendingDelivery(audience, body);
+    }
+  }
+
+  /**
    * Publish a shaped post (`PostInput`) as a `Create(Note|Article|Page)`:
    * validate, mint server-assigned ids, store to the outbox, and fan out to
    * followers exactly like {@link #publish}. The front door has already
@@ -869,23 +909,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray()) {
       if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
     }
-    // A community post is additionally delivered to the Group's own inbox —
-    // the group then Announces it to members per FEP-1b12 (§2.3); we never
-    // fan out to the community's members ourselves.
-    const audience = parsed.input.audience;
-    if (audience && isSafeTarget(audience)) {
-      const known = this.#sql
-        .exec<{ inbox: string | null; shared_inbox: string | null }>(
-          `SELECT inbox, shared_inbox FROM following WHERE actor = ?`,
-          audience,
-        )
-        .toArray()[0];
-      const groupInbox = known?.shared_inbox ?? known?.inbox;
-      if (groupInbox) {
-        this.#enqueueDelivery(groupInbox, json_);
-      } else {
-        this.#enqueuePendingDelivery(audience, json_);
-      }
+    if (parsed.input.audience) {
+      this.#deliverToAudience(parsed.input.audience, json_);
     }
     await this.#armAlarm();
 

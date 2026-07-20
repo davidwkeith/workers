@@ -183,8 +183,12 @@ Fediverse interop #273 phase 2/3 acceptance, against any live Lemmy instance:
    "!community@instance"}`; confirm it appears as a post in the community
    (title intact) once the community announces it.
 4. Reply to a community post (`note` + `inReplyTo` + the community
-   `audience`) and vote (publish a `Like`/`Dislike` of a community post via
-   the outbox); confirm both register on Lemmy.
+   `audience`) and vote — `POST <actor>/outbox` with `{"type": "Like"/
+   "Dislike", "object": "<post-iri>", "audience": "<community-iri>"}` (the
+   `audience` is required: a vote's `object` names content, not an actor, so
+   there is no inbox to derive delivery from without it — omitting it means
+   the vote never reaches the community at all); confirm both register on
+   Lemmy.
 5. Record `activitypub-federation` -> `targets` -> `lemmy` as `passing` with
    the run date.
 
