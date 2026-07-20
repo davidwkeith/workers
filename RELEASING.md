@@ -174,6 +174,39 @@ publish` sends packages that have _never had a stable release_ to the `latest`
 - **Build before test.** Any CI step that runs the test suite must build first;
   vitest resolves sibling `@dwk/*` deps through their `dist/` `exports`.
 
+## Recovering from a bad publish / inconsistent `pre.json`
+
+If a package's `package.json` version and `.changeset/pre.json` disagree — e.g. a
+package sits at `0.0.0` (a bad/partial publish) while one of its changesets is
+already listed in `pre.json`'s applied `changesets` array but the version was
+never bumped — do **not** just run `changeset version` to fix it: in pre mode
+that consumes _every_ pending changeset across the whole workspace (bumping many
+unrelated packages) and still skips the already-applied changeset, silently
+losing its changelog entry. Instead reconstruct the intended end-state by hand
+for that one package (this is what PR #321 did for `@dwk/mcp`):
+
+1. Identify **only** the changesets that bump the affected package — grep the
+   frontmatter, since an `mcp-*`-named changeset may actually bump a different
+   package (e.g. the endpoint packages that contribute tools).
+2. Set `package.json` `version` to what those changesets imply from the package's
+   `initialVersions[...]` anchor in `pre.json` (e.g. `0.0.0` + a `minor`
+   changeset → `0.1.0-beta.0`; the first prerelease is `-beta.0`).
+3. In `pre.json`, add any of that package's not-yet-applied changesets to the
+   applied `changesets` array so all of them are marked consumed into that
+   version. Leave `initialVersions[...]` alone — it's the pre-enter anchor, not
+   the published version.
+4. Write/extend the package's `CHANGELOG.md` with the new version's entry,
+   copying the changeset bodies verbatim and prefixing each bullet with the short
+   hash of the commit that added the changeset
+   (`git log --diff-filter=A --format=%h -- .changeset/<name>.md | tail -1`), so
+   it matches the auto-generated sibling format.
+5. Verify with `pnpm exec changeset status` (the repaired package must show **no**
+   pending bump), then `pnpm release:gate` and `pnpm catalog:check`.
+
+Note: an already-published bad version (e.g. `0.0.0` on npm) can't be
+unpublished; this repairs the repo state so the _next_ publish is correct and
+dependents re-pin to the good version.
+
 ## Related
 
 - `CLAUDE.md` → "Conformance & release gate" and the commands table.
