@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/davidwkeith/workers/security/advisories/new
+    about: Please report security vulnerabilities privately instead of opening a public issue.
+  - name: Requirements discussion
+    url: https://github.com/davidwkeith/workers/issues/1
+    about: The broader requirements thread — read this before proposing large architectural changes.
