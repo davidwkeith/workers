@@ -601,6 +601,10 @@ export function createStore(
         // inside this transaction and merged into the write, so a concurrent
         // insert committed since the caller built `quads` survives instead of
         // being dropped by a stale snapshot (see WriteOptions.preserveWhere).
+        // Caller quads are inserted first so that if one ever overlaps a
+        // preserved quad, the caller's wins: insertQuads is INSERT OR IGNORE
+        // against the quads PK (resource + s/p/o/datatype/lang/graph), so the
+        // later duplicate is dropped rather than doubling the row.
         const preserved = options.preserveWhere
           ? store.readQuads(key).filter(options.preserveWhere)
           : [];
