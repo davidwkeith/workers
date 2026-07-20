@@ -27,6 +27,7 @@
           "match": "exact",
           "methods": ["GET"],
           "handler": "createIndieAuth",
+          "authorityBound": true,
           "validatorID": "rfc8414",
           "authorityBinding": true,
           "specificationURL": "https://www.rfc-editor.org/rfc/rfc8414"

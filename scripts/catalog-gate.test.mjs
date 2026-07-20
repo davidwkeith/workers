@@ -363,6 +363,14 @@ test("a well-formed claim with validatorID, authorityBinding, and specificationU
   assert.deepEqual(evaluateCatalog(input), []);
 });
 
+test("a .well-known claim may carry both authorityBound (legacy) and authorityBinding (new) at once", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].path = "/.well-known/webmention-config";
+  input.catalog.workers[0].routes[0].authorityBound = true;
+  input.catalog.workers[0].routes[0].authorityBinding = true;
+  assert.deepEqual(evaluateCatalog(input), []);
+});
+
 test("validatorID must be a non-empty string when present", () => {
   const input = routedFixture();
   input.catalog.workers[0].routes[0].validatorID = "";
