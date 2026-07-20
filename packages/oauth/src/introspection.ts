@@ -143,6 +143,12 @@ export function createIntrospectionHandler(
     // Clone before consuming the body so the authenticator can read it too.
     const authRequest = request.clone();
     const form = await readForm(request);
+    if (form === null) {
+      return oauthErrorResponse(
+        OAuthError.InvalidRequest,
+        "request parameters must not be included more than once",
+      );
+    }
 
     // Protect the endpoint first, so an unauthenticated caller learns nothing
     // about any token (not even "unknown" vs "known") — the token lookup stays

@@ -213,6 +213,84 @@ describe("createMicrosubQueueConsumer", () => {
     expect(retries).toEqual([0]);
   });
 
+  it("does not persist validators when insertItems throws (so the retry re-fetches)", async () => {
+    const cache = new Map<
+      string,
+      { etag: string | null; lastModified: string | null }
+    >([["https://f.example/atom", { etag: "old", lastModified: null }]]);
+    const store = {
+      async getFeedCache(u: string) {
+        return cache.get(u) ?? null;
+      },
+      async setFeedCache(
+        u: string,
+        etag: string | null,
+        lastModified: string | null,
+      ) {
+        cache.set(u, { etag, lastModified });
+      },
+      async channelsForFeed() {
+        return ["chan1"];
+      },
+      async insertItems() {
+        throw new Error("d1 write failed");
+      },
+    } as unknown as MicrosubStore;
+    const run = consumer(feedFetch(), store);
+    const { batch: b, retries } = batch([
+      { kind: "poll", feedUrl: "https://f.example/atom" },
+    ]);
+    await run(b, env as unknown as MicrosubEnv, ctx);
+    expect(retries).toEqual([0]);
+    // Validators untouched: the retry re-fetches the entries it never stored,
+    // instead of getting a 304 for them.
+    expect(cache.get("https://f.example/atom")).toEqual({
+      etag: "old",
+      lastModified: null,
+    });
+  });
+
+  it("preserves cached validators on a 304 that omits them", async () => {
+    const cache = new Map<
+      string,
+      { etag: string | null; lastModified: string | null }
+    >([
+      [
+        "https://f.example/atom",
+        { etag: 'W/"v1"', lastModified: "Mon, 01 Jan 2026 00:00:00 GMT" },
+      ],
+    ]);
+    const store = {
+      async getFeedCache(u: string) {
+        return cache.get(u) ?? null;
+      },
+      async setFeedCache(
+        u: string,
+        etag: string | null,
+        lastModified: string | null,
+      ) {
+        cache.set(u, { etag, lastModified });
+      },
+      async channelsForFeed() {
+        return ["chan1"];
+      },
+      async insertItems() {
+        return 0;
+      },
+    } as unknown as MicrosubStore;
+    const run = consumer(feedFetch(304), store);
+    const { batch: b, acks } = batch([
+      { kind: "poll", feedUrl: "https://f.example/atom" },
+    ]);
+    await run(b, env as unknown as MicrosubEnv, ctx);
+    expect(acks).toEqual([0]);
+    // The 304 carried no validators; the previously-cached ones survive.
+    expect(cache.get("https://f.example/atom")).toEqual({
+      etag: 'W/"v1"',
+      lastModified: "Mon, 01 Jan 2026 00:00:00 GMT",
+    });
+  });
+
   it("fails loudly without a store or DB binding", () => {
     const broken = {
       ...(env as unknown as MicrosubEnv),

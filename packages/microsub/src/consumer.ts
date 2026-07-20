@@ -102,12 +102,6 @@ export function createMicrosubQueueConsumer(
         }
 
         const now = clock();
-        await store.setFeedCache(
-          job.feedUrl,
-          fetched.etag,
-          fetched.lastModified,
-          now,
-        );
 
         let added = 0;
         if (!fetched.notModified && fetched.entries.length > 0) {
@@ -124,6 +118,21 @@ export function createMicrosubQueueConsumer(
             );
           }
         }
+
+        // Persist the conditional-fetch validators only AFTER the entries are
+        // stored. If `insertItems` throws (→ `message.retry()`), the cache still
+        // holds the OLD validators, so the retry re-fetches the entries instead
+        // of getting a `304` for items it never stored (`insertItems` dedups by
+        // entry id, so the re-insert is idempotent). On a `304` the response may
+        // omit validators — keep the previously-cached ones rather than nulling
+        // them, so the next poll stays conditional.
+        await store.setFeedCache(
+          job.feedUrl,
+          fetched.etag ?? cache?.etag ?? null,
+          fetched.lastModified ?? cache?.lastModified ?? null,
+          now,
+        );
+
         emit(resolved, MicrosubLogEvent.FeedPolled, {
           added,
           host: hostFromUrl(job.feedUrl),

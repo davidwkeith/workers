@@ -245,7 +245,11 @@ interface Harness {
 
 async function withHandler(
   fn: (h: Harness) => Promise<void>,
-  options: { scope?: ("read" | "write")[]; now?: () => number } = {},
+  options: {
+    scope?: ("read" | "write")[];
+    pathPrefix?: string;
+    now?: () => number;
+  } = {},
 ): Promise<void> {
   const id = harness.WEBDAV_DO.idFromName(crypto.randomUUID());
   const stub = harness.WEBDAV_DO.get(id);
@@ -255,7 +259,12 @@ async function withHandler(
     const cred = await backend.credentials.mint({
       webid: WEBID,
       label: "Finder",
-      scope: { modes: options.scope ?? ["read", "write"] },
+      scope: {
+        modes: options.scope ?? ["read", "write"],
+        ...(options.pathPrefix !== undefined
+          ? { pathPrefix: options.pathPrefix }
+          : {}),
+      },
       iterations: ITER,
     });
     const basic = `Basic ${btoa(`${cred.username}:${cred.secret}`)}`;
@@ -374,6 +383,24 @@ describe("createWebdav — PUT/GET round-trip (spec §3)", () => {
       backend.allow = (_w, _p, mode) => mode === "read";
       expect((await call("PUT", "/d.txt", { body: "x" })).status).toBe(403);
     });
+  });
+
+  it("confines an app-password pathPrefix on a segment boundary (no sibling escape)", async () => {
+    await withHandler(
+      async ({ call }) => {
+        // In scope: the request passes the scope check (a missing resource is
+        // 404, never 403 — the scope did not refuse it).
+        expect((await call("GET", "/photos/a.txt")).status).not.toBe(403);
+        expect((await call("GET", "/photos")).status).not.toBe(403);
+        // The sibling /photos-private shares a string prefix but not a path
+        // segment — the scope must refuse it with 403, not leak it.
+        expect((await call("GET", "/photos-private/a.txt")).status).toBe(403);
+        expect(
+          (await call("PUT", "/photos-private/a.txt", { body: "x" })).status,
+        ).toBe(403);
+      },
+      { scope: ["read", "write"], pathPrefix: "/photos" },
+    );
   });
 });
 

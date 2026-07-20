@@ -57,6 +57,12 @@ export function createRevocationHandler(
     // Clone before consuming the body so the authenticator can read it too.
     const authRequest = request.clone();
     const form = await readForm(request);
+    if (form === null) {
+      return oauthErrorResponse(
+        OAuthError.InvalidRequest,
+        "request parameters must not be included more than once",
+      );
+    }
 
     const clientId = form.get("client_id") ?? undefined;
     if (
