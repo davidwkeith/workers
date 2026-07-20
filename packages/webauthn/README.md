@@ -108,8 +108,10 @@ credential response and POST it to the matching `verify` endpoint.
 > unauthenticated, anyone can register their own authenticator against another
 > user's id and then authenticate as that user — account takeover. The default
 > `authorize` hook allows everything (matching `@dwk/vc`), so **the composing
-> front door owns this decision**. Supply an `authorize` that requires an
-> established session for the `register/*` operations, e.g.:
+> front door owns this decision**. When no hook is supplied the factory emits a
+> loud `webauthn.config.registration_unguarded` warning on the injected logger
+> at startup rather than degrading silently. Supply an `authorize` that requires
+> an established session for the `register/*` operations, e.g.:
 >
 > ```ts
 > createWebAuthn({

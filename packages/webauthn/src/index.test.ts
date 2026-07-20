@@ -286,4 +286,28 @@ describe("@dwk/webauthn handler", () => {
     });
     expect(res.status).toBe(200);
   });
+
+  it("warns loudly at startup when no authorize hook is supplied", () => {
+    const warnings: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (event: string) => warnings.push(event),
+      error: () => {},
+    };
+    rp("unguarded", { logger });
+    expect(warnings).toContain("webauthn.config.registration_unguarded");
+  });
+
+  it("does not warn when an authorize hook is supplied", () => {
+    const warnings: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (event: string) => warnings.push(event),
+      error: () => {},
+    };
+    rp("guarded-quiet", { authorize: () => true, logger });
+    expect(warnings).not.toContain("webauthn.config.registration_unguarded");
+  });
 });

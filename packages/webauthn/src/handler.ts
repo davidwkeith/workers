@@ -112,6 +112,18 @@ function internalRequest(
 export function createWebAuthn(config: WebAuthnConfig): WebAuthnHandler {
   const resolved = resolveConfig(config);
 
+  // Loud startup warning when registration is left ungated: the default
+  // `authorize` hook allows everything, so an unauthenticated `/register/*` is
+  // an account-takeover vector unless the composing front door gates it
+  // upstream. Surface it rather than degrading silently (composition-contract
+  // "no silent degradation" posture); it's advisory since upstream gating is a
+  // valid pattern the package can't observe.
+  if (config.authorize === undefined) {
+    emit(resolved, "warn", WebAuthnLogEvent.RegistrationUnguarded, {
+      reason: "no_authorize_hook",
+    });
+  }
+
   return async (request, env, _ctx) => {
     assertBindings(env);
 
