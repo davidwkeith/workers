@@ -49,16 +49,21 @@ export interface DistributeJob {
 /**
  * How a {@link DeliverJob} carries the snapshot the planner fetched:
  *
- * - **`inline`** — the body rides in the queue message itself. Used when the
- *   body fits under {@link MAX_INLINE_BODY_BYTES}, comfortably inside a
- *   Cloudflare Queue message's ~128 KB limit.
+ * - **`inline`** — the body rides in the queue message itself, **base64-encoded**
+ *   into `body`. A raw `Uint8Array` is *not* carried: Cloudflare Queues (and the
+ *   Node self-host's queue shim) default to JSON-serializing a plain message
+ *   object, which turns a byte array into `{"0":…,"1":…}` — ~10× larger and not a
+ *   `Uint8Array` on the way back. A base64 string round-trips predictably and
+ *   sizes at a known 4/3 of the raw body. Used when the body fits under
+ *   {@link MAX_INLINE_BODY_BYTES} (chosen so the *encoded* message stays well
+ *   inside a Cloudflare Queue message's ~128 KB limit).
  * - **`staged`** — the body was written once to the `WEBSUB_CONTENT` R2 bucket
  *   under `key`, and every per-subscriber job references it. Used when the body
  *   is too large to inline, so a viral feed with many subscribers stages the
  *   content a single time rather than copying it into every message.
  */
 export type DeliverPayload =
-  | { readonly via: "inline"; readonly body: Uint8Array }
+  | { readonly via: "inline"; readonly body: string }
   | { readonly via: "staged"; readonly key: string };
 
 /**

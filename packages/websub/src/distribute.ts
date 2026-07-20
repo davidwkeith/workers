@@ -60,13 +60,37 @@ export const DEFAULT_SIGNATURE_ALGORITHM: SignatureAlgorithm = "sha256";
 const MAX_CONTENT_BYTES = 4 * 1024 * 1024;
 
 /**
- * Largest body carried inline in a per-subscriber queue message. Cloudflare
- * Queue messages are capped at ~128 KB; 96 KB leaves comfortable headroom for
- * the message's other fields (callback, secret, content type) and the queue's
- * own serialization overhead. A snapshot over this size is staged once in R2
+ * Largest **raw** body carried inline in a per-subscriber queue message. The
+ * inline body is base64-encoded (see {@link encodeInlineBody}), which inflates
+ * it to 4/3 its size; at 64 KB raw that is ~85 KB encoded, leaving comfortable
+ * headroom under a Cloudflare Queue message's ~128 KB cap for the message's
+ * other fields and JSON overhead. A snapshot over this size is staged once in R2
  * (see {@link WebSubEnv.WEBSUB_CONTENT}) and referenced by key instead.
  */
-export const MAX_INLINE_BODY_BYTES = 96 * 1024;
+export const MAX_INLINE_BODY_BYTES = 64 * 1024;
+
+/**
+ * Base64-encode a body for inline carriage in a queue message. Queues default
+ * to JSON-serializing the message object, which would corrupt a raw
+ * `Uint8Array`; a base64 string round-trips through any serialization.
+ */
+export function encodeInlineBody(body: Uint8Array): string {
+  let binary = "";
+  for (const byte of body) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+/** Decode a body previously encoded by {@link encodeInlineBody}. */
+export function decodeInlineBody(encoded: string): Uint8Array {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
 
 /**
  * The minimal subscription facts one delivery needs: where to POST, which topic

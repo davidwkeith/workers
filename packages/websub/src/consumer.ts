@@ -38,6 +38,8 @@ import {
 } from "./config.js";
 import {
   deliverToSubscriber,
+  decodeInlineBody,
+  encodeInlineBody,
   fetchTopicContent,
   readStagedContent,
   stageContent,
@@ -71,11 +73,20 @@ function estimateJobBytes(job: DeliverJob): number {
     job.contentType.length +
     64;
   return job.payload.via === "inline"
-    ? base + job.payload.body.byteLength
+    ? base + job.payload.body.length
     : base + job.payload.key.length;
 }
 
-/** Enqueue `jobs` via `sendBatch`, chunked to stay within the queue's limits. */
+/**
+ * Enqueue `jobs` via `sendBatch`, chunked to stay within the queue's limits.
+ *
+ * If a later chunk throws after earlier chunks already flushed, the error
+ * propagates and the whole `distribute` job retries, which re-enqueues deliver
+ * jobs for the already-flushed subscribers too. That is a bounded, WebSub-legal
+ * duplication (§7 requires subscribers to tolerate duplicate deliveries) chosen
+ * over the alternative — swallowing the failure would silently *drop* the
+ * unflushed subscribers' update, a far worse outcome than an extra POST.
+ */
 async function sendDeliverJobs(
   queue: Queue<WebSubJob>,
   jobs: readonly DeliverJob[],
@@ -181,7 +192,7 @@ async function planDistribution(
   let payload: DeliverPayload;
   let staged: boolean;
   if (content.body.byteLength <= MAX_INLINE_BODY_BYTES) {
-    payload = { via: "inline", body: content.body };
+    payload = { via: "inline", body: encodeInlineBody(content.body) };
     staged = false;
   } else if (env.WEBSUB_CONTENT === undefined) {
     throw new Error(
@@ -222,7 +233,7 @@ async function runDelivery(
 ): Promise<"ack" | "retry"> {
   let body: Uint8Array;
   if (job.payload.via === "inline") {
-    body = job.payload.body;
+    body = decodeInlineBody(job.payload.body);
   } else {
     if (env.WEBSUB_CONTENT === undefined) {
       // A staged delivery landed with no bucket to read it from: a

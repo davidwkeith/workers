@@ -251,7 +251,11 @@ describe("Phase 3 — lifecycle bring-up on the shims", () => {
     );
 
     await enqueue(env.WEBSUB_QUEUE, { kind: "distribute", topic });
-    await broker.tick();
+    // The distribute job is a fan-out planner: it enqueues one per-subscriber
+    // deliver job, so drain the queue until it settles rather than ticking once.
+    for (let i = 0; i < 5 && broker.pending("WEBSUB_QUEUE") > 0; i++) {
+      await broker.tick();
+    }
 
     // The subscriber received an HMAC-signed delivery.
     expect(signature).toMatch(/^sha(1|256)=/);

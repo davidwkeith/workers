@@ -11,9 +11,14 @@ subscriber down during a publish no longer silently misses the update; a large
 subscriber set no longer exceeds a single invocation's subrequest ceiling; and a
 transient failure no longer re-delivers to every subscriber (duplicates).
 
-Small snapshots ride inline in each `deliver` message; a body too large to
-inline (> `MAX_INLINE_BODY_BYTES`, 96 KB) is staged once in a new optional
+Small snapshots ride inline in each `deliver` message, **base64-encoded** (a raw
+`Uint8Array` would be JSON-serialized by Cloudflare Queues into a ~10×-larger
+`{"0":…}` byte map and not round-trip as bytes). A body too large to inline
+(> `MAX_INLINE_BODY_BYTES`, 64 KB raw) is staged once in a new optional
 `WEBSUB_CONTENT` R2 bucket and referenced by key. When a snapshot exceeds the
 inline limit and no bucket is configured, the fan-out fails loudly rather than
-truncating the push. `deliverToSubscriber` now accepts the narrower
-`DeliveryTarget` shape (`Subscription` remains assignable).
+truncating the push. Delivery is at-least-once: a `distribute` retry after a
+partial `sendBatch` fan-out can re-enqueue deliver jobs for subscribers already
+reached (WebSub §7 requires subscribers to tolerate duplicates).
+`deliverToSubscriber` now accepts the narrower `DeliveryTarget` shape
+(`Subscription` remains assignable).

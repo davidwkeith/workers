@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createWebSubQueueConsumer } from "./consumer.js";
 import type { WebSubEnv } from "./config.js";
+import { decodeInlineBody, encodeInlineBody } from "./distribute.js";
 import type { WebSubJob } from "./queue.js";
 import type {
   Subscription,
@@ -85,11 +86,15 @@ function batchOf(jobs: WebSubJob[]): {
 /** In-memory Queue producer capturing every enqueued job (send + sendBatch). */
 class MemoryQueue {
   readonly sent: WebSubJob[] = [];
+  /** Size of each `sendBatch` call, in order — lets a test assert chunking. */
+  readonly batchSizes: number[] = [];
   async send(body: WebSubJob) {
     this.sent.push(body);
   }
   async sendBatch(messages: Iterable<{ body: WebSubJob }>) {
-    for (const m of messages) this.sent.push(m.body);
+    const batch = [...messages];
+    this.batchSizes.push(batch.length);
+    for (const m of batch) this.sent.push(m.body);
   }
 }
 
@@ -327,7 +332,82 @@ describe("createWebSubQueueConsumer — distribute (fan-out planner)", () => {
       contentType: "application/atom+xml",
       payload: { via: "inline" },
     });
+    // The inline body is a base64 string (not a raw Uint8Array), so the job
+    // JSON-serializes to a compact string — no `{"0":..,"1":..}` byte-map bloat.
+    const payload = jobs[0]?.payload;
+    expect(payload?.via === "inline" && typeof payload.body).toBe("string");
+    if (payload?.via === "inline") {
+      expect(new TextDecoder().decode(decodeInlineBody(payload.body))).toBe(
+        "<feed>new</feed>",
+      );
+      // No `{"0":..,"1":..}` byte-map: the message serializes compactly, far
+      // smaller than the ~10× bloat a raw Uint8Array would incur.
+      const serialized = JSON.stringify(jobs[0]);
+      expect(serialized).not.toContain('"0":');
+      expect(serialized.length).toBeLessThan(300);
+    }
     expect(acks).toEqual([0]);
+  });
+
+  it("chunks the fan-out into ≤100-message sendBatch calls for a large subscriber set", async () => {
+    const store = new MemoryStore();
+    for (let i = 0; i < 250; i++) {
+      await store.upsert({
+        callback: `https://sub${i}.example/cb`,
+        topic,
+        leaseSeconds: 1000,
+        now: 0,
+      });
+    }
+    const queue = new MemoryQueue();
+    const consumer = createWebSubQueueConsumer(
+      { ...config, fetch: distributingFetch("<feed/>", []) },
+      { store, now: () => 500 },
+    );
+    const { batch, acks } = batchOf([{ kind: "distribute", topic }]);
+    await consumer(batch, envWith(queue), ctx);
+
+    // 250 subscribers → one deliver job each, no message enqueued more than once.
+    expect(deliverJobs(queue)).toHaveLength(250);
+    expect(new Set(deliverJobs(queue).map((j) => j.callback)).size).toBe(250);
+    // Chunked across multiple sendBatch calls, none over the 100-message cap.
+    expect(queue.batchSizes.length).toBeGreaterThan(1);
+    expect(Math.max(...queue.batchSizes)).toBeLessThanOrEqual(100);
+    expect(queue.batchSizes.reduce((a, b) => a + b, 0)).toBe(250);
+    expect(acks).toEqual([0]);
+  });
+
+  it("retries the whole distribute job when a later sendBatch chunk fails (at-least-once)", async () => {
+    const store = new MemoryStore();
+    for (let i = 0; i < 150; i++) {
+      await store.upsert({
+        callback: `https://sub${i}.example/cb`,
+        topic,
+        leaseSeconds: 1000,
+        now: 0,
+      });
+    }
+    // A queue whose second sendBatch chunk throws after the first already
+    // flushed: the exception propagates and the distribute job retries. Per
+    // WebSub's at-least-once contract the first chunk's subscribers may then be
+    // re-enqueued — a bounded, spec-tolerated duplication, not silent loss.
+    class FlakyQueue extends MemoryQueue {
+      calls = 0;
+      override async sendBatch(messages: Iterable<{ body: WebSubJob }>) {
+        this.calls++;
+        if (this.calls === 2) throw new Error("queue overloaded");
+        return super.sendBatch(messages);
+      }
+    }
+    const queue = new FlakyQueue();
+    const consumer = createWebSubQueueConsumer(
+      { ...config, fetch: distributingFetch("<feed/>", []) },
+      { store, now: () => 500 },
+    );
+    const { batch, acks, retries } = batchOf([{ kind: "distribute", topic }]);
+    await consumer(batch, envWith(queue), ctx);
+    expect(retries).toEqual([0]);
+    expect(acks).toEqual([]);
   });
 
   it("prunes expired leases and schedules only the live subscriber", async () => {
@@ -476,14 +556,16 @@ describe("createWebSubQueueConsumer — distribute (fan-out planner)", () => {
 describe("createWebSubQueueConsumer — deliver jobs", () => {
   const topic = "https://example.com/feed";
 
-  it("POSTs an inline body (signed with the subscriber's secret) and acks", async () => {
+  it("decodes and POSTs an inline body (signed with the subscriber's secret) and acks", async () => {
     const posted: string[] = [];
     let seenSig: string | null = null;
+    let seenBody: string | null = null;
     const fetchImpl: FetchLike = vi.fn(async (input, init) => {
       posted.push(input);
       seenSig = new Headers(init?.headers as HeadersInit).get(
         "x-hub-signature",
       );
+      seenBody = new TextDecoder().decode(init?.body as ArrayBuffer);
       return new Response(null, { status: 204 });
     });
     const consumer = createWebSubQueueConsumer(
@@ -497,11 +579,16 @@ describe("createWebSubQueueConsumer — deliver jobs", () => {
         topic,
         secret: "sek",
         contentType: "application/atom+xml",
-        payload: { via: "inline", body: new TextEncoder().encode("<feed/>") },
+        payload: {
+          via: "inline",
+          body: encodeInlineBody(new TextEncoder().encode("<feed/>")),
+        },
       },
     ]);
     await consumer(batch, {} as WebSubEnv, ctx);
     expect(posted).toEqual(["https://sub.example/cb"]);
+    // The base64 payload was decoded back to the exact original bytes.
+    expect(seenBody).toBe("<feed/>");
     expect(seenSig).toMatch(/^sha256=/);
     expect(acks).toEqual([0]);
   });
@@ -521,7 +608,10 @@ describe("createWebSubQueueConsumer — deliver jobs", () => {
         topic,
         secret: null,
         contentType: "application/atom+xml",
-        payload: { via: "inline", body: new TextEncoder().encode("x") },
+        payload: {
+          via: "inline",
+          body: encodeInlineBody(new TextEncoder().encode("x")),
+        },
       },
     ]);
     await consumer(batch, {} as WebSubEnv, ctx);

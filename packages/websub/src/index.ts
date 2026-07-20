@@ -76,6 +76,8 @@ export {
   deliverToSubscriber,
   stageContent,
   readStagedContent,
+  encodeInlineBody,
+  decodeInlineBody,
   MAX_INLINE_BODY_BYTES,
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
