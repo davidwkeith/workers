@@ -195,4 +195,41 @@ describe("default key resolver", () => {
     );
     expect(await resolve(KEY_ID)).toBeNull();
   });
+
+  it("rejects a key document that claims a cross-origin owner (impersonation)", async () => {
+    // The key is served from evil.example but declares ownership by an actor on
+    // victim.example. Attributing the signature to the victim would be actor
+    // impersonation, so the resolver must refuse the cross-origin ownership.
+    const resolve = resolverWith(
+      vi.fn(async () =>
+        jsonResponse({
+          id: "https://evil.example/key",
+          publicKey: {
+            owner: "https://victim.example/users/alice",
+            publicKeyPem: "ATTACKER-PEM",
+          },
+        }),
+      ) as unknown as typeof fetch,
+    );
+    expect(await resolve("https://evil.example/key")).toBeNull();
+  });
+
+  it("rejects a plaintext http: keyId without fetching (SSRF guard)", async () => {
+    const fetchImpl = vi.fn();
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(
+      await resolve("http://remote.example/users/bob#main-key"),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a private/loopback-host keyId without fetching (SSRF guard)", async () => {
+    const fetchImpl = vi.fn();
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    expect(await resolve("https://127.0.0.1/key")).toBeNull();
+    expect(
+      await resolve("https://169.254.169.254/latest/meta-data"),
+    ).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });

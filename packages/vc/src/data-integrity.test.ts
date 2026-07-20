@@ -179,6 +179,43 @@ describe("eddsa-jcs-2022", () => {
     expect(result.errors[0]).toMatch(/could not resolve/);
   });
 
+  it("rejects a credential whose verification method is not controlled by the issuer (forgery)", async () => {
+    // The attacker signs — with their own key — a credential that names a victim
+    // as issuer, using a verification method on the attacker's own DID
+    // (VM_ID's DID is did:web:example.com, not the victim). The signature is
+    // valid, so only the issuer<->controller binding can catch this.
+    const { privateJwk, multikeyVm } = await ed25519Material();
+    const signer = await importSigner(privateJwk);
+    const forged: JsonObject = {
+      ...sampleDoc(),
+      issuer: "did:web:victim.example",
+    };
+    const secured = await addProof(forged, signer, {
+      verificationMethod: VM_ID,
+    });
+    const result = await verifyProof(secured, {
+      resolveVerificationMethod: () => multikeyVm,
+    });
+    expect(result.verified).toBe(false);
+    expect(result.errors[0]).toMatch(/is not the credential issuer/);
+  });
+
+  it("accepts a verification method whose explicit controller is the issuer", async () => {
+    const { privateJwk, multikeyVm } = await ed25519Material();
+    const signer = await importSigner(privateJwk);
+    const secured = await addProof(sampleDoc(), signer, {
+      verificationMethod: VM_ID,
+    });
+    const result = await verifyProof(secured, {
+      // issuer is did:web:example.com; declare a matching explicit controller.
+      resolveVerificationMethod: () => ({
+        ...multikeyVm,
+        controller: "did:web:example.com",
+      }),
+    });
+    expect(result).toEqual({ verified: true, errors: [] });
+  });
+
   it("verifies via a publicKeyJwk verification method too", async () => {
     const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
       "sign",

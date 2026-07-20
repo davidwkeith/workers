@@ -12,6 +12,7 @@
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
 import type { ActorIris, ActorProfile } from "./as2.js";
+import { guardedFetch, readJsonCapped } from "./discovery.js";
 import type {
   KeyResolver,
   ResolvedKey,
@@ -246,32 +247,47 @@ export function deriveIris(baseUrl: string, username: string): ActorIris {
   };
 }
 
+/** Ceiling on an untrusted key/actor document's size (bytes). */
+const MAX_KEY_DOC_BYTES = 1024 * 1024;
+
 /**
  * The default key resolver: fetch the `keyId` (an actor or fragment IRI) as AS2
  * and read its embedded `publicKey`. Returns `null` when the document cannot be
  * fetched or carries no usable key, which the verifier maps to a rejection.
+ *
+ * The `keyId` comes from an unauthenticated inbound `POST /inbox`, so the fetch
+ * runs through the same public-HTTPS SSRF guard outbound delivery uses
+ * ({@link guardedFetch}): non-`https:` schemes and private / loopback /
+ * link-local hosts are refused before any request leaves. The body is read with
+ * a hard byte ceiling so a hostile remote cannot exhaust memory.
+ *
+ * Critically, the resolved `owner` is bound to the origin that served the key:
+ * a key document may only speak for an actor on its **own** origin. Without this
+ * an attacker could host a key document at `https://evil.example/key` declaring
+ * `owner: https://victim.example/users/alice`, sign an activity with their own
+ * key, and have the verifier attribute it to the victim (actor impersonation),
+ * since the signature is checked against *this* document's key.
  */
 function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
+  const fetchGuarded = guardedFetch(fetchImpl);
   return async (keyId: string): Promise<ResolvedKey | null> => {
     // The key IRI is the actor (or key) document URL with its fragment
     // stripped. Parse it as a URL so the fragment is removed per the URL spec
     // (rather than by string surgery) and an unparseable `keyId` is rejected
     // before it reaches `fetch`.
-    let actorUrl: string;
+    let keyUrl: URL;
     try {
-      const url = new URL(keyId);
-      // Only ever dereference a remote actor/key document over HTTP(S); reject
-      // other schemes (`file:`, `data:`, …) outright so a crafted `keyId`
-      // cannot redirect the fetch at a non-network resource.
-      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-      url.hash = "";
-      actorUrl = url.href;
+      keyUrl = new URL(keyId);
+      keyUrl.hash = "";
     } catch {
       return null;
     }
     let response: Response;
     try {
-      response = await fetchImpl(actorUrl, {
+      // `guardedFetch` enforces `https:`-only + a public host on the
+      // attacker-supplied `keyId` (throwing on any violation) before the
+      // request leaves; a rejection resolves to `null`.
+      response = await fetchGuarded(keyUrl.href, {
         headers: { accept: "application/activity+json" },
         // Bound key resolution so a slow remote cannot stall inbox verification.
         signal: AbortSignal.timeout(10_000),
@@ -280,13 +296,8 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       return null;
     }
     if (!response.ok) return null;
-    let doc: unknown;
-    try {
-      doc = await response.json();
-    } catch {
-      return null;
-    }
-    if (!doc || typeof doc !== "object") return null;
+    const doc = await readJsonCapped(response, MAX_KEY_DOC_BYTES);
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
     const publicKey = (doc as Record<string, unknown>).publicKey;
     if (!publicKey || typeof publicKey !== "object") return null;
     const pem = (publicKey as Record<string, unknown>).publicKeyPem;
@@ -294,6 +305,15 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       (publicKey as Record<string, unknown>).owner ??
       (doc as Record<string, unknown>).id;
     if (typeof pem !== "string" || typeof owner !== "string") return null;
+    // Bind the key to the origin that served it: reject a document that claims
+    // ownership by an actor on a different origin (the impersonation vector).
+    let ownerUrl: URL;
+    try {
+      ownerUrl = new URL(owner);
+    } catch {
+      return null;
+    }
+    if (ownerUrl.origin !== keyUrl.origin) return null;
     return { owner, publicKeyPem: pem };
   };
 }
