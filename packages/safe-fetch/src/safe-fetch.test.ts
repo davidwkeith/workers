@@ -54,6 +54,22 @@ describe("isPrivateOrReservedHost", () => {
     expect(isPrivateOrReservedHost("[64:ff9b::169.254.169.254]")).toBe(true);
   });
 
+  it("blocks 6to4 (2002::/16) that embeds a private IPv4", () => {
+    // 2002:7f00:1:: embeds 127.0.0.1; 2002:c0a8:101:: embeds 192.168.1.1.
+    expect(isPrivateOrReservedHost("[2002:7f00:1::]")).toBe(true);
+    expect(isPrivateOrReservedHost("[2002:c0a8:101::]")).toBe(true);
+    expect(isPrivateOrReservedHost("[2002:a9fe:a9fe::]")).toBe(true); // 169.254.169.254
+    // A 6to4 wrapping a public IPv4 (8.8.8.8) stays allowed.
+    expect(isPrivateOrReservedHost("[2002:808:808::]")).toBe(false);
+  });
+
+  it("blocks Teredo (2001:0000::/32) whose embedded client IPv4 is private", () => {
+    // Client IPv4 lives in groups 6–7, bitwise-inverted: ~192.168.1.1 =
+    // 3f57:fefe, ~8.8.8.8 = f7f7:f7f7.
+    expect(isPrivateOrReservedHost("[2001:0:0:0:0:0:3f57:fefe]")).toBe(true);
+    expect(isPrivateOrReservedHost("[2001:0:0:0:0:0:f7f7:f7f7]")).toBe(false);
+  });
+
   it("blocks site-local, multicast, and documentation IPv6", () => {
     expect(isPrivateOrReservedHost("[fec0::1]")).toBe(true);
     expect(isPrivateOrReservedHost("[ff02::1]")).toBe(true);

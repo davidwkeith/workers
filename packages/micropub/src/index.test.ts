@@ -638,9 +638,43 @@ describe("@dwk/micropub media endpoint", () => {
 
     const get = await handler(new Request(location), harness, ctx);
     expect(get.status).toBe(200);
+    // A known media type is served inline with its type — and never sniffed.
     expect(get.headers.get("content-type")).toBe("image/png");
+    expect(get.headers.get("x-content-type-options")).toBe("nosniff");
     const bytes = new Uint8Array(await get.arrayBuffer());
     expect(Array.from(bytes)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("serves an uploaded text/html blob as a non-executable download (stored-XSS guard)", async () => {
+    const minted = await mintToken("media");
+    const form = new FormData();
+    form.set(
+      "file",
+      new File(["<script>alert(1)</script>"], "x.html", {
+        type: "text/html",
+      }),
+    );
+    const res = await handler(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MEDIA),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    const get = await handler(
+      new Request(res.headers.get("location")!),
+      harness,
+      ctx,
+    );
+    expect(get.status).toBe(200);
+    // Not served as HTML: forced to an opaque, downloaded blob, never sniffed —
+    // so a `media`-scope upload can't execute as script on this origin.
+    expect(get.headers.get("content-type")).toBe("application/octet-stream");
+    expect(get.headers.get("content-disposition")).toBe("attachment");
+    expect(get.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("rejects a media upload without the media scope (least privilege)", async () => {

@@ -307,9 +307,48 @@ describe("AT Protocol PDS", () => {
       `/xrpc/com.atproto.sync.getBlob?cid=${blob.blob.ref.$link}`,
     );
     expect(fetched.status).toBe(200);
+    // A known media type is served inline with its type, and never sniffed.
+    expect(fetched.headers.get("content-type")).toBe("image/png");
+    expect(fetched.headers.get("x-content-type-options")).toBe("nosniff");
     expect([...new Uint8Array(await fetched.arrayBuffer())]).toEqual([
       ...bytes,
     ]);
+  });
+
+  it("serves a text/html blob as a non-executable download (stored-XSS guard)", async () => {
+    const host = "htmlblob.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+    });
+    const token = await login(handler, host);
+    const uploaded = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.repo.uploadBlob",
+      {
+        raw: new TextEncoder().encode("<script>alert(1)</script>"),
+        contentType: "text/html",
+        token,
+      },
+    );
+    expect(uploaded.status).toBe(200);
+    const blob = (await uploaded.json()) as {
+      blob: { ref: { $link: string } };
+    };
+    const fetched = await call(
+      handler,
+      host,
+      `/xrpc/com.atproto.sync.getBlob?cid=${blob.blob.ref.$link}`,
+    );
+    expect(fetched.status).toBe(200);
+    // Not served as HTML: forced to an opaque download, never sniffed.
+    expect(fetched.headers.get("content-type")).toBe(
+      "application/octet-stream",
+    );
+    expect(fetched.headers.get("content-disposition")).toBe("attachment");
+    expect(fetched.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("rejects an oversized blob by its declared Content-Length", async () => {
