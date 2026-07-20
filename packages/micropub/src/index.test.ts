@@ -699,6 +699,27 @@ describe("@dwk/micropub media endpoint", () => {
     expect((photo as string).startsWith(`${MEDIA}/`)).toBe(true);
   });
 
+  it("never writes media to R2 when a multipart create is unauthorized", async () => {
+    const before = (await harness.MEDIA.list()).objects.length;
+    const form = new FormData();
+    form.set("h", "entry");
+    form.set("content", "no auth");
+    form.set(
+      "photo",
+      new File([new Uint8Array([9, 9])], "p.jpg", { type: "image/jpeg" }),
+    );
+    // No Authorization header and no DPoP proof: authorization must fail…
+    const res = await handler(
+      new Request(MICROPUB, { method: "POST", body: form }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    // …and the upload must never have been streamed to R2 (auth precedes store).
+    const after = (await harness.MEDIA.list()).objects.length;
+    expect(after).toBe(before);
+  });
+
   it("rejects a multipart upload over the media size limit", async () => {
     const tiny = createMicropub({ baseUrl: BASE, me: ME, maxMediaBytes: 2 });
     const minted = await mintToken("create");

@@ -40,6 +40,19 @@ const DEFAULT_LIFETIME_SECONDS = 60;
 /** Reference entropy in bytes: 256 bits of unguessable `request_uri`. */
 const REFERENCE_BYTES = 32;
 
+/**
+ * Client-authentication parameters that a `client_secret_post` /
+ * `private_key_jwt` client sends in the same form body as the authorization
+ * parameters. They authenticate the request; they are not part of the pushed
+ * authorization request and MUST NOT be persisted into the stored record, where
+ * a client's credential would otherwise sit at rest.
+ */
+const CLIENT_AUTH_PARAMS = new Set([
+  "client_secret",
+  "client_assertion",
+  "client_assertion_type",
+]);
+
 /** Build the `request_uri` URN for a stored reference. */
 export function requestUriFor(reference: string): string {
   return `${PUSHED_REQUEST_URI_PREFIX}${reference}`;
@@ -148,7 +161,11 @@ export function createPushedAuthorizationRequestHandler(
     }
 
     const params: Record<string, string> = {};
-    for (const [key, value] of form) params[key] = value;
+    for (const [key, value] of form) {
+      // Never persist the client's authentication credential (see above).
+      if (CLIENT_AUTH_PARAMS.has(key)) continue;
+      params[key] = value;
+    }
 
     if (config.validate) {
       const problem = await config.validate(params);

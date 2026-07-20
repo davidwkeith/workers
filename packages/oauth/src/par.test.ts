@@ -72,6 +72,32 @@ describe("createPushedAuthorizationRequestHandler", () => {
     expect(saved?.params.code_challenge).toBe("abc");
   });
 
+  it("never persists client-authentication credentials into the stored record", async () => {
+    let saved: PushedRequestRecord | undefined;
+    const res = await handler({
+      saveRequest: async (record) => {
+        saved = record;
+      },
+    })(
+      postForm({
+        client_id: "https://app.example/",
+        client_secret: "s3cret",
+        client_assertion: "ey.assertion.jwt",
+        client_assertion_type:
+          "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        response_type: "code",
+        code_challenge: "abc",
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(saved?.params.response_type).toBe("code");
+    expect(saved?.params.code_challenge).toBe("abc");
+    // The credential-bearing parameters must not survive into storage.
+    expect(saved?.params.client_secret).toBeUndefined();
+    expect(saved?.params.client_assertion).toBeUndefined();
+    expect(saved?.params.client_assertion_type).toBeUndefined();
+  });
+
   it("rejects a body that smuggles its own request_uri", async () => {
     const res = await handler()(
       postForm({

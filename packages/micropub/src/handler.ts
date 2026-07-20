@@ -163,14 +163,16 @@ async function readForm(request: Request): Promise<[string, string][]> {
 }
 
 /**
- * Parse a `multipart/form-data` create: text fields become mf2 properties, while
- * uploaded files (e.g. `photo`) are streamed to R2 and replaced by their URLs.
+ * Parse a `multipart/form-data` create's **text** fields into a
+ * {@link ParsedBody}, returning the uploaded file parts separately and
+ * *unstored*. No blob ever reaches R2 here: the files are streamed to R2 only
+ * after the request is authorized (see {@link handleAction} →
+ * {@link foldUploadedMedia}), so an unauthenticated caller cannot cause a write.
  */
-async function parseMultipartCreate(
+async function parseMultipartFields(
   request: Request,
-  env: MicropubEnv,
   config: ResolvedConfig,
-): Promise<ParsedBody> {
+): Promise<{ parsed: ParsedBody; files: [string, File][] }> {
   // Guard memory before `formData()` buffers the whole multipart body.
   if (contentLengthExceeds(request, config.maxMediaBytes)) {
     throw new Mf2ParseError(
@@ -179,22 +181,31 @@ async function parseMultipartCreate(
   }
   const form = await request.formData();
   const textEntries: [string, string][] = [];
-  const fileFields: [string, File][] = [];
+  const files: [string, File][] = [];
   for (const [key, value] of form) {
     if (typeof value === "string") textEntries.push([key, value]);
-    else fileFields.push([key, value]);
+    else files.push([key, value]);
   }
+  return { parsed: parseFormBody(textEntries), files };
+}
 
-  const parsed = parseFormBody(textEntries);
-  if (fileFields.length === 0) return parsed;
-
-  // Upload each file and fold its URL into the matching property (a trailing
-  // `[]` denotes a multi-valued property, e.g. `photo[]`).
+/**
+ * Stream each uploaded file to R2 and fold its URL into the matching mf2
+ * property (a trailing `[]` denotes a multi-valued property, e.g. `photo[]`).
+ * Called only after authorization succeeds.
+ */
+async function foldUploadedMedia(
+  parsed: ParsedBody,
+  files: [string, File][],
+  env: MicropubEnv,
+  config: ResolvedConfig,
+): Promise<ParsedBody> {
+  if (files.length === 0) return parsed;
   const properties: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(parsed.mf2.properties)) {
     properties[key] = [...values];
   }
-  for (const [field, file] of fileFields) {
+  for (const [field, file] of files) {
     if (file.size > config.maxMediaBytes) {
       throw new Mf2ParseError(
         `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
@@ -387,12 +398,13 @@ async function handleQuery(
 
 // --- Actions ----------------------------------------------------------------
 
-/** Parse a `POST` body into a {@link ParsedBody} based on its content type. */
-async function parseRequest(
-  request: Request,
-  env: MicropubEnv,
-  config: ResolvedConfig,
-): Promise<ParsedBody> {
+/**
+ * Parse a non-multipart `POST` body into a {@link ParsedBody} based on its
+ * content type. `multipart/form-data` is handled directly in
+ * {@link handleAction} so its file parts can be stored only after
+ * authorization.
+ */
+async function parseRequest(request: Request): Promise<ParsedBody> {
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     let body: unknown;
@@ -402,9 +414,6 @@ async function parseRequest(
       throw new Mf2ParseError("request body is not valid JSON");
     }
     return parseJsonBody(body);
-  }
-  if (contentType.includes("multipart/form-data")) {
-    return parseMultipartCreate(request, env, config);
   }
   return parseFormBody(await readForm(request));
 }
@@ -420,8 +429,13 @@ async function handleAction(
   // before `parseRequest` consumes the stream.
   const contentType = request.headers.get("content-type") ?? "";
   const isJson = contentType.includes("application/json");
+  const isMultipart = contentType.includes("multipart/form-data");
   let rawJson: unknown;
   let parsed: ParsedBody;
+  // Uploaded multipart files, parsed but NOT yet stored — they are streamed to
+  // R2 only after authorization succeeds, so an unauthenticated request can
+  // never cause a blob write.
+  let pendingFiles: [string, File][] = [];
   try {
     if (isJson) {
       try {
@@ -430,8 +444,12 @@ async function handleAction(
         throw new Mf2ParseError("request body is not valid JSON");
       }
       parsed = parseJsonBody(rawJson);
+    } else if (isMultipart) {
+      const fields = await parseMultipartFields(request, config);
+      parsed = fields.parsed;
+      pendingFiles = fields.files;
     } else {
-      parsed = await parseRequest(request, env, config);
+      parsed = await parseRequest(request);
     }
   } catch (err) {
     if (err instanceof Mf2ParseError) {
@@ -474,6 +492,23 @@ async function handleAction(
       status: auth.status,
     });
     return error(auth.error, auth.description, auth.status);
+  }
+
+  // Authorized: only now stream any uploaded multipart files to R2 and fold
+  // their URLs into the create. (Files on a non-create action are ignored, so
+  // they never produce orphaned blobs.)
+  if (pendingFiles.length > 0 && action === "create") {
+    try {
+      parsed = await foldUploadedMedia(parsed, pendingFiles, env, config);
+    } catch (err) {
+      if (err instanceof Mf2ParseError) {
+        emit(config, "warn", MicropubLogEvent.RequestRejected, {
+          reason: "invalid_body",
+        });
+        return error("invalid_request", err.message, 400);
+      }
+      throw err;
+    }
   }
 
   switch (action) {
