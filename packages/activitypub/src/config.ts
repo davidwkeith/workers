@@ -230,7 +230,24 @@ export interface ForwardedConfig {
   readonly keyId: string;
   /** Private key (PKCS#8 PEM) so the DO can sign deliveries from its alarm. */
   readonly privateKeyPem?: string;
+  /**
+   * TEMPORARY (#273/#315/#317) — see {@link ActivityPubConfig.debugSignatureDiagnostics}.
+   * Forwarded so the DO's own actor/signer-mismatch diagnostic (object.ts) can
+   * gate itself the same way the front door's signature-rejection diagnostic
+   * does.
+   */
+  readonly debugSignatureDiagnostics: boolean;
 }
+
+/**
+ * TEMPORARY (fediverse conformance debugging, #273/#315/#317) — hardcoded
+ * cutoff shared by every temporary diagnostic block gated behind
+ * {@link ActivityPubConfig.debugSignatureDiagnostics}, so none of them can
+ * linger silently even on the one disposable deployment that opts in.
+ */
+export const DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF = Date.parse(
+  "2026-07-21T12:00:00Z",
+);
 
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_ATTEMPTS = 8;

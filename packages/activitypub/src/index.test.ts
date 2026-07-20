@@ -712,6 +712,7 @@ function forwardedHeader(
     deliveryBaseDelayMs: 60_000,
     keyId: iris.keyId,
     privateKeyPem,
+    debugSignatureDiagnostics: false,
   };
   return JSON.stringify(config);
 }

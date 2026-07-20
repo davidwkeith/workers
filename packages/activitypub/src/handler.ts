@@ -24,6 +24,7 @@ import {
   type UsageCounts,
 } from "./nodeinfo.js";
 import {
+  DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF,
   INTERNAL_HEADERS,
   resolveConfig,
   type ActivityPubConfig,
@@ -104,6 +105,8 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     keyId: config.iris.keyId,
     sharedInbox: config.sharedInbox,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),
+    // TEMPORARY (#273/#315/#317) — see `config.debugSignatureDiagnostics`.
+    debugSignatureDiagnostics: config.debugSignatureDiagnostics,
   };
 }
 
@@ -199,7 +202,8 @@ async function verifySignature(config: ResolvedConfig, inbox: InboxRequest) {
 // works for debugging the live suite: the fedify-peer test case throws on a
 // non-2xx delivery and prints the response body verbatim in the workflow
 // log, so no separate log-retrieval path (`wrangler tail`, etc.) is needed.
-const DEBUG_SIGNATURE_DIAGNOSTICS_CUTOFF = Date.parse("2026-07-21T12:00:00Z");
+// The cutoff itself lives in `config.ts` — shared with the DO's own
+// actor/signer-mismatch diagnostic (object.ts), added for the same reason.
 
 function buildSignatureDiagnostic(
   inbox: InboxRequest,
