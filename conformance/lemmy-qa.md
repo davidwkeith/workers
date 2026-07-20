@@ -44,6 +44,10 @@ reached the community at all before that fix).
 | Lemmy test account  | _fill in_                                                     |
 | Community actor IRI | _fill in, e.g. `https://lemmy.ml/c/<community>`_              |
 
+Both `/outbox` and `/publish` are confirmed enabled and working on this
+deployment as of the Fedify conformance runs on 2026-07-20 and the vote-
+delivery fix in #324 — no additional setup should be needed before starting.
+
 ## Prerequisites
 
 - [ ] A Lemmy account on a live instance, logged in.
