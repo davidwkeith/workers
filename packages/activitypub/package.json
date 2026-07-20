@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@dwk/calendar": "workspace:*",
+    "@dwk/http-signatures": "workspace:*",
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",
     "@dwk/mcp": "workspace:*",

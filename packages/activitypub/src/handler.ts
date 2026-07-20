@@ -332,6 +332,7 @@ export function createActivityPub(
       const inbox: InboxRequest = {
         method,
         path: `${url.pathname}${url.search}`,
+        url: request.url,
         headers: request.headers,
         body: bodyBytes,
       };

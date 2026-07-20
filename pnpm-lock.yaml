@@ -53,6 +53,9 @@ importers:
       '@dwk/calendar':
         specifier: workspace:*
         version: link:../calendar
+      '@dwk/http-signatures':
+        specifier: workspace:*
+        version: link:../http-signatures
       '@dwk/ldn':
         specifier: workspace:*
         version: link:../ldn
