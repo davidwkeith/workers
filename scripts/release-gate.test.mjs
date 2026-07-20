@@ -126,16 +126,16 @@ test('"not-applicable" suites and integration do not block', () => {
     status: {
       packages: {
         "@dwk/dpop": {
-          suites: { "dummy": { status: "not-applicable" } },
+          suites: { dummy: { status: "not-applicable" } },
           integration: { status: "not-applicable" },
-         },
-       },
-     },
+        },
+      },
+    },
   });
   assert.deepEqual(violations, []);
 });
 
-test('a stable package with empty suites and not-applicable integration is blocked', () => {
+test("a stable package with empty suites and not-applicable integration is blocked", () => {
   const violations = evaluateReleaseGate({
     packages: [{ name: "@dwk/mcp", version: "1.0.0" }],
     status: {
@@ -143,15 +143,15 @@ test('a stable package with empty suites and not-applicable integration is block
         "@dwk/mcp": {
           suites: {},
           integration: { status: "not-applicable" },
-         },
-       },
-     },
+        },
+      },
+    },
   });
   assert.equal(violations.length, 1);
   assert.match(violations[0], /no conformance suites/);
 });
 
-test('a stable package with pending suites is blocked even without not-applicable integration', () => {
+test("a stable package with pending suites is blocked even without not-applicable integration", () => {
   const violations = evaluateReleaseGate({
     packages: [{ name: "@dwk/calendar", version: "1.0.0" }],
     status: {
@@ -159,12 +159,28 @@ test('a stable package with pending suites is blocked even without not-applicabl
         "@dwk/calendar": {
           suites: {},
           integration: { status: "pending" },
-         },
-       },
-     },
+        },
+      },
+    },
   });
   assert.equal(violations.length, 1);
   assert.match(violations[0], /pending/);
+});
+
+test("a major-version-2 stable package with empty suites and not-applicable integration is blocked", () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/calendar", version: "2.0.0" }],
+    status: {
+      packages: {
+        "@dwk/calendar": {
+          suites: {},
+          integration: { status: "not-applicable" },
+        },
+      },
+    },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /no conformance suites/);
 });
 
 test("a stable package with a pending per-target (node) suite is blocked", () => {
