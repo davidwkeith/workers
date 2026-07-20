@@ -231,7 +231,9 @@ function isCleanRoutePath(path) {
 }
 
 /**
- * Structurally validate one entry's route claims (issue #256), appending to
+ * Structurally validate one entry's route claims (issue #256; `validatorID`/
+ * `authorityBinding`/`specificationURL` added for Anglesite-app#829, which
+ * mirror Anglesite-app's `WorkerRouteClaim` fields), appending to
  * `violations`. Returns the structurally-valid claims for cross-entry checks.
  * @param {any} entry
  * @param {string} label
@@ -302,6 +304,38 @@ function checkRoutes(entry, label, violations) {
       violations.push(
         `${where}: every route claim needs a "handler" identity (the factory export that owns it).`,
       );
+    }
+
+    if (
+      route.validatorID !== undefined &&
+      !isNonEmptyString(route.validatorID)
+    ) {
+      violations.push(
+        `${where}: "validatorID" must be a non-empty string when present.`,
+      );
+    }
+    if (
+      route.authorityBinding !== undefined &&
+      typeof route.authorityBinding !== "boolean"
+    ) {
+      violations.push(
+        `${where}: "authorityBinding" must be a boolean when present.`,
+      );
+    }
+    if (route.specificationURL !== undefined) {
+      if (!isNonEmptyString(route.specificationURL)) {
+        violations.push(
+          `${where}: "specificationURL" must be a non-empty string when present.`,
+        );
+      } else {
+        try {
+          new URL(route.specificationURL);
+        } catch {
+          violations.push(
+            `${where}: "specificationURL" must be a valid absolute URL (got ${JSON.stringify(route.specificationURL)}).`,
+          );
+        }
+      }
     }
 
     const key = `${route.match} ${route.path}`;

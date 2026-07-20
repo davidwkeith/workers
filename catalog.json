@@ -26,27 +26,34 @@
           "path": "/.well-known/oauth-authorization-server",
           "match": "exact",
           "methods": ["GET"],
-          "head": true,
           "handler": "createIndieAuth",
-          "authorityBound": true
+          "authorityBound": true,
+          "validatorID": "rfc8414",
+          "authorityBinding": true,
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc8414"
         },
         {
           "path": "/authorize",
           "match": "exact",
           "methods": ["GET", "POST"],
-          "handler": "createIndieAuth"
+          "handler": "createIndieAuth",
+          "authorityBinding": true,
+          "specificationURL": "https://indieauth.spec.indieweb.org/"
         },
         {
           "path": "/token",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createIndieAuth"
+          "handler": "createIndieAuth",
+          "authorityBinding": true,
+          "specificationURL": "https://indieauth.spec.indieweb.org/"
         },
         {
           "path": "/revocation",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createIndieAuth"
+          "handler": "createIndieAuth",
+          "specificationURL": "https://indieauth.spec.indieweb.org/"
         }
       ]
     },

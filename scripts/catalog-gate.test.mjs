@@ -354,6 +354,55 @@ test("an exact path under another entry's prefix collides", () => {
   assert.match(violations[0], /\/pod\//);
 });
 
+test("a well-formed claim with validatorID, authorityBinding, and specificationURL passes", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].validatorID = "rfc8414";
+  input.catalog.workers[0].routes[0].authorityBinding = true;
+  input.catalog.workers[0].routes[0].specificationURL =
+    "https://www.rfc-editor.org/rfc/rfc8414";
+  assert.deepEqual(evaluateCatalog(input), []);
+});
+
+test("a .well-known claim may carry both authorityBound (legacy) and authorityBinding (new) at once", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].path = "/.well-known/webmention-config";
+  input.catalog.workers[0].routes[0].authorityBound = true;
+  input.catalog.workers[0].routes[0].authorityBinding = true;
+  assert.deepEqual(evaluateCatalog(input), []);
+});
+
+test("validatorID must be a non-empty string when present", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].validatorID = "";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /validatorID/);
+});
+
+test("authorityBinding must be a boolean when present", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].authorityBinding = "yes";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /authorityBinding/);
+});
+
+test("specificationURL must be a non-empty string when present", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].specificationURL = "";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /specificationURL/);
+});
+
+test("specificationURL must be a valid absolute URL", () => {
+  const input = routedFixture();
+  input.catalog.workers[0].routes[0].specificationURL = "not a url";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /specificationURL/);
+});
+
 test("nested prefixes across entries collide", () => {
   const input = routedFixture();
   input.catalog.workers[0].routes.push({
