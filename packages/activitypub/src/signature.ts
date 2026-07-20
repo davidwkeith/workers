@@ -1,22 +1,31 @@
 /**
  * HTTP Message Signatures for ActivityPub server-to-server traffic.
  *
- * The fediverse authenticates `POST /inbox` deliveries with the legacy
- * `draft-cavage-http-signatures` "Signature" profile (RSA-SHA256 over a covered
- * header set, with body integrity carried by a `Digest` header). This module
- * implements **sign** and **verify** for that profile over WebCrypto, with an
- * RSA-only algorithm allow-list mirroring the `@dwk/dpop` hardening posture (no
- * `none`, no symmetric algorithms).
+ * The fediverse still widely authenticates `POST /inbox` deliveries with the
+ * legacy `draft-cavage-http-signatures` "Signature" profile (RSA-SHA256 over a
+ * covered header set, body integrity carried by a `Digest` header); this
+ * module implements **sign** and **verify** for that profile over WebCrypto
+ * directly, with an RSA-only algorithm allow-list mirroring the `@dwk/dpop`
+ * hardening posture (no `none`, no symmetric algorithms). Verification also
+ * accepts the modern **RFC 9421** `Signature`/`Signature-Input` structured-field
+ * profile (e.g. Fedify's `Create`/`Update`/… deliveries), delegated to the
+ * cross-standard `@dwk/http-signatures` package (issue #59) rather than
+ * reimplemented here — see {@link verifyInboxSignature}.
  *
- * It is deliberately small and self-contained so the package functions and
- * federates today; it is structured behind the `verifyInboxSignature` config
- * seam (see `config.ts`) so the forthcoming cross-standard `@dwk/http-signatures`
- * package (RFC 9421 + draft-cavage; issue #59) can be swapped in unchanged once
- * it lands.
+ * Outbound signing stays on the draft-cavage profile: every fediverse peer
+ * this package interoperates with today accepts it, so there is no correctness
+ * reason to change it, and it keeps `signRequest` self-contained.
  *
  * Inputs are plain data — method, URL, headers, body bytes, and a resolved key —
  * so the crypto unit-tests without any ActivityPub assumptions.
  */
+
+import {
+  verifyMessage,
+  type HttpMessage,
+  type KeyResolver as HttpSigKeyResolver,
+  type SignatureFailureReason,
+} from "@dwk/http-signatures";
 
 /** The only signature algorithm v1 accepts (RSASSA-PKCS1-v1_5 + SHA-256). */
 const ALGORITHM = "rsa-sha256";
@@ -160,8 +169,14 @@ export type VerifyResult =
 /** What {@link verifyInboxSignature} needs about the inbound request. */
 export interface InboxRequest {
   readonly method: string;
-  /** Path + query the signer covered via `(request-target)`. */
+  /** Path + query the signer covered via `(request-target)` (draft-cavage). */
   readonly path: string;
+  /**
+   * The full absolute request URL, e.g. `https://example.com/users/bob/inbox`.
+   * Only used for RFC 9421 verification (`@target-uri`/`@authority`/…); the
+   * draft-cavage path only ever needs {@link path}.
+   */
+  readonly url: string;
   readonly headers: Headers;
   /** The already-buffered request body (inbox bodies are small). */
   readonly body: Uint8Array;
@@ -174,6 +189,26 @@ export interface VerifyOptions {
 }
 
 /**
+ * Verify an inbound `POST /inbox` HTTP signature — draft-cavage or RFC 9421,
+ * auto-detected the same way `@dwk/http-signatures` does: a `Signature-Input`
+ * header means RFC 9421, its absence means draft-cavage. Both profiles bind
+ * the same facts — the target, a timestamp, and the body — before an
+ * RSA-SHA256 verification against the resolved key. On success both return the
+ * verified `keyId` and its owning actor IRI for the front door to hand to the
+ * DO.
+ */
+export async function verifyInboxSignature(
+  request: InboxRequest,
+  resolveKey: KeyResolver,
+  options: VerifyOptions = {},
+): Promise<VerifyResult> {
+  if (request.headers.has("signature-input")) {
+    return verifyInboxSignatureRfc9421(request, resolveKey, options);
+  }
+  return verifyInboxSignatureCavage(request, resolveKey, options);
+}
+
+/**
  * Verify a draft-cavage HTTP signature on an inbound `POST /inbox`.
  *
  * Checks, in order: a supported algorithm; that `(request-target)`, `host`,
@@ -183,7 +218,7 @@ export interface VerifyOptions {
  * signature itself against the resolved key. On success it returns the verified
  * `keyId` and its owning actor IRI for the front door to hand to the DO.
  */
-export async function verifyInboxSignature(
+async function verifyInboxSignatureCavage(
   request: InboxRequest,
   resolveKey: KeyResolver,
   options: VerifyOptions = {},
@@ -254,6 +289,141 @@ export async function verifyInboxSignature(
   if (!verified) return { ok: false, reason: "signature_invalid" };
 
   return { ok: true, keyId, actor: resolved.owner };
+}
+
+/** Flatten a `Headers` object into the plain record `@dwk/http-signatures` expects. */
+function headersRecord(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of headers.entries()) out[key] = value;
+  return out;
+}
+
+/**
+ * Map a `@dwk/http-signatures` failure reason onto this package's own
+ * {@link VerifyFailureReason} vocabulary, so callers (structured logging, the
+ * diagnostic block, tests) only ever see one stable set of reasons regardless
+ * of which profile rejected the request. `importFailed` distinguishes a
+ * `key_unresolved` the library reported because our own PEM import threw
+ * (`bad_key`, matching the draft-cavage path) from a genuine resolver miss.
+ */
+function mapRfc9421Reason(
+  reason: SignatureFailureReason,
+  importFailed: boolean,
+): VerifyFailureReason {
+  switch (reason) {
+    case "key_unresolved":
+      return importFailed ? "bad_key" : "key_unresolved";
+    case "key_alg_mismatch":
+    case "key_too_small":
+    case "key_invalid":
+      return "bad_key";
+    case "signature_invalid":
+      return "signature_invalid";
+    case "digest_mismatch":
+      return "digest_mismatch";
+    case "digest_missing":
+    case "digest_unsupported":
+      return "missing_digest";
+    case "alg_unsupported":
+      return "unsupported_algorithm";
+    case "components_malformed":
+    case "covered_component_missing":
+    case "required_component_missing":
+      return "missing_covered_header";
+    case "created_required":
+    case "created_invalid":
+    case "expires_invalid":
+    case "signature_expired":
+    case "signature_future":
+      return "stale_date";
+    case "signature_missing":
+    case "signature_input_malformed":
+    case "signature_malformed":
+    case "label_ambiguous":
+    case "label_missing":
+    case "keyid_missing":
+    default:
+      return "missing_signature";
+  }
+}
+
+/**
+ * Verify an RFC 9421 (`Signature-Input`/`Signature`) HTTP signature on an
+ * inbound `POST /inbox`, delegating the wire-format parsing and cryptographic
+ * verification to `@dwk/http-signatures`. Requires `@method`, `@target-uri`,
+ * and `content-digest` to be covered (binding the method, the full target URL
+ * — host included — and the body under the signature) and a `created`
+ * parameter (the RFC 9421-idiomatic timestamp anchor, checked against the same
+ * clock-skew tolerance the draft-cavage path applies to the legacy `Date`
+ * header) so a captured signature cannot be replayed indefinitely.
+ */
+async function verifyInboxSignatureRfc9421(
+  request: InboxRequest,
+  resolveKey: KeyResolver,
+  options: VerifyOptions,
+): Promise<VerifyResult> {
+  let resolvedOwner: string | null = null;
+  let importFailed = false;
+  const libResolveKey: HttpSigKeyResolver = async ({ keyId }) => {
+    if (keyId === null) return null;
+    const resolved = await resolveKey(keyId);
+    if (!resolved) return null;
+    resolvedOwner = resolved.owner;
+    try {
+      return await importPublicKey(resolved.publicKeyPem);
+    } catch {
+      importFailed = true;
+      return null;
+    }
+  };
+
+  const message: HttpMessage = {
+    method: request.method,
+    url: request.url,
+    headers: headersRecord(request.headers),
+  };
+  const now = options.now ?? (() => Date.now());
+
+  const result = await verifyMessage(message, {
+    profile: "rfc9421",
+    resolveKey: libResolveKey,
+    requiredComponents: ["@method", "@target-uri", "content-digest"],
+    requireCreated: true,
+    now: Math.floor(now() / 1000),
+    toleranceSeconds: options.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS,
+    body: request.body,
+  });
+
+  if (!result.valid) {
+    return {
+      ok: false,
+      reason: mapRfc9421Reason(
+        result.reason ?? "signature_invalid",
+        importFailed,
+      ),
+    };
+  }
+  // The library only rejects a `created` that is too far in the *future*
+  // (`signature_future`) — it never bounds staleness in the other direction
+  // unless the signer also sent `expires`, which is not something we can rely
+  // on every peer to include. Enforce the same two-sided replay window here
+  // that the draft-cavage path enforces on the literal `Date` header, keyed
+  // off the verified `created` instead.
+  const toleranceMs =
+    (options.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS) * 1000;
+  if (
+    result.created === undefined ||
+    Math.abs(now() - result.created * 1000) > toleranceMs
+  ) {
+    return { ok: false, reason: "stale_date" };
+  }
+  // A valid result always carries the keyid it verified against, and our own
+  // resolver ran (and recorded the owner) to get here — but guard defensively
+  // rather than assert, since a `!` would crash on any future library change.
+  if (!resolvedOwner || !result.keyId) {
+    return { ok: false, reason: "key_unresolved" };
+  }
+  return { ok: true, keyId: result.keyId, actor: resolvedOwner };
 }
 
 /** A signed outbound request: the headers to send plus the body to send them with. */

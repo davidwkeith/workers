@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { createContentDigest, signMessage } from "@dwk/http-signatures";
+
 import {
   buildSigningString,
   digestHeader,
@@ -32,6 +34,7 @@ function toPem(der: ArrayBuffer, label: string): string {
 
 let publicKeyPem: string;
 let privateKeyPem: string;
+let privateKey: CryptoKey;
 let otherPublicKeyPem: string;
 
 beforeAll(async () => {
@@ -47,6 +50,7 @@ beforeAll(async () => {
     (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer,
     "PRIVATE KEY",
   );
+  privateKey = pair.privateKey;
   const other = (await crypto.subtle.generateKey(RSA, true, [
     "sign",
     "verify",
@@ -73,6 +77,7 @@ async function signedInbox(body: string, now: number): Promise<InboxRequest> {
   return {
     method: "POST",
     path: "/users/bob/inbox",
+    url,
     headers,
     body: new TextEncoder().encode(body),
   };
@@ -176,6 +181,7 @@ describe("verifyInboxSignature", () => {
       {
         method: "POST",
         path: "/users/bob/inbox",
+        url: "https://example.com/users/bob/inbox",
         headers: new Headers(),
         body: new TextEncoder().encode(body),
       },
@@ -198,6 +204,117 @@ describe("verifyInboxSignature", () => {
       now: () => now,
     });
     expect(result).toEqual({ ok: false, reason: "missing_covered_header" });
+  });
+});
+
+/** Build an RFC 9421-signed inbound request, e.g. Fedify's `Create`/`Update` deliveries. */
+async function signedInboxRfc9421(
+  body: string,
+  now: number,
+  overrides: { readonly components?: string[] } = {},
+): Promise<InboxRequest> {
+  const url = "https://example.com/users/bob/inbox";
+  const bodyBytes = new TextEncoder().encode(body);
+  const contentDigest = await createContentDigest(bodyBytes);
+  const components = overrides.components ?? [
+    "@method",
+    "@target-uri",
+    "content-digest",
+  ];
+  const message = {
+    method: "POST",
+    url,
+    headers: { "content-digest": contentDigest },
+  };
+  const signed = await signMessage(message, {
+    profile: "rfc9421",
+    key: privateKey,
+    keyId: KEY_ID,
+    alg: "rsa-v1_5-sha256",
+    components,
+    now: Math.floor(now / 1000),
+  });
+  const headers = new Headers({ ...message.headers, ...signed });
+  return {
+    method: "POST",
+    path: "/users/bob/inbox",
+    url,
+    headers,
+    body: bodyBytes,
+  };
+}
+
+describe("verifyInboxSignature (RFC 9421)", () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const body = JSON.stringify({ type: "Create", id: "https://remote/1" });
+
+  it("accepts a valid RFC 9421 signature and returns the actor", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const result = await verifyInboxSignature(inbox, resolver(publicKeyPem), {
+      now: () => now,
+    });
+    expect(result).toEqual({ ok: true, keyId: KEY_ID, actor: ACTOR });
+  });
+
+  it("rejects a tampered body (content-digest mismatch)", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const tampered: InboxRequest = {
+      ...inbox,
+      body: new TextEncoder().encode(body + " "),
+    };
+    const result = await verifyInboxSignature(
+      tampered,
+      resolver(publicKeyPem),
+      { now: () => now },
+    );
+    expect(result).toEqual({ ok: false, reason: "digest_mismatch" });
+  });
+
+  it("rejects a stale `created` outside the skew window", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const result = await verifyInboxSignature(inbox, resolver(publicKeyPem), {
+      now: () => now + 10 * 60 * 1000,
+      clockSkewSeconds: 300,
+    });
+    expect(result).toEqual({ ok: false, reason: "stale_date" });
+  });
+
+  it("rejects the wrong key", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const result = await verifyInboxSignature(
+      inbox,
+      resolver(otherPublicKeyPem),
+      { now: () => now },
+    );
+    expect(result).toEqual({ ok: false, reason: "signature_invalid" });
+  });
+
+  it("rejects when the key cannot be resolved", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const result = await verifyInboxSignature(inbox, () => null, {
+      now: () => now,
+    });
+    expect(result).toEqual({ ok: false, reason: "key_unresolved" });
+  });
+
+  it("rejects when content-digest is not covered", async () => {
+    const inbox = await signedInboxRfc9421(body, now, {
+      components: ["@method", "@target-uri"],
+    });
+    const result = await verifyInboxSignature(inbox, resolver(publicKeyPem), {
+      now: () => now,
+    });
+    expect(result).toEqual({ ok: false, reason: "missing_covered_header" });
+  });
+
+  it("rejects a bad public key (unparseable PEM) as bad_key", async () => {
+    const inbox = await signedInboxRfc9421(body, now);
+    const result = await verifyInboxSignature(
+      inbox,
+      resolver("not a real PEM"),
+      { now: () => now },
+    );
+    expect(result).toEqual({ ok: false, reason: "bad_key" });
   });
 });
 
