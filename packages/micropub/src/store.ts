@@ -99,12 +99,32 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
   }
   const db = env.MICROPUB_DB;
 
+  // Create the schema lazily on first use so a consumer that composes the
+  // package against a fresh D1 never needs a separate migration step: the first
+  // request to reach the store materialises the table. Mirrors the lazy-schema
+  // pattern the webmention/websub/microsub stores use. The cached promise is
+  // cleared on failure so a transient D1 error during the first call doesn't
+  // permanently wedge the store.
+  let ready: Promise<void> | null = null;
+  const ensureSchema = (): Promise<void> => {
+    ready ??= db
+      .prepare(SCHEMA)
+      .run()
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        ready = null;
+        throw err;
+      });
+    return ready;
+  };
+
   return {
     async init() {
-      await db.prepare(SCHEMA).run();
+      await ensureSchema();
     },
 
     async insertPost({ url, type, properties, now }) {
+      await ensureSchema();
       // `INSERT OR IGNORE` leaves an existing row untouched; `meta.changes`
       // tells us whether this URL was free.
       const result = await db
@@ -119,6 +139,7 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
     },
 
     async getPost(url) {
+      await ensureSchema();
       const row = await db
         .prepare(
           `SELECT url, type, properties, deleted, created_at, updated_at
@@ -130,6 +151,7 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
     },
 
     async updateProperties(url, properties, now) {
+      await ensureSchema();
       const result = await db
         .prepare(
           `UPDATE posts SET properties = ?, updated_at = ?
@@ -141,6 +163,7 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
     },
 
     async setDeleted(url, deleted, now) {
+      await ensureSchema();
       const result = await db
         .prepare(`UPDATE posts SET deleted = ?, updated_at = ? WHERE url = ?`)
         .bind(deleted ? 1 : 0, now, url)
