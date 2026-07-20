@@ -725,7 +725,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * Publish an owner-supplied activity to the outbox and fan it out to every
    * follower's inbox, plus a named `audience` Group's inbox when present (a
    * Lemmy vote: `{"type": "Like"/"Dislike", "object": "<post-iri>",
-   * "audience": "<community-iri>"}"` — the community is the only way such a
+   * "audience": "<community-iri>"}` — the community is the only way such a
    * vote reaches anyone, since a vote's `object` names content, not an actor,
    * so there is no inbox to derive from it directly). A bare object (e.g. a
    * `Note`) is wrapped in a `Create`. The front door has already authorized
