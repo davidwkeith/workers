@@ -80,6 +80,7 @@ function cfgHeader(
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
     keyId: iris.keyId,
+    debugSignatureDiagnostics: false,
     ...overrides,
   };
   return JSON.stringify(config);
@@ -1330,6 +1331,46 @@ describe("announce unwrapping (FEP-1b12)", () => {
     });
   });
 });
+
+// --- TEMPORARY (fediverse conformance debugging, #273/#315/#317 — delete
+// this block along with the diagnostic it covers) ---
+describe("actor/signer-mismatch diagnostics", () => {
+  const mismatched = {
+    id: `${REMOTE}/activities/mismatch-1`,
+    type: "Follow",
+    actor: "https://impostor.example/users/eve",
+    object: REMOTE,
+  };
+
+  it("403s with a fixed message by default — no signer/author leaked", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        signedInboxRequest(username, mismatched, REMOTE),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.text()).toBe(
+        "Activity actor does not match the signing actor",
+      );
+    });
+  });
+
+  it("echoes signer/author when opted in", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        signedInboxRequest(username, mismatched, REMOTE, {
+          debugSignatureDiagnostics: true,
+        }),
+      );
+      expect(res.status).toBe(403);
+      const body = await res.text();
+      expect(body).toContain(`signer=${REMOTE}`);
+      expect(body).toContain("author=https://impostor.example/users/eve");
+    });
+  });
+});
+// --- END TEMPORARY ---
 
 describe("dislike", () => {
   it("stores an inbound Dislike like a Like", async () => {
