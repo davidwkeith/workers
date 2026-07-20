@@ -262,9 +262,14 @@ async function handleMediaUpload(
   // A `create`-only token authorizes creating posts (including photos folded
   // into a multipart create), not arbitrary blob uploads to the media endpoint
   // — `q=config` advertises `media` as a distinct scope.
-  const auth = await authorize(request, env, config, tokenFromHeader(request), [
-    "media",
-  ]);
+  const auth = await authorize(
+    request,
+    env,
+    config,
+    tokenFromHeader(request),
+    ["media"],
+    config.mediaEndpoint,
+  );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {
       reason: auth.error,
@@ -366,6 +371,7 @@ async function handleQuery(
     config,
     tokenFromHeader(request),
     [],
+    config.micropubEndpoint,
   );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {
@@ -506,6 +512,7 @@ async function handleAction(
     config,
     token,
     scopesForAction(action),
+    config.micropubEndpoint,
   );
   if (!auth.ok) {
     emit(config, "warn", MicropubLogEvent.AuthRejected, {

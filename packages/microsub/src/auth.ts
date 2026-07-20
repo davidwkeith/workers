@@ -80,9 +80,13 @@ export function hasScope(
 
 /**
  * Authorize a request. Verifies the access token, completes the DPoP binding
- * against this exact request (`htm`/`htu`/`ath`/`cnf.jkt`), checks revocation,
- * records the proof for replay detection (when `recordReplay`), and — when
+ * against this request (`htm`/`htu`/`ath`/`cnf.jkt`), checks revocation, records
+ * the proof for replay detection (when `recordReplay`), and — when
  * `requiredScopes` is non-empty — enforces scope.
+ *
+ * `expectedHtu` is the configured, public endpoint URL the DPoP proof's `htu`
+ * must match — NOT `request.url`, which diverges from what the client signed
+ * when the package is mounted behind a path-rewriting proxy.
  */
 export async function authorize(
   request: Request,
@@ -91,6 +95,7 @@ export async function authorize(
   token: string | null,
   requiredScopes: readonly string[],
   recordReplay: boolean,
+  expectedHtu: string,
 ): Promise<AuthResult> {
   if (!token) {
     return failure("unauthorized", "a bearer access token is required", 401);
@@ -132,7 +137,7 @@ export async function authorize(
   const dpop = await verifyDpopProof({
     proof,
     htm: request.method,
-    htu: request.url,
+    htu: expectedHtu,
     accessToken: token,
     expectedJkt: claims.cnf.jkt,
   });

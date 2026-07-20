@@ -1269,3 +1269,32 @@ describe("@dwk/micropub query and action edge cases", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("@dwk/micropub DPoP htu binding behind a proxy", () => {
+  it("binds htu to the configured endpoint, not request.url", async () => {
+    // Path-rewriting proxy: the client signs the PUBLIC endpoint, but the
+    // Worker sees a different internal request URL. The DPoP htu must be checked
+    // against the configured endpoint — before this fix it used request.url and
+    // failed htu_mismatch for exactly the mountable-prefix deployments targeted.
+    const publicEndpoint = "https://public.example/micropub";
+    const proxied = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      micropubEndpoint: publicEndpoint,
+    });
+    const minted = await mintToken("create");
+    const res = await proxied(
+      new Request("https://internal.worker/micropub", {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", publicEndpoint)),
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: "h=entry&content=proxied",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+  });
+});
