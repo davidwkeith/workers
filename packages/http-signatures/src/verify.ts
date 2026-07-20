@@ -27,6 +27,14 @@ export interface VerifyParams {
   /** Allowed clock skew, in seconds, for `created`/`expires`. Defaults to 300. */
   toleranceSeconds?: number;
   /**
+   * Maximum age of a `created` timestamp, in seconds. A signature whose
+   * `created` is older than `now - maxAgeSeconds` (allowing `toleranceSeconds`
+   * of skew) is rejected as `created_stale`, so a captured proof without an
+   * `expires` cannot be replayed indefinitely. Defaults to 3600 (1 hour); pass
+   * `Infinity` to disable. Only applies when `created` is present.
+   */
+  maxAgeSeconds?: number;
+  /**
    * The received body. When provided and a digest component is covered, the
    * corresponding `content-digest` / `digest` header is recomputed over it; a
    * mismatch fails verification with a `digest_*` reason.
@@ -68,12 +76,14 @@ export async function verifyMessage(
           requireCreated: params.requireCreated,
           now: params.now,
           toleranceSeconds: params.toleranceSeconds,
+          maxAgeSeconds: params.maxAgeSeconds,
         })
       : await verifyCavage(message, {
           resolveKey: params.resolveKey,
           requiredComponents: params.requiredComponents,
           now: params.now,
           toleranceSeconds: params.toleranceSeconds,
+          maxAgeSeconds: params.maxAgeSeconds,
         });
 
   if (!result.valid || params.body === undefined) return result;

@@ -65,6 +65,7 @@ export type SignatureFailureReason =
   | "required_component_missing"
   | "created_invalid"
   | "created_required"
+  | "created_stale"
   | "signature_expired"
   | "signature_future"
   | "expires_invalid"

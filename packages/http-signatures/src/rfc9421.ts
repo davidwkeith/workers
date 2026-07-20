@@ -120,6 +120,14 @@ export interface Rfc9421VerifyParams {
   now?: number;
   /** Allowed clock skew, in seconds, for `created`/`expires`. Defaults to 300. */
   toleranceSeconds?: number;
+  /**
+   * Maximum age of a `created` timestamp, in seconds. A signature whose
+   * `created` is older than `now - maxAgeSeconds` (allowing `toleranceSeconds`
+   * of skew) is rejected as `created_stale`, so a captured proof cannot be
+   * replayed indefinitely when it carries no `expires`. Defaults to 3600 (1
+   * hour); pass `Infinity` to disable. Only applies when `created` is present.
+   */
+  maxAgeSeconds?: number;
 }
 
 function paramMap(
@@ -143,6 +151,7 @@ function fail(reason: SignatureFailureReason): VerifyResult {
 }
 
 const DEFAULT_TOLERANCE_SECONDS = 300;
+const DEFAULT_MAX_AGE_SECONDS = 3600;
 
 /**
  * Verify an RFC 9421 signature on `message`. Never throws — every failure is a
@@ -207,6 +216,10 @@ export async function verifyRfc9421(
       return fail("created_invalid");
     created = c;
     if (c > now + tolerance) return fail("signature_future");
+    // Lower-bound the age so a signature without `expires` cannot be replayed
+    // indefinitely. `Infinity` disables the bound.
+    const maxAge = params.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS;
+    if (c < now - tolerance - maxAge) return fail("created_stale");
   } else if (params.requireCreated) {
     return fail("created_required");
   }
