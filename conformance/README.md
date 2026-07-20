@@ -144,7 +144,10 @@ secret). Record `activitypub-federation` -> `targets` -> `fedify` as
 ### Manual run: Pixelfed (target `pixelfed`)
 
 Fediverse interop #273 phase 1 acceptance, against any live Pixelfed instance
-(e.g. an account on pixelfed.social):
+(e.g. an account on pixelfed.social). See
+[`pixelfed-qa.md`](./pixelfed-qa.md) for the fillable, step-by-step QA runbook
+(exact commands, a results checklist, and troubleshooting) — the summary below
+is the quick reference:
 
 1. From the Pixelfed account, search the actor's handle
    (`@user@your.domain`) and **follow** it; confirm the follow is accepted
