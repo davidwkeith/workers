@@ -120,25 +120,44 @@ export function evaluateReleaseGate({ packages, status }) {
       continue;
     }
 
+    // For stable packages, ensure there's at least one suite entry (passing or
+    // not-applicable) when integration is not-applicable. An empty suites object
+    // with not-applicable integration passes vacuously, allowing a stable release
+    // with zero conformance evidence.
+    const hasSuite = Object.keys(entry.suites ?? {}).length > 0;
+    const integration = entry.integration?.status;
+    if (
+      !hasSuite &&
+      integration === "not-applicable" &&
+      pkg.version.startsWith("1")
+    ) {
+      violations.push(
+         `${pkg.name}@${pkg.version}: stable package with no conformance suites and integration "not-applicable" — mark at least one suite as "not-applicable" to gate the release.`,
+       );
+    }
+
     for (const [suite, result] of Object.entries(entry.suites ?? {})) {
       const status = result?.status;
       if (status !== "passing" && status !== "not-applicable") {
         violations.push(
-          `${pkg.name}@${pkg.version}: conformance suite "${suite}" is "${status}" (must be "passing").`,
-        );
-      }
-      // Per-target results (e.g. the self-hosted Node host) gate too.
+           `${pkg.name}@${pkg.version}: conformance suite "${suite}" is "${status}" (must be "passing`).`,
+         );
+       }
+       // Per-target results (e.g. the self-hosted Node host) gate too.
       for (const [target, tResult] of Object.entries(result?.targets ?? {})) {
         const tStatus = tResult?.status;
         if (tStatus !== "passing" && tStatus !== "not-applicable") {
           violations.push(
-            `${pkg.name}@${pkg.version}: conformance suite "${suite}" on target "${target}" is "${tStatus}" (must be "passing").`,
-          );
-        }
-      }
-    }
+             `${pkg.name}@${pkg.version}: conformance suite "${suite}" on target "${target}" is "${tStatus}" (must be "passing`).`,
+           );
+         }
+       }
+     }
 
-    const integration = entry.integration?.status;
+    // Skip suite validation if we already flagged the missing-suite issue.
+    if (!hasSuite && integration === "not-applicable" && pkg.version.startsWith("1")) {
+      continue;
+    }
     if (integration !== "passing" && integration !== "not-applicable") {
       violations.push(
         `${pkg.name}@${pkg.version}: integration lifecycle tests are "${integration}" (must be "passing").`,

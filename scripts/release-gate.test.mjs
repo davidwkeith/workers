@@ -126,13 +126,45 @@ test('"not-applicable" suites and integration do not block', () => {
     status: {
       packages: {
         "@dwk/dpop": {
-          suites: {},
+          suites: { "dummy": { status: "not-applicable" } },
           integration: { status: "not-applicable" },
-        },
-      },
-    },
+         },
+       },
+     },
   });
   assert.deepEqual(violations, []);
+});
+
+test('a stable package with empty suites and not-applicable integration is blocked', () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/mcp", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/mcp": {
+          suites: {},
+          integration: { status: "not-applicable" },
+         },
+       },
+     },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /no conformance suites/);
+});
+
+test('a stable package with pending suites is blocked even without not-applicable integration', () => {
+  const violations = evaluateReleaseGate({
+    packages: [{ name: "@dwk/calendar", version: "1.0.0" }],
+    status: {
+      packages: {
+        "@dwk/calendar": {
+          suites: {},
+          integration: { status: "pending" },
+         },
+       },
+     },
+  });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /pending/);
 });
 
 test("a stable package with a pending per-target (node) suite is blocked", () => {
