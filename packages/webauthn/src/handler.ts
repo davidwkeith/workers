@@ -21,6 +21,7 @@ import {
   type WebAuthnEnv,
   type WebAuthnOperation,
 } from "./config.js";
+import { WebAuthnLogEvent } from "./log.js";
 
 /** A `fetch`-compatible Worker handler. */
 export type WebAuthnHandler = (
@@ -122,6 +123,20 @@ export function createWebAuthn(config: WebAuthnConfig): WebAuthnHandler {
       return new Response("Method Not Allowed", {
         status: 405,
         headers: { allow: "POST" },
+      });
+    }
+
+    // Authorization gate (runs before any DO state is touched). Registration
+    // MUST be gated to an authenticated principal by the composing front door —
+    // see `WebAuthnConfig.authorize`. The default hook allows all.
+    if (!(await resolved.authorize(op, request))) {
+      const rejected = op.startsWith("register/")
+        ? WebAuthnLogEvent.RegisterRejected
+        : WebAuthnLogEvent.AuthenticateRejected;
+      emit(resolved, "warn", rejected, { reason: "unauthorized" });
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
       });
     }
 

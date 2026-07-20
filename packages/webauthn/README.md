@@ -100,7 +100,24 @@ credential response and POST it to the matching `verify` endpoint.
 | `challengeTtlSeconds` | `300` | Challenge lifetime. |
 | `timeoutMs` | `60000` | Ceremony timeout advertised to the client. |
 | `userVerification` | `"preferred"` | `"required"` also rejects assertions whose UV flag is unset. |
+| `authorize` | allow-all | Per-operation gate `(operation, request) => boolean`; return `false` for `401`. **Gate registration — see below.** |
 | `logger` / `metrics` | no-op | Injectable `@dwk/log` seams for ceremony outcomes. |
+
+> **⚠️ Gate registration.** `register/options` and `register/verify` bind a
+> passkey to a **caller-supplied** `user.id`. If they are reachable
+> unauthenticated, anyone can register their own authenticator against another
+> user's id and then authenticate as that user — account takeover. The default
+> `authorize` hook allows everything (matching `@dwk/vc`), so **the composing
+> front door owns this decision**. Supply an `authorize` that requires an
+> established session for the `register/*` operations, e.g.:
+>
+> ```ts
+> createWebAuthn({
+>   rpId, rpName, origin,
+>   authorize: (op, req) =>
+>     op.startsWith("authenticate/") || hasAuthenticatedSession(req),
+> });
+> ```
 
 Per the [composition contract](../../spec/composition-contract.md), the package
 never reads the global environment: all config is passed into the factory, and a

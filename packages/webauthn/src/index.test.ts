@@ -261,4 +261,29 @@ describe("@dwk/webauthn handler", () => {
       handler(request, {} as WebAuthnEnv, {} as ExecutionContext),
     ).rejects.toThrow(/missing required Durable Object binding/);
   });
+
+  it("rejects a registration the authorize hook denies, before touching the DO", async () => {
+    const seen: string[] = [];
+    // A realistic gate: allow authentication, require a session for register.
+    const { handler, origin } = rp("gated", {
+      authorize: (op, req) => {
+        seen.push(op);
+        return op.startsWith("authenticate/") || req.headers.has("x-session");
+      },
+    });
+    const res = await post(handler, origin, "/register/options", {
+      user: { id: "dXNlci0x", name: "alice", displayName: "Alice" },
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(seen).toEqual(["register/options"]);
+  });
+
+  it("lets an approved registration through the gate", async () => {
+    const { handler, origin } = rp("gated-ok", { authorize: () => true });
+    const res = await post(handler, origin, "/register/options", {
+      user: { id: "dXNlci0x", name: "alice", displayName: "Alice" },
+    });
+    expect(res.status).toBe(200);
+  });
 });
