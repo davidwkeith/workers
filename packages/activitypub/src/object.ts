@@ -1241,7 +1241,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * seam the DO cannot call directly. Identical outcomes coalesce into one row
    * (fields serialize with sorted keys); at the table's cardinality cap a new
    * key tallies into the {@link ActivityPubLogEvent.MetricsOverflow} counter
-   * instead, so the count survives even when its attribution cannot.
+   * instead, so the count survives even when its attribution cannot. A single
+   * upsert does both the write and the was-it-a-new-row check: `RETURNING n`
+   * yields `1` only for a freshly created row (an existing row increments to
+   * ≥ 2), so the cap's row count runs only on that path.
    */
   #recordMetric(
     event: string,
@@ -1252,30 +1255,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       canonical[key] = fields[key] as string | number | boolean;
     }
     const serialized = JSON.stringify(canonical);
-    const exists =
-      this.#sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM pending_metrics WHERE event = ? AND fields = ?`,
-          event,
-          serialized,
-        )
-        .one().n > 0;
+    const n = this.#sql
+      .exec<{ n: number }>(
+        `INSERT INTO pending_metrics (event, fields, n) VALUES (?, ?, 1)
+           ON CONFLICT(event, fields) DO UPDATE SET n = n + 1
+           RETURNING n`,
+        event,
+        serialized,
+      )
+      .one().n;
+    if (n > 1) return; // coalesced into an existing key: row count unchanged
     // The overflow tally itself is exempt from the cap, so a full table can
     // always still count (it adds at most one row beyond the cap).
-    if (
-      !exists &&
-      event !== ActivityPubLogEvent.MetricsOverflow &&
-      this.#pendingMetricRows() >= MAX_PENDING_METRIC_ROWS
-    ) {
+    if (event === ActivityPubLogEvent.MetricsOverflow) return;
+    if (this.#pendingMetricRows() > MAX_PENDING_METRIC_ROWS) {
+      this.#sql.exec(
+        `DELETE FROM pending_metrics WHERE event = ? AND fields = ?`,
+        event,
+        serialized,
+      );
       this.#recordMetric(ActivityPubLogEvent.MetricsOverflow, {});
-      return;
     }
-    this.#sql.exec(
-      `INSERT INTO pending_metrics (event, fields, n) VALUES (?, ?, 1)
-         ON CONFLICT(event, fields) DO UPDATE SET n = n + 1`,
-      event,
-      serialized,
-    );
   }
 
   #pendingMetricRows(): number {
