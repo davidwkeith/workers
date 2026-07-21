@@ -10,6 +10,7 @@
  */
 
 import type { Mf2Object } from "./mf2.js";
+import type { PageRequest } from "./pagination.js";
 
 /** Cloudflare binding required by the Micropub post store. */
 export interface MicropubStoreEnv {
@@ -68,6 +69,11 @@ export interface MicropubStore {
     filter?: string;
     limit?: number;
   }): Promise<string[]>;
+  /**
+   * List live (non-deleted) posts newest-first, for the `q=source` list query.
+   * Offset-based pagination; the caller owns limit/offset validation.
+   */
+  listPosts(page: PageRequest): Promise<readonly PostRecord[]>;
 }
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS posts (
@@ -207,6 +213,21 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
         .bind(...binds)
         .all<{ category: string }>();
       return (result.results ?? []).map((row) => row.category);
+    },
+
+    async listPosts({ limit, offset }) {
+      await ensureSchema();
+      const { results } = await db
+        .prepare(
+          `SELECT url, type, properties, deleted, created_at, updated_at
+             FROM posts
+            WHERE deleted = 0
+            ORDER BY created_at DESC, url DESC
+            LIMIT ? OFFSET ?`,
+        )
+        .bind(limit, offset)
+        .all<PostRow>();
+      return results.map(rowToRecord);
     },
   };
 }

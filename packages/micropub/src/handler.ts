@@ -20,12 +20,14 @@ import {
   parseJsonBody,
   parseUpdateOperations,
   sourceView,
+  sourceListView,
   validateVocabulary,
   Mf2ParseError,
   type Mf2Object,
   type MicropubCommands,
   type ParsedBody,
 } from "./mf2.js";
+import { parsePageRequest } from "./pagination.js";
 import {
   createMicropubStore,
   recordToMf2,
@@ -442,12 +444,20 @@ async function handleQuery(
     return json({ categories });
   }
   if (q === "source") {
+    const filter = [
+      ...params.getAll("properties[]"),
+      ...params.getAll("properties"),
+    ];
     const url = params.get("url");
     if (!url) {
-      emit(config, "warn", MicropubLogEvent.RequestRejected, {
-        reason: "query_missing_url",
-      });
-      return error("invalid_request", "`url` is required for `q=source`", 400);
+      const page = parsePageRequest(params);
+      const records = await store.listPosts(page);
+      return json(
+        sourceListView(
+          records.map(recordToMf2),
+          filter,
+        ),
+      );
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {
@@ -457,10 +467,6 @@ async function handleQuery(
       // spec/packages/micropub.md "Error responses".
       return error("invalid_request", "no post exists at that URL", 404);
     }
-    const filter = [
-      ...params.getAll("properties[]"),
-      ...params.getAll("properties"),
-    ];
     return json(sourceView(recordToMf2(record), filter));
   }
 

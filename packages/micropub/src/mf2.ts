@@ -407,3 +407,17 @@ export function sourceView(
   }
   return { type: post.type, properties: post.properties };
 }
+
+/**
+ * Project the `q=source` **list** view: each post through {@link sourceView}
+ * with the same `properties[]` filter, wrapped in the `{ items }` envelope
+ * of the Micropub post-list extension. Reusing {@link sourceView} guarantees
+ * a list item and a single-post `q=source&url=` response share identical
+ * projection semantics.
+ */
+export function sourceListView(
+  posts: readonly Mf2Object[],
+  filter?: readonly string[],
+): { readonly items: readonly ReturnType<typeof sourceView>[] } {
+  return { items: posts.map((post) => sourceView(post, filter)) };
+}
