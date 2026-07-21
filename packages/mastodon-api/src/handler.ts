@@ -9,6 +9,7 @@ import { handleVerifyAccountCredentials } from "./accounts.js";
 import { handleCreateApp, handleVerifyAppCredentials } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
+import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
 
 /** Per-request context threaded to route handlers. */
@@ -27,6 +28,8 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["POST /api/v1/apps", handleCreateApp],
     ["GET /api/v1/apps/verify_credentials", handleVerifyAppCredentials],
     ["GET /api/v1/accounts/verify_credentials", handleVerifyAccountCredentials],
+    ["GET /api/v1/instance", handleInstanceV1],
+    ["GET /api/v2/instance", handleInstanceV2],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],
