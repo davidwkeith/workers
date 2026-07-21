@@ -1225,7 +1225,8 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    const url1 = new URL((await res1.json()).url);
+    expect(res1.status).toBe(201);
+    const url1 = new URL(res1.headers.get("location") ?? "");
     const res2 = await handler(
       new Request(MICROPUB, {
         method: "POST",
@@ -1241,7 +1242,8 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    const url2 = new URL((await res2.json()).url);
+    expect(res2.status).toBe(201);
+    const url2 = new URL(res2.headers.get("location") ?? "");
     const res = await handler(
       new Request(`${MICROPUB}?q=source`, {
         headers: await authHeaders(minted, "GET", MICROPUB),

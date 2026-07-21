@@ -452,7 +452,14 @@ async function handleQuery(
     if (!url) {
       const page = parsePageRequest(params);
       const records = await store.listPosts(page);
-      return json(sourceListView(records.map(recordToMf2), filter));
+      const mf2Objects = records.map((record) => {
+        const mf2 = recordToMf2(record);
+        return {
+          ...mf2,
+          properties: { ...mf2.properties, url: [record.url] },
+        };
+      });
+      return json(sourceListView(mf2Objects, filter));
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {
