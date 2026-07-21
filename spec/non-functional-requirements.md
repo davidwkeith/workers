@@ -40,7 +40,11 @@ Implications:
 
 ## Security
 
-- **DPoP everywhere** tokens are used.
+- **DPoP everywhere** tokens are used. One designed exception:
+  `@dwk/mastodon-api`'s read-only client-API tokens are plain bearer (real
+  Mastodon apps cannot do DPoP) — scoped, isolated, and mitigated per
+  [mastodon-client-api.md](mastodon-client-api.md) Decision 2; no DPoP-bound
+  surface accepts them.
 - **No ACL / decision caching outside strongly-consistent layers.**
 - **Least-privilege bindings** — a package gets only the bindings it declares.
 - **Outbound SSRF posture is deny-by-default** — every fetch of an attacker-
