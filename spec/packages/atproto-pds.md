@@ -70,14 +70,21 @@ secp256k1 signing curve):
   by `SHA-256(key)`), rebuilding the canonical tree is far simpler than
   incremental node splitting and is trivially correct/interoperable. Records live
   in DO SQLite; node blocks are recomputed for commits and CAR export.
-  **Known scaling boundary** (#219): `#entries()` (`object.ts`) loads the entire
-  `records` table into memory on every `#commit()` and `#getRepo()` to rebuild
-  the tree, so its memory and CPU cost grows linearly with account size against
-  the DO's 128 MB limit. Fine at today's scale; large accounts would need
-  incremental MST maintenance (persist nodes, update only the path from a
-  changed leaf to root) instead of a full rebuild per commit. Deferred rather
-  than built, since this package is exploratory/strategic and a documented
-  boundary is the right answer until a real scale need appears.
+  **Known scaling boundary** (#219): `buildMst` returns every MST node block in
+  memory (both `#commit()` and `#getRepo()` call it), so the node-rebuild memory
+  and CPU cost still grows linearly with account size against the DO's 128 MB
+  limit. Fine at today's scale; large accounts would need incremental MST
+  maintenance (persist nodes, update only the path from a changed leaf to root)
+  instead of a full rebuild per commit. Deferred rather than built, since this
+  package is exploratory/strategic and a documented boundary is the right
+  answer until a real scale need appears. `#commit()` additionally loads every
+  record body into memory via `#entries()` to compute the diff CAR for the
+  firehose frame — the same boundary, on the write path. `#getRepo()` does
+  **not** share this record-body cost (#296, fixed): it builds MST entries via
+  the lean `#mstEntries()` (keys/CIDs only, no body decode) and streams the
+  exported CAR via `writeCarStream` (`car.ts`), which pulls one record body at a
+  time off a SQL cursor as the response is read rather than buffering the whole
+  repository into one response body.
 - **Storage core is self-contained.** DAG-CBOR, CIDv1, the MST, CAR, and commit
   signing are implemented directly on WebCrypto in this package — it shares
   neither `@dwk/store` nor `@dwk/rdf`, exactly as anticipated below.
