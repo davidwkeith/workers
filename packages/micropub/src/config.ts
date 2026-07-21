@@ -65,7 +65,8 @@ export interface SyndicationTarget {
  * advertises one target per followed fediverse community (#278).
  */
 export type SyndicationTargetsProvider = () =>
-  Promise<readonly SyndicationTarget[]> | readonly SyndicationTarget[];
+  | Promise<readonly SyndicationTarget[]>
+  | readonly SyndicationTarget[];
 
 /**
  * Derive the canonical URL of a newly created post from its microformats2
@@ -117,7 +118,8 @@ export interface MicropubConfig {
    * followed fediverse communities).
    */
   readonly syndicateTo?:
-    readonly SyndicationTarget[] | SyndicationTargetsProvider;
+    | readonly SyndicationTarget[]
+    | SyndicationTargetsProvider;
 
   /**
    * Fediverse syndication (#278): when set, a create whose
@@ -224,7 +226,9 @@ function defaultGeneratePostUrl(baseUrl: string): GeneratePostUrl {
 /** Normalize `syndicateTo` (static list or provider) to an async provider. */
 function normalizeSyndicateTo(
   syndicateTo:
-    readonly SyndicationTarget[] | SyndicationTargetsProvider | undefined,
+    | readonly SyndicationTarget[]
+    | SyndicationTargetsProvider
+    | undefined,
 ): () => Promise<readonly SyndicationTarget[]> {
   if (syndicateTo === undefined) return async () => [];
   if (typeof syndicateTo === "function") {

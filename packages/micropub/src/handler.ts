@@ -452,12 +452,7 @@ async function handleQuery(
     if (!url) {
       const page = parsePageRequest(params);
       const records = await store.listPosts(page);
-      return json(
-        sourceListView(
-          records.map(recordToMf2),
-          filter,
-        ),
-      );
+      return json(sourceListView(records.map(recordToMf2), filter));
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {

@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  parsePageRequest,
-  DEFAULT_LIMIT,
-  MAX_LIMIT,
-} from "./pagination.js";
+import { parsePageRequest, DEFAULT_LIMIT, MAX_LIMIT } from "./pagination.js";
 
 describe("parsePageRequest", () => {
   it("returns defaults when params are absent", () => {
@@ -68,9 +64,9 @@ describe("parsePageRequest", () => {
     expect(result.offset).toBe(10000);
   });
 
-  it("handles decimal limit (truncates to integer)", () => {
+  it("handles decimal limit (parseInt truncates to integer)", () => {
     const params = new URLSearchParams({ limit: "20.9" });
     const result = parsePageRequest(params);
-    expect(result.limit).toBe(DEFAULT_LIMIT);
+    expect(result.limit).toBe(20);
   });
 });
