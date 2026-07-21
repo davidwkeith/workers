@@ -95,8 +95,7 @@ function valueToText(value: unknown): string | null {
       return obj.value;
     }
     const props = obj.properties as
-      | Record<string, readonly unknown[]>
-      | undefined;
+      Record<string, readonly unknown[]> | undefined;
     const name = props?.name?.[0];
     if (typeof name === "string") {
       return name;

@@ -1250,10 +1250,12 @@ describe("@dwk/micropub query and action edge cases", () => {
       ctx,
     );
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as Record<string, unknown>;
     expect(data).toHaveProperty("items");
     expect(Array.isArray(data.items)).toBe(true);
-    const urls = data.items.map((item: any) => item.properties.url?.[0]);
+    const urls = (data.items as Record<string, unknown>[]).map(
+      (item) => (item.properties as Record<string, unknown>).url?.[0],
+    );
     expect(urls).toContain(url1.href);
     expect(urls).toContain(url2.href);
     expect(data.items[0]).toHaveProperty("type");
@@ -1332,7 +1334,7 @@ describe("@dwk/micropub query and action edge cases", () => {
 
   it("applies property filtering to q=source list items", async () => {
     const minted = await mintToken("create");
-    const res = await handler(
+    await handler(
       new Request(MICROPUB, {
         method: "POST",
         headers: {
@@ -1347,7 +1349,6 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    const createdUrl = (await res.json()).url;
     const res2 = await handler(
       new Request(`${MICROPUB}?q=source&properties[]=content`, {
         headers: await authHeaders(minted, "GET", MICROPUB),
@@ -1356,7 +1357,7 @@ describe("@dwk/micropub query and action edge cases", () => {
       ctx,
     );
     expect(res2.status).toBe(200);
-    const data = await res2.json();
+    const data = (await res2.json()) as Record<string, unknown>;
     expect(data.items[0]).toHaveProperty("properties");
     expect(data.items[0]?.properties).toHaveProperty("content");
     expect(data.items[0]?.properties).not.toHaveProperty("name");
