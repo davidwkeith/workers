@@ -68,7 +68,7 @@ requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
-Run from the repo root (pnpm 10, Node >=20):
+Run from the repo root (pnpm 10, Node >=22 — `@dwk/server`'s built-in `node:sqlite` shims need it):
 
 | Task                    | Command                                                           |
 | ----------------------- | ----------------------------------------------------------------- |

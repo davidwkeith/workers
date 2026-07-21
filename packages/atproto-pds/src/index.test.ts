@@ -423,6 +423,10 @@ describe("AT Protocol PDS", () => {
       "/xrpc/com.atproto.sync.getRepo?did=" + host,
     );
     expect(carRes.headers.get("content-type")).toBe("application/vnd.ipld.car");
+    // Regression guard for #296: getRepo must stream its body (never
+    // materialize the whole repository into one buffered Uint8Array), so the
+    // response is backed by a ReadableStream rather than an ArrayBuffer/Blob.
+    expect(carRes.body).toBeInstanceOf(ReadableStream);
     const car = readCar(new Uint8Array(await carRes.arrayBuffer()));
 
     // The CAR's declared root is the latest commit.

@@ -387,7 +387,10 @@ export function createStore(
    *      an identical body already exists, so writes still dedupe.
    *
    * R2 has no server-side copy, so the promotion re-streams through the Worker;
-   * that is still bounded and never fully buffered.
+   * that is still bounded and never fully buffered. The content-addressed
+   * destination key is only known once the hash is in, so a step-2 read to
+   * learn it and a separate step-3 read to copy the bytes are unavoidable
+   * without a `tee` — which the first bullet above already rules out.
    *
    * No `httpMetadata.contentType` is recorded on the R2 object: the key is
    * content-addressed, so distinct resources with the same bytes share one
@@ -399,6 +402,19 @@ export function createStore(
     stream: ReadableStream,
   ): Promise<{ hash: string; size: number }> {
     const stagingKey = `${blobPrefix}/staging/${crypto.randomUUID()}`;
+    // Track the staging key in the same transactional outbox ordinary orphans
+    // use, from the instant it exists — not just on the happy path in
+    // `finally` below. If this isolate is evicted (OOM/wall-clock) between
+    // here and the `finally`'s cleanup, the row survives, gets forwarded by
+    // `forwardOrphans`, and the cron GC (`collectGarbage`) reclaims the
+    // abandoned staging object after its safety window instead of leaking it
+    // in R2 forever. No resurrection risk to guard against: `stagingKey` is a
+    // fresh random UUID per call, so nothing else can ever write to it again.
+    sql.exec(
+      "INSERT INTO orphan_outbox (blob_key, enqueued_at) VALUES (?, ?)",
+      stagingKey,
+      Date.now(),
+    );
     try {
       // 1. Stream to staging. A single consumer (R2) means upload backpressure
       //    propagates to the source, so the DO holds only chunks in flight.
@@ -426,8 +442,11 @@ export function createStore(
       }
       return { hash, size };
     } finally {
-      // The staged object is transient regardless of outcome.
+      // The staged object is transient regardless of outcome. Successful
+      // cleanup also removes the outbox row so a healthy write never forwards
+      // a resolved staging key to the shared GC store.
       await env.BLOBS.delete(stagingKey);
+      sql.exec("DELETE FROM orphan_outbox WHERE blob_key = ?", stagingKey);
     }
   }
 

@@ -35,15 +35,15 @@ jobs:
     # protection rules (required reviewers, branch restrictions) there.
     environment: npm-publish
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0 # full history so changeset can tag releases
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # Node 24 so the @dwk/server SQLite shims (built-in `node:sqlite`) run
           # flag-free; matches ci.yml.
@@ -75,6 +75,12 @@ jobs:
       - name: Test (with coverage)
         run: pnpm test:coverage
 
+      # conformance.yml's release-gate job already enforces this on every
+      # PR/push, but the release workflow didn't — a package could ship
+      # without a catalog.json decision if that check alone had drifted.
+      - name: Enforce catalog gate (catalog.json covers every package)
+        run: pnpm catalog:check
+
       - name: Release gate (dry run)
         if: ${{ inputs.dry_run }}
         run: pnpm release:gate
@@ -105,3 +111,22 @@ jobs:
             [ -n "$tag" ] && git tag "$tag" 2>/dev/null || true
           done
           git push origin --tags
+
+      - name: Publish a GitHub Release for @dwk/server (drives docker.yml's `release` trigger)
+        if: ${{ !inputs.dry_run }}
+        # docker.yml's Docker-image job listens for `release: [published]`, but
+        # nothing else in the repo ever creates a GitHub Release (only tags),
+        # so that trigger was dead code. @dwk/server is private (never an npm
+        # tag above), so it gets its own release tag here instead.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./packages/server/package.json').version")
+          tag="dwk-server-v${version}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists (no @dwk/server version bump this run); skipping."
+          else
+            gh release create "$tag" \
+              --title "@dwk/server $version" \
+              --notes "Self-host Docker image for @dwk/server $version. See packages/server/CHANGELOG.md for what changed."
+          fi

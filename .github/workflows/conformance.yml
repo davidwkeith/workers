@@ -37,15 +37,18 @@ on:
           elsewhere).
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   # Static guard: refuses to let any package go stable (>=1.0.0) before its
   # conformance suites + integration lifecycle tests are recorded as passing.
   release-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
           # flag-free (spec/self-hosting.md §16 decision 2).
@@ -66,9 +69,9 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
           # flag-free (spec/self-hosting.md §16 decision 2).
@@ -91,11 +94,11 @@ jobs:
       - name: Check Cloudflare credentials
         id: creds
         run: echo "ok=${{ secrets.CLOUDFLARE_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.creds.outputs.ok == 'true'
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
         if: steps.creds.outputs.ok == 'true'
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: steps.creds.outputs.ok == 'true'
         with:
           # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
@@ -109,7 +112,7 @@ jobs:
         run: pnpm build
       - name: Deploy conformance target
         if: steps.creds.outputs.ok == 'true'
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -129,9 +132,9 @@ jobs:
       matrix:
         standard: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.standard)) || fromJSON('["micropub","webmention","solid","webdav","activitypub"]') }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@b0f76dfb45f55f8421693e4803ac7bb65143bd34 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           # Node 24 for parity with CI: @dwk/server's node:sqlite shims run
           # flag-free (spec/self-hosting.md §16 decision 2).
@@ -179,6 +182,14 @@ jobs:
           fi
       - name: Run hosted conformance suite
         env:
+          # The weekly schedule carries no `inputs` (those only exist for
+          # workflow_dispatch), so without a fallback here every scheduled run
+          # invoked run-suite.mjs with no --target and silently no-op'd (green
+          # badge, zero suites actually run). deploy-target above just
+          # (re)deployed exactly this URL, on both the schedule and dispatch
+          # paths, so it's the correct default whenever an operator doesn't
+          # override it.
+          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io' }}
           # Basic credentials for the WebDAV mount (an app password minted via
           # the owner-gated endpoint); unset for the other suites.
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
@@ -192,9 +203,9 @@ jobs:
           # (fediverse interop #273): the deployed target's outbox URL plus
           # its ACTIVITYPUB_PUBLISH_TOKEN (mirrored into this repo secret).
           # Unset ⇒ those cases report `skipped`.
-          FEDIFY_PUBLISH_URL: ${{ secrets.FEDIFY_PUBLISH_TOKEN != '' && inputs.target_url != '' && format('{0}/outbox', inputs.target_url) || '' }}
+          FEDIFY_PUBLISH_URL: ${{ secrets.FEDIFY_PUBLISH_TOKEN != '' && format('{0}/outbox', inputs.target_url || 'https://conformance.dwk.io') || '' }}
           FEDIFY_PUBLISH_TOKEN: ${{ secrets.FEDIFY_PUBLISH_TOKEN }}
         run: |
           node scripts/conformance/run-suite.mjs "${{ matrix.standard }}" \
-            ${{ inputs.target_url && format('--target {0}', inputs.target_url) || '' }} \
+            --target "$TARGET_URL" \
             --target-id "${{ inputs.target_id || (matrix.standard == 'activitypub' && 'fedify' || 'cloudflare') }}"

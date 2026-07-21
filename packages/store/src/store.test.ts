@@ -417,6 +417,27 @@ describe("@dwk/store streaming blob writes", () => {
     expect(out.head).toMatchObject({ kind: "blob", etag: out.streamed });
   });
 
+  it("leaves no staging-key outbox row behind after a successful streamed write (#305)", async () => {
+    // stageAndHash enrolls its random staging key in the same transactional
+    // outbox ordinary orphans use, so an isolate killed mid-write doesn't leak
+    // it in R2 forever — but a healthy write must clean that row up itself
+    // rather than leaving it to be needlessly forwarded to the shared GC store.
+    const out = await withStore(async ({ store, env, state }) => {
+      await store.putBlob("/streamed", new Response("staged-content").body!, {
+        contentType: "text/plain",
+      });
+      const staging = await env.BLOBS.list({
+        prefix: `${state.id.toString()}/blobs/staging/`,
+      });
+      return {
+        orphans: store.collectOrphans().length,
+        stagingObjectCount: staging.objects.length,
+      };
+    });
+    expect(out.orphans).toBe(0);
+    expect(out.stagingObjectCount).toBe(0);
+  });
+
   it("accepts a Blob body and dedupes identical streamed content", async () => {
     const out = await withStore(async ({ store }) => {
       const a = await store.putBlob("/a", new Blob(["same-bytes"]));
