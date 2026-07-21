@@ -50,6 +50,19 @@ function text(
   });
 }
 
+/**
+ * A document↔folder name collision detected **inside** the write transaction
+ * (via the store `guard`). Thrown so the write rolls back atomically and the
+ * caller maps it to `409`, closing the TOCTOU window between the pre-check and
+ * the commit that a plain read-then-write would leave open.
+ */
+class ConflictError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "ConflictError";
+  }
+}
+
 export class RemoteStorageObject extends DurableObject<RemoteStorageEnv> {
   #store: Store | null = null;
 
@@ -193,15 +206,25 @@ export class RemoteStorageObject extends DurableObject<RemoteStorageEnv> {
     }
     // Document↔folder name collisions are forbidden (draft §6): a path that
     // already has descendants is a folder, and any ancestor that is a document
-    // would shadow this one.
+    // would shadow this one. This is a cheap early reject before we read the
+    // body; the authoritative check runs again inside the write transaction (the
+    // store `guard`), since a concurrent PUT to a related path could otherwise
+    // slip a collision in between this read and the commit.
     const conflict = this.#conflict(store, path);
     if (conflict) return text(409, conflict, { allow: ALLOW });
 
     const existed = store.head(path) !== null;
-    await this.#writeBody(store, path, request, {
-      ifMatch: ifMatchOf(request),
-      ifNoneMatch: ifNoneMatchOf(request),
-    });
+    try {
+      await this.#writeBody(store, path, request, {
+        ifMatch: ifMatchOf(request),
+        ifNoneMatch: ifNoneMatchOf(request),
+      });
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        return text(409, err.reason, { allow: ALLOW });
+      }
+      throw err;
+    }
     await this.#drainOrphans(store);
 
     const meta = store.head(path);
@@ -286,17 +309,32 @@ export class RemoteStorageObject extends DurableObject<RemoteStorageEnv> {
       "application/octet-stream";
     const declared = parseContentLength(request.headers.get("content-length"));
 
+    // Re-run the document↔folder collision check inside the write transaction:
+    // between the caller's pre-check and this commit, a concurrent PUT to a
+    // parent/child path could have created the very folder/document that would
+    // shadow this one. Throwing rolls the write back (and outboxes any staged
+    // blob), so two racing PUTs can't both commit into a collision (draft §6).
+    const guard = () => {
+      const conflict = this.#conflict(store, path);
+      if (conflict) throw new ConflictError(conflict);
+    };
+
     if (declared !== null && declared > store.maxInlineBytes) {
       await store.putBlob(path, request.body ?? new Blob([]), {
         contentType,
         ...preconditions,
+        guard,
       });
       return;
     }
 
     const peeked = await readUpToLimit(request.body, store.maxInlineBytes);
     if (peeked.kind === "overflow") throw new LengthRequiredError();
-    await store.putBlob(path, peeked.bytes, { contentType, ...preconditions });
+    await store.putBlob(path, peeked.bytes, {
+      contentType,
+      ...preconditions,
+      guard,
+    });
   }
 }
 

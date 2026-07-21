@@ -1,5 +1,6 @@
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import { ensureGcSchema } from "@dwk/store";
 
 import {
@@ -300,6 +301,59 @@ describe("conflict detection", () => {
       body: "doc",
     });
     expect(conflict.status).toBe(409);
+  });
+
+  it("409s (and rolls back) when an ancestor document appears mid-body-read — the in-transaction guard, not just the pre-check", async () => {
+    // The pre-write #conflict check catches collisions that already exist. This
+    // exercises the TOCTOU the guard closes: a collision that only appears
+    // *after* the pre-check, while the body is being read. Driving the DO
+    // instance directly (not via the front-door stub) lets a reentrant write run
+    // during the outer write's body read without deadlocking on the DO input
+    // gate — the front door's gated stub calls would.
+    const ns = (testEnv as unknown as { STORAGE: DurableObjectNamespace })
+      .STORAGE;
+    const stub = ns.get(ns.idFromName(crypto.randomUUID()));
+    await runInDurableObject(
+      stub,
+      async (instance: { fetch(request: Request): Promise<Response> }) => {
+        const origin = "https://storage.example";
+        // PUT /a/b whose body, only once the DO starts reading it, creates /a as
+        // a document — an ancestor that now shadows /a/b. The pre-write #conflict
+        // ran and passed before /a existed, so only the re-check inside the write
+        // transaction can catch it.
+        let injected = false;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            if (!injected) {
+              injected = true;
+              const ancestor = await instance.fetch(
+                new Request(`${origin}/a`, {
+                  method: "PUT",
+                  body: "ancestor-doc",
+                  headers: { "content-type": "text/plain" },
+                }),
+              );
+              expect(ancestor.status).toBe(201);
+            }
+            controller.enqueue(new TextEncoder().encode("child-body"));
+            controller.close();
+          },
+        });
+        const res = await instance.fetch(
+          new Request(`${origin}/a/b`, {
+            method: "PUT",
+            body,
+            headers: { "content-type": "text/plain" },
+            duplex: "half",
+          } as RequestInit),
+        );
+        expect(res.status).toBe(409);
+        // The racing write was rolled back inside the transaction: /a/b never
+        // came into existence.
+        const check = await instance.fetch(new Request(`${origin}/a/b`));
+        expect(check.status).toBe(404);
+      },
+    );
   });
 });
 

@@ -105,6 +105,17 @@ export interface WriteOptions {
    * together with the write — making the guard and the write atomic.
    */
   readonly guard?: () => void;
+  /**
+   * Predicate identifying existing quads on the resource that a quad-replacing
+   * write ({@link Store.writeQuads} / RDF {@link Store.putResource}) must
+   * **keep** rather than overwrite — server-managed triples the client never
+   * sends, chiefly a container's `ldp:contains` membership. The matching quads
+   * are re-read **inside the write transaction** and merged into the new quad
+   * set, so a concurrent write committed since the caller built its quad list
+   * cannot be clobbered by a stale snapshot (a read-then-write TOCTOU). Ignored
+   * on the blob path, which stores no quads.
+   */
+  readonly preserveWhere?: (quad: StoredQuad) => boolean;
 }
 
 /** Preconditions for {@link Store.delete}. */
@@ -586,9 +597,23 @@ export function createStore(
           sql.exec("DELETE FROM resources WHERE key = ?", key);
           outboxIfUnreferenced(current.blobKey);
         }
+        // Server-managed quads (e.g. a container's `ldp:contains`) are read back
+        // inside this transaction and merged into the write, so a concurrent
+        // insert committed since the caller built `quads` survives instead of
+        // being dropped by a stale snapshot (see WriteOptions.preserveWhere).
+        // Caller quads are inserted first so that if one ever overlaps a
+        // preserved quad, the caller's wins: insertQuads is INSERT OR IGNORE
+        // against the quads PK (resource + s/p/o/datatype/lang/graph), so the
+        // later duplicate is dropped rather than doubling the row.
+        const preserved = options.preserveWhere
+          ? store.readQuads(key).filter(options.preserveWhere)
+          : [];
         sql.exec("DELETE FROM quads WHERE resource = ?", key);
         upsertRdfPointer(key, etag, contentType, options.size ?? 0);
-        insertQuads(key, quads);
+        insertQuads(
+          key,
+          preserved.length > 0 ? [...quads, ...preserved] : quads,
+        );
       });
       return etag;
     },

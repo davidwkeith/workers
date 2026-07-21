@@ -93,6 +93,54 @@ describe("@dwk/store quad store", () => {
     });
   });
 
+  it("preserveWhere keeps server-managed quads across a replacing write", async () => {
+    const CONTAINS = "http://www.w3.org/ns/ldp#contains";
+    const containsChild: StoredQuad = {
+      subject: { termType: "NamedNode", value: `${EX}c` },
+      predicate: { termType: "NamedNode", value: CONTAINS },
+      object: { termType: "NamedNode", value: `${EX}c/child` },
+      graph: DEFAULT_GRAPH,
+    };
+    const oldMeta: StoredQuad = {
+      subject: { termType: "NamedNode", value: `${EX}c` },
+      predicate: { termType: "NamedNode", value: `${EX}title` },
+      object: { termType: "Literal", value: "old", datatype: XSD_STRING },
+      graph: DEFAULT_GRAPH,
+    };
+    const newMeta: StoredQuad = {
+      ...oldMeta,
+      object: { termType: "Literal", value: "new", datatype: XSD_STRING },
+    };
+    const read = await withStore(({ store }) => {
+      // A container holding one membership triple plus some metadata.
+      store.writeQuads("/c", [containsChild, oldMeta]);
+      // A client PUT replaces the resource with new metadata only (it never
+      // sends server-managed containment); preserveWhere keeps ldp:contains.
+      store.writeQuads("/c", [newMeta], {
+        preserveWhere: (q) => q.predicate.value === CONTAINS,
+      });
+      return store.readQuads("/c");
+    });
+    // The membership triple survived the replace; stale metadata was overwritten.
+    const byPredicate = new Map(read.map((q) => [q.predicate.value, q.object]));
+    expect([...byPredicate.keys()].sort()).toEqual(
+      [CONTAINS, `${EX}title`].sort(),
+    );
+    expect(byPredicate.get(`${EX}title`)).toMatchObject({ value: "new" });
+    expect(byPredicate.get(CONTAINS)).toMatchObject({ value: `${EX}c/child` });
+  });
+
+  it("preserveWhere is a harmless no-op on a resource with no matching quads", async () => {
+    const read = await withStore(({ store }) => {
+      store.writeQuads("/fresh", QUADS, {
+        preserveWhere: (q) =>
+          q.predicate.value === "http://www.w3.org/ns/ldp#contains",
+      });
+      return store.readQuads("/fresh");
+    });
+    expect(read).toHaveLength(QUADS.length);
+  });
+
   it("applies an N3-Patch deletes+inserts atomically", async () => {
     const [first, ...rest] = QUADS;
     const result = await withStore(({ store }) => {
