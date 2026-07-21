@@ -131,13 +131,24 @@ export function absoluteUrl(value: string, base: string): string {
   }
 }
 
-/** Upper bound on `q=category` results, regardless of the requested `limit`. */
+/**
+ * Upper bound on `q=category` results, regardless of the requested `limit`.
+ * Set high because this is an autocomplete *tag list*, not a paginated feed —
+ * a client generally wants every tag so it can filter locally.
+ */
 const MAX_CATEGORY_LIMIT = 1000;
 
 /**
- * Parse a `limit` query parameter (the stable Limit extension): a positive
- * integer, capped at {@link MAX_CATEGORY_LIMIT}. Returns `undefined` for an
- * absent or unparseable value, so the store returns the full list.
+ * Parse the `limit` query parameter (the stable Limit extension) for
+ * `q=category`: a positive integer, capped at {@link MAX_CATEGORY_LIMIT}. An
+ * absent or malformed value yields `undefined` — i.e. the full (capped) list —
+ * because a tag list for autocomplete has no useful small default page size.
+ *
+ * This is a *deliberate* divergence from the forthcoming post-list query
+ * (`q=source` with no `url`, #351/#353), whose pagination defaults a malformed
+ * `limit` to a small page: a tag list and a post feed want different defaults.
+ * Both share the same philosophy — a malformed `limit` never 400s, it is a
+ * client convenience, not a contract.
  */
 function parseLimitParam(raw: string | null): number | undefined {
   if (raw === null || !/^\d+$/.test(raw)) return undefined;

@@ -87,8 +87,11 @@ Currently implemented (all **stable**):
   distinct string `category` (tag) values across all **live** posts (soft-deleted
   posts are excluded), alphabetised, for client autocomplete. Narrowed by the
   **Limit** (`limit=`) and **Filter** (`filter=`, case-insensitive substring)
-  parameters; `limit` is capped server-side. Nested non-string tags (e.g.
-  `h-card` objects) are excluded from the list.
+  parameters; `limit` is capped server-side. An absent or malformed `limit`
+  returns the full (capped) list rather than a default page — autocomplete
+  wants every tag — a deliberate difference from the post-list query's
+  paginated default (#351/#353). Nested non-string tags (e.g. `h-card` objects)
+  are excluded from the list.
 
 Not yet implemented / tracked separately:
 
