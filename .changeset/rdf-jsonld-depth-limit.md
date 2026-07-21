@@ -6,4 +6,8 @@
 expansion, rejecting a document nested deeper than that with a `JsonLdError`.
 Previously a deeply nested `@dwk/rdf` input (mutually recursive
 `processNode`/`valueToObject`) could overflow the call stack with an
-uncatchable `RangeError`, escaping the package's `JsonLdError` contract.
+uncatchable `RangeError`, escaping the package's `JsonLdError` contract. The
+cap also now covers nested `@list` values (`buildList`/`valueToObject`'s own
+mutual recursion for `{"@list": [{"@list": [...]}]}`-shaped input), which the
+initial fix missed — a deeply `@list`-nested document could still overflow
+the stack.

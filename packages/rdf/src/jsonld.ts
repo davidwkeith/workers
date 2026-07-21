@@ -360,7 +360,13 @@ class RdfEmitter {
       const def = active.terms.get(key);
 
       if (def?.container === "@list") {
-        const head = this.buildList(arrayify(value), def, active, graph, depth);
+        const head = this.buildList(
+          arrayify(value),
+          def,
+          active,
+          graph,
+          depth + 1,
+        );
         this.emit(subject, predicate, head, graph);
         continue;
       }
@@ -372,7 +378,7 @@ class RdfEmitter {
             def,
             active,
             graph,
-            depth,
+            depth + 1,
           );
           this.emit(subject, predicate, head, graph);
           continue;
@@ -451,7 +457,7 @@ class RdfEmitter {
         def,
         active,
         graph,
-        depth,
+        depth + 1,
       );
     }
     if ("@id" in value && Object.keys(value).length === 1) {
@@ -549,6 +555,11 @@ class RdfEmitter {
     graph: Quad_Graph,
     depth: number,
   ): NamedNode | BlankNode {
+    if (depth > MAX_NESTING_DEPTH) {
+      throw new JsonLdError(
+        `node nesting exceeds the maximum supported depth (${MAX_NESTING_DEPTH})`,
+      );
+    }
     // Strip the list container so list members aren't re-wrapped as lists.
     const itemDef = def?.container ? { ...def, container: undefined } : def;
     const objects = items

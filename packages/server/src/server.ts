@@ -163,7 +163,22 @@ export function createServer(config: HostConfig): DwkServer {
   // package doesn't control the shape of. A reverse proxy in front of this
   // container may set its own copy of these — that's harmless duplication,
   // not a conflict.
-  app.use(helmet({ contentSecurityPolicy: false }));
+  //
+  // `crossOriginResourcePolicy` is relaxed to "cross-origin": helmet's default
+  // ("same-origin") would block a browser from directly fetching this host's
+  // discovery documents — WebFinger `.well-known/webfinger`, ActivityPub actor
+  // documents, IndieAuth metadata — from another origin, which several of the
+  // `@dwk` protocols this host composes are explicitly designed to allow.
+  // This host has no fixed set of mounted packages to reason a narrower,
+  // per-route policy from, so the blanket relaxation is the composer-neutral
+  // choice; a deployer who does need to restrict specific routes can add its
+  // own middleware ahead of theirs.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    }),
+  );
   app.use(reservedDispatch(config.mounts, config.env, origin, tracker, logger));
   if (config.publicDir !== undefined) {
     // `dotfiles: "deny"` is explicit rather than relying on express.static's

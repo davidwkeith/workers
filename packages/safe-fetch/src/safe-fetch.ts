@@ -508,11 +508,20 @@ export async function safeFetch(
           method === "POST");
       if (downgradeToGet) {
         const headers = new Headers((currentInit.headers as HeadersInit) ?? {});
+        // The WHATWG Fetch redirect algorithm strips Content-Encoding/
+        // Content-Language/Content-Location/Content-Type here; Content-Length
+        // isn't in that list because a compliant implementation derives it
+        // from the actual (now-null) body rather than trusting a caller-set
+        // header. This implementation preserves `headers` verbatim otherwise,
+        // so a stale Content-Length from the original request would
+        // otherwise survive onto a body-less GET, understating/overstating
+        // its (absent) body — strip it too.
         for (const name of [
           "content-encoding",
           "content-language",
           "content-location",
           "content-type",
+          "content-length",
         ]) {
           headers.delete(name);
         }

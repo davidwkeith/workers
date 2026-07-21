@@ -103,6 +103,14 @@ const SCHEMA = [
      expires_at INTEGER NOT NULL,
      revoked INTEGER NOT NULL DEFAULT 0
    )`,
+  // Support both `pruneExpired`'s DELETE (below) and any future expiry scan —
+  // without these, deleting expired rows on every save/issuance is a
+  // full-table scan, reintroducing (now at higher frequency) the cost this
+  // pruning was meant to fix.
+  `CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at
+     ON authorization_codes(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_access_tokens_expires_at
+     ON access_tokens(expires_at)`,
 ] as const;
 
 interface AuthCodeRow {
@@ -281,7 +289,10 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
 
     async recordToken(record) {
       await ensureSchema();
-      await pruneExpired(db, Math.floor(Date.now() / 1000));
+      // `record.issuedAt` is the caller's own "now" for this issuance — reuse
+      // it instead of a fresh `Date.now()` read, matching the file's
+      // injectable-clock convention without a public interface change.
+      await pruneExpired(db, record.issuedAt);
       await db
         .prepare(
           `INSERT INTO access_tokens

@@ -110,6 +110,12 @@ describe("createServer (end-to-end)", () => {
     expect(res.headers.get("x-frame-options")).toBeTruthy();
     // No CSP: publicDir can serve an arbitrary self-hosted site.
     expect(res.headers.get("content-security-policy")).toBeNull();
+    // Relaxed from helmet's "same-origin" default: a browser on another
+    // origin must still be able to fetch this host's WebFinger/ActivityPub/
+    // IndieAuth discovery documents directly.
+    expect(res.headers.get("cross-origin-resource-policy")).toBe(
+      "cross-origin",
+    );
 
     const dotfile = await fetch(`${base}/.env`);
     expect(dotfile.status).not.toBe(200);

@@ -10,4 +10,7 @@ now forwards it from its own `Env` into the `CredentialStore` it builds.
 Also fixed: a MKCOL request body sent without a `Content-Length` header
 (chunked transfer-encoding, whose length is unknown up front) previously
 defaulted to "length 0" and slipped past the RFC 4918 §9.3 unsupported-media
-check; only an explicit `Content-Length: 0` now clears a non-null body.
+check. The fix now reads (and discards) the first chunk of the body to check
+for actual bytes rather than inferring emptiness from headers alone, so a
+legitimate empty chunked-encoded MKCOL (a non-null body stream that simply
+yields no bytes) is no longer rejected alongside a real one.

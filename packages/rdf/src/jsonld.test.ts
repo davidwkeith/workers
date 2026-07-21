@@ -300,6 +300,18 @@ describe("@dwk/rdf JSON-LD parse", () => {
     const document = { "@id": "https://ex/root", ...(node as JsonObject) };
     await expect(parseJsonLd(document)).rejects.toBeInstanceOf(JsonLdError);
   });
+
+  it("rejects deeply nested @list values with a JsonLdError, not a RangeError", async () => {
+    // buildList and valueToObject are mutually recursive for a value object
+    // nesting another "@list" inside it — build { "@list": [ { "@list": [ ...
+    // "leaf" ] } ] } nested well past MAX_NESTING_DEPTH.
+    let list: JsonValue = "leaf";
+    for (let i = 0; i < 500; i++) {
+      list = { "@list": [list] };
+    }
+    const document = { "@id": "https://ex/root", "https://ex/p": list };
+    await expect(parseJsonLd(document)).rejects.toBeInstanceOf(JsonLdError);
+  });
 });
 
 describe("@dwk/rdf JSON-LD round-trips", () => {

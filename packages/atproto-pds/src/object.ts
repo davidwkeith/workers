@@ -1521,9 +1521,6 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         ),
       );
     }
-    const rows = this.#sql
-      .exec("SELECT frame FROM firehose WHERE seq > ? ORDER BY seq", cursor)
-      .toArray();
     // The replay is intentionally synchronous (no `await`) so JS run-to-
     // completion semantics guarantee no concurrent `#commit` can interleave
     // and broadcast a newer frame to this socket before the backfill catches
@@ -1532,9 +1529,18 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // exposes no `bufferedAmount` to poll synchronously either way. Instead,
     // a cumulative byte budget bounds the worst case: once it's exceeded, the
     // replay refuses to queue more and closes the connection rather than
-    // handing an unbounded burst to a slow client.
+    // handing an unbounded burst to a slow client. The cursor is iterated
+    // directly (not `.toArray()`'d) so the budget check gates further reads
+    // from SQLite, not just further sends to the socket — `.toArray()` would
+    // materialize every matching row up front regardless of the budget,
+    // still risking the DO's 128 MB memory ceiling on a large backfill
+    // window even though the socket itself would never see more than
+    // MAX_BACKFILL_BYTES.
     let sentBytes = 0;
-    for (const row of rows) {
+    for (const row of this.#sql.exec(
+      "SELECT frame FROM firehose WHERE seq > ? ORDER BY seq",
+      cursor,
+    )) {
       const frame = unbase64(row.frame as string);
       sentBytes += frame.byteLength;
       if (sentBytes > MAX_BACKFILL_BYTES) {

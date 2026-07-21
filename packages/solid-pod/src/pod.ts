@@ -1035,12 +1035,18 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     // A `ldp:contains` object is expected to always be same-origin (the store
     // itself only ever writes same-origin containment quads), but #337 found
     // that a client can PUT a forged cross-origin `ldp:contains` triple into a
-    // container body; `startsWith` here is the defensive guard so slicing an
-    // unexpected off-origin IRI can't produce a bogus, non-`/`-rooted "path"
-    // that then gets handed to the store as if it were one of this pod's own
-    // resources.
+    // container body; this is the defensive guard so slicing an unexpected
+    // off-origin IRI can't produce a bogus, non-`/`-rooted "path" that then
+    // gets handed to the store as if it were one of this pod's own resources.
+    // A plain `startsWith(origin)` is not that guard: `origin` +
+    // `.attacker.com/x` also starts with `origin`'s characters (host-suffix
+    // spoofing), so the match requires either exact equality or a `/`
+    // immediately after `origin` — a real path boundary, not just a shared
+    // string prefix.
     const toPath = (iri: string): string | null =>
-      iri.startsWith(origin) ? iri.slice(origin.length) : null;
+      iri === origin || iri.startsWith(`${origin}/`)
+        ? iri.slice(origin.length)
+        : null;
 
     const statOf = (path: string): ResourceStat | null => {
       const meta = store.head(path);

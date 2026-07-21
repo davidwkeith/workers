@@ -457,18 +457,32 @@ async function remove(
 // MKCOL
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether `request` actually carries body bytes, checked by reading (and
+ * discarding) its first chunk rather than trusting headers alone. A
+ * `Content-Length: 0` request has a `null` body and is trivially empty, but a
+ * chunked-encoded request (no `Content-Length` — its length is unknown up
+ * front) can legitimately carry a non-null body stream that yields zero bytes;
+ * treating "non-null body" alone as "has a body" would 415 that legitimate
+ * empty MKCOL alongside a real one.
+ */
+async function hasBodyBytes(request: Request): Promise<boolean> {
+  if (request.body === null) return false;
+  const reader = request.body.getReader();
+  try {
+    const { done, value } = await reader.read();
+    return !done && (value?.byteLength ?? 0) > 0;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 async function mkcol(
   ctx: RequestContext,
   resolved: Resolved,
 ): Promise<Response> {
   // RFC 4918 §9.3: MKCOL with a request body is unsupported media (415).
-  // Only an explicit `Content-Length: 0` clears a non-null body stream — a
-  // request with no Content-Length at all (chunked transfer-encoding, whose
-  // length is unknown up front) must not default to "0" and slip through.
-  if (
-    ctx.request.body !== null &&
-    ctx.request.headers.get("content-length") !== "0"
-  ) {
+  if (await hasBodyBytes(ctx.request)) {
     return problem(415, "MKCOL bodies are not supported");
   }
   const collectionPath = isCollectionPath(ctx.path) ? ctx.path : `${ctx.path}/`;
