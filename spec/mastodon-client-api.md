@@ -461,14 +461,17 @@ The suite is "real clients log in and render", not a rocks-style harness:
    scaffold; apps/authorize/token/revoke; `instance` (v1+v2);
    `verify_credentials`; stub roster. Acceptance: a real client completes
    login and shows the owner account.
+   ([#348](https://github.com/davidwkeith/workers/issues/348))
 2. **Read surface**: `__client/*` DO routes + extended `__stats` in
    `@dwk/activitypub`; timelines/home; notifications; statuses/:id;
    accounts/:id; snowflake pagination. Acceptance: the pixelfed-qa step-4
    like + reply are visible in a real client; runbook + status.json land.
+   ([#349](https://github.com/davidwkeith/workers/issues/349))
 3. **Fidelity**: actor-profile hydration cache; merging the owner's own
    `outbox` posts into the home timeline (additive thanks to the reserved
    snowflake source bit); counters; any quirks the client matrix surfaces
    (each recorded in the runbook, fixed, and fixture-tested).
+   ([#350](https://github.com/davidwkeith/workers/issues/350))
 
 Each phase is independently shippable and changeset-recorded; phases 2–3
 change `@dwk/activitypub` only additively (internal routes, one export).
