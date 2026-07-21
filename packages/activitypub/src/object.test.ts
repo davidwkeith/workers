@@ -2234,6 +2234,48 @@ describe("delivery outcome logging", () => {
     }
   });
 
+  it("__stats includes followers, following, and statuses counts", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Seed 1 follower
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        `${REMOTE}/actor`,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      // Seed 1 accepted following
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, ?, ?)`,
+        `${REMOTE}/actor2`,
+        "accepted",
+        1,
+      );
+      // Create 1 outbox entry via publish
+      const publishRes = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Create", object: { type: "Note", content: "test" } }),
+          true,
+        ),
+      );
+      expect(publishRes.status).toBe(201);
+
+      // Call __stats and verify counts
+      const statsRes = await instance.fetch(
+        new Request(`${iris.id}/__stats`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      const body = (await statsRes.json()) as Record<string, number>;
+      expect(body.followers).toBe(1);
+      expect(body.following).toBe(1);
+      expect(body.statuses).toBe(1);
+      expect(body.users).toBe(1);
+      expect(body.localPosts).toBe(1);
+    });
+  });
+
   it("tallies into the overflow counter at the pending-metrics cardinality cap", async () => {
     const { username, stub } = freshUser();
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});

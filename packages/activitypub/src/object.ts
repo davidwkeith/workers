@@ -1808,7 +1808,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
   #stats(): Response {
     const localPosts = this.#count("outbox");
-    return json(200, { users: 1, localPosts } as JsonValue);
+    return json(200, {
+      users: 1,
+      localPosts,
+      followers: this.#count("followers"),
+      following: this.#count("following"),
+      statuses: localPosts,
+    } as JsonValue);
   }
 
   /**
