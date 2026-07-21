@@ -69,12 +69,14 @@ Design decisions locked here (rationale in `spec/mastodon-client-api.md`):
 ### Task 1: `@dwk/oauth` ClientStore seam
 
 **Files:**
+
 - Modify: `packages/oauth/src/store.ts`
 - Modify: `packages/oauth/src/index.ts`
 - Create: `packages/oauth/src/store.test.ts`
 - Create: `.changeset/oauth-client-store-seam.md`
 
 **Interfaces:**
+
 - Consumes: existing `ClientRecord` in `packages/oauth/src/store.ts`.
 - Produces: `interface ClientStore { saveClient(record: ClientRecord): Promise<void>; getClient(clientId: string): Promise<ClientRecord | null>; }` exported from `@dwk/oauth`. Task 4's `MastodonStore` extends it.
 
@@ -182,11 +184,13 @@ git commit -m "feat(oauth): add ClientStore read seam (getClient) for grant-buil
 ### Task 2: Scaffold `@dwk/mastodon-api` (package files, config types, error helpers, 404/CORS router shell)
 
 **Files:**
+
 - Create: `packages/mastodon-api/package.json`, `tsconfig.json`, `tsconfig.build.json`, `vitest.config.ts`, `README.md`, `CLAUDE.md`
 - Create: `packages/mastodon-api/src/index.ts`, `src/config.ts`, `src/backend.ts`, `src/errors.ts`, `src/handler.ts`
 - Test: `packages/mastodon-api/src/handler.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Logger`/`Metrics` from `@dwk/log`.
 - Produces: `createMastodonApi(config): (request: Request, env: MastodonApiEnv, ctx: ExecutionContext) => Promise<Response>`; `MastodonApiEnv { AUTH_DB: D1Database }`; `MastodonApiConfig` (fields below); `ApproveMastodonAuthorization`; `MastodonBackend` seam types; `mastodonError(status, message)`. Later tasks register routes in `handler.ts`'s route table.
 
@@ -521,9 +525,7 @@ describe("createMastodonApi shell", () => {
     );
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
-    const res = await api()(
-      new Request("https://owner.example/api/v1/nope"),
-    );
+    const res = await api()(new Request("https://owner.example/api/v1/nope"));
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
@@ -560,10 +562,9 @@ export interface RouteContext {
 type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 
 /** Exact-path routes, keyed `"METHOD /path"`. Feature tasks add entries. */
-const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<
-  string,
-  RouteHandler
->([]);
+const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
+  [],
+);
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -670,10 +671,12 @@ git commit -m "feat(mastodon-api): scaffold endpoint package with router shell, 
 ### Task 3: Encoding helpers (tokens, hashing, PKCE)
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/encoding.ts`
 - Test: `packages/mastodon-api/src/encoding.test.ts`
 
 **Interfaces:**
+
 - Produces: `randomToken(): string` (256-bit base64url), `sha256Hex(input: string): Promise<string>`, `verifyPkceS256(verifier: string, challenge: string): Promise<boolean>`, `timingSafeEqualHex(a: string, b: string): boolean`. Used by tasks 4, 6, 7, 8, 10.
 
 - [ ] **Step 1: Write the failing test**
@@ -732,7 +735,10 @@ const encoder = new TextEncoder();
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }
 
 /** A 256-bit random base64url identifier (tokens, codes, client ids). */
@@ -791,26 +797,37 @@ git commit -m "feat(mastodon-api): token minting, hashing, and PKCE helpers"
 ### Task 4: D1 store (`MastodonStore`)
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/store.ts`
 - Test: `packages/mastodon-api/src/store.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ClientRecord`, `ClientStore` from `@dwk/oauth` (Task 1); `MastodonApiEnv` (Task 2).
 - Produces:
 
 ```ts
 interface MastodonCodeRecord {
-  code: string; clientId: string; redirectUri: string; scope: string;
-  codeChallenge: string | null; expiresAt: number;                    // seconds
+  code: string;
+  clientId: string;
+  redirectUri: string;
+  scope: string;
+  codeChallenge: string | null;
+  expiresAt: number; // seconds
 }
 interface MastodonTokenRecord {
-  tokenHash: string; clientId: string; scope: string;
-  accountId: string | null;                                           // null ⇒ client_credentials
-  createdAt: number; revoked: boolean;
+  tokenHash: string;
+  clientId: string;
+  scope: string;
+  accountId: string | null; // null ⇒ client_credentials
+  createdAt: number;
+  revoked: boolean;
 }
 interface MastodonMarkerRecord {
-  timeline: "home" | "notifications"; lastReadId: string;
-  version: number; updatedAt: number;
+  timeline: "home" | "notifications";
+  lastReadId: string;
+  version: number;
+  updatedAt: number;
 }
 interface MastodonStore extends ClientStore {
   init(): Promise<void>;
@@ -819,10 +836,16 @@ interface MastodonStore extends ClientStore {
   saveToken(record: MastodonTokenRecord): Promise<void>;
   getToken(tokenHash: string): Promise<MastodonTokenRecord | null>;
   revokeToken(tokenHash: string): Promise<void>;
-  getMarkers(timelines: readonly string[]): Promise<readonly MastodonMarkerRecord[]>;
-  saveMarker(timeline: "home" | "notifications", lastReadId: string, now: number): Promise<MastodonMarkerRecord>;
+  getMarkers(
+    timelines: readonly string[],
+  ): Promise<readonly MastodonMarkerRecord[]>;
+  saveMarker(
+    timeline: "home" | "notifications",
+    lastReadId: string,
+    now: number,
+  ): Promise<MastodonMarkerRecord>;
 }
-function createMastodonStore(env: MastodonApiEnv): MastodonStore
+function createMastodonStore(env: MastodonApiEnv): MastodonStore;
 ```
 
 - [ ] **Step 1: Write the failing tests**
@@ -983,13 +1006,13 @@ const SCHEMA = [
 
 Implementation notes (all shown patterns come from `packages/indieauth/src/store.ts`):
 
-- `createMastodonStore(env)` throws `new Error("@dwk/mastodon-api: missing required D1 binding \`AUTH_DB\`")` when `!env.AUTH_DB`.
+- `createMastodonStore(env)` throws `new Error("@dwk/mastodon-api: missing required D1 binding \`AUTH_DB\`")`when`!env.AUTH_DB`.
 - `saveClient` serializes `record.metadata` as JSON into `metadata`, stores `record.clientSecret ?? ""` in `client_secret_hash` and `record.clientIdIssuedAt` in `created_at`. `getClient` reverses it (omit `clientSecret` when the column is empty). Before each `saveClient`, opportunistically prune expired codes (`DELETE FROM mastodon_codes WHERE expires_at <= ?`) and never-authorized stale apps:
 
 ```ts
 `DELETE FROM mastodon_apps
   WHERE created_at <= ?
-    AND client_id NOT IN (SELECT client_id FROM mastodon_tokens)`
+    AND client_id NOT IN (SELECT client_id FROM mastodon_tokens)`;
 // bound to now − 30 days (2_592_000 s): an unwanted registration costs one
 // D1 row for at most a month (spec/mastodon-client-api.md, Decision 2).
 ```
@@ -999,7 +1022,7 @@ Implementation notes (all shown patterns come from `packages/indieauth/src/store
 ```ts
 `UPDATE mastodon_codes SET used = 1
   WHERE code = ? AND used = 0 AND expires_at > ?
-  RETURNING code, client_id, redirect_uri, scope, code_challenge, expires_at`
+  RETURNING code, client_id, redirect_uri, scope, code_challenge, expires_at`;
 ```
 
 - `saveMarker` is an upsert with version increment, returning the row:
@@ -1011,7 +1034,7 @@ Implementation notes (all shown patterns come from `packages/indieauth/src/store
     last_read_id = excluded.last_read_id,
     version = mastodon_markers.version + 1,
     updated_at = excluded.updated_at
-  RETURNING timeline, last_read_id, version, updated_at`
+  RETURNING timeline, last_read_id, version, updated_at`;
 ```
 
 - `getMarkers(timelines)` builds a `WHERE timeline IN (?, ?)` from the (validated, internal) list.
@@ -1031,10 +1054,12 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 5: Entity serializers
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/entities.ts`
 - Test: `packages/mastodon-api/src/entities.test.ts`
 
 **Interfaces:**
+
 - Consumes: `MastodonApiConfig`, `OwnerAccount`, `OWNER_ACCOUNT_ID` (Task 2); `ClientRecord` (`@dwk/oauth`); `BackendAccountCounts` (Task 2); `MastodonMarkerRecord` (Task 4).
 - Produces (all pure; every required Mastodon field emitted):
   - `applicationEntity(record: ClientRecord, opts?: { clientSecret?: string }): Record<string, unknown>` — `{id, name, website, redirect_uri, redirect_uris}` (+ `client_id`, `client_secret` only when `opts.clientSecret` is passed, i.e. at registration). `id = String(record.clientIdIssuedAt)`; `redirect_uri` is the registered URIs newline-joined (legacy field), `redirect_uris` the array; **no `vapid_key`**.
@@ -1060,11 +1085,13 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 6: `POST /api/v1/apps` (registration wire adapter)
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/apps.ts`
 - Modify: `packages/mastodon-api/src/handler.ts` (route table)
 - Test: `packages/mastodon-api/src/apps.test.ts`
 
 **Interfaces:**
+
 - Consumes: `validateClientMetadata` (`@dwk/oauth`), `createMastodonStore` (Task 4), `randomToken`/`sha256Hex` (Task 3), `applicationEntity` (Task 5), `mastodonError` (Task 2).
 - Produces: `handleCreateApp(ctx: RouteContext): Promise<Response>` registered as `POST /api/v1/apps`. Reads form-encoded **or** JSON bodies with fields `client_name` (required), `redirect_uris` (string — possibly newline-separated — or array; required), `scopes` (space-separated, default `"read"`), `website` (optional).
 
@@ -1094,11 +1121,13 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 7: `GET /oauth/authorize`
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/oauth-flow.ts`
 - Modify: `packages/mastodon-api/src/handler.ts`
 - Test: `packages/mastodon-api/src/oauth-flow.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ApproveMastodonAuthorization`/`MastodonAuthorizationRequest` (Task 2), store (Task 4), `randomToken` (Task 3).
 - Produces: `handleAuthorize(ctx: RouteContext): Promise<Response>` registered as `GET /oauth/authorize`. Also `OOB_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"` (shared with Task 8's tests).
 
@@ -1128,11 +1157,13 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 8: `POST /oauth/token` + client authentication
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/auth.ts`
 - Modify: `packages/mastodon-api/src/oauth-flow.ts`, `src/handler.ts`
 - Test: extend `packages/mastodon-api/src/oauth-flow.test.ts`
 
 **Interfaces:**
+
 - Consumes: store, `sha256Hex`/`verifyPkceS256`/`timingSafeEqualHex`/`randomToken` (Task 3), `OWNER_ACCOUNT_ID` (Task 2).
 - Produces:
   - `auth.ts`: `authenticateClient(params: URLSearchParams, headers: Headers, store: MastodonStore): Promise<ClientRecord | null>` — reads `client_id`/`client_secret` from the form body, or HTTP Basic; verifies `sha256Hex(secret)` against the stored hash with `timingSafeEqualHex`.
@@ -1165,10 +1196,12 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 9: `POST /oauth/revoke`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/oauth-flow.ts`, `src/handler.ts`
 - Test: extend `packages/mastodon-api/src/oauth-flow.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createRevocationHandler` (`@dwk/oauth`), `authenticateClient` (Task 8), `sha256Hex`.
 - Produces: `handleRevoke(ctx: RouteContext)` registered as `POST /oauth/revoke`.
 
@@ -1187,11 +1220,13 @@ git commit -m "feat(mastodon-api): D1 store for apps, single-use codes, hashed t
 ### Task 10: Bearer auth + `verify_credentials` (apps + accounts)
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/auth.ts`, `src/apps.ts`, `src/handler.ts`
 - Create: `packages/mastodon-api/src/accounts.ts`
 - Test: `packages/mastodon-api/src/accounts.test.ts` (+ extend `apps.test.ts`)
 
 **Interfaces:**
+
 - Consumes: store (Task 4), `entities` (Task 5), error helpers (Task 2).
 - Produces in `auth.ts`:
 
@@ -1220,11 +1255,13 @@ Routes: `GET /api/v1/apps/verify_credentials` (any valid token, incl. client_cre
 ### Task 11: Instance endpoints
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/instance.ts`
 - Modify: `packages/mastodon-api/src/handler.ts`
 - Test: `packages/mastodon-api/src/instance.test.ts`
 
 **Interfaces:**
+
 - Consumes: `instanceV1Entity`/`instanceV2Entity` (Task 5).
 - Produces: `GET /api/v1/instance` and `GET /api/v2/instance`, both public (no auth), host taken from `new URL(config.baseUrl).host`.
 
@@ -1240,11 +1277,13 @@ Routes: `GET /api/v1/apps/verify_credentials` (any valid token, incl. client_cre
 ### Task 12: Markers
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/markers.ts`
 - Modify: `packages/mastodon-api/src/handler.ts`
 - Test: `packages/mastodon-api/src/markers.test.ts`
 
 **Interfaces:**
+
 - Consumes: store (Task 4), `markerEntity` (Task 5), `authenticateBearer` (Task 10).
 - Produces: `GET /api/v1/markers?timeline[]=home&timeline[]=notifications` → `{home: {...}, notifications: {...}}` (only saved ones; unknown timeline names ignored); `POST /api/v1/markers` accepting form (`home[last_read_id]=123`) or JSON (`{"home": {"last_read_id": "123"}}`) → the saved markers object. Both require an account-bound token.
 
@@ -1260,11 +1299,13 @@ Routes: `GET /api/v1/apps/verify_credentials` (any valid token, incl. client_cre
 ### Task 13: Stub roster
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/stubs.ts`
 - Modify: `packages/mastodon-api/src/handler.ts`
 - Test: `packages/mastodon-api/src/stubs.test.ts`
 
 **Interfaces:**
+
 - Consumes: `authenticateBearer` (Task 10).
 - Produces: data-driven roster (design: grows without new code paths):
 
@@ -1292,6 +1333,7 @@ Roster (all `GET`, `200`): `/api/v1/filters` `[]`, `/api/v2/filters` `[]`, `/api
 ### Task 14: Docs — package spec, spec index, root CLAUDE.md
 
 **Files:**
+
 - Create: `spec/packages/mastodon-api.md`
 - Modify: `spec/README.md`, `CLAUDE.md`, `packages/mastodon-api/README.md` (flesh out if thin)
 
@@ -1305,6 +1347,7 @@ Roster (all `GET`, `200`): `/api/v1/filters` `[]`, `/api/v2/filters` `[]`, `/api
 ### Task 15: Catalog entry + changeset
 
 **Files:**
+
 - Modify: `catalog.json`
 - Create: `.changeset/mastodon-api-phase-1.md`
 
