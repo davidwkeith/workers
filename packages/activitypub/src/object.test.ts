@@ -2255,7 +2255,10 @@ describe("delivery outcome logging", () => {
       const publishRes = await instance.fetch(
         outboxRequest(
           username,
-          JSON.stringify({ type: "Create", object: { type: "Note", content: "test" } }),
+          JSON.stringify({
+            type: "Create",
+            object: { type: "Note", content: "test" },
+          }),
           true,
         ),
       );
