@@ -259,6 +259,27 @@ both groups in one pass.
   commands or conventions in this file change.
 - **Formatting (Prettier):** semicolons, double quotes, trailing commas (`all`),
   80-column print width. `pnpm format:check` is a CI gate.
+- **Commit messages & PR titles:** [Conventional Commits](https://www.conventionalcommits.org/) —
+  `<type>(<scope>): <subject>`, lowercase type, subject not capitalized, scope
+  in parentheses (the package name minus the `@dwk/` prefix, comma-separated
+  for several packages, omitted only for a repo-wide change). Types in use:
+  `feat`, `fix`, `chore`, `docs`, `debug`. Correct:
+  `fix(solid-pod): strip client-forged ldp:contains from container PUT`.
+  Incorrect: `Fix solid-pod: strip client-forged ldp:contains from container PUT`
+  (capitalized, colon instead of scope parens) and `Add AGENTS.md symlink to CLAUDE.md`
+  (no type prefix at all). This repo squash-merges PRs, so the **PR title** —
+  not just the individual commit messages on the branch — is what lands in
+  `git log`; get the title right.
+- **PR body:** open every PR from `.github/PULL_REQUEST_TEMPLATE.md` (GitHub
+  pre-fills it automatically) and keep its section headings — `Summary`,
+  `Packages affected`, `Checklist` — verbatim. Don't rename `Checklist` to
+  `Verification` or replace it with free-form prose, and don't delete a
+  checklist item that doesn't apply — leave it unchecked with a one-line
+  reason instead (`- [ ] Updated catalog.json/conformance/status.json — not applicable, no new worker`).
+- **Review threads:** resolve every review conversation before merging —
+  either by pushing a fix and marking the thread resolved, or by replying
+  with why no change is needed and then resolving it. Don't merge with
+  outstanding unresolved threads.
 - **Releases:** independent semver per package via **Changesets**. To record a
   change, run `pnpm changeset`, select the affected packages and bump, and commit
   the generated markdown in `.changeset/` alongside the code. `commit: false` —
