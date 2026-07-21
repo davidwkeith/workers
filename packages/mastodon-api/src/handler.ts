@@ -8,6 +8,7 @@
 import { handleCreateApp } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
+import { handleAuthorize } from "./oauth-flow.js";
 
 /** Per-request context threaded to route handlers. */
 export interface RouteContext {
@@ -21,7 +22,10 @@ type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 
 /** Exact-path routes, keyed `"METHOD /path"`. Feature modules add entries. */
 const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
-  [["POST /api/v1/apps", handleCreateApp]],
+  [
+    ["POST /api/v1/apps", handleCreateApp],
+    ["GET /oauth/authorize", handleAuthorize],
+  ],
 );
 
 const CORS_HEADERS = {

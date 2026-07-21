@@ -39,3 +39,37 @@ export async function resetDb(): Promise<void> {
     await testEnv.AUTH_DB.exec(`DROP TABLE IF EXISTS ${table}`);
   }
 }
+
+/** The app-registration response shape used across the endpoint tests. */
+export interface AppResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly website: string | null;
+  readonly redirect_uri: string;
+  readonly redirect_uris: readonly string[];
+  readonly client_id: string;
+  readonly client_secret: string;
+}
+
+/** Register an app through the real endpoint; throws on a non-200. */
+export async function registerApp(
+  overrides: Record<string, unknown> = {},
+): Promise<AppResponse> {
+  const res = await api()(
+    new Request("https://owner.example/api/v1/apps", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Tusky",
+        redirect_uris: "app://oauth-callback",
+        scopes: "read write follow push",
+        website: "https://tusky.app",
+        ...overrides,
+      }),
+    }),
+  );
+  if (res.status !== 200) {
+    throw new Error(`registerApp: unexpected ${res.status}`);
+  }
+  return (await res.json()) as AppResponse;
+}

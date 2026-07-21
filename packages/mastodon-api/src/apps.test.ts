@@ -1,37 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { createMastodonStore } from "./store.js";
-import { api, resetDb, testEnv } from "./test-harness.js";
-
-interface AppResponse {
-  readonly id: string;
-  readonly name: string;
-  readonly website: string | null;
-  readonly redirect_uri: string;
-  readonly redirect_uris: readonly string[];
-  readonly client_id: string;
-  readonly client_secret: string;
-}
-
-export async function registerApp(
-  overrides: Record<string, unknown> = {},
-): Promise<AppResponse> {
-  const res = await api()(
-    new Request("https://owner.example/api/v1/apps", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        client_name: "Tusky",
-        redirect_uris: "app://oauth-callback",
-        scopes: "read write follow push",
-        website: "https://tusky.app",
-        ...overrides,
-      }),
-    }),
-  );
-  expect(res.status).toBe(200);
-  return (await res.json()) as AppResponse;
-}
+import type { AppResponse } from "./test-harness.js";
+import { api, registerApp, resetDb, testEnv } from "./test-harness.js";
 
 describe("POST /api/v1/apps", () => {
   beforeEach(resetDb);
