@@ -79,7 +79,7 @@ export function authorize(
 ): AccessDecision {
   const acl = effectiveAcl(store, origin, path);
   if (acl === null) return { granted: false, modes: [] };
-  return evaluateAccess(request, [acl]);
+  return evaluateAccess(request, acl);
 }
 
 /**
@@ -112,7 +112,7 @@ export function grantedModes(
         ...(agent ? { agent } : {}),
         ...(requestOrigin ? { origin: requestOrigin } : {}),
       },
-      [acl],
+      acl,
     );
     return new Set(decision.modes);
   });

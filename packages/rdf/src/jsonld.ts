@@ -226,6 +226,16 @@ function processContext(
 
 // --- Expansion to RDF -----------------------------------------------------
 
+/**
+ * Ceiling on node-value nesting depth during `toRdf` expansion. `processNode`
+ * and `valueToObject` mutually recurse for every nested node value (a node
+ * whose property value is itself a node object, `@reverse`, or `@list`
+ * member), so a maliciously deep — or just very deep — input would otherwise
+ * overflow the call stack with an uncatchable `RangeError`, breaking the
+ * `JsonLdError` contract every other malformed-input path honors.
+ */
+const MAX_NESTING_DEPTH = 100;
+
 class RdfEmitter {
   readonly quads: Quad[] = [];
   private counter = 0;
@@ -263,12 +273,12 @@ class RdfEmitter {
       if ("@graph" in item && !("@id" in item)) {
         for (const node of arrayify(item["@graph"])) {
           if (isObject(node)) {
-            this.processNode(node, ctx, DataFactory.defaultGraph());
+            this.processNode(node, ctx, DataFactory.defaultGraph(), 0);
           }
         }
         continue;
       }
-      this.processNode(item, ctx, DataFactory.defaultGraph());
+      this.processNode(item, ctx, DataFactory.defaultGraph(), 0);
     }
   }
 
@@ -296,7 +306,13 @@ class RdfEmitter {
     node: JsonObject,
     context: ActiveContext,
     graph: Quad_Graph,
+    depth: number,
   ): NamedNode | BlankNode | null {
+    if (depth > MAX_NESTING_DEPTH) {
+      throw new JsonLdError(
+        `node nesting exceeds the maximum supported depth (${MAX_NESTING_DEPTH})`,
+      );
+    }
     const active =
       "@context" in node ? processContext(context, node["@context"]) : context;
     const subject = this.nodeSubject(node, active);
@@ -320,12 +336,14 @@ class RdfEmitter {
 
       if (key === "@graph") {
         for (const inner of arrayify(value)) {
-          if (isObject(inner)) this.processNode(inner, active, subject);
+          if (isObject(inner))
+            this.processNode(inner, active, subject, depth + 1);
         }
         continue;
       }
       if (key === "@reverse") {
-        if (isObject(value)) this.processReverse(value, subject, active, graph);
+        if (isObject(value))
+          this.processReverse(value, subject, active, graph, depth + 1);
         continue;
       }
       if (isKeyword(key)) continue; // @index, @included, … unsupported — skip
@@ -342,7 +360,13 @@ class RdfEmitter {
       const def = active.terms.get(key);
 
       if (def?.container === "@list") {
-        const head = this.buildList(arrayify(value), def, active, graph);
+        const head = this.buildList(
+          arrayify(value),
+          def,
+          active,
+          graph,
+          depth + 1,
+        );
         this.emit(subject, predicate, head, graph);
         continue;
       }
@@ -354,11 +378,12 @@ class RdfEmitter {
             def,
             active,
             graph,
+            depth + 1,
           );
           this.emit(subject, predicate, head, graph);
           continue;
         }
-        const object = this.valueToObject(item, def, active, graph);
+        const object = this.valueToObject(item, def, active, graph, depth);
         if (!object) continue;
         if (def?.reverse) {
           // A literal cannot be the subject of a triple — drop reverse literals.
@@ -378,6 +403,7 @@ class RdfEmitter {
     subject: NamedNode | BlankNode,
     active: ActiveContext,
     graph: Quad_Graph,
+    depth: number,
   ): void {
     for (const [key, value] of Object.entries(reverse)) {
       const predicateIri = expandIri(active, key, { vocab: true });
@@ -391,7 +417,7 @@ class RdfEmitter {
       const predicate = DataFactory.namedNode(predicateIri);
       const def = active.terms.get(key);
       for (const item of arrayify(value)) {
-        const object = this.valueToObject(item, def, active, graph);
+        const object = this.valueToObject(item, def, active, graph, depth);
         // A literal cannot be the subject of a triple — drop reverse literals.
         if (object && object.termType !== "Literal") {
           this.emit(object as Quad_Subject, predicate, subject, graph);
@@ -405,6 +431,7 @@ class RdfEmitter {
     def: TermDefinition | undefined,
     active: ActiveContext,
     graph: Quad_Graph,
+    depth: number,
   ): Quad_Object | null {
     if (value === null) return null;
 
@@ -425,12 +452,18 @@ class RdfEmitter {
 
     if ("@value" in value) return this.valueObjectToLiteral(value, active);
     if ("@list" in value) {
-      return this.buildList(arrayify(value["@list"]), def, active, graph);
+      return this.buildList(
+        arrayify(value["@list"]),
+        def,
+        active,
+        graph,
+        depth + 1,
+      );
     }
     if ("@id" in value && Object.keys(value).length === 1) {
       return this.idToTerm(expandIri(active, String(value["@id"])));
     }
-    return this.processNode(value, active, graph);
+    return this.processNode(value, active, graph, depth + 1);
   }
 
   private literalFor(
@@ -520,11 +553,17 @@ class RdfEmitter {
     def: TermDefinition | undefined,
     active: ActiveContext,
     graph: Quad_Graph,
+    depth: number,
   ): NamedNode | BlankNode {
+    if (depth > MAX_NESTING_DEPTH) {
+      throw new JsonLdError(
+        `node nesting exceeds the maximum supported depth (${MAX_NESTING_DEPTH})`,
+      );
+    }
     // Strip the list container so list members aren't re-wrapped as lists.
     const itemDef = def?.container ? { ...def, container: undefined } : def;
     const objects = items
-      .map((item) => this.valueToObject(item, itemDef, active, graph))
+      .map((item) => this.valueToObject(item, itemDef, active, graph, depth))
       .filter((object): object is Quad_Object => object !== null);
 
     if (objects.length === 0) return DataFactory.namedNode(RDF_NIL);

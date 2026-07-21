@@ -38,6 +38,39 @@ describe("safeFetchJson", () => {
     ).rejects.toThrow();
   });
 
+  it("throws when the content-type is clearly not JSON (e.g. an HTML error page)", async () => {
+    const doFetch: FetchLike = vi.fn(
+      async () =>
+        new Response("<html>not json, honest</html>", {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    );
+    await expect(
+      safeFetchJson(doFetch, "https://example.com/data"),
+    ).rejects.toThrow(/content-type/i);
+  });
+
+  it("accepts a missing content-type and JSON-ish variants (+json, text/plain)", async () => {
+    for (const contentType of [
+      null,
+      "application/json",
+      "application/did+json",
+      "application/ld+json; charset=utf-8",
+      "text/plain",
+    ]) {
+      const headers = new Headers();
+      if (contentType !== null) {
+        headers.set("content-type", contentType);
+      }
+      const doFetch: FetchLike = vi.fn(
+        async () => new Response(JSON.stringify({ ok: true }), { headers }),
+      );
+      await expect(
+        safeFetchJson(doFetch, "https://example.com/data"),
+      ).resolves.toEqual({ ok: true });
+    }
+  });
+
   it("propagates SsrfError for a blocked host", async () => {
     const doFetch: FetchLike = vi.fn(async () => new Response("{}"));
     await expect(

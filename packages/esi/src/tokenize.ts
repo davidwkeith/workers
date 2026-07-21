@@ -6,6 +6,19 @@
 const TAG_PREFIX = "<esi:";
 const REMOVE_CLOSE_TAG = "</esi:remove>";
 const MAX_PENDING_BYTES = 8192;
+const byteCounter = new TextEncoder();
+
+/**
+ * UTF-8 byte length of `s`. A JS string's own `.length` counts UTF-16 code
+ * units, which undercounts multi-byte characters (e.g. a 3-byte CJK
+ * character is 1 UTF-16 unit) — measuring pending-tag size against
+ * {@link MAX_PENDING_BYTES} with `.length` would let an attacker-controlled
+ * unterminated tag grow well past the nominal byte cap by filling it with
+ * multi-byte text.
+ */
+function byteLength(s: string): number {
+  return byteCounter.encode(s).length;
+}
 
 export type EsiToken =
   | { readonly kind: "text"; readonly value: string }
@@ -109,7 +122,7 @@ export class EsiTokenizer {
           this.#buffer = "";
           break;
         }
-        if (candidate.length > MAX_PENDING_BYTES) {
+        if (byteLength(candidate) > MAX_PENDING_BYTES) {
           tokens.push({ kind: "text", value: candidate });
           this.#buffer = "";
           break;

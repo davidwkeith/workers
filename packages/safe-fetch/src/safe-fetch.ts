@@ -418,8 +418,17 @@ const BASE_STRIP_HEADERS = [
  * "manual"`) up to `maxRedirects` hops; and a single {@link AbortSignal.timeout},
  * combined with any signal already on `init` via `AbortSignal.any`, bounds the
  * whole chain. The request method, headers, and body from `init` are
- * preserved across hops — a redirected `POST` re-POSTs to the (re-validated)
- * new location rather than silently degrading to `GET`.
+ * preserved across hops for 307/308 — a redirected `POST` re-POSTs to the
+ * (re-validated) new location rather than silently degrading to `GET`. A 303
+ * (and a 301/302 responding to a `POST`) instead downgrades to a bodyless
+ * `GET` on the next hop, matching the WHATWG Fetch redirect algorithm and
+ * every browser's behavior — re-sending the original method/body there would
+ * violate "See Other"'s contract and surprise a server expecting a `GET`.
+ *
+ * Caveat: a streamed `init.body` (a `ReadableStream`, not a `Uint8Array` or
+ * string) is consumed by the first hop's `doFetch` call, so a 307/308 that
+ * preserves the body on a second hop cannot re-send it — pass a buffered body
+ * if the target might redirect with one of those statuses.
  *
  * @throws {SsrfError} when a host is blocked, a scheme is disallowed, or the
  * redirect cap is exceeded. Other failures (network, timeout) propagate as the
@@ -491,6 +500,38 @@ export async function safeFetch(
 
       const next = validateHop(new URL(location, currentUrl).toString());
       await response.body?.cancel().catch(() => undefined);
+
+      const method = (currentInit.method ?? "GET").toUpperCase();
+      const downgradeToGet =
+        (response.status === 303 && method !== "GET" && method !== "HEAD") ||
+        ((response.status === 301 || response.status === 302) &&
+          method === "POST");
+      if (downgradeToGet) {
+        const headers = new Headers((currentInit.headers as HeadersInit) ?? {});
+        // The WHATWG Fetch redirect algorithm strips Content-Encoding/
+        // Content-Language/Content-Location/Content-Type here; Content-Length
+        // isn't in that list because a compliant implementation derives it
+        // from the actual (now-null) body rather than trusting a caller-set
+        // header. This implementation preserves `headers` verbatim otherwise,
+        // so a stale Content-Length from the original request would
+        // otherwise survive onto a body-less GET, understating/overstating
+        // its (absent) body — strip it too.
+        for (const name of [
+          "content-encoding",
+          "content-language",
+          "content-location",
+          "content-type",
+          "content-length",
+        ]) {
+          headers.delete(name);
+        }
+        currentInit = {
+          ...currentInit,
+          method: "GET",
+          body: undefined,
+          headers,
+        };
+      }
 
       if (currentInit.headers && new URL(currentUrl).origin !== next.origin) {
         const headers = new Headers(currentInit.headers as HeadersInit);

@@ -238,7 +238,11 @@ interface Harness {
   call: (
     method: string,
     path: string,
-    init?: { headers?: Record<string, string>; body?: string; auth?: boolean },
+    init?: {
+      headers?: Record<string, string>;
+      body?: BodyInit;
+      auth?: boolean;
+    },
   ) => Promise<Response>;
   backend: MemBackend;
 }
@@ -278,7 +282,12 @@ async function withHandler(
       const headers: Record<string, string> = { ...init.headers };
       if (init.auth !== false) headers["authorization"] = basic;
       const reqInit: RequestInit = { method, headers };
-      if (init.body !== undefined) reqInit.body = init.body;
+      if (init.body !== undefined) {
+        reqInit.body = init.body;
+        if (init.body instanceof ReadableStream) {
+          (reqInit as { duplex?: "half" }).duplex = "half";
+        }
+      }
       return handler(
         new Request(`https://pod.example${path}`, reqInit),
         {} as never,
@@ -754,6 +763,32 @@ describe("createWebdav — lock/verb edge cases", () => {
         headers: { "content-length": "4" },
       });
       expect(res.status).toBe(415);
+    });
+  });
+
+  it("rejects a MKCOL body sent without Content-Length (e.g. chunked transfer-encoding) with 415", async () => {
+    // A body with no Content-Length header must not default to "length 0"
+    // and slip through — that was the bug: chunked requests never carry a
+    // Content-Length up front.
+    await withHandler(async ({ call }) => {
+      const res = await call("MKCOL", "/chunked", { body: "junk" });
+      expect(res.status).toBe(415);
+    });
+  });
+
+  it("allows a MKCOL whose chunked body stream is non-null but yields zero bytes", async () => {
+    // A legitimate empty chunked-encoded request has no Content-Length (its
+    // length is unknown up front) but a non-null body stream that simply
+    // closes without ever emitting a chunk — this must not be conflated with
+    // a real body and 415'd.
+    await withHandler(async ({ call }) => {
+      const emptyStream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      const res = await call("MKCOL", "/empty-chunked", { body: emptyStream });
+      expect(res.status).toBe(201);
     });
   });
 

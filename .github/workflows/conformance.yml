@@ -205,7 +205,13 @@ jobs:
           # Unset ⇒ those cases report `skipped`.
           FEDIFY_PUBLISH_URL: ${{ secrets.FEDIFY_PUBLISH_TOKEN != '' && format('{0}/outbox', inputs.target_url || 'https://conformance.dwk.io') || '' }}
           FEDIFY_PUBLISH_TOKEN: ${{ secrets.FEDIFY_PUBLISH_TOKEN }}
+          # Matrix/input values interpolated via env, never directly into the
+          # `run:` shell — workflow_dispatch inputs are attacker-controlled
+          # for anyone with write access, so string-building a command from
+          # them directly is a shell-injection vector.
+          STANDARD: ${{ matrix.standard }}
+          TARGET_ID: ${{ inputs.target_id || (matrix.standard == 'activitypub' && 'fedify' || 'cloudflare') }}
         run: |
-          node scripts/conformance/run-suite.mjs "${{ matrix.standard }}" \
+          node scripts/conformance/run-suite.mjs "$STANDARD" \
             --target "$TARGET_URL" \
-            --target-id "${{ inputs.target_id || (matrix.standard == 'activitypub' && 'fedify' || 'cloudflare') }}"
+            --target-id "$TARGET_ID"

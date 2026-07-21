@@ -64,6 +64,30 @@ import { notifyDenial, verifyIntent } from "./verify.js";
 const MAX_SEND_BATCH = 100;
 const MAX_SEND_BATCH_BYTES = 240 * 1024;
 
+/** Base delay (seconds) before the first queue retry, doubled per attempt. */
+const RETRY_BASE_DELAY_SECONDS = 30;
+/** Ceiling on the retry delay (seconds), regardless of attempt count. */
+const RETRY_MAX_DELAY_SECONDS = 3600;
+
+/**
+ * Exponential backoff (base {@link RETRY_BASE_DELAY_SECONDS}, doubling per
+ * attempt, capped at {@link RETRY_MAX_DELAY_SECONDS}) for a queue message's
+ * `retry({ delaySeconds })`. A bare `message.retry()` with no delay would
+ * re-deliver against an unreachable callback/topic at the queue's default
+ * cadence indefinitely, hammering it instead of backing off.
+ */
+function retryDelaySeconds(attempts: number): number {
+  // Defensively clamp to a valid attempt count: real Cloudflare Queue
+  // messages always report attempts >= 1, but a test double or a future
+  // platform change reporting 0/undefined/NaN must not compute a NaN delay.
+  const safeAttempts =
+    Number.isFinite(attempts) && attempts >= 1 ? attempts : 1;
+  return Math.min(
+    RETRY_BASE_DELAY_SECONDS * 2 ** (safeAttempts - 1),
+    RETRY_MAX_DELAY_SECONDS,
+  );
+}
+
 /** Rough serialized size of one deliver job, for byte-budgeting a send batch. */
 function estimateJobBytes(job: DeliverJob): number {
   const base =
@@ -339,7 +363,9 @@ export function createWebSubQueueConsumer(
         if (job.kind === "deliver") {
           const delivered = await runDelivery(resolved, env, job);
           if (delivered === "retry") {
-            message.retry();
+            message.retry({
+              delaySeconds: retryDelaySeconds(message.attempts),
+            });
           } else {
             message.ack();
           }
@@ -359,7 +385,7 @@ export function createWebSubQueueConsumer(
         if (fetched.kind === "retry") {
           // The topic was unreachable / non-2xx — retry the whole job later
           // rather than dropping the push.
-          message.retry();
+          message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
           continue;
         }
         if (fetched.kind === "drop") {
@@ -394,7 +420,7 @@ export function createWebSubQueueConsumer(
           kind: job.kind,
           error: err instanceof Error ? err.name : "unknown",
         });
-        message.retry();
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
       }
     }
   };

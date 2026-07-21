@@ -128,25 +128,35 @@ class MemoryInbox implements InboxStore {
   }
 }
 
-function batchOf(jobs: WebmentionJob[]): {
+function batchOf(
+  jobs: WebmentionJob[],
+  attempts: readonly number[] = [],
+): {
   batch: MessageBatch<WebmentionJob>;
   acks: number[];
   retries: number[];
+  retryDelays: (number | undefined)[];
 } {
   const acks: number[] = [];
   const retries: number[] = [];
+  const retryDelays: (number | undefined)[] = [];
   const messages = jobs.map(
     (body, i) =>
       ({
         body,
+        attempts: attempts[i] ?? 1,
         ack: () => acks.push(i),
-        retry: () => retries.push(i),
+        retry: (options?: { delaySeconds?: number }) => {
+          retries.push(i);
+          retryDelays.push(options?.delaySeconds);
+        },
       }) as unknown as Message<WebmentionJob>,
   );
   return {
     batch: { messages } as unknown as MessageBatch<WebmentionJob>,
     acks,
     retries,
+    retryDelays,
   };
 }
 
@@ -232,6 +242,29 @@ describe("createWebmentionQueueConsumer", () => {
     await consumer(batch, {} as WebmentionEnv, ctx);
     expect(acks).toEqual([]);
     expect(retries).toEqual([0]);
+  });
+
+  it("backs off exponentially, capped, based on message.attempts", async () => {
+    const fetchImpl: FetchLike = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const throwingInbox: InboxStore = {
+      store: () => Promise.reject(new Error("db down")),
+      remove: () => Promise.reject(new Error("db down")),
+      list: () => Promise.resolve([]),
+    };
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox: throwingInbox,
+      fetch: fetchImpl,
+    });
+    const job = {
+      source: "https://other.example/p",
+      target: "https://example.com/article",
+    };
+    const { batch, retryDelays } = batchOf([job, job, job, job], [1, 2, 3, 20]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+    expect(retryDelays).toEqual([30, 60, 120, 3600]);
   });
 
   it("fails loudly when no inbox is configured", async () => {

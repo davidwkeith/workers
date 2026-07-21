@@ -178,7 +178,15 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     );
   }
 
-  /** Lazily build the store with the front-door's offload threshold. */
+  /**
+   * Lazily build the store with the front-door's offload threshold. Built
+   * once per isolate and cached: `maxInlineBytes` is taken from whichever
+   * request happens to construct the store first, on the assumption that a
+   * single composition's config is stable for the life of the DO instance
+   * (the front door passes the same `maxInlineBytes` on every request in
+   * practice). A composition that varies it per-request would not see later
+   * values take effect until the isolate is evicted and rebuilt.
+   */
   #getStore(config: ForwardedConfig): Store {
     if (this.#store === null) {
       this.#store = createStore(this.ctx, this.env, {
@@ -858,7 +866,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
   /** The app-password store over this pod's SQLite (built once). */
   #webdavCredentials(): CredentialStore {
-    return (this.#credentials ??= new CredentialStore(this.#sql));
+    return (this.#credentials ??= new CredentialStore(
+      this.#sql,
+      {},
+      undefined,
+      this.env.WEBDAV_PEPPER,
+    ));
   }
 
   /**
@@ -1019,7 +1032,21 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #webdavBackend(store: Store, origin: string): WebdavBackend {
     // Arrow-function properties below capture this DO as their lexical `this`,
     // so the seam reaches the pod's private write/containment helpers directly.
-    const toPath = (iri: string): string => iri.slice(origin.length);
+    // A `ldp:contains` object is expected to always be same-origin (the store
+    // itself only ever writes same-origin containment quads), but #337 found
+    // that a client can PUT a forged cross-origin `ldp:contains` triple into a
+    // container body; this is the defensive guard so slicing an unexpected
+    // off-origin IRI can't produce a bogus, non-`/`-rooted "path" that then
+    // gets handed to the store as if it were one of this pod's own resources.
+    // A plain `startsWith(origin)` is not that guard: `origin` +
+    // `.attacker.com/x` also starts with `origin`'s characters (host-suffix
+    // spoofing), so the match requires either exact equality or a `/`
+    // immediately after `origin` — a real path boundary, not just a shared
+    // string prefix.
+    const toPath = (iri: string): string | null =>
+      iri === origin || iri.startsWith(`${origin}/`)
+        ? iri.slice(origin.length)
+        : null;
 
     const statOf = (path: string): ResourceStat | null => {
       const meta = store.head(path);
@@ -1052,7 +1079,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // `statOf` is a synchronous SQLite lookup now (no per-child R2 read), so
         // a plain map suffices.
         return children
-          .map((iri) => statOf(toPath(iri)))
+          .map((iri) => {
+            const path = toPath(iri);
+            return path === null ? null : statOf(path);
+          })
           .filter((child): child is ResourceStat => child !== null);
       },
 

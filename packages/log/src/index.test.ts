@@ -96,6 +96,22 @@ describe("consoleLogger", () => {
     });
   });
 
+  it("never lets a field named level/event/time clobber the envelope", () => {
+    const sink = spySink();
+    const logger = consoleLogger({
+      console: sink,
+      base: { level: "bogus-from-base", n: 1 },
+      now: () => "t",
+    });
+    logger.warn("evt", { event: "bogus-from-fields", time: "bogus", n: 2 });
+    expect(JSON.parse(sink.records[0]?.line ?? "")).toEqual({
+      level: "warn",
+      event: "evt",
+      time: "t",
+      n: 2,
+    });
+  });
+
   it("never throws on a non-serializable field; emits a fallback record", () => {
     const sink = spySink();
     const logger = consoleLogger({ console: sink, now: () => "t" });

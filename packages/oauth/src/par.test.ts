@@ -155,6 +155,17 @@ describe("createPushedAuthorizationRequestHandler", () => {
     expect(saveRequest).not.toHaveBeenCalled();
   });
 
+  it("scopes the WWW-Authenticate challenge to Basic for a client_secret_basic caller", async () => {
+    const res = await handler({ authenticate: () => false })(
+      postForm(
+        { client_id: "https://app.example/" },
+        { headers: { authorization: "Basic dXNlcjpwYXNz" } },
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe('Basic realm="oauth"');
+  });
+
   it("rejects an invalid DPoP proof when binding is enabled", async () => {
     const res = await handler({
       dpopBinding: true,

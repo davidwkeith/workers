@@ -163,6 +163,29 @@ describe("validateClientMetadata", () => {
       (result as { metadata: Record<string, unknown> }).metadata,
     ).not.toHaveProperty("bogus_field");
   });
+
+  it("never echoes an untrusted submitted value back in error_description", () => {
+    const injected = '"><script>alert(1)</script>';
+    const cases: unknown[] = [
+      {
+        redirect_uris: ["https://app.example/cb"],
+        token_endpoint_auth_method: injected,
+      },
+      { redirect_uris: ["https://app.example/cb"], grant_types: [injected] },
+      {
+        redirect_uris: ["https://app.example/cb"],
+        response_types: [injected],
+      },
+      { redirect_uris: [injected] },
+    ];
+    for (const input of cases) {
+      const result = validateClientMetadata(input, config);
+      expect("error" in result).toBe(true);
+      if ("error" in result) {
+        expect(result.description).not.toContain(injected);
+      }
+    }
+  });
 });
 
 describe("createClientRegistrationHandler", () => {
@@ -224,8 +247,41 @@ describe("createClientRegistrationHandler", () => {
     expect(saveClient).not.toHaveBeenCalled();
   });
 
+  it("scopes the WWW-Authenticate challenge to Basic for a client_secret_basic caller", async () => {
+    const res = await handler({ authenticate: () => false })(
+      new Request(ENDPOINT, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Basic dXNlcjpwYXNz",
+        },
+        body: JSON.stringify({ redirect_uris: ["https://app.example/cb"] }),
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe('Basic realm="oauth"');
+  });
+
   it("rejects non-POST with 405", async () => {
     const res = await handler()(new Request(ENDPOINT, { method: "GET" }));
     expect(res.status).toBe(405);
+  });
+
+  it("treats a body over the size cap as invalid client metadata rather than buffering it in full", async () => {
+    const huge = JSON.stringify({
+      redirect_uris: ["https://app.example/cb"],
+      client_name: "x".repeat(200_000),
+    });
+    const res = await handler()(
+      new Request(ENDPOINT, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: huge,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: "invalid_client_metadata",
+    });
   });
 });

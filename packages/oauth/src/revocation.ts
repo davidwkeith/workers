@@ -12,7 +12,11 @@
  */
 
 import { OAuthError, oauthErrorResponse } from "./errors.js";
-import { methodNotAllowed, readForm } from "./http.js";
+import {
+  methodNotAllowed,
+  readForm,
+  wwwAuthenticateChallenge,
+} from "./http.js";
 import { OAuthLogEvent } from "./log.js";
 import {
   emit,
@@ -76,7 +80,7 @@ export function createRevocationHandler(
         OAuthError.InvalidClient,
         "revocation requires client authentication",
         401,
-        { "WWW-Authenticate": "Bearer" },
+        { "WWW-Authenticate": wwwAuthenticateChallenge(request) },
       );
     }
 

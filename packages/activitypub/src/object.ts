@@ -195,14 +195,21 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#ensureColumn("following", "shared_inbox", "TEXT");
   }
 
-  /** Add a nullable column if this object predates it (additive migration). */
+  /**
+   * Add a nullable column if this object predates it (additive migration).
+   * Checks `PRAGMA table_info` first (matching `@dwk/store`'s pattern) rather
+   * than attempting the `ALTER TABLE` and pattern-matching the error string
+   * for "duplicate column" — a substring match would silently swallow an
+   * unrelated SQLite error (e.g. a disk-full write failure) that happens to
+   * mention "duplicate column" in its own message, or miss a legitimate
+   * duplicate-column error phrased differently by a future SQLite version.
+   */
   #ensureColumn(table: string, column: string, type: string): void {
-    try {
-      this.#sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    } catch (error) {
-      // "duplicate column name" — already migrated; anything else is real.
-      if (!String(error).includes("duplicate column")) throw error;
-    }
+    const columns = this.#sql
+      .exec<{ name: string }>(`PRAGMA table_info(${table})`)
+      .toArray();
+    if (columns.some((c) => c.name === column)) return;
+    this.#sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   override async fetch(request: Request): Promise<Response> {

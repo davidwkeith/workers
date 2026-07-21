@@ -72,7 +72,7 @@ describe("@dwk/wac evaluateAccess", () => {
       }),
     );
     const request: AccessRequest = { mode: "read", agent: ALICE };
-    const decision = evaluateAccess(request, [acl]);
+    const decision = evaluateAccess(request, acl);
     expect(decision.granted).toBe(true);
     expect(decision.effectiveAcl).toBe(RESOURCE);
     expect(decision.modes.sort()).toEqual(["read", "write"]);
@@ -86,7 +86,7 @@ describe("@dwk/wac evaluateAccess", () => {
         modes: [`${ACL}Read`],
       }),
     );
-    expect(evaluateAccess({ mode: "write", agent: ALICE }, [acl]).granted).toBe(
+    expect(evaluateAccess({ mode: "write", agent: ALICE }, acl).granted).toBe(
       false,
     );
   });
@@ -99,7 +99,7 @@ describe("@dwk/wac evaluateAccess", () => {
         modes: [`${ACL}Read`],
       }),
     );
-    const decision = evaluateAccess({ mode: "read", agent: BOB }, [acl]);
+    const decision = evaluateAccess({ mode: "read", agent: BOB }, acl);
     expect(decision.granted).toBe(false);
     expect(decision.effectiveAcl).toBe(RESOURCE);
     expect(decision.modes).toEqual([]);
@@ -114,8 +114,8 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Read`],
         }),
       );
-      expect(evaluateAccess({ mode: "read" }, [acl]).granted).toBe(true);
-      expect(evaluateAccess({ mode: "read", agent: BOB }, [acl]).granted).toBe(
+      expect(evaluateAccess({ mode: "read" }, acl).granted).toBe(true);
+      expect(evaluateAccess({ mode: "read", agent: BOB }, acl).granted).toBe(
         true,
       );
     });
@@ -128,10 +128,10 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Read`],
         }),
       );
-      expect(evaluateAccess({ mode: "read", agent: BOB }, [acl]).granted).toBe(
+      expect(evaluateAccess({ mode: "read", agent: BOB }, acl).granted).toBe(
         true,
       );
-      expect(evaluateAccess({ mode: "read" }, [acl]).granted).toBe(false);
+      expect(evaluateAccess({ mode: "read" }, acl).granted).toBe(false);
     });
 
     it("treats an empty-string agent as unauthenticated", () => {
@@ -144,9 +144,9 @@ describe("@dwk/wac evaluateAccess", () => {
       );
       // An empty WebID is not an identity: it must not satisfy
       // acl:AuthenticatedAgent.
-      expect(
-        evaluateAccess({ mode: "read", agent: "" }, [authed]).granted,
-      ).toBe(false);
+      expect(evaluateAccess({ mode: "read", agent: "" }, authed).granted).toBe(
+        false,
+      );
 
       // Nor should it match a malformed empty acl:agent value.
       const emptyAgent = accessToAcl(
@@ -157,7 +157,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       expect(
-        evaluateAccess({ mode: "read", agent: "" }, [emptyAgent]).granted,
+        evaluateAccess({ mode: "read", agent: "" }, emptyAgent).granted,
       ).toBe(false);
     });
   });
@@ -174,7 +174,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       expect(
-        evaluateAccess({ mode: "write", agent: BOB, groups: [GROUP] }, [acl])
+        evaluateAccess({ mode: "write", agent: BOB, groups: [GROUP] }, acl)
           .granted,
       ).toBe(true);
     });
@@ -188,8 +188,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       expect(
-        evaluateAccess({ mode: "write", agent: BOB, groups: [] }, [acl])
-          .granted,
+        evaluateAccess({ mode: "write", agent: BOB, groups: [] }, acl).granted,
       ).toBe(false);
     });
   });
@@ -207,7 +206,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       expect(
-        evaluateAccess({ mode: "read", agent: ALICE, origin: TRUSTED }, [acl])
+        evaluateAccess({ mode: "read", agent: ALICE, origin: TRUSTED }, acl)
           .granted,
       ).toBe(true);
     });
@@ -224,12 +223,12 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(
         evaluateAccess(
           { mode: "read", agent: ALICE, origin: "https://evil.example" },
-          [acl],
+          acl,
         ).granted,
       ).toBe(false);
-      expect(
-        evaluateAccess({ mode: "read", agent: ALICE }, [acl]).granted,
-      ).toBe(false);
+      expect(evaluateAccess({ mode: "read", agent: ALICE }, acl).granted).toBe(
+        false,
+      );
     });
 
     it("normalizes origin for case and trailing-slash differences", () => {
@@ -245,7 +244,7 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(
         evaluateAccess(
           { mode: "read", agent: ALICE, origin: "https://app.example" },
-          [acl],
+          acl,
         ).granted,
       ).toBe(true);
     });
@@ -261,7 +260,7 @@ describe("@dwk/wac evaluateAccess", () => {
       expect(
         evaluateAccess(
           { mode: "read", agent: ALICE, origin: "https://evil.example" },
-          [acl],
+          acl,
         ).granted,
       ).toBe(true);
     });
@@ -276,20 +275,23 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Read`],
         }),
       );
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
+      const decision = evaluateAccess(
+        { mode: "read", agent: ALICE },
         containerAcl,
-      ]);
+      );
       expect(decision.granted).toBe(true);
       expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
-    it("treats the first existing ancestor default as authoritative, ignoring farther entries", () => {
-      // The chain's first entry is the nearest existing container ACL. Its
-      // authorization scopes ROOT, not this CONTAINER, so nothing applies — but
-      // per WAC §5.1 a present-but-non-matching ACL is still the effective ACL
-      // and is authoritative: the decision is a fail-closed deny, never climbing
-      // to the farther, permissive root default (the inverted stop condition of
-      // issue #101).
+    it("treats the nearest existing ancestor default as authoritative, never climbing farther", () => {
+      // This container ACL exists but its authorization scopes ROOT, not this
+      // CONTAINER, so nothing applies — per WAC §5.1 a present-but-non-matching
+      // ACL is still the effective ACL and is authoritative: the decision is a
+      // fail-closed deny. The caller resolves and passes only this one
+      // document; there is no farther, more-permissive root default to climb
+      // to even if one existed (the inverted stop condition of issue #101) —
+      // evaluateAccess's single-`AclResource` signature makes that structurally
+      // impossible, not just behaviorally refused.
       const innerDefault: AclResource = {
         target: CONTAINER,
         scope: "default",
@@ -299,29 +301,21 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Write`],
         }),
       };
-      const rootDefault: AclResource = {
-        target: ROOT,
-        scope: "default",
-        quads: authorization("#inherited", {
-          default: ROOT,
-          agents: [ALICE],
-          modes: [`${ACL}Read`],
-        }),
-      };
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
+      const decision = evaluateAccess(
+        { mode: "read", agent: ALICE },
         innerDefault,
-        rootDefault,
-      ]);
+      );
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBe(CONTAINER);
     });
 
     it("does not fall through an own-ACL that grants nothing (fail closed)", () => {
       // The resource's own ACL document exists but its authorization scopes a
-      // different resource, so nothing applies to the target. As the first
-      // existing entry it is the effective ACL, so the decision MUST deny rather
-      // than inherit the permissive container default (the issue #27 fail-open
-      // hazard).
+      // different resource, so nothing applies to the target. As the effective
+      // ACL it must deny rather than inherit a hypothetical permissive
+      // container default (the issue #27 fail-open hazard) — there is no
+      // container default passed here at all, since the caller would never
+      // reach for one once its own ACL exists.
       const ownAcl = accessToAcl(
         authorization("#other", {
           accessTo: "https://alice.example/notes/other.ttl",
@@ -329,17 +323,7 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Write`],
         }),
       );
-      const containerAcl = defaultAcl(
-        authorization("#inherited", {
-          default: CONTAINER,
-          agents: [ALICE],
-          modes: [`${ACL}Read`],
-        }),
-      );
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [
-        ownAcl,
-        containerAcl,
-      ]);
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, ownAcl);
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBe(RESOURCE);
       expect(decision.modes).toEqual([]);
@@ -358,24 +342,15 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Write`],
         }),
       };
-      const containerAcl = defaultAcl(
-        authorization("#inherited", {
-          default: CONTAINER,
-          agents: [ALICE],
-          modes: [`${ACL}Write`],
-        }),
-      );
-      const decision = evaluateAccess({ mode: "write", agent: ALICE }, [
-        ownAcl,
-        containerAcl,
-      ]);
+      const decision = evaluateAccess({ mode: "write", agent: ALICE }, ownAcl);
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBe(RESOURCE);
     });
 
     it("lets a resource's own ACL take precedence over an ancestor default", () => {
-      // accessTo grants only Read; the container default would grant Write, but
-      // the nearer applicable ACL is authoritative and stops the walk.
+      // accessTo grants only Read; a container default would grant Write, but
+      // the nearer applicable ACL is authoritative and the caller never passes
+      // the farther one.
       const resourceAcl = accessToAcl(
         authorization("#own", {
           accessTo: RESOURCE,
@@ -383,18 +358,13 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Read`],
         }),
       );
-      const containerAcl = defaultAcl(
-        authorization("#inherited", {
-          default: CONTAINER,
-          agents: [ALICE],
-          modes: [`${ACL}Write`],
-        }),
-      );
-      const chain = [resourceAcl, containerAcl];
       expect(
-        evaluateAccess({ mode: "read", agent: ALICE }, chain).granted,
+        evaluateAccess({ mode: "read", agent: ALICE }, resourceAcl).granted,
       ).toBe(true);
-      const write = evaluateAccess({ mode: "write", agent: ALICE }, chain);
+      const write = evaluateAccess(
+        { mode: "write", agent: ALICE },
+        resourceAcl,
+      );
       expect(write.granted).toBe(false);
       expect(write.effectiveAcl).toBe(RESOURCE);
     });
@@ -407,8 +377,24 @@ describe("@dwk/wac evaluateAccess", () => {
         q("#legacy", `${ACL}mode`, `${ACL}Read`),
       ]);
       expect(
-        evaluateAccess({ mode: "read", agent: ALICE }, [containerAcl]).granted,
+        evaluateAccess({ mode: "read", agent: ALICE }, containerAcl).granted,
       ).toBe(true);
+    });
+
+    it("ignores an authorization-shaped subject with no rdf:type acl:Authorization (fail closed)", () => {
+      // A subject carrying acl:accessTo/acl:agent/acl:mode but never declared
+      // `rdf:type acl:Authorization` is not a candidate authorization, by
+      // design (see findApplicableAuthorizations' doc comment): treating it as
+      // one via structural inference would grant access based on a document
+      // shape this library did not fully understand.
+      const acl = accessToAcl([
+        q("#untyped", `${ACL}accessTo`, RESOURCE),
+        q("#untyped", `${ACL}agent`, ALICE),
+        q("#untyped", `${ACL}mode`, `${ACL}Read`),
+      ]);
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, acl);
+      expect(decision.granted).toBe(false);
+      expect(decision.modes).toEqual([]);
     });
 
     it("denies via the effective ACL when its authorizations do not apply", () => {
@@ -423,14 +409,20 @@ describe("@dwk/wac evaluateAccess", () => {
       // The chain entry targets CONTAINER but the authorization defaults ROOT,
       // so nothing applies. The entry still exists, so per §5.1 it is the
       // effective ACL: the result is a fail-closed deny attributed to it.
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, [root]);
+      const decision = evaluateAccess({ mode: "read", agent: ALICE }, root);
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBe(CONTAINER);
       expect(decision.modes).toEqual([]);
     });
 
-    it("denies with no effective ACL for an empty chain", () => {
-      const decision = evaluateAccess({ mode: "read", agent: ALICE }, []);
+    it("denies with no effective ACL when the caller has none to pass", () => {
+      // A caller that found no existing ACL anywhere up the hierarchy has
+      // nothing to pass — this defensive branch covers that (and any other)
+      // falsy call rather than throwing.
+      const decision = evaluateAccess(
+        { mode: "read", agent: ALICE },
+        undefined as unknown as AclResource,
+      );
       expect(decision.granted).toBe(false);
       expect(decision.effectiveAcl).toBeUndefined();
       expect(decision.modes).toEqual([]);
@@ -446,9 +438,9 @@ describe("@dwk/wac evaluateAccess", () => {
           modes: [`${ACL}Append`],
         }),
       );
-      expect(
-        evaluateAccess({ mode: "append", agent: BOB }, [acl]).granted,
-      ).toBe(true);
+      expect(evaluateAccess({ mode: "append", agent: BOB }, acl).granted).toBe(
+        true,
+      );
     });
 
     it("satisfies an append request from an acl:Write grant (write implies append)", () => {
@@ -460,7 +452,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       expect(
-        evaluateAccess({ mode: "append", agent: ALICE }, [acl]).granted,
+        evaluateAccess({ mode: "append", agent: ALICE }, acl).granted,
       ).toBe(true);
     });
 
@@ -473,7 +465,7 @@ describe("@dwk/wac evaluateAccess", () => {
         }),
       );
       // A delete must be requested as `write`; Append-only must not authorize it.
-      expect(evaluateAccess({ mode: "write", agent: BOB }, [acl]).granted).toBe(
+      expect(evaluateAccess({ mode: "write", agent: BOB }, acl).granted).toBe(
         false,
       );
     });
@@ -487,10 +479,10 @@ describe("@dwk/wac evaluateAccess", () => {
         modes: [`${ACL}Control`],
       }),
     );
-    expect(
-      evaluateAccess({ mode: "control", agent: ALICE }, [acl]).granted,
-    ).toBe(true);
-    expect(evaluateAccess({ mode: "read", agent: ALICE }, [acl]).granted).toBe(
+    expect(evaluateAccess({ mode: "control", agent: ALICE }, acl).granted).toBe(
+      true,
+    );
+    expect(evaluateAccess({ mode: "read", agent: ALICE }, acl).granted).toBe(
       false,
     );
   });
@@ -508,7 +500,7 @@ describe("@dwk/wac evaluateAccess", () => {
         modes: [`${ACL}Write`],
       }),
     ]);
-    const decision = evaluateAccess({ mode: "write", agent: ALICE }, [acl]);
+    const decision = evaluateAccess({ mode: "write", agent: ALICE }, acl);
     expect(decision.granted).toBe(true);
     expect(decision.modes.sort()).toEqual(["read", "write"]);
   });
@@ -547,10 +539,10 @@ describe("@dwk/wac evaluateAccess", () => {
         },
       ],
     };
-    const decision = evaluateAccess({ mode: "read", agent: ALICE }, [acl]);
+    const decision = evaluateAccess({ mode: "read", agent: ALICE }, acl);
     expect(decision.granted).toBe(true);
     expect(decision.modes).toEqual(["read"]);
-    expect(evaluateAccess({ mode: "write", agent: ALICE }, [acl]).granted).toBe(
+    expect(evaluateAccess({ mode: "write", agent: ALICE }, acl).granted).toBe(
       false,
     );
   });

@@ -636,6 +636,51 @@ describe("Content-Digest", () => {
     });
     expect(bad).toMatchObject({ valid: false, reason: "digest_mismatch" });
   });
+
+  it("requireBodyDigest fails a body-bearing message whose signature covers no digest", async () => {
+    const k = keys["ed25519"]!;
+    const body = '{"type":"Create","actor":"https://example.com/actor"}';
+    const message = baseMessage();
+    const headers = await signMessage(message, {
+      key: k.privateKey,
+      keyId: "k",
+      alg: "ed25519",
+      components: ["@method", "@target-uri"],
+      created: NOW,
+    });
+    const received: HttpMessage = {
+      ...message,
+      headers: { ...message.headers, ...headers },
+    };
+
+    // Without requireBodyDigest, the body is simply never checked.
+    const unverified = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW,
+      body,
+    });
+    expect(unverified.valid).toBe(true);
+
+    // With it, a body handed in without a covered digest component is rejected.
+    const rejected = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW,
+      body,
+      requireBodyDigest: true,
+    });
+    expect(rejected).toMatchObject({
+      valid: false,
+      reason: "body_digest_required",
+    });
+
+    // A signature with no body at all is unaffected by the option.
+    const noBody = await verifyMessage(received, {
+      resolveKey: resolverFor(k.publicKey),
+      now: NOW,
+      requireBodyDigest: true,
+    });
+    expect(noBody.valid).toBe(true);
+  });
 });
 
 // --- draft-cavage -----------------------------------------------------------

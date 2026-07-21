@@ -267,6 +267,30 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
   };
 }
 
+/** Base delay (seconds) before the first queue retry, doubled per attempt. */
+const RETRY_BASE_DELAY_SECONDS = 30;
+/** Ceiling on the retry delay (seconds), regardless of attempt count. */
+const RETRY_MAX_DELAY_SECONDS = 3600;
+
+/**
+ * Exponential backoff (base {@link RETRY_BASE_DELAY_SECONDS}, doubling per
+ * attempt, capped at {@link RETRY_MAX_DELAY_SECONDS}) for a queue message's
+ * `retry({ delaySeconds })`. A bare `message.retry()` with no delay would
+ * re-deliver an unreachable source at the queue's default cadence
+ * indefinitely, hammering it instead of backing off.
+ */
+function retryDelaySeconds(attempts: number): number {
+  // Defensively clamp to a valid attempt count: real Cloudflare Queue
+  // messages always report attempts >= 1, but a test double or a future
+  // platform change reporting 0/undefined/NaN must not compute a NaN delay.
+  const safeAttempts =
+    Number.isFinite(attempts) && attempts >= 1 ? attempts : 1;
+  return Math.min(
+    RETRY_BASE_DELAY_SECONDS * 2 ** (safeAttempts - 1),
+    RETRY_MAX_DELAY_SECONDS,
+  );
+}
+
 /**
  * Build the Queue consumer that verifies received mentions.
  *
@@ -312,7 +336,7 @@ export function createWebmentionQueueConsumer(
         };
         logger.warn(WebmentionLogEvent.QueueRetry, fields);
         metrics.count(WebmentionLogEvent.QueueRetry, fields);
-        message.retry();
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
       }
     }
   };

@@ -19,8 +19,10 @@ future `@dwk` packages can adopt it unchanged.
     (RFC 9449 §4.2 — guards against JWT mix-up / reuse), valid signature, `iat`
     within an acceptable window, and `jti` present.
 - Surface the verified `jti` so callers can enforce replay policy
-  (`@dwk/solid-pod` enforces strict `jti` replay in the DO for writes; reads MAY
-  use a short edge-cached window).
+  (`@dwk/solid-pod` enforces strict `jti` replay in the DO for writes only —
+  reads are idempotent and side-effect-free, so this package does not itself
+  gate on any read-side replay window; a config knob for one was dropped
+  from `@dwk/solid-pod` in the #313 cleanup after being found unwired).
 
 ## Design constraints
 
@@ -29,6 +31,16 @@ future `@dwk` packages can adopt it unchanged.
   **without a Workers runtime**.
 - **Protocol-agnostic:** no IndieWeb- or Solid-specific claim handling baked in.
   Caller supplies issuer/audience expectations.
+- **Algorithm allow-list:** `DpopAlgorithm` is `ES256 | ES384 | RS256 | PS256`.
+  Symmetric (`HS*`) and `none` are excluded on purpose — a DPoP proof must be
+  signed by the client-held private key whose public half is the embedded
+  `jwk`. `EdDSA`/`ES512` are simply not implemented yet (no deliberate
+  security reason excludes them); widen the allow-list if a caller needs one.
+- **`htu` has no port allow-list.** `htu` binding is exact-match string
+  comparison after normalization (scheme + host + path, port included when
+  non-default); the package does not restrict which ports a caller's
+  configured endpoint may use. This is deliberately silent in RFC 9449 too —
+  noted here so it isn't mistaken for an oversight.
 
 ## Testing
 

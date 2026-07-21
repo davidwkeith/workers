@@ -110,6 +110,16 @@ const RESERVED_CLOSE_CODES = new Set([1004, 1005, 1006, 1015]);
 // an `OutdatedCursor` info frame, then whatever remains in the buffer.
 const FIREHOSE_RETENTION = 1024;
 
+// Ceiling on total bytes sent by one #backfill replay (§ subscribeRepos).
+// Without this, the worst case is FIREHOSE_RETENTION frames at up to 1 MiB
+// each — up to ~1 GiB queued onto the socket in one synchronous burst, with
+// no flow control, since Workers' WebSocket exposes no `bufferedAmount` (or
+// any other backpressure signal) to gate on — unlike the standard browser
+// WebSocket API its types otherwise mirror. Capping the total instead bounds
+// the burst regardless of how fast the client drains it; a client that hits
+// the cap gets a terminal error and reconnects with a narrower cursor.
+const MAX_BACKFILL_BYTES = 16 * 1024 * 1024; // 16 MiB
+
 // PLC genesis submission retry schedule (alarm-driven exponential backoff).
 const PLC_SUBMIT_MAX_ATTEMPTS = 10;
 const PLC_SUBMIT_BASE_MS = 10_000; // 10s
@@ -1511,10 +1521,40 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
         ),
       );
     }
-    const rows = this.#sql
-      .exec("SELECT frame FROM firehose WHERE seq > ? ORDER BY seq", cursor)
-      .toArray();
-    for (const row of rows) ws.send(unbase64(row.frame as string));
+    // The replay is intentionally synchronous (no `await`) so JS run-to-
+    // completion semantics guarantee no concurrent `#commit` can interleave
+    // and broadcast a newer frame to this socket before the backfill catches
+    // up (see the class doc comment) — so this loop cannot `await` a real
+    // drain signal without reintroducing that race, and Workers' WebSocket
+    // exposes no `bufferedAmount` to poll synchronously either way. Instead,
+    // a cumulative byte budget bounds the worst case: once it's exceeded, the
+    // replay refuses to queue more and closes the connection rather than
+    // handing an unbounded burst to a slow client. The cursor is iterated
+    // directly (not `.toArray()`'d) so the budget check gates further reads
+    // from SQLite, not just further sends to the socket — `.toArray()` would
+    // materialize every matching row up front regardless of the budget,
+    // still risking the DO's 128 MB memory ceiling on a large backfill
+    // window even though the socket itself would never see more than
+    // MAX_BACKFILL_BYTES.
+    let sentBytes = 0;
+    for (const row of this.#sql.exec(
+      "SELECT frame FROM firehose WHERE seq > ? ORDER BY seq",
+      cursor,
+    )) {
+      const frame = unbase64(row.frame as string);
+      sentBytes += frame.byteLength;
+      if (sentBytes > MAX_BACKFILL_BYTES) {
+        ws.send(
+          encodeErrorFrame(
+            "BackfillOverflow",
+            "backfill exceeds the per-connection byte budget; reconnect with a more recent cursor",
+          ),
+        );
+        this.#closeAfterError(ws, "Backfill budget exceeded");
+        return;
+      }
+      ws.send(frame);
+    }
   }
 
   /**

@@ -21,9 +21,10 @@ requirement this package implements.
 - Provide a **`noopLogger`** that discards everything; this is the default a
   package uses when its config supplies none, so logging is strictly opt-in.
 - Provide a **`consoleLogger`** that emits one JSON record per call
-  (`{ level, event, time, ...base, ...fields }`) to `console`, suitable for
-  Cloudflare Workers structured logs / Logpush. It MUST support a minimum-level
-  threshold and base fields.
+  (`{ ...base, ...fields, level, event, time }` — the envelope spread last, so
+  a caller field named `level`/`event`/`time` can never clobber it) to
+  `console`, suitable for Cloudflare Workers structured logs / Logpush. It MUST
+  support a minimum-level threshold and base fields.
 - Provide **`withContext`** to bind request-/pod-scoped fields onto every record
   at the composition boundary.
 - Provide a **redaction helper** (`hostFromUrl`) returning a URL's host only, so

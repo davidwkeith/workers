@@ -103,6 +103,14 @@ const SCHEMA = [
      expires_at INTEGER NOT NULL,
      revoked INTEGER NOT NULL DEFAULT 0
    )`,
+  // Support both `pruneExpired`'s DELETE (below) and any future expiry scan —
+  // without these, deleting expired rows on every save/issuance is a
+  // full-table scan, reintroducing (now at higher frequency) the cost this
+  // pruning was meant to fix.
+  `CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at
+     ON authorization_codes(expires_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_access_tokens_expires_at
+     ON access_tokens(expires_at)`,
 ] as const;
 
 interface AuthCodeRow {
@@ -152,6 +160,28 @@ async function addColumnIfMissing(
     .all<{ name: string }>();
   if (info.results.some((row) => row.name === column)) return;
   await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
+}
+
+/**
+ * Delete expired rows from both tables. Called opportunistically from the two
+ * insert paths (a fresh authorization code or a newly issued token) rather
+ * than on a schedule — this package has no cron entrypoint of its own — so
+ * `authorization_codes` and `access_tokens` don't grow unbounded and slow
+ * `isTokenActive`'s scan as a deployment accumulates history. A `used`
+ * authorization code or a `revoked` token is only actually reclaimed once it
+ * also expires, matching `redeemAuthorizationCode`/`isTokenActive`'s own
+ * expiry check — nothing here changes what those two already treat as
+ * expired.
+ */
+async function pruneExpired(db: D1Database, nowSeconds: number): Promise<void> {
+  await db.batch([
+    db
+      .prepare("DELETE FROM authorization_codes WHERE expires_at <= ?")
+      .bind(nowSeconds),
+    db
+      .prepare("DELETE FROM access_tokens WHERE expires_at <= ?")
+      .bind(nowSeconds),
+  ]);
 }
 
 /** Parse the JSON-encoded `resource` column into a non-empty list, or `undefined`. */
@@ -213,6 +243,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
 
     async saveAuthorizationCode(record) {
       await ensureSchema();
+      await pruneExpired(db, Math.floor(Date.now() / 1000));
       await db
         .prepare(
           `INSERT INTO authorization_codes
@@ -258,6 +289,10 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
 
     async recordToken(record) {
       await ensureSchema();
+      // `record.issuedAt` is the caller's own "now" for this issuance — reuse
+      // it instead of a fresh `Date.now()` read, matching the file's
+      // injectable-clock convention without a public interface change.
+      await pruneExpired(db, record.issuedAt);
       await db
         .prepare(
           `INSERT INTO access_tokens

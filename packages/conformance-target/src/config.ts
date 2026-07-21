@@ -27,6 +27,7 @@ import type { WebmentionConfig, WebmentionEnv } from "@dwk/webmention";
 import type { WebSubConfig, WebSubEnv } from "@dwk/websub";
 
 import { approveAuthorization } from "./approval.js";
+import { timingSafeEqual } from "./timing-safe-equal.js";
 
 /** The local part of the test identity's `acct:` handle and AP username. */
 export const USERNAME = "conformance";
@@ -92,7 +93,8 @@ function adminAuthenticate(
     const auth = request.headers.get("authorization");
     if (
       env.CONFORMANCE_ADMIN_TOKEN &&
-      auth === `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`
+      auth !== null &&
+      timingSafeEqual(auth, `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`)
     ) {
       return {
         webid: ownerWebId(env),

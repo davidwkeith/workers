@@ -126,17 +126,26 @@ function fakeStore(): {
   return { store, inserts, cache };
 }
 
-function batch(jobs: PollJob[]): {
+function batch(
+  jobs: PollJob[],
+  attempts: readonly number[] = [],
+): {
   batch: Parameters<ReturnType<typeof createMicrosubQueueConsumer>>[0];
   acks: number[];
   retries: number[];
+  retryDelays: (number | undefined)[];
 } {
   const acks: number[] = [];
   const retries: number[] = [];
+  const retryDelays: (number | undefined)[] = [];
   const messages = jobs.map((body, i) => ({
     body,
+    attempts: attempts[i] ?? 1,
     ack: () => acks.push(i),
-    retry: () => retries.push(i),
+    retry: (options?: { delaySeconds?: number }) => {
+      retries.push(i);
+      retryDelays.push(options?.delaySeconds);
+    },
   }));
   return {
     batch: { messages } as unknown as Parameters<
@@ -144,6 +153,7 @@ function batch(jobs: PollJob[]): {
     >[0],
     acks,
     retries,
+    retryDelays,
   };
 }
 
@@ -211,6 +221,22 @@ describe("createMicrosubQueueConsumer", () => {
     ]);
     await run(b, env as unknown as MicrosubEnv, ctx);
     expect(retries).toEqual([0]);
+  });
+
+  it("backs off exponentially, capped, based on message.attempts", async () => {
+    const store = {
+      async getFeedCache() {
+        throw new Error("d1 down");
+      },
+    } as unknown as MicrosubStore;
+    const run = consumer(feedFetch(), store);
+    const job: PollJob = { kind: "poll", feedUrl: "https://f.example/atom" };
+    const { batch: b, retryDelays } = batch(
+      [job, job, job, job],
+      [1, 2, 3, 20],
+    );
+    await run(b, env as unknown as MicrosubEnv, ctx);
+    expect(retryDelays).toEqual([30, 60, 120, 3600]);
   });
 
   it("does not persist validators when insertItems throws (so the retry re-fetches)", async () => {

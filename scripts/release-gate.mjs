@@ -32,7 +32,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * @param {string} version
  */
 export function parseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(
     String(version),
   );
   if (!match) return null;
@@ -65,21 +65,38 @@ export function loadPackages(root = ROOT) {
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const manifestPath = join(packagesDir, entry.name, "package.json");
-    let manifest;
+    let raw;
     try {
-      manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      raw = readFileSync(manifestPath, "utf8");
     } catch {
+      // No package.json at all in this directory — not a package, skip.
       continue;
     }
+    // A package.json that *exists* but fails to parse (or isn't the object
+    // shape npm requires) is a real repo defect, not an absent package: the
+    // gate cannot verify that package's stability/conformance at all, so
+    // silently skipping it would let a broken manifest dodge the release
+    // gate entirely. Fail loudly instead.
+    let manifest;
+    try {
+      manifest = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(
+        `release-gate: ${manifestPath} is not valid JSON: ${err.message}`,
+        { cause: err },
+      );
+    }
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
-      continue;
+      throw new Error(`release-gate: ${manifestPath} is not a JSON object`);
     }
     if (manifest.private) continue;
     if (
       typeof manifest.name !== "string" ||
       typeof manifest.version !== "string"
     ) {
-      continue;
+      throw new Error(
+        `release-gate: ${manifestPath} is missing a string \`name\`/\`version\` (required for every non-private package)`,
+      );
     }
     out.push({
       name: manifest.name,

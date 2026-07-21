@@ -8,8 +8,13 @@ Docker-deployable Express server that emulates Cloudflare Workers primitives on
 Node.js + SQLite + filesystem. Provides a `Fetch → Express` request adapter,
 Node-backed shims for D1 (SQLite), R2 (local filesystem), KV (in-memory),
 Durable Objects (per-pod SQLite files), queues (Node job scheduler), and cron
-(scheduled tasks). Mounts all `@dwk` endpoint packages behind one domain,
-exactly as a composed Worker would.
+(scheduled tasks), so any composed set of `@dwk` endpoint packages can be
+mounted behind one domain exactly as they would in a Worker. Its own devDeps
+currently exercise `indieauth`/`micropub`/`microsub`/`webmention`/`websub`/
+`webfinger`/`host-meta`/`webauthn`/`vc`/`solid-pod`/`store`/`wac`/`ldn` —
+`activitypub`/`remotestorage`/`atproto-pds`/`webdav` are not yet wired into
+this host's own composition/tests (nothing about the host prevents mounting
+them; it just hasn't been done here yet).
 
 ## Spec
 
@@ -70,4 +75,7 @@ src/*.test.ts                    # colocated tests
 - `@dwk/log` — structured logging.
 - `@worker-tools/html-rewriter` — HTMLRewriter polyfill.
 - `express` (5.x) — HTTP server.
+- `helmet` — baseline security-header middleware (nosniff, frame-options,
+  HSTS, …); CSP left off since `publicDir` can serve an arbitrary self-hosted
+  site.
 - `ws` — WebSocket implementation.

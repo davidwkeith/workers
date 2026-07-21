@@ -22,6 +22,7 @@ import { createMicropubStore } from "@dwk/micropub";
 import { createMicrosubStore } from "@dwk/microsub";
 
 import type { ConformanceEnv } from "./config.js";
+import { timingSafeEqual } from "./timing-safe-equal.js";
 
 const UNAVAILABLE_PACKAGES = {
   "@dwk/websub":
@@ -43,7 +44,8 @@ export function createAdminInit(
     const auth = request.headers.get("authorization");
     if (
       !env.CONFORMANCE_ADMIN_TOKEN ||
-      auth !== `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`
+      auth === null ||
+      !timingSafeEqual(auth, `Bearer ${env.CONFORMANCE_ADMIN_TOKEN}`)
     ) {
       return new Response("Unauthorized", { status: 401 });
     }

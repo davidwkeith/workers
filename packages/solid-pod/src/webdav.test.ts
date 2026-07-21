@@ -5,7 +5,7 @@ import {
 } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { ensureGcSchema } from "@dwk/store";
+import { createStore, ensureGcSchema } from "@dwk/store";
 import { CredentialStore, type AppPasswordScope } from "@dwk/webdav";
 
 import { createSolidPodWebdav, type SolidPodEnv } from "./index.js";
@@ -143,6 +143,61 @@ describe("@dwk/solid-pod WebDAV door", () => {
       const body = await res.text();
       expect(body).toContain("<D:multistatus");
       expect(body).toContain("/a.txt");
+    });
+  });
+
+  it("never resolves a forged cross-origin ldp:contains quad to a spoofed child path (#337)", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/a.txt", { body: "alpha" });
+
+      // Simulate a forged cross-origin `ldp:contains` triple landing in the
+      // container's quads — regardless of how it gets there, `listChildren`'s
+      // origin check must never resolve it to a same-origin-looking path via
+      // a naive string-prefix match (`baseUrl` + ".attacker.com" also starts
+      // with `baseUrl`'s characters). To make this a real discriminating
+      // test (not just "nothing to find either way"), a resource is created
+      // at the exact key a buggy prefix-match slice would have produced —
+      // pre-fix this would list; post-fix `toPath` excludes it before ever
+      // reaching a store lookup.
+      const collidingKey = ".attacker.com/evil";
+      const stub = testEnv.POD.get(testEnv.POD.idFromName(baseUrl));
+      await runInDurableObject(stub, (_instance, state) => {
+        const store = createStore(state, testEnv);
+        store.writeQuads(collidingKey, [
+          {
+            subject: { termType: "NamedNode", value: "tag:test" },
+            predicate: { termType: "NamedNode", value: "tag:marker" },
+            object: {
+              termType: "Literal",
+              value: "spoofed",
+              datatype: "http://www.w3.org/2001/XMLSchema#string",
+            },
+            graph: { termType: "DefaultGraph", value: "" },
+          },
+        ]);
+        const existing = store.readQuads("/");
+        store.writeQuads("/", [
+          ...existing,
+          {
+            subject: { termType: "NamedNode", value: `${baseUrl}/` },
+            predicate: {
+              termType: "NamedNode",
+              value: "http://www.w3.org/ns/ldp#contains",
+            },
+            object: {
+              termType: "NamedNode",
+              value: `${baseUrl}${collidingKey}`,
+            },
+            graph: { termType: "DefaultGraph", value: "" },
+          },
+        ]);
+      });
+
+      const res = await call("PROPFIND", "/", { headers: { depth: "1" } });
+      expect(res.status).toBe(207);
+      const body = await res.text();
+      expect(body).toContain("/a.txt");
+      expect(body).not.toContain("attacker.com");
     });
   });
 

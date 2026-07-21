@@ -7,10 +7,11 @@ import {
 
 const ENDPOINT = "https://as.example/revoke";
 
-function postForm(fields: Record<string, string>): Request {
+function postForm(fields: Record<string, string>, init?: RequestInit): Request {
   return new Request(ENDPOINT, {
     method: "POST",
     body: new URLSearchParams(fields),
+    ...init,
   });
 }
 
@@ -59,6 +60,17 @@ describe("createRevocationHandler", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("WWW-Authenticate")).toBe("Bearer");
     expect(revokeToken).not.toHaveBeenCalled();
+  });
+
+  it("scopes the WWW-Authenticate challenge to Basic for a client_secret_basic caller", async () => {
+    const res = await handler({ authenticate: () => false })(
+      postForm(
+        { token: "tok" },
+        { headers: { authorization: "Basic dXNlcjpwYXNz" } },
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe('Basic realm="oauth"');
   });
 
   it("lets a body-reading authenticator coexist with the handler's parse", async () => {

@@ -5,7 +5,7 @@
  * `docs/superpowers/specs/2026-07-13-esi-design.md`.
  */
 
-import { noopLogger } from "@dwk/log";
+import { hostFromUrl, noopLogger } from "@dwk/log";
 import { resolveFragment, type FragmentFetchOptions } from "./fragment.js";
 import { EsiTokenizer, type EsiToken } from "./tokenize.js";
 
@@ -149,7 +149,9 @@ export function createEsiTransformStream(
     // token.kind === "include"
     includeCount++;
     if (includeCount > maxIncludes) {
-      logger.warn("esi.include.dropped_max_includes", { src: token.src });
+      logger.warn("esi.include.dropped_max_includes", {
+        host: hostFromUrl(token.src),
+      });
       return;
     }
     scheduleBytes(runFragment(token), controller);

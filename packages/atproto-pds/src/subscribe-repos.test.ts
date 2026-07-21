@@ -252,6 +252,46 @@ describe("subscribeRepos firehose", () => {
     expect(decodeCommit(await reader.next()).body.seq).toBe(3);
   });
 
+  it(
+    "caps a backfill replay at a total byte budget rather than queuing an unbounded burst",
+    { timeout: 30_000 },
+    async () => {
+      // Workers' WebSocket exposes no `bufferedAmount` to gate on, so #backfill
+      // enforces a cumulative byte budget instead (#313 low-severity checklist).
+      // 20 records of ~1 MiB each comfortably crosses the 16 MiB budget.
+      const host = "fh-overflow.example";
+      const handler = pds(host);
+      const token = await login(handler, host);
+      const bigText = "x".repeat(1_000_000);
+      for (let i = 0; i < 20; i++) {
+        await createRecord(handler, host, token, `r${i}`, bigText);
+      }
+
+      const { reader } = await subscribe(handler, host, "?cursor=0");
+      let sawOverflow = false;
+      let commitsSeen = 0;
+      for (let i = 0; i < 20; i++) {
+        const frame = await reader.next();
+        if (
+          [...frame].join(",") ===
+          [
+            ...encodeErrorFrame(
+              "BackfillOverflow",
+              "backfill exceeds the per-connection byte budget; reconnect with a more recent cursor",
+            ),
+          ].join(",")
+        ) {
+          sawOverflow = true;
+          break;
+        }
+        commitsSeen++;
+      }
+      expect(sawOverflow).toBe(true);
+      // The overflow is hit partway through, not after every record replayed.
+      expect(commitsSeen).toBeLessThan(20);
+    },
+  );
+
   it("replays only events after a mid-stream cursor", async () => {
     const host = "fh-midcursor.example";
     const handler = pds(host);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DataFactory } from "n3";
 
 import { JsonLdError, parseJsonLd, writeJsonLd } from "./jsonld.js";
+import type { JsonObject, JsonValue } from "./jsonld.js";
 import type { Quad } from "n3";
 
 const { namedNode, blankNode, literal, quad, defaultGraph, variable } =
@@ -286,6 +287,30 @@ describe("@dwk/rdf JSON-LD parse", () => {
       parseJsonLd({ "@context": "https://schema.org", "@id": "https://ex/a" }),
     ).rejects.toBeInstanceOf(JsonLdError);
     await expect(parseJsonLd("{not json")).rejects.toBeInstanceOf(JsonLdError);
+  });
+
+  it("rejects deeply nested node values with a JsonLdError, not a RangeError", async () => {
+    // Build { "@context": ..., "@id": ..., "https://ex/p": { "https://ex/p": { ... } } }
+    // nested well past MAX_NESTING_DEPTH so it would otherwise stack-overflow
+    // the mutually-recursive processNode/valueToObject walk.
+    let node: JsonValue = { "https://ex/p": "leaf" };
+    for (let i = 0; i < 500; i++) {
+      node = { "https://ex/p": node };
+    }
+    const document = { "@id": "https://ex/root", ...(node as JsonObject) };
+    await expect(parseJsonLd(document)).rejects.toBeInstanceOf(JsonLdError);
+  });
+
+  it("rejects deeply nested @list values with a JsonLdError, not a RangeError", async () => {
+    // buildList and valueToObject are mutually recursive for a value object
+    // nesting another "@list" inside it — build { "@list": [ { "@list": [ ...
+    // "leaf" ] } ] } nested well past MAX_NESTING_DEPTH.
+    let list: JsonValue = "leaf";
+    for (let i = 0; i < 500; i++) {
+      list = { "@list": [list] };
+    }
+    const document = { "@id": "https://ex/root", "https://ex/p": list };
+    await expect(parseJsonLd(document)).rejects.toBeInstanceOf(JsonLdError);
   });
 });
 

@@ -23,6 +23,9 @@ export const DEFAULT_MAX_AGE_SECONDS = 300;
  *
  * Symmetric (`HS*`) and `none` are deliberately excluded: a DPoP proof must be
  * signed by the client-held private key whose public half is embedded as `jwk`.
+ * `EdDSA`/`ES512` are simply not implemented yet — no deliberate security
+ * reason excludes them, unlike the symmetric/`none` exclusion above; widen
+ * this allow-list if a caller needs one of them.
  */
 export type DpopAlgorithm = "ES256" | "ES384" | "RS256" | "PS256";
 
@@ -231,6 +234,11 @@ function rsaModulusBits(n: string): number {
  * Normalize an HTTP URI for `htu` comparison: lowercase the scheme and host
  * (the URL parser does this), drop default ports, and strip query and fragment.
  * Returns `null` when the URI cannot be parsed.
+ *
+ * No port allow-list: a non-default port present in `url.host` is kept and
+ * compared exactly, but this package never restricts which ports a caller's
+ * configured endpoint may use — that's deliberately out of scope (RFC 9449
+ * is silent on it too), not an oversight.
  */
 function normalizeHtu(uri: string): string | null {
   try {
