@@ -310,6 +310,28 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return this.#listFollowing(request);
     }
+    // Owner-only cursor-paginated reads for the Mastodon client API phase 2
+    // (`@dwk/mastodon-api`'s `MastodonBackend` seam, #349): timeline (posts
+    // from followed accounts), notifications (favourite/reblog/mention), and
+    // a single-row lookup for `statuses/:id`. Internal-only like `__inbox`.
+    if (path === `${pathOf(iris.id)}/__client/timeline`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#listClientEntries(request, "timeline");
+    }
+    if (path === `${pathOf(iris.id)}/__client/notifications`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#listClientEntries(request, "notifications");
+    }
+    if (path === `${pathOf(iris.id)}/__client/entry`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#clientEntry(request);
+    }
 
     if (path === pathOf(iris.followers)) {
       return this.#serveCollection(request, iris.followers, "followers");
@@ -1165,6 +1187,224 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         sharedInbox: row.shared_inbox,
       })),
     } as JsonValue);
+  }
+
+  /**
+   * Classification used by `__client/timeline`/`__client/notifications`
+   * (Mastodon client API phase 2, spec/mastodon-client-api.md Decision 3).
+   * Read-time, over the parsed activity JSON — `object_type` alone can't
+   * distinguish these (it reflects the *embedded object's* type, not the
+   * activity's own, and is null for bare-IRI objects like most `Like`s).
+   * `Follow` is deliberately absent: inbound Follows never reach `inbox`
+   * (see docs/superpowers/specs/2026-07-21-mastodon-phase2-implementation-notes.md).
+   */
+  #classifyClientEntry(
+    activity: ActivityObject,
+  ): "timeline" | "favourite" | "reblog" | "mention" | null {
+    const type = activity.type;
+    if (type === "Create" || type === "Update") {
+      const objType = objectType(activity.object);
+      const postShapes = ["Note", "Article", "Page", "Video"];
+      if (objType !== undefined && postShapes.includes(objType)) {
+        return "timeline";
+      }
+      // A reply/mention targeting this actor is a notification, not a
+      // timeline entry (the timeline is "things I follow posted", the
+      // notification is "someone addressed me").
+      const object = activity.object;
+      const inReplyTo =
+        object && typeof object === "object" && !Array.isArray(object)
+          ? (object as Record<string, JsonValue>).inReplyTo
+          : undefined;
+      if (
+        typeof inReplyTo === "string" &&
+        inReplyTo.startsWith(this.#config!.iris.id)
+      ) {
+        return "mention";
+      }
+      return null;
+    }
+    if (type === "Like") return "favourite";
+    if (type === "Announce") return "reblog";
+    return null;
+  }
+
+  /**
+   * Shared cursor-paginated reader for `__client/timeline` and
+   * `__client/notifications`. Fetches `inbox` rows in `received_at DESC,
+   * seq DESC` batches (oldest-first when `min_received_at` selects the
+   * opposite direction), classifies each row, keeps the ones matching
+   * `kind`, and repeats until either `limit` matches are collected or the
+   * table is exhausted — a single bounded `SELECT ... LIMIT ?` cannot fill
+   * the page reliably once classification discards non-matching rows.
+   */
+  #listClientEntries(
+    request: Request,
+    kind: "timeline" | "notifications",
+  ): Response {
+    const url = new URL(request.url);
+    const limit = Math.min(
+      Math.max(
+        1,
+        Number.parseInt(url.searchParams.get("limit") ?? "20", 10) || 20,
+      ),
+      100,
+    );
+    const maxReceivedAt = url.searchParams.get("max_received_at");
+    const sinceReceivedAt = url.searchParams.get("since_received_at");
+    const minReceivedAt = url.searchParams.get("min_received_at");
+    const tieSeq = url.searchParams.get("tie_seq");
+
+    const oldestFirst = minReceivedAt !== null;
+    let where = "verify_state IS NOT 'failed'"; // defensive; see cursor-contract note
+    const params: (string | number)[] = [];
+    if (maxReceivedAt !== null) {
+      where +=
+        tieSeq !== null
+          ? " AND (received_at < ? OR (received_at = ? AND seq < ?))"
+          : " AND received_at < ?";
+      params.push(Number(maxReceivedAt));
+      if (tieSeq !== null) {
+        params.push(Number(maxReceivedAt), Number(tieSeq));
+      }
+    }
+    if (sinceReceivedAt !== null) {
+      where +=
+        tieSeq !== null
+          ? " AND (received_at > ? OR (received_at = ? AND seq > ?))"
+          : " AND received_at > ?";
+      params.push(Number(sinceReceivedAt));
+      if (tieSeq !== null) {
+        params.push(Number(sinceReceivedAt), Number(tieSeq));
+      }
+    }
+    if (minReceivedAt !== null) {
+      where +=
+        tieSeq !== null
+          ? " AND (received_at > ? OR (received_at = ? AND seq > ?))"
+          : " AND received_at > ?";
+      params.push(Number(minReceivedAt));
+      if (tieSeq !== null) {
+        params.push(Number(minReceivedAt), Number(tieSeq));
+      }
+    }
+
+    const order = oldestFirst ? "ASC" : "DESC";
+    const matches: {
+      seq: number;
+      receivedAt: number;
+      activity: JsonValue;
+      relayedBy: string | null;
+    }[] = [];
+    // Classify-and-fill: batches of 4x the page size keep the number of
+    // round-trips small for the common case (most rows are timeline-shaped)
+    // while still terminating once the table is exhausted.
+    const BATCH = Math.max(limit * 4, 40);
+    let cursorReceivedAt =
+      maxReceivedAt !== null
+        ? Number(maxReceivedAt)
+        : sinceReceivedAt !== null
+          ? Number(sinceReceivedAt)
+          : minReceivedAt !== null
+            ? Number(minReceivedAt)
+            : null;
+    let cursorSeq = tieSeq !== null ? Number(tieSeq) : null;
+    let exhausted = false;
+    while (matches.length < limit && !exhausted) {
+      let batchWhere = where;
+      const batchParams = [...params];
+      if (cursorReceivedAt !== null && matches.length > 0) {
+        // Subsequent internal batches page from the last row seen so far.
+        batchWhere +=
+          cursorSeq !== null
+            ? oldestFirst
+              ? " AND (received_at > ? OR (received_at = ? AND seq > ?))"
+              : " AND (received_at < ? OR (received_at = ? AND seq < ?))"
+            : oldestFirst
+              ? " AND received_at > ?"
+              : " AND received_at < ?";
+        batchParams.push(cursorReceivedAt);
+        if (cursorSeq !== null) batchParams.push(cursorReceivedAt, cursorSeq);
+      }
+      const rows = this.#sql
+        .exec<{
+          seq: number;
+          json: string;
+          received_at: number;
+          relayed_by: string | null;
+        }>(
+          `SELECT seq, json, received_at, relayed_by FROM inbox
+             WHERE ${batchWhere} ORDER BY received_at ${order}, seq ${order} LIMIT ?`,
+          ...batchParams,
+          BATCH,
+        )
+        .toArray();
+      if (rows.length === 0) {
+        break;
+      }
+      for (const row of rows) {
+        const activity = JSON.parse(row.json) as ActivityObject;
+        const classification = this.#classifyClientEntry(activity);
+        const wanted =
+          kind === "timeline"
+            ? classification === "timeline"
+            : classification === "favourite" ||
+              classification === "reblog" ||
+              classification === "mention";
+        if (wanted) {
+          matches.push({
+            seq: row.seq,
+            receivedAt: row.received_at,
+            activity: activity as unknown as JsonValue,
+            relayedBy: row.relayed_by,
+          });
+          if (matches.length >= limit) break;
+        }
+      }
+      const last = rows[rows.length - 1];
+      cursorReceivedAt = last!.received_at;
+      cursorSeq = last!.seq;
+      if (rows.length < BATCH) exhausted = true;
+    }
+
+    return json(200, { items: matches } as unknown as JsonValue);
+  }
+
+  /**
+   * `__client/entry?received_at=<ms>&seq_low=<0-32767>` — single-row lookup
+   * for `statuses/:id`. `seq_low` disambiguates the (vanishingly rare) case
+   * of two rows sharing a millisecond; the common case matches on
+   * `received_at` alone.
+   */
+  #clientEntry(request: Request): Response {
+    const url = new URL(request.url);
+    const receivedAt = Number(url.searchParams.get("received_at"));
+    const seqLow = url.searchParams.get("seq_low");
+    if (!Number.isFinite(receivedAt)) {
+      return json(404, { error: "not found" } as JsonValue);
+    }
+    const rows = this.#sql
+      .exec<{
+        seq: number;
+        json: string;
+        received_at: number;
+        relayed_by: string | null;
+      }>(
+        `SELECT seq, json, received_at, relayed_by FROM inbox WHERE received_at = ? ORDER BY seq`,
+        receivedAt,
+      )
+      .toArray();
+    const row =
+      seqLow !== null
+        ? (rows.find((r) => r.seq % 32768 === Number(seqLow)) ?? rows[0])
+        : rows[0];
+    if (!row) return json(404, { error: "not found" } as JsonValue);
+    return json(200, {
+      seq: row.seq,
+      receivedAt: row.received_at,
+      activity: JSON.parse(row.json) as JsonValue,
+      relayedBy: row.relayed_by,
+    } as unknown as JsonValue);
   }
 
   // -- dedup -----------------------------------------------------------------

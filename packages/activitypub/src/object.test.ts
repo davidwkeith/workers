@@ -1067,9 +1067,10 @@ describe("inbox classification", () => {
       );
       expect(res.status).toBe(202);
       const row = state.storage.sql
-        .exec<{ object_type: string | null; audience: string | null }>(
-          `SELECT object_type, audience FROM inbox`,
-        )
+        .exec<{
+          object_type: string | null;
+          audience: string | null;
+        }>(`SELECT object_type, audience FROM inbox`)
         .one();
       expect(row.object_type).toBe("Page");
       expect(row.audience).toBe("https://lemmy.example/c/birding");
@@ -1097,9 +1098,10 @@ describe("inbox classification", () => {
       );
       expect(res.status).toBe(202);
       const row = state.storage.sql
-        .exec<{ object_type: string | null; audience: string | null }>(
-          `SELECT object_type, audience FROM inbox`,
-        )
+        .exec<{
+          object_type: string | null;
+          audience: string | null;
+        }>(`SELECT object_type, audience FROM inbox`)
         .one();
       expect(row.object_type).toBeNull();
       expect(row.audience).toBeNull();
@@ -1209,9 +1211,11 @@ describe("announce unwrapping (FEP-1b12)", () => {
       expect(inner?.audience).toBe(GROUP);
       // Content tier: the verify row is due immediately.
       const verify = state.storage.sql
-        .exec<{ target: string; expect: string; next_at: number }>(
-          `SELECT target, expect, next_at FROM verify_queue`,
-        )
+        .exec<{
+          target: string;
+          expect: string;
+          next_at: number;
+        }>(`SELECT target, expect, next_at FROM verify_queue`)
         .one();
       expect(verify.target).toBe(`${AUTHOR}/post/1`);
       expect(verify.expect).toBe("present");
@@ -1237,9 +1241,10 @@ describe("announce unwrapping (FEP-1b12)", () => {
       );
       expect(res.status).toBe(202);
       const verify = state.storage.sql
-        .exec<{ target: string; next_at: number }>(
-          `SELECT target, next_at FROM verify_queue`,
-        )
+        .exec<{
+          target: string;
+          next_at: number;
+        }>(`SELECT target, next_at FROM verify_queue`)
         .one();
       // Votes verify at the activity id, after the sweep delay.
       expect(verify.target).toBe(`${AUTHOR}/activities/like-1`);
@@ -1268,7 +1273,10 @@ describe("announce unwrapping (FEP-1b12)", () => {
         .one().n;
       expect(queued).toBe(0);
       const inner = state.storage.sql
-        .exec<{ relayed_by: string | null; verify_state: string | null }>(
+        .exec<{
+          relayed_by: string | null;
+          verify_state: string | null;
+        }>(
           `SELECT relayed_by, verify_state FROM inbox WHERE id = ?`,
           `${AUTHOR}/activities/2`,
         )
@@ -1326,10 +1334,9 @@ describe("announce unwrapping (FEP-1b12)", () => {
         ),
       );
       const copies = state.storage.sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE id = ?`, innerId)
         .one().n;
       expect(copies).toBe(1);
     });
@@ -1402,16 +1409,16 @@ describe("outbound relationship activities", () => {
       );
       expect(res.status).toBe(201);
       const following = state.storage.sql
-        .exec<{ state: string }>(
-          `SELECT state FROM following WHERE actor = ?`,
-          GROUP,
-        )
+        .exec<{
+          state: string;
+        }>(`SELECT state FROM following WHERE actor = ?`, GROUP)
         .one();
       expect(following.state).toBe("pending");
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1442,9 +1449,10 @@ describe("outbound relationship activities", () => {
         .one().n;
       expect(rows).toBe(0);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1522,9 +1530,10 @@ describe("outbound vote delivery (Like/Dislike audience)", () => {
       );
       expect(res.status).toBe(201);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1626,9 +1635,10 @@ describe("community post delivery", () => {
       );
       expect(res.status).toBe(201);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1716,10 +1726,9 @@ describe("follow-target typing and backfill", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ actor_type: string | null }>(
-          `SELECT actor_type FROM following WHERE actor = ?`,
-          REMOTE,
-        )
+        .exec<{
+          actor_type: string | null;
+        }>(`SELECT actor_type FROM following WHERE actor = ?`, REMOTE)
         .one();
       expect(row.actor_type).toBe("Person");
       const deliveries = state.storage.sql
@@ -1778,10 +1787,9 @@ describe("relayed-object verification", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("verified");
       const queued = state.storage.sql
@@ -1806,10 +1814,9 @@ describe("relayed-object verification", () => {
         },
       );
       const copies = state.storage.sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE id = ?`, innerId)
         .one().n;
       expect(copies).toBe(0);
       const queued = state.storage.sql
@@ -1839,10 +1846,9 @@ describe("relayed-object verification", () => {
       );
       // Row survives, still pending, and the verify row backs off.
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("pending");
       const verify = state.storage.sql
@@ -1882,10 +1888,9 @@ describe("relayed-object verification", () => {
       );
       // The vote row survives as provisional; verification simply stops.
       const copies = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          voteId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, voteId)
         .one();
       expect(copies.verify_state).toBe("pending");
       const queued = state.storage.sql
@@ -1910,16 +1915,16 @@ describe("relayed-object verification", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("pending");
       const verify = state.storage.sql
-        .exec<{ attempts: number; next_at: number }>(
-          `SELECT attempts, next_at FROM verify_queue`,
-        )
+        .exec<{
+          attempts: number;
+          next_at: number;
+        }>(`SELECT attempts, next_at FROM verify_queue`)
         .one();
       expect(verify.attempts).toBe(1);
       expect(verify.next_at).toBeGreaterThan(Date.now());
@@ -2298,14 +2303,18 @@ describe("delivery outcome logging", () => {
           },
         );
         const overflow = state.storage.sql
-          .exec<{ n: number }>(
+          .exec<{
+            n: number;
+          }>(
             `SELECT n FROM pending_metrics WHERE event = ?`,
             ActivityPubLogEvent.MetricsOverflow,
           )
           .toArray();
         expect(overflow).toEqual([{ n: 1 }]);
         const succeeded = state.storage.sql
-          .exec<{ n: number }>(
+          .exec<{
+            n: number;
+          }>(
             `SELECT COUNT(*) AS n FROM pending_metrics WHERE event = ?`,
             ActivityPubLogEvent.DeliverySucceeded,
           )
@@ -2360,5 +2369,280 @@ describe("delivery outcome logging", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// __client/timeline, __client/notifications, __client/entry (Mastodon client
+// API phase 2, #349): owner-only internal reads over `inbox`, gated exactly
+// like `__inbox`/`__following` (INTERNAL_HEADERS.internal !== "1" -> 404).
+// ---------------------------------------------------------------------------
+
+/** A Like activity from REMOTE targeting an opaque local object IRI. */
+function likeActivity(
+  id: string,
+  object = "https://social.example/notes/1",
+): Record<string, unknown> {
+  return { id, type: "Like", actor: REMOTE, object };
+}
+
+/** A Create(Note) activity from REMOTE, attributed to itself (a followed post). */
+function createNoteActivity(
+  id: string,
+  content = "hello",
+): Record<string, unknown> {
+  return {
+    id,
+    type: "Create",
+    actor: REMOTE,
+    object: { type: "Note", content, attributedTo: REMOTE },
+  };
+}
+
+/** An Announce activity from REMOTE wrapping a bare-IRI object. */
+function announceActivity(id: string, object: string): Record<string, unknown> {
+  return { id, type: "Announce", actor: REMOTE, object };
+}
+
+/** A GET to a `__client/*` internal route, with the internal marker set. */
+function clientRequest(username: string, pathAndQuery: string): Request {
+  const iris = deriveIris(BASE, username);
+  return new Request(`${iris.id}${pathAndQuery}`, {
+    headers: {
+      [INTERNAL_HEADERS.config]: cfgHeader(username),
+      [INTERNAL_HEADERS.internal]: "1",
+    },
+  });
+}
+
+describe("__client/timeline", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/timeline`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("returns Create/Note rows newest-first, excluding Like rows", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            likeActivity("https://remote.example/activities/timeline-like"),
+          ),
+        ),
+      );
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            createNoteActivity(
+              "https://remote.example/activities/timeline-create",
+            ),
+          ),
+        ),
+      );
+
+      const res = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { activity: { type: string } }[];
+      };
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0]?.activity.type).toBe("Create");
+    });
+  });
+
+  it("paginates with max_received_at + tie_seq without skipping or duplicating", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const ids = [
+        "https://remote.example/activities/page-1",
+        "https://remote.example/activities/page-2",
+        "https://remote.example/activities/page-3",
+      ];
+      for (const id of ids) {
+        const res = await instance.fetch(
+          inboxRequest(username, JSON.stringify(createNoteActivity(id))),
+        );
+        expect(res.status).toBe(202);
+      }
+
+      type Page = {
+        items: {
+          seq: number;
+          receivedAt: number;
+          activity: { id: string };
+        }[];
+      };
+
+      const page1Res = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=2"),
+      );
+      const page1 = (await page1Res.json()) as Page;
+      // Newest-first: page-3, then page-2.
+      expect(page1.items.map((i) => i.activity.id)).toEqual([ids[2], ids[1]]);
+
+      const last = page1.items[1]!;
+      const page2Res = await instance.fetch(
+        clientRequest(
+          username,
+          `/__client/timeline?limit=2&max_received_at=${last.receivedAt}&tie_seq=${last.seq}`,
+        ),
+      );
+      const page2 = (await page2Res.json()) as Page;
+      expect(page2.items.map((i) => i.activity.id)).toEqual([ids[0]]);
+
+      // Combined across both pages: exactly the 3 ids, in order, no
+      // duplication and no gap even when several rows share a `received_at`
+      // millisecond (the common case under a fast test clock).
+      const combined = [...page1.items, ...page2.items].map(
+        (i) => i.activity.id,
+      );
+      expect(combined).toEqual([ids[2], ids[1], ids[0]]);
+    });
+  });
+});
+
+describe("__client/notifications", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/notifications`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("classifies Like as favourite and Announce as reblog, omits Follow", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Follows never reach `inbox` at all (only `followers`/`pending_accept`
+      // rows) — deliver one to document that gap rather than silently relying
+      // on it, and confirm no row lands in `inbox` regardless.
+      const followRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/activities/notif-follow",
+            type: "Follow",
+            actor: REMOTE,
+            object: iris.id,
+          }),
+        ),
+      );
+      expect(followRes.status).toBe(202);
+      const followRows = state.storage.sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE json LIKE '%"Follow"%'`)
+        .one().n;
+      expect(followRows).toBe(0);
+
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            likeActivity("https://remote.example/activities/notif-like"),
+          ),
+        ),
+      );
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            announceActivity(
+              "https://remote.example/activities/notif-announce",
+              "https://social.example/notes/own-id",
+            ),
+          ),
+        ),
+      );
+
+      const res = await instance.fetch(
+        clientRequest(username, "/__client/notifications?limit=10"),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      expect(body.items).toHaveLength(2);
+      expect(body.items.map((i) => i.activity.type).sort()).toEqual([
+        "Announce",
+        "Like",
+      ]);
+      expect(
+        body.items.some(
+          (i) =>
+            i.activity.id === "https://remote.example/activities/notif-follow",
+        ),
+      ).toBe(false);
+    });
+  });
+});
+
+describe("__client/entry", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/entry?received_at=1`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("looks up a single row by received_at, 404s when there is none", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            createNoteActivity("https://remote.example/activities/entry-1"),
+          ),
+        ),
+      );
+      const timeline = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=1"),
+      );
+      const { items } = (await timeline.json()) as {
+        items: { seq: number; receivedAt: number; activity: { id: string } }[];
+      };
+      const found = items[0]!;
+
+      const entryRes = await instance.fetch(
+        clientRequest(
+          username,
+          `/__client/entry?received_at=${found.receivedAt}&seq_low=${found.seq % 32768}`,
+        ),
+      );
+      expect(entryRes.status).toBe(200);
+      const entry = (await entryRes.json()) as {
+        activity: { id: string };
+      };
+      expect(entry.activity.id).toBe(
+        "https://remote.example/activities/entry-1",
+      );
+
+      const missing = await instance.fetch(
+        clientRequest(username, "/__client/entry?received_at=999999999"),
+      );
+      expect(missing.status).toBe(404);
+    });
   });
 });
