@@ -5,8 +5,6 @@
  * multiple times and tested in isolation.
  */
 
-import type { Logger, Metrics } from "@dwk/log";
-
 import type { MastodonBackend } from "./backend.js";
 
 /** Cloudflare bindings required by `@dwk/mastodon-api`. */
@@ -95,10 +93,6 @@ export interface MastodonApiConfig {
   readonly pageSize?: { readonly default: number; readonly max: number };
   /** Live-count + timeline backend; absent in phase 1 (counts render as 0). */
   readonly backend?: MastodonBackend;
-  /** Structured logger; defaults to no-op. */
-  readonly logger?: Logger;
-  /** Metrics sink; defaults to no-op. */
-  readonly metrics?: Metrics;
 }
 
 /** The one local account id this deployment ever mints (single-owner). */

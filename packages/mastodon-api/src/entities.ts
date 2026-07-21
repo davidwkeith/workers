@@ -45,6 +45,11 @@ export function applicationEntity(
   const redirectUris = metadataRedirectUris(record);
   const scope = metadataString(record, "scope") ?? "read";
   return {
+    // The registration second doubles as the entity id. Two apps registered
+    // in the same second collide — accepted for a single-owner instance
+    // (clients key on `client_id`, not `id`, for the OAuth flow); phase 3's
+    // fidelity pass (#350) is the place to revisit if the client matrix
+    // ever cares.
     id: String(record.clientIdIssuedAt),
     name: metadataString(record, "client_name") ?? "",
     website: metadataString(record, "client_uri"),

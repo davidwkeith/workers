@@ -362,6 +362,27 @@ describe("POST /oauth/token", () => {
     expect(rejected.status).toBe(400);
   });
 
+  it("rejects a missing code_verifier when a challenge was recorded", async () => {
+    const app = await registerApp();
+    const code = await obtainCode(app, {
+      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      code_challenge_method: "S256",
+    });
+    const res = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://oauth-callback",
+        code,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_grant",
+    );
+  });
+
   it("supports client_credentials with an account-less token", async () => {
     const app = await registerApp();
     const res = await api()(

@@ -67,7 +67,6 @@ src/*.test.ts      # colocated tests
 
 - `@dwk/oauth` — client metadata validation, RFC 7009 revocation handler,
   `ClientRecord`/`ClientStore` seam.
-- `@dwk/log` — structured logging interface.
 
 ## Depended on by
 

@@ -279,35 +279,35 @@
           "path": "/api/v1/",
           "match": "prefix",
           "methods": ["GET", "POST"],
-          "handler": "createActivitypubMastodonApi",
+          "handler": "createMastodonApi",
           "specificationURL": "https://docs.joinmastodon.org/api/"
         },
         {
           "path": "/api/v2/",
           "match": "prefix",
           "methods": ["GET"],
-          "handler": "createActivitypubMastodonApi",
+          "handler": "createMastodonApi",
           "specificationURL": "https://docs.joinmastodon.org/api/"
         },
         {
           "path": "/oauth/authorize",
           "match": "exact",
           "methods": ["GET"],
-          "handler": "createActivitypubMastodonApi",
+          "handler": "createMastodonApi",
           "authorityBinding": true
         },
         {
           "path": "/oauth/token",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createActivitypubMastodonApi",
+          "handler": "createMastodonApi",
           "authorityBinding": true
         },
         {
           "path": "/oauth/revoke",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createActivitypubMastodonApi"
+          "handler": "createMastodonApi"
         }
       ]
     },

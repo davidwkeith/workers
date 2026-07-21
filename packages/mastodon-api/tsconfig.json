@@ -10,6 +10,8 @@
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/oauth": ["../oauth/src/index.ts"]
     },
+    // @dwk/dpop and @dwk/log stay mapped (though not direct deps): aliasing
+    // @dwk/oauth to its src means tsc walks its imports as source too.
     "types": [
       "@cloudflare/workers-types",
       "@cloudflare/vitest-pool-workers/types"

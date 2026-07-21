@@ -178,9 +178,6 @@ importers:
 
   packages/mastodon-api:
     dependencies:
-      '@dwk/log':
-        specifier: workspace:*
-        version: link:../log
       '@dwk/oauth':
         specifier: workspace:*
         version: link:../oauth
