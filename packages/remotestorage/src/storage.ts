@@ -66,7 +66,15 @@ class ConflictError extends Error {
 export class RemoteStorageObject extends DurableObject<RemoteStorageEnv> {
   #store: Store | null = null;
 
-  /** Lazily build the store with the front-door's offload threshold. */
+  /**
+   * Lazily build the store with the front-door's offload threshold. Built
+   * once per isolate and cached: `maxInlineBytes` is taken from whichever
+   * request happens to construct the store first, on the assumption that a
+   * single composition's config is stable for the life of the DO instance
+   * (the front door passes the same `maxInlineBytes` on every request in
+   * practice). A composition that varies it per-request would not see later
+   * values take effect until the isolate is evicted and rebuilt.
+   */
   #getStore(config: ForwardedConfig): Store {
     if (this.#store === null) {
       this.#store = createStore(this.ctx, this.env, {

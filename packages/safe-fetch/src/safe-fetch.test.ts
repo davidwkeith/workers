@@ -346,6 +346,48 @@ describe("safeFetch", () => {
     expect(seen[1]?.body).toBe("source=x&target=y");
   });
 
+  it("downgrades a 303 to a bodyless GET on the next hop", async () => {
+    const seen: { url: string; method?: string; body?: unknown }[] = [];
+    const doFetch: FetchLike = vi.fn(async (url, init) => {
+      seen.push({ url, method: init?.method, body: init?.body });
+      return url === "https://wm.example/in"
+        ? new Response(null, {
+            status: 303,
+            headers: { location: "https://wm.example/in2" },
+          })
+        : new Response(null, { status: 200 });
+    });
+    await safeFetch(doFetch, "https://wm.example/in", {
+      method: "POST",
+      body: "source=x&target=y",
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]?.method).toBe("GET");
+    expect(seen[1]?.body).toBeUndefined();
+  });
+
+  it("downgrades a 301/302 POST to a bodyless GET on the next hop", async () => {
+    for (const status of [301, 302]) {
+      const seen: { url: string; method?: string; body?: unknown }[] = [];
+      const doFetch: FetchLike = vi.fn(async (url, init) => {
+        seen.push({ url, method: init?.method, body: init?.body });
+        return url === "https://wm.example/in"
+          ? new Response(null, {
+              status,
+              headers: { location: "https://wm.example/in2" },
+            })
+          : new Response(null, { status: 200 });
+      });
+      await safeFetch(doFetch, "https://wm.example/in", {
+        method: "POST",
+        body: "source=x&target=y",
+      });
+      expect(seen).toHaveLength(2);
+      expect(seen[1]?.method).toBe("GET");
+      expect(seen[1]?.body).toBeUndefined();
+    }
+  });
+
   it("logs and counts under the caller-supplied logEvent on an SSRF block", async () => {
     const logger = {
       warn: vi.fn(),

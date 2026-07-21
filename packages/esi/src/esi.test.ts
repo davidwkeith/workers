@@ -64,4 +64,24 @@ describe("processEsi", () => {
     expect(result.headers.get("x-custom")).toBe("value");
     expect(result.status).toBe(200);
   });
+
+  it("drops ETag and Last-Modified, which describe the origin body, not the transformed one", async () => {
+    const original = new Response(
+      '<p>hi</p><esi:include src="https://f.example/x"/>',
+      {
+        status: 200,
+        headers: {
+          "content-type": "text/html",
+          etag: '"abc123"',
+          "last-modified": "Tue, 01 Jul 2026 00:00:00 GMT",
+        },
+      },
+    );
+
+    const result = processEsi(original, {
+      fetch: (async () => new Response("frag")) as FetchLike,
+    });
+    expect(result.headers.has("etag")).toBe(false);
+    expect(result.headers.has("last-modified")).toBe(false);
+  });
 });

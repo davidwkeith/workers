@@ -19,6 +19,7 @@
 import type { IndieAuthConfig } from "@dwk/indieauth";
 
 import type { ConformanceEnv } from "./config.js";
+import { timingSafeEqual } from "./timing-safe-equal.js";
 
 /** Consent-token lifetime: 5 minutes. */
 const CONSENT_TTL_MS = 300_000;
@@ -32,15 +33,6 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
-
-/** Constant-time string comparison to avoid leaking match length via timing. */
-function timingSafeEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 function base64url(bytes: ArrayBuffer): string {

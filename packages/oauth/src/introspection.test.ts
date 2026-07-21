@@ -149,6 +149,17 @@ describe("createIntrospectionHandler", () => {
     expect(await res.json()).toMatchObject({ error: "invalid_client" });
   });
 
+  it("scopes the WWW-Authenticate challenge to Basic for a client_secret_basic caller", async () => {
+    const res = await handler({ authenticate: () => false })(
+      postForm(
+        { token: "tok" },
+        { headers: { authorization: "Basic dXNlcjpwYXNz" } },
+      ),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe('Basic realm="oauth"');
+  });
+
   it("does not look the token up when authentication fails", async () => {
     const lookupToken = vi.fn(async () => null);
     await handler({ authenticate: () => false, lookupToken })(

@@ -179,6 +179,20 @@ function collect(
 
 /**
  * Finds the authorizations in an ACL document that apply to its scoped target.
+ *
+ * @remarks
+ * A subject only becomes a candidate authorization when it carries an
+ * explicit `rdf:type acl:Authorization` triple — a subject that grants
+ * `acl:mode`/`acl:agent`/etc. but omits the type triple is silently ignored
+ * rather than treated as an authorization by structural inference. This is a
+ * **conscious, fail-closed** decision: WAC documents in the wild are not
+ * required to declare the type (some authors omit it, relying on shape
+ * alone), so a laxer reader that inferred "authorization-shaped" subjects
+ * would widen who can be granted access from a document this library did not
+ * fully understand. Failing closed here means a malformed/incomplete ACL
+ * document grants *less* than intended (denial, safe) rather than *more*
+ * (an accidental grant, unsafe). See `index.test.ts`'s
+ * "ignores an authorization-shaped subject with no rdf:type" case.
  */
 function findApplicableAuthorizations(acl: AclResource): Authorization[] {
   if (!acl || !acl.quads) {
@@ -296,39 +310,32 @@ function toAccessModes(granted: ReadonlySet<string>): AccessMode[] {
 }
 
 /**
- * Evaluates a Web Access Control decision against an effective-ACL chain.
+ * Evaluates a Web Access Control decision against the effective ACL.
  *
  * @remarks
  * Per WAC §5.1 the effective ACL is the *first* ancestor whose ACL resource
  * exists, "regardless of whether it contains matching authorizations". The
- * {@link AclResource | chain} lists existing ACL documents nearest-first, so its
- * **first entry is the effective ACL and is authoritative**: the decision is
- * made from that document alone — granted or denied — and never falls through
- * (fail open) to a farther ancestor's `acl:default`, even when the document
- * grants nothing for the target. This holds equally for a resource's own `.acl`
- * (scope `"accessTo"`) and for an ancestor container's `acl:default`.
+ * caller resolves that document and passes it here as the single
+ * {@link AclResource | acl} — it is authoritative: the decision is made from
+ * it alone — granted or denied — and never falls through (fail open) to a
+ * farther ancestor's `acl:default`, even when the document grants nothing for
+ * the target. This holds equally for a resource's own `.acl` (scope
+ * `"accessTo"`) and for an ancestor container's `acl:default`.
  *
  * Selecting *which* ancestor's ACL exists is the caller's responsibility (it is
  * a function of resource existence, not authorization content); this library
  * does not climb the hierarchy by inspecting authorizations, which would invert
- * §5.1's stop condition. Entries after the first are not consulted.
+ * §5.1's stop condition.
  *
  * @param request - The agent and request facts to authorize.
- * @param chain - The effective ACL as a one-element chain (nearest first).
+ * @param acl - The single effective ACL document (nearest existing ancestor).
  * @returns The decision, including the granted modes and the effective ACL.
  */
 export function evaluateAccess(
   request: AccessRequest,
-  chain: AclResource[],
+  acl: AclResource,
 ): AccessDecision {
-  if (!request || !chain || !Array.isArray(chain)) {
-    return { granted: false, modes: [] };
-  }
-  // The first chain entry is an existing ACL document, hence the effective ACL
-  // per §5.1; it is authoritative whether or not it carries a matching
-  // authorization, so the decision is taken from it alone (fail closed).
-  const acl = chain[0];
-  if (!acl) {
+  if (!request || !acl) {
     return { granted: false, modes: [] };
   }
 

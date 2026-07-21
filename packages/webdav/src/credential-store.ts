@@ -82,15 +82,18 @@ export class CredentialStore {
   readonly #sql: SqlStorage;
   readonly #throttle: ThrottlePolicy;
   readonly #now: () => number;
+  readonly #pepper: string | undefined;
 
   constructor(
     sql: SqlStorage,
     throttle: Partial<ThrottlePolicy> = {},
     now: () => number = Date.now,
+    pepper?: string,
   ) {
     this.#sql = sql;
     this.#throttle = { ...DEFAULT_THROTTLE, ...throttle };
     this.#now = now;
+    this.#pepper = pepper;
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS webdav_credentials (
          credential_id TEXT PRIMARY KEY,
@@ -132,7 +135,11 @@ export class CredentialStore {
 
   /** Mint a new app password (owner-gated at the HTTP layer) and persist it. */
   async mint(params: MintAppPasswordParams): Promise<MintedAppPassword> {
-    const minted = await mintAppPassword({ now: this.#now, ...params });
+    const minted = await mintAppPassword({
+      now: this.#now,
+      pepper: this.#pepper,
+      ...params,
+    });
     const { record } = minted;
     this.#sql.exec(
       `INSERT INTO webdav_credentials
@@ -210,7 +217,12 @@ export class CredentialStore {
     }
 
     const record = rowToRecord(row);
-    const valid = await verifyAppPassword(secret, record, this.#now);
+    const valid = await verifyAppPassword(
+      secret,
+      record,
+      this.#now,
+      this.#pepper,
+    );
     if (valid) {
       this.#sql.exec(
         "UPDATE webdav_credentials SET failed_count = 0, failed_since = 0 WHERE credential_id = ?",

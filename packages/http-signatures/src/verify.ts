@@ -40,6 +40,17 @@ export interface VerifyParams {
    * mismatch fails verification with a `digest_*` reason.
    */
   body?: Uint8Array | string;
+  /**
+   * Require a covered `content-digest` / `digest` component whenever `body`
+   * is supplied. Without this, passing `body` alongside a signature that
+   * covers neither header returns `valid: true` with the body's integrity
+   * never actually checked — the signature only vouches for the headers it
+   * covers, not the body a caller happens to hand in. Off by default so a
+   * caller that intentionally verifies headers only (and checks the body some
+   * other way) is not forced to opt out. When enabled, a `body` with no
+   * covered digest component fails as `body_digest_required`.
+   */
+  requireBodyDigest?: boolean;
 }
 
 function hasHeader(message: HttpMessage, name: string): boolean {
@@ -106,6 +117,8 @@ export async function verifyMessage(
     );
     if (rejection !== null)
       return { ...result, valid: false, reason: rejection };
+  } else if (params.requireBodyDigest) {
+    return { ...result, valid: false, reason: "body_digest_required" };
   }
 
   return result;

@@ -50,6 +50,42 @@ describe("mintAppPassword / verifyAppPassword", () => {
     expect(await verifyAppPassword("wrong-secret", minted.record)).toBe(false);
   });
 
+  it("mixes WEBDAV_PEPPER into the hash: verify requires the same pepper the credential was minted with", async () => {
+    const params = {
+      webid: "https://me.example/profile#me",
+      label: "MacBook Finder",
+      scope: SCOPE,
+      iterations: ITERATIONS,
+    };
+    const peppered = await mintAppPassword({
+      ...params,
+      pepper: "server-wide-secret",
+    });
+
+    // Verifying with the wrong (or missing) pepper must fail even with the
+    // correct secret — proving the pepper is actually load-bearing, not just
+    // present in the record.
+    expect(
+      await verifyAppPassword(
+        peppered.secret,
+        peppered.record,
+        Date.now,
+        "server-wide-secret",
+      ),
+    ).toBe(true);
+    expect(await verifyAppPassword(peppered.secret, peppered.record)).toBe(
+      false,
+    );
+    expect(
+      await verifyAppPassword(
+        peppered.secret,
+        peppered.record,
+        Date.now,
+        "wrong-pepper",
+      ),
+    ).toBe(false);
+  });
+
   it("rejects an expired credential", async () => {
     let clock = 1_000;
     const minted = await mintAppPassword({

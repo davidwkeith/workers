@@ -23,7 +23,12 @@ import { hostFromUrl } from "@dwk/log";
 
 import { randomIdentifier } from "./encoding.js";
 import { OAuthError, oauthErrorResponse } from "./errors.js";
-import { json, methodNotAllowed, readForm } from "./http.js";
+import {
+  json,
+  methodNotAllowed,
+  readForm,
+  wwwAuthenticateChallenge,
+} from "./http.js";
 import { OAuthLogEvent } from "./log.js";
 import {
   emit,
@@ -165,7 +170,7 @@ export function createPushedAuthorizationRequestHandler(
         OAuthError.InvalidClient,
         "pushed authorization requests require client authentication",
         401,
-        { "WWW-Authenticate": "Bearer" },
+        { "WWW-Authenticate": wwwAuthenticateChallenge(request) },
       );
     }
 

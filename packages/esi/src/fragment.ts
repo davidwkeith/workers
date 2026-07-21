@@ -11,7 +11,7 @@ import {
   type FetchLike,
   type SafeFetchOptions,
 } from "@dwk/safe-fetch";
-import { noopLogger, type Logger, type Metrics } from "@dwk/log";
+import { hostFromUrl, noopLogger, type Logger, type Metrics } from "@dwk/log";
 import type { EsiToken } from "./tokenize.js";
 
 export interface FragmentFetchOptions {
@@ -102,7 +102,7 @@ export async function resolveFragment(
   }
 
   if (token.onerror === "continue") {
-    logger.debug("esi.fragment.failed", { src: token.src });
+    logger.debug("esi.fragment.failed", { host: hostFromUrl(token.src) });
     return "";
   }
 
@@ -121,10 +121,13 @@ export async function resolveFragment(
     if (altBody !== null) {
       return altBody;
     }
-    logger.warn("esi.fragment.failed", { src: token.src, alt: token.alt });
+    logger.warn("esi.fragment.failed", {
+      host: hostFromUrl(token.src),
+      altHost: hostFromUrl(token.alt),
+    });
     return "";
   }
 
-  logger.warn("esi.fragment.failed", { src: token.src });
+  logger.warn("esi.fragment.failed", { host: hostFromUrl(token.src) });
   return "";
 }

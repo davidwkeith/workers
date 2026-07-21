@@ -72,7 +72,8 @@ export type SignatureFailureReason =
   | "signature_invalid"
   | "digest_missing"
   | "digest_unsupported"
-  | "digest_mismatch";
+  | "digest_mismatch"
+  | "body_digest_required";
 
 /** Result of verifying an HTTP message signature. */
 export interface VerifyResult {

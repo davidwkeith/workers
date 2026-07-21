@@ -154,6 +154,28 @@ async function addColumnIfMissing(
   await db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`).run();
 }
 
+/**
+ * Delete expired rows from both tables. Called opportunistically from the two
+ * insert paths (a fresh authorization code or a newly issued token) rather
+ * than on a schedule — this package has no cron entrypoint of its own — so
+ * `authorization_codes` and `access_tokens` don't grow unbounded and slow
+ * `isTokenActive`'s scan as a deployment accumulates history. A `used`
+ * authorization code or a `revoked` token is only actually reclaimed once it
+ * also expires, matching `redeemAuthorizationCode`/`isTokenActive`'s own
+ * expiry check — nothing here changes what those two already treat as
+ * expired.
+ */
+async function pruneExpired(db: D1Database, nowSeconds: number): Promise<void> {
+  await db.batch([
+    db
+      .prepare("DELETE FROM authorization_codes WHERE expires_at <= ?")
+      .bind(nowSeconds),
+    db
+      .prepare("DELETE FROM access_tokens WHERE expires_at <= ?")
+      .bind(nowSeconds),
+  ]);
+}
+
 /** Parse the JSON-encoded `resource` column into a non-empty list, or `undefined`. */
 function parseResources(raw: string | null): readonly string[] | undefined {
   if (!raw) return undefined;
@@ -213,6 +235,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
 
     async saveAuthorizationCode(record) {
       await ensureSchema();
+      await pruneExpired(db, Math.floor(Date.now() / 1000));
       await db
         .prepare(
           `INSERT INTO authorization_codes
@@ -258,6 +281,7 @@ export function createIndieAuthStore(env: IndieAuthStoreEnv): IndieAuthStore {
 
     async recordToken(record) {
       await ensureSchema();
+      await pruneExpired(db, Math.floor(Date.now() / 1000));
       await db
         .prepare(
           `INSERT INTO access_tokens

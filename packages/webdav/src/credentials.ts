@@ -65,6 +65,8 @@ export interface MintAppPasswordParams {
   readonly expiresAt?: number | null;
   /** Clock injection for tests; defaults to `Date.now`. */
   readonly now?: () => number;
+  /** Deployment-wide pepper (`WEBDAV_PEPPER`), mixed into the hash when set. */
+  readonly pepper?: string;
 }
 
 /** OWASP-recommended PBKDF2-HMAC-SHA-256 iteration count (2023). */
@@ -110,14 +112,30 @@ export function generateSecret(): string {
   return randomBase64Url(SECRET_BYTES);
 }
 
+/**
+ * Prepend the deployment-wide pepper (`WEBDAV_PEPPER`), when configured, to
+ * the per-credential secret before hashing. Unlike the per-record `salt`
+ * (stored alongside the hash, so it adds nothing against a stolen database),
+ * the pepper never leaves Worker secret storage — an attacker who exfiltrates
+ * the DO SQLite table alone still cannot brute-force credentials offline
+ * without it. Not retroactive: changing (or newly setting/unsetting)
+ * `WEBDAV_PEPPER` changes the hash input for every future `verify`, so
+ * credentials minted under a different pepper value stop verifying — the
+ * same operational tradeoff as rotating any other KDF parameter.
+ */
+function pepperedSecret(secret: string, pepper?: string): string {
+  return pepper ? `${pepper}:${secret}` : secret;
+}
+
 async function deriveHash(
   secret: string,
   salt: Uint8Array,
   iterations: number,
+  pepper?: string,
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secret),
+    new TextEncoder().encode(pepperedSecret(secret, pepper)),
     "PBKDF2",
     false,
     ["deriveBits"],
@@ -151,7 +169,7 @@ export async function mintAppPassword(
   const secret = generateSecret();
   const salt = new Uint8Array(SALT_BYTES);
   crypto.getRandomValues(salt);
-  const hash = await deriveHash(secret, salt, iterations);
+  const hash = await deriveHash(secret, salt, iterations, params.pepper);
   const record: AppPasswordRecord = {
     credentialId,
     webid: params.webid,
@@ -174,6 +192,7 @@ export async function verifyAppPassword(
   secret: string,
   record: AppPasswordRecord,
   now: () => number = Date.now,
+  pepper?: string,
 ): Promise<boolean> {
   if (record.expiresAt !== null && now() >= record.expiresAt) return false;
   const expected = fromHex(record.hashHex);
@@ -181,6 +200,7 @@ export async function verifyAppPassword(
     secret,
     fromHex(record.saltHex),
     record.iterations,
+    pepper,
   );
   return timingSafeEqual(actual, expected);
 }

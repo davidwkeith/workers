@@ -208,6 +208,25 @@ describe("EsiTokenizer", () => {
     );
   });
 
+  it("caps the pending-tag buffer by UTF-8 byte length, not UTF-16 code units", () => {
+    const tokenizer = new EsiTokenizer();
+    const tokens: EsiToken[] = [];
+    tokens.push(...tokenizer.push('<esi:include src="'));
+    // A 3-byte-per-character CJK string: 3000 code units is only 3000 in
+    // `.length`, but 9000 UTF-8 bytes — over the 8 KB cap in bytes even
+    // though under it in code units. A code-unit-based check would keep
+    // buffering this well past the intended byte budget.
+    const cjk = "中".repeat(3000);
+    tokens.push(...tokenizer.push(cjk));
+    tokens.push(...tokenizer.flush());
+
+    // The overflow must have been flushed mid-stream (before flush()) as
+    // literal text, proving the cap tripped on the CJK push itself.
+    expect(tokens.some((t) => t.kind === "text" && t.value.includes(cjk))).toBe(
+      true,
+    );
+  });
+
   it("passes text with no esi markup at all straight through without buffering", () => {
     const tokenizer = new EsiTokenizer();
     const tokens = tokenizer.push("just some plain text, nothing special");

@@ -23,7 +23,12 @@ import {
   oauthErrorResponse,
   type OAuthErrorCode,
 } from "./errors.js";
-import { json, methodNotAllowed, readJson } from "./http.js";
+import {
+  json,
+  methodNotAllowed,
+  readJson,
+  wwwAuthenticateChallenge,
+} from "./http.js";
 import { OAuthLogEvent } from "./log.js";
 import {
   emit,
@@ -137,7 +142,7 @@ export function validateClientMetadata(
   if (typeof authMethod !== "string" || !authMethods.includes(authMethod)) {
     return {
       error: OAuthError.InvalidClientMetadata,
-      description: `unsupported token_endpoint_auth_method: ${String(authMethod)}`,
+      description: "unsupported token_endpoint_auth_method",
     };
   }
 
@@ -153,7 +158,7 @@ export function validateClientMetadata(
     if (!grantTypesSupported.includes(grant)) {
       return {
         error: OAuthError.InvalidClientMetadata,
-        description: `unsupported grant_type: ${grant}`,
+        description: "unsupported grant_type",
       };
     }
   }
@@ -169,7 +174,7 @@ export function validateClientMetadata(
     if (!responseTypesSupported.includes(responseType)) {
       return {
         error: OAuthError.InvalidClientMetadata,
-        description: `unsupported response_type: ${responseType}`,
+        description: "unsupported response_type",
       };
     }
   }
@@ -202,13 +207,13 @@ export function validateClientMetadata(
       if (!isValidRedirectUri(uri)) {
         return {
           error: OAuthError.InvalidRedirectUri,
-          description: `invalid redirect_uri: ${uri}`,
+          description: "invalid redirect_uri",
         };
       }
       if (config.redirectUriPolicy && !config.redirectUriPolicy(uri)) {
         return {
           error: OAuthError.InvalidRedirectUri,
-          description: `redirect_uri not permitted: ${uri}`,
+          description: "redirect_uri not permitted",
         };
       }
     }
@@ -297,7 +302,7 @@ export function createClientRegistrationHandler(
         OAuthError.InvalidClient,
         "client registration requires authorization",
         401,
-        { "WWW-Authenticate": "Bearer" },
+        { "WWW-Authenticate": wwwAuthenticateChallenge(request) },
       );
     }
 

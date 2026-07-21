@@ -117,11 +117,13 @@ export interface ConsoleLoggerOptions {
  * A {@link Logger} that emits one JSON object per record to `console`, suitable
  * for Cloudflare Workers structured logs / Logpush.
  *
- * Each record is `{ level, event, time, ...base, ...fields }`, serialized with
+ * Each record is `{ ...base, ...fields, level, event, time }`, serialized with
  * `JSON.stringify` (which drops `undefined`-valued fields, so optional context
- * can be passed unconditionally). Records below `minLevel` are dropped. The
- * matching `console` method is used per level so a platform's level routing
- * still applies.
+ * can be passed unconditionally). The envelope (`level`/`event`/`time`) spreads
+ * last so a caller's `fields` (or a composer's `base`) can never clobber it by
+ * coincidentally using one of those names as a field key. Records below
+ * `minLevel` are dropped. The matching `console` method is used per level so a
+ * platform's level routing still applies.
  *
  * Honors the {@link Logger} non-throwing contract: if a field is not
  * JSON-serializable (a circular reference, a `BigInt`, …) the record is replaced
@@ -140,12 +142,15 @@ export function consoleLogger(options: ConsoleLoggerOptions = {}): Logger {
       if (LEVEL_ORDER[level] < threshold) {
         return;
       }
+      // The envelope spreads LAST so a caller's `fields` (or a composer's
+      // `base`) can never clobber `level`/`event`/`time` by coincidentally
+      // using one of those names as a field key — the envelope always wins.
       const record: LogFields = {
+        ...base,
+        ...fields,
         level,
         event,
         time: now(),
-        ...base,
-        ...fields,
       };
       try {
         sink[level](JSON.stringify(record));

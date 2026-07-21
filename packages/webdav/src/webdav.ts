@@ -462,9 +462,12 @@ async function mkcol(
   resolved: Resolved,
 ): Promise<Response> {
   // RFC 4918 §9.3: MKCOL with a request body is unsupported media (415).
+  // Only an explicit `Content-Length: 0` clears a non-null body stream — a
+  // request with no Content-Length at all (chunked transfer-encoding, whose
+  // length is unknown up front) must not default to "0" and slip through.
   if (
     ctx.request.body !== null &&
-    (ctx.request.headers.get("content-length") ?? "0") !== "0"
+    ctx.request.headers.get("content-length") !== "0"
   ) {
     return problem(415, "MKCOL bodies are not supported");
   }

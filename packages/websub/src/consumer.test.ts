@@ -61,25 +61,35 @@ class MemoryStore implements SubscriptionStore {
   }
 }
 
-function batchOf(jobs: WebSubJob[]): {
+function batchOf(
+  jobs: WebSubJob[],
+  attempts: readonly number[] = [],
+): {
   batch: MessageBatch<WebSubJob>;
   acks: number[];
   retries: number[];
+  retryDelays: (number | undefined)[];
 } {
   const acks: number[] = [];
   const retries: number[] = [];
+  const retryDelays: (number | undefined)[] = [];
   const messages = jobs.map(
     (body, i) =>
       ({
         body,
+        attempts: attempts[i] ?? 1,
         ack: () => acks.push(i),
-        retry: () => retries.push(i),
+        retry: (options?: { delaySeconds?: number }) => {
+          retries.push(i);
+          retryDelays.push(options?.delaySeconds);
+        },
       }) as unknown as Message<WebSubJob>,
   );
   return {
     batch: { messages } as unknown as MessageBatch<WebSubJob>,
     acks,
     retries,
+    retryDelays,
   };
 }
 
@@ -297,6 +307,34 @@ describe("createWebSubQueueConsumer — verify jobs", () => {
     await consumer(batch, {} as WebSubEnv, ctx);
     expect(acks).toEqual([]);
     expect(retries).toEqual([0]);
+  });
+
+  it("backs off exponentially, capped, based on message.attempts", async () => {
+    const failing: SubscriptionStore = {
+      upsert: () => Promise.reject(new Error("db down")),
+      remove: () => Promise.resolve(),
+      listActive: () => Promise.resolve([]),
+      get: () => Promise.resolve(null),
+      pruneExpired: () => Promise.resolve(0),
+    };
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      const challenge = new URL(input).searchParams.get("hub.challenge");
+      return new Response(challenge, { status: 200 });
+    });
+    const consumer = createWebSubQueueConsumer(
+      { ...config, fetch: fetchImpl },
+      { store: failing },
+    );
+    const job: WebSubJob = {
+      kind: "verify",
+      mode: "subscribe",
+      callback: "https://sub.example/cb",
+      topic: "https://example.com/feed",
+      leaseSeconds: 600,
+    };
+    const { batch, retryDelays } = batchOf([job, job, job, job], [1, 2, 3, 20]);
+    await consumer(batch, {} as WebSubEnv, ctx);
+    expect(retryDelays).toEqual([30, 60, 120, 3600]);
   });
 });
 

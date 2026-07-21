@@ -92,6 +92,29 @@ describe("createServer (end-to-end)", () => {
     expect(await staticFile.text()).toContain("home");
   });
 
+  it("sets baseline security headers and refuses to serve a dotfile", async () => {
+    const publicDir = dataDir();
+    writeFileSync(join(publicDir, ".env"), "SECRET=nope");
+    writeFileSync(join(publicDir, "index.html"), "<h1>home</h1>");
+
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      publicDir,
+      mounts: [webfingerMount],
+      env: {},
+    });
+
+    const res = await fetch(`${base}/index.html`);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-frame-options")).toBeTruthy();
+    // No CSP: publicDir can serve an arbitrary self-hosted site.
+    expect(res.headers.get("content-security-policy")).toBeNull();
+
+    const dotfile = await fetch(`${base}/.env`);
+    expect(dotfile.status).not.toBe(200);
+  });
+
   it("runs the configurable fallback for unmatched routes (default 404)", async () => {
     await start({
       baseUrl: "http://localhost",

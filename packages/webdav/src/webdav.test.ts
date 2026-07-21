@@ -757,6 +757,16 @@ describe("createWebdav — lock/verb edge cases", () => {
     });
   });
 
+  it("rejects a MKCOL body sent without Content-Length (e.g. chunked transfer-encoding) with 415", async () => {
+    // A body with no Content-Length header must not default to "length 0"
+    // and slip through — that was the bug: chunked requests never carry a
+    // Content-Length up front.
+    await withHandler(async ({ call }) => {
+      const res = await call("MKCOL", "/chunked", { body: "junk" });
+      expect(res.status).toBe(415);
+    });
+  });
+
   it("reports collection metadata with 204 on a bare GET", async () => {
     await withHandler(async ({ call }) => {
       await call("MKCOL", "/col");

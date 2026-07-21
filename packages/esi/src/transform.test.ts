@@ -94,6 +94,8 @@ describe("createEsiTransformStream", () => {
     expect(out).toBe("F(https://example.com/1)F(https://example.com/2)");
     expect(logger.warnCalls.length).toBe(1);
     expect(logger.warnCalls[0]?.[0]).toBe("esi.include.dropped_max_includes");
+    // Host-only: the full src URL (path/query) must never reach the logger.
+    expect(logger.warnCalls[0]?.[1]).toEqual({ host: "example.com" });
   });
 
   it("never exceeds the configured concurrency of in-flight fragment fetches", async () => {

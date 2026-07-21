@@ -28,6 +28,13 @@ export interface SolidPodEnv {
    * without ever waking a Durable Object.
    */
   readonly GC_DB?: D1Database;
+  /**
+   * App-password hashing pepper for the WebDAV façade's `CredentialStore`
+   * (`@dwk/webdav`'s `WebdavEnv.WEBDAV_PEPPER`). Optional: when unset, app
+   * passwords hash without a pepper (salt alone), same as before this binding
+   * existed.
+   */
+  readonly WEBDAV_PEPPER?: string;
 }
 
 /** Cloudflare bindings required by the out-of-band R2 garbage-collection cron. */
@@ -95,13 +102,6 @@ export interface SolidPodConfig {
    * of the DO SQLite quad store. Defaults to the ~2 MB DO-cell ceiling.
    */
   readonly maxInlineBytes?: number;
-
-  /**
-   * The documented read-replay tradeoff: reads MAY reuse a DPoP proof within
-   * this many seconds (edge-cached window) rather than enforcing strict
-   * single-use `jti`. Writes are always strict. Defaults to `0` (strict reads).
-   */
-  readonly readReplayWindowSeconds?: number;
 
   /**
    * Allow **unauthenticated** writes (`PUT`/`POST`/`PATCH`/`DELETE`) when WAC
@@ -179,7 +179,6 @@ export interface ResolvedConfig {
   readonly jwks?: Jwks;
   readonly jwksUri?: string;
   readonly maxInlineBytes?: number;
-  readonly readReplayWindowSeconds: number;
   readonly allowAnonymousWrites: boolean;
   readonly gcSafetyWindowMs: number;
   readonly now: () => number;
@@ -268,7 +267,6 @@ export function resolveConfig(config: SolidPodConfig): ResolvedConfig {
     jwks: config.jwks,
     jwksUri: config.jwksUri,
     maxInlineBytes: config.maxInlineBytes,
-    readReplayWindowSeconds: config.readReplayWindowSeconds ?? 0,
     allowAnonymousWrites: config.allowAnonymousWrites ?? false,
     gcSafetyWindowMs: config.gcSafetyWindowMs ?? DEFAULT_GC_SAFETY_WINDOW_MS,
     now: config.now ?? (() => Date.now()),

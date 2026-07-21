@@ -30,6 +30,10 @@ describe("resolveFragment", () => {
     });
     expect(body).toBe("");
     expect(logger.debug).toHaveBeenCalledTimes(1);
+    // Host-only: the full src URL (path/query) must never reach the logger.
+    expect(logger.debug).toHaveBeenCalledWith("esi.fragment.failed", {
+      host: "example.com",
+    });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
@@ -71,6 +75,11 @@ describe("resolveFragment", () => {
     expect(body).toBe("");
     expect(fetchFn).toHaveBeenCalledTimes(2);
     expect(logger.warn).toHaveBeenCalledTimes(1);
+    // Host-only: neither the full src nor alt URL reaches the logger.
+    expect(logger.warn).toHaveBeenCalledWith("esi.fragment.failed", {
+      host: "example.com",
+      altHost: "example.com",
+    });
   });
 
   it("resolves to '' logged at warn when there is no onerror and no alt", async () => {
