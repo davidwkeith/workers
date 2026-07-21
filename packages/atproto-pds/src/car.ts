@@ -24,22 +24,65 @@ function lengthPrefixed(body: Uint8Array): Uint8Array {
   return concatBytes([encodeVarint(body.length), body]);
 }
 
+function carHeader(roots: CID[]): Uint8Array {
+  return lengthPrefixed(
+    encodeCbor({ roots: roots.map((cid) => cid), version: 1 }),
+  );
+}
+
+function carBlockRecord(block: CarBlock): Uint8Array {
+  return lengthPrefixed(concatBytes([block.cid.bytes, block.bytes]));
+}
+
 /**
  * Serialise a CARv1 with `roots` as its declared roots and `blocks` as its body.
  * The caller is responsible for including every block transitively reachable
  * from the roots.
  */
 export function writeCar(roots: CID[], blocks: Iterable<CarBlock>): Uint8Array {
-  const header = encodeCbor({
-    roots: roots.map((cid) => cid),
-    version: 1,
-  });
-  const chunks: Uint8Array[] = [lengthPrefixed(header)];
+  const chunks: Uint8Array[] = [carHeader(roots)];
   for (const block of blocks) {
-    const record = concatBytes([block.cid.bytes, block.bytes]);
-    chunks.push(lengthPrefixed(record));
+    chunks.push(carBlockRecord(block));
   }
   return concatBytes(chunks);
+}
+
+/**
+ * Serialise a CARv1 as a `ReadableStream`: the header and each block are
+ * encoded and enqueued only as the stream is pulled, one block at a time. A
+ * caller backed by a lazy `blocks` iterator (e.g. a SQL cursor decoding one
+ * row per step) never has to hold the full archive — or even every block —
+ * in memory at once, and the response streams to the client as it is built
+ * rather than after the whole thing is assembled.
+ */
+export function writeCarStream(
+  roots: CID[],
+  blocks: Iterable<CarBlock>,
+): ReadableStream<Uint8Array> {
+  let headerSent = false;
+  const iterator = blocks[Symbol.iterator]();
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (!headerSent) {
+        headerSent = true;
+        controller.enqueue(carHeader(roots));
+        return;
+      }
+      const next = iterator.next();
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(carBlockRecord(next.value));
+    },
+    cancel() {
+      // An early-aborted read (e.g. a Relay disconnecting mid-`getRepo`, the
+      // scenario this streaming form exists for) must not leave a
+      // generator-backed `blocks` iterator (holding a live SQL cursor)
+      // suspended for GC to eventually finalize.
+      iterator.return?.();
+    },
+  });
 }
 
 /** A parsed CAR: its declared roots and the blocks it carried. */

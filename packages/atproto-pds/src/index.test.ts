@@ -443,6 +443,51 @@ describe("AT Protocol PDS", () => {
     expect(car.blocks.some((b) => b.cid.equals(commit.data))).toBe(true);
   });
 
+  it("streams a multi-record getRepo export as a real ReadableStream, containing every record", async () => {
+    const host = "carstream.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const rkeys = ["a", "b", "c", "d", "e"];
+    for (const rkey of rkeys) {
+      await call(handler, host, "/xrpc/com.atproto.repo.createRecord", {
+        body: {
+          collection: "app.bsky.feed.post",
+          rkey,
+          record: { $type: "app.bsky.feed.post", text: `post ${rkey}` },
+        },
+        token,
+      });
+    }
+
+    const carRes = await call(
+      handler,
+      host,
+      "/xrpc/com.atproto.sync.getRepo?did=" + host,
+    );
+    // The response body is a stream, not a pre-buffered `BodyInit`.
+    expect(carRes.body).toBeInstanceOf(ReadableStream);
+
+    const car = readCar(new Uint8Array(await carRes.arrayBuffer()));
+    const head = (await (
+      await call(handler, host, "/xrpc/com.atproto.sync.getLatestCommit")
+    ).json()) as { cid: string };
+    expect(car.roots[0]!.toString()).toBe(head.cid);
+
+    // Every record's block is present, self-contained, and byte-correct.
+    for (const rkey of rkeys) {
+      const record = encodeCbor(
+        jsonToCbor({
+          $type: "app.bsky.feed.post",
+          text: `post ${rkey}`,
+        } as JsonValue),
+      );
+      const cid = await CID.create(DAG_CBOR_CODEC, record);
+      const found = car.blocks.find((b) => b.cid.equals(cid));
+      expect(found).toBeDefined();
+      expect([...found!.bytes]).toEqual([...record]);
+    }
+  });
+
   it("signs commits with secp256k1 when configured, advertising a k-256 key", async () => {
     const host = "k256.example";
     const handler = pdsK256(host);
