@@ -244,7 +244,10 @@ requested scopes to the owner at consent time.
 
 ### Storage
 
-Three tables in D1 — `mastodon_apps`, `mastodon_codes`, `mastodon_tokens` —
+Four tables in D1 — `mastodon_apps`, `mastodon_codes`, `mastodon_tokens`,
+and `mastodon_markers` (saved read positions per timeline — per-account
+state, and this deployment has one account, so two rows; kept in D1 rather
+than the DO because it is client-session state, not federation state) —
 behind a store interface defined in `@dwk/mastodon-api` (adding the
 `getClient(clientId)` read that `@dwk/oauth`'s `saveClient`-only seam
 deliberately leaves to consumers). The catalog entry declares the binding as
@@ -272,6 +275,7 @@ the binding acceptance test is real clients (see Conformance).
 | `GET /api/v1/accounts/verify_credentials` | `ActorProfile` config + `__stats` counts |
 | `GET /api/v1/accounts/:id` | own actor from config; remote actors synthesized from stored activity JSON |
 | `GET /api/v1/timelines/home` | `__client/timeline` |
+| `GET`/`POST /api/v1/markers` | D1 `mastodon_markers` (two rows: `home` + `notifications` read positions) |
 | `GET /api/v1/notifications` | `__client/notifications` |
 | `GET /api/v1/statuses/:id` | `entry(id)` |
 
@@ -287,9 +291,8 @@ hard-error on `404`/`500`, so each returns `200` with an empty-but-valid
 body: `/api/v1/filters`, `/api/v2/filters`, `/api/v1/lists`,
 `/api/v1/custom_emojis`, `/api/v1/announcements`, `/api/v1/follow_requests`,
 `/api/v1/conversations`, `/api/v1/favourites`, `/api/v1/bookmarks`,
-`/api/v1/preferences` (defaults object), and `/api/v1/markers` (`GET` echoes
-stored-nothing `{}`; `POST` accepts and echoes so read-position saving
-doesn't error). The stub roster is data-driven in the router so conformance
+and `/api/v1/preferences` (defaults object). The stub roster is data-driven
+in the router so conformance
 runs can grow it without new code paths. Everything else under `/api/`
 returns Mastodon's error shape (`404` + `{"error": "..."}`).
 
@@ -462,9 +465,11 @@ change `@dwk/activitypub` only additively (internal routes, one export).
 
 ## Open questions
 
-- **Marker persistence** — v1 stubs `/api/v1/markers` as accept-and-echo;
-  if the client matrix shows a client that regresses badly without real
-  read-position storage, a two-row DO table is the fix (additive).
+- ~~Marker persistence~~ — **resolved (#327 discussion): real storage in
+  v1.** Markers need no DO surface after all — per-account state with one
+  account is two D1 rows (`mastodon_markers`), one store method and two
+  thin handlers, so clients resume at the owner's read position from day
+  one (see the endpoint roster and Storage).
 - **`client_credentials` necessity** — listed SHOULD; confirm during the
   phase-1 client matrix whether the target clients actually require it and
   drop it from scope if none do.
