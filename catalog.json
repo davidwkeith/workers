@@ -253,6 +253,65 @@
       ]
     },
     {
+      "id": "mastodon-api",
+      "package": "@dwk/mastodon-api",
+      "displayName": "Fediverse client login",
+      "description": "Log in with Mastodon-compatible apps (Pixelfed, Tusky) to browse this site's fediverse notifications and timeline.",
+      "group": "social",
+      "binding": {
+        "kind": "settingsActivated"
+      },
+      "requires": ["activitypub"],
+      "resources": [
+        {
+          "type": "durable-object",
+          "binding": "ACTOR",
+          "className": "ActivityPubObject",
+          "sqlite": true
+        },
+        {
+          "type": "d1",
+          "binding": "AUTH_DB"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/api/v1/",
+          "match": "prefix",
+          "methods": ["GET", "POST"],
+          "handler": "createActivitypubMastodonApi",
+          "specificationURL": "https://docs.joinmastodon.org/api/"
+        },
+        {
+          "path": "/api/v2/",
+          "match": "prefix",
+          "methods": ["GET"],
+          "handler": "createActivitypubMastodonApi",
+          "specificationURL": "https://docs.joinmastodon.org/api/"
+        },
+        {
+          "path": "/oauth/authorize",
+          "match": "exact",
+          "methods": ["GET"],
+          "handler": "createActivitypubMastodonApi",
+          "authorityBinding": true
+        },
+        {
+          "path": "/oauth/token",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createActivitypubMastodonApi",
+          "authorityBinding": true
+        },
+        {
+          "path": "/oauth/revoke",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createActivitypubMastodonApi"
+        }
+      ]
+    },
+    {
       "id": "webfinger",
       "package": "@dwk/webfinger",
       "displayName": "WebFinger",
