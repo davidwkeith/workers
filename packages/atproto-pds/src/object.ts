@@ -22,7 +22,7 @@ import {
   verifyJwt,
   type SessionClaims,
 } from "./auth.js";
-import { writeCar, type CarBlock } from "./car.js";
+import { writeCar, writeCarStream, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 import {
@@ -138,6 +138,37 @@ function unbase64(text: string): Uint8Array {
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
+}
+
+/**
+ * Yield every record's block, decoding one row at a time from the SQL cursor
+ * as the generator is advanced (never `.toArray()`d), so a `getRepo` export
+ * streamed through {@link writeCarStream} holds at most one decoded record
+ * body in memory at once instead of the whole repository.
+ */
+function* repoRecordBlocks(sql: SqlStorage): Generator<CarBlock> {
+  for (const row of sql.exec("SELECT cid, value FROM records")) {
+    yield {
+      cid: CID.parse(row.cid as string),
+      bytes: unbase64(row.value as string),
+    };
+  }
+}
+
+/** The full block set for a `getRepo` export CAR: the signed commit, every MST
+ * node (already resident in memory from the `buildMst` call), then every
+ * record body streamed lazily via {@link repoRecordBlocks}. */
+function* repoBlocks(
+  headCid: CID,
+  headBytes: Uint8Array,
+  nodeBlocks: ReadonlyMap<string, Uint8Array>,
+  sql: SqlStorage,
+): Generator<CarBlock> {
+  yield { cid: headCid, bytes: headBytes };
+  for (const [cidStr, bytes] of nodeBlocks) {
+    yield { cid: CID.parse(cidStr), bytes };
+  }
+  yield* repoRecordBlocks(sql);
 }
 
 export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
@@ -1239,6 +1270,22 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   /**
+   * Read all records into MST entries without decoding any record body — used
+   * by {@link #getRepo}, which streams record blocks separately (see
+   * {@link repoRecordBlocks}) instead of buffering every decoded body up
+   * front the way {@link #entries} does for the commit path.
+   */
+  #mstEntries(): MstEntry[] {
+    return this.#sql
+      .exec("SELECT collection, rkey, cid FROM records")
+      .toArray()
+      .map((row) => ({
+        key: recordPath(row.collection as string, row.rkey as string),
+        value: CID.parse(row.cid as string),
+      }));
+  }
+
+  /**
    * Build the MST, sign a new commit chaining to the prior head, and store it.
    * When `ops` is given (a record write/delete or a migration import), a
    * `#commit` event is appended to the firehose and broadcast to subscribers;
@@ -1508,17 +1555,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     const headBytes = this.#kvGet("head_bytes");
     if (!headCid || !headBytes)
       throw namedError(404, "RepoNotFound", "Empty repo");
-    const { entries, blocks } = this.#entries();
-    const { blocks: nodeBlocks } = await buildMst(entries);
-    const car: CarBlock[] = [
-      { cid: CID.parse(headCid), bytes: unbase64(headBytes) },
-    ];
-    for (const [cidStr, bytes] of nodeBlocks) {
-      car.push({ cid: CID.parse(cidStr), bytes });
-    }
-    car.push(...blocks);
-    const body = writeCar([CID.parse(headCid)], car);
-    return new Response(body as BodyInit, {
+    const { blocks: nodeBlocks } = await buildMst(this.#mstEntries());
+    const cid = CID.parse(headCid);
+    const bytes = unbase64(headBytes);
+    // Stream the CAR out rather than materializing it in memory: every
+    // Relay/AppView doing a full sync calls this, and it's the `tooBig`
+    // firehose fallback, so a large repository must not have to fit in the
+    // DO's 128 MB. `repoBlocks` decodes one record body at a time as the
+    // stream is pulled.
+    const body = writeCarStream(
+      [cid],
+      repoBlocks(cid, bytes, nodeBlocks, this.#sql),
+    );
+    return new Response(body, {
       headers: { "content-type": CAR_CONTENT_TYPE },
     });
   }
