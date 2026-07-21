@@ -1203,14 +1203,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   ): "timeline" | "favourite" | "reblog" | "mention" | null {
     const type = activity.type;
     if (type === "Create" || type === "Update") {
-      const objType = objectType(activity.object);
-      const postShapes = ["Note", "Article", "Page", "Video"];
-      if (objType !== undefined && postShapes.includes(objType)) {
-        return "timeline";
-      }
       // A reply/mention targeting this actor is a notification, not a
       // timeline entry (the timeline is "things I follow posted", the
-      // notification is "someone addressed me").
+      // notification is "someone addressed me"). This MUST be checked
+      // before the post-shape → "timeline" fallback below: a real
+      // reply/mention is almost always a Create of a Note (itself a post
+      // shape), so checking post-shape first would make this branch
+      // unreachable in the common case.
       const object = activity.object;
       const inReplyTo =
         object && typeof object === "object" && !Array.isArray(object)
@@ -1221,6 +1220,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         inReplyTo.startsWith(this.#config!.iris.id)
       ) {
         return "mention";
+      }
+      const objType = objectType(activity.object);
+      const postShapes = ["Note", "Article", "Page", "Video"];
+      if (objType !== undefined && postShapes.includes(objType)) {
+        return "timeline";
       }
       return null;
     }
@@ -1310,10 +1314,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
             : null;
     let cursorSeq = tieSeq !== null ? Number(tieSeq) : null;
     let exhausted = false;
+    // Tracks whether we've issued the first internal batch query yet — the
+    // cursor-continuation WHERE clause below must apply to every batch after
+    // the first regardless of how many matches have been found so far.
+    // Gating it on `matches.length > 0` instead (as a prior version did) lets
+    // a zero-match first batch re-issue the exact same query forever.
+    let isFirstBatch = true;
     while (matches.length < limit && !exhausted) {
       let batchWhere = where;
       const batchParams = [...params];
-      if (cursorReceivedAt !== null && matches.length > 0) {
+      if (cursorReceivedAt !== null && !isFirstBatch) {
         // Subsequent internal batches page from the last row seen so far.
         batchWhere +=
           cursorSeq !== null
@@ -1339,6 +1349,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           BATCH,
         )
         .toArray();
+      isFirstBatch = false;
       if (rows.length === 0) {
         break;
       }

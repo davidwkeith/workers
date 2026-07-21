@@ -2404,6 +2404,24 @@ function announceActivity(id: string, object: string): Record<string, unknown> {
   return { id, type: "Announce", actor: REMOTE, object };
 }
 
+/**
+ * A Create(Note) activity from REMOTE that replies to (mentions) `inReplyTo`
+ * — a post shape (Note) AND a reply, to exercise the ordering between the
+ * "mention" and "timeline" branches of `#classifyClientEntry`.
+ */
+function mentionCreateActivity(
+  id: string,
+  inReplyTo: string,
+  content = "hey you",
+): Record<string, unknown> {
+  return {
+    id,
+    type: "Create",
+    actor: REMOTE,
+    object: { type: "Note", content, attributedTo: REMOTE, inReplyTo },
+  };
+}
+
 /** A GET to a `__client/*` internal route, with the internal marker set. */
 function clientRequest(username: string, pathAndQuery: string): Request {
   const iris = deriveIris(BASE, username);
@@ -2589,6 +2607,105 @@ describe("__client/notifications", () => {
             i.activity.id === "https://remote.example/activities/notif-follow",
         ),
       ).toBe(false);
+    });
+  });
+
+  it(
+    "finds a match in a later internal batch when the first batch (size " +
+      "max(limit*4, 40)) has zero matches — regression: the cursor-" +
+      "continuation clause must apply to every batch after the first " +
+      "regardless of how many matches have been found so far, or a zero-" +
+      "match first batch re-issues the same query forever",
+    async () => {
+      const { username, stub } = freshUser();
+      await runInDurableObject(stub, async (instance) => {
+        // Deliver the favourite (Like) row FIRST so it gets the lowest
+        // seq/received_at — i.e. it's the *oldest* row. With limit=1, BATCH
+        // = max(1*4, 40) = 40, and the default order is `received_at DESC,
+        // seq DESC` (newest first), so the first internal batch of 40 rows
+        // is exactly the 40 timeline (Create/Note) rows below, and the
+        // older Like row is only reachable via a second, cursor-continued
+        // batch.
+        const likeId = "https://remote.example/activities/batch-miss-like";
+        const likeRes = await instance.fetch(
+          inboxRequest(username, JSON.stringify(likeActivity(likeId))),
+        );
+        expect(likeRes.status).toBe(202);
+
+        for (let i = 0; i < 40; i++) {
+          const res = await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify(
+                createNoteActivity(
+                  `https://remote.example/activities/batch-miss-create-${i}`,
+                ),
+              ),
+            ),
+          );
+          expect(res.status).toBe(202);
+        }
+
+        const res = await instance.fetch(
+          clientRequest(username, "/__client/notifications?limit=1"),
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          items: { activity: { id: string; type: string } }[];
+        };
+        expect(body.items).toHaveLength(1);
+        expect(body.items[0]?.activity.id).toBe(likeId);
+      });
+    },
+    20_000,
+  );
+
+  it("classifies a reply Create(Note) targeting this actor as mention, not timeline (regression: post-shape check must not shadow inReplyTo)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const mentionId = "https://remote.example/activities/notif-mention";
+      const plainTimelineId =
+        "https://remote.example/activities/notif-plain-timeline";
+      const mentionRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            mentionCreateActivity(mentionId, `${iris.id}/posts/own-status-1`),
+          ),
+        ),
+      );
+      expect(mentionRes.status).toBe(202);
+      // A plain top-level Create/Note with no inReplyTo — must still land in
+      // the timeline, not notifications (no regression on the ordinary case).
+      const plainRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(createNoteActivity(plainTimelineId)),
+        ),
+      );
+      expect(plainRes.status).toBe(202);
+
+      const notifRes = await instance.fetch(
+        clientRequest(username, "/__client/notifications?limit=10"),
+      );
+      expect(notifRes.status).toBe(200);
+      const notifBody = (await notifRes.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      const notifIds = notifBody.items.map((i) => i.activity.id);
+      expect(notifIds).toContain(mentionId);
+      expect(notifIds).not.toContain(plainTimelineId);
+
+      const timelineRes = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      expect(timelineRes.status).toBe(200);
+      const timelineBody = (await timelineRes.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      const timelineIds = timelineBody.items.map((i) => i.activity.id);
+      expect(timelineIds).not.toContain(mentionId);
+      expect(timelineIds).toContain(plainTimelineId);
     });
   });
 });
