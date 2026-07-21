@@ -12,15 +12,16 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **26 publishable packages** — the
+**Status: implemented, unreleased.** There are **27 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
 `@dwk/store`, `@dwk/mcp`, `@dwk/esi`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
-`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`) — plus two private
-packages that are never published: a 27th, `@dwk/server`, the Node/Express
+`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`) —
+plus two private
+packages that are never published: `@dwk/server`, the Node/Express
 self-hosting host (marked `"private": true`, ships only as a Docker image),
 and `@dwk/conformance-target`, the deployed conformance Worker
 (`conformance.dwk.io`) every endpoint package composes into for the hosted
@@ -29,7 +30,8 @@ Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. Versioning is via Changesets **pre mode**
 (`.changeset/pre.json`, tag `beta`); the packages are published to npm as
 `0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds`,
-`@dwk/calendar`, `@dwk/webdav`, and `@dwk/mcp` are the most recently added). Note that in pre
+`@dwk/calendar`, `@dwk/webdav`, `@dwk/mcp`, and `@dwk/mastodon-api` are the
+most recently added). Note that in pre
 mode, packages with no prior
 stable release publish to the **`latest`** dist-tag, not `beta`, so plain
 `npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
@@ -63,6 +65,15 @@ and the v2 contributions (`@dwk/solid-pod`'s `createSolidPodMcpTools` →
 authorization as a second, resource-level check beneath the MCP scope;
 `@dwk/activitypub`'s `createActivitypubMcpTools` → `activitypub_list_inbox`)
 are all implemented (see `spec/packages/mcp.md`, tracked in #240/#262).
+`@dwk/mastodon-api` is the newest — a Mastodon-compatible client API subset
+(spec/mastodon-client-api.md, #327) so off-the-shelf fediverse apps (Pixelfed,
+Tusky) can log in and browse the owner's account read-only. **Phase 1 is
+implemented** (app registration, the Mastodon app OAuth flow over `@dwk/oauth`
+with opaque hashed bearer tokens — the documented DPoP exception — instance
+documents, `verify_credentials`, markers, stub roster; #348); the DO-backed
+read surface (timelines/notifications via the `MastodonBackend` seam and
+`@dwk/activitypub`'s `createActivitypubMastodonApi` adapter) is phase 2 (#349),
+fidelity is phase 3 (#350).
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
@@ -129,7 +140,10 @@ injected state.
 - **Endpoint / standard packages** — named for the standard:
   `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
   `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`.
+  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`,
+  `@dwk/mastodon-api` (named for the de-facto Mastodon client API standard;
+  reads `@dwk/activitypub`'s DO only through its injected `MastodonBackend`
+  seam).
   `@dwk/atproto-pds` is the strategic outlier: it is the AT Protocol PDS endpoint
   but shares neither `@dwk/store` nor `@dwk/rdf` (its repository is an MST of
   DAG-CBOR records), so its storage core is self-contained.
@@ -228,7 +242,8 @@ packages/<name>/
   `negotiation.ts`, `inbox.ts`/`sender.ts`). `workerd`-bound
   packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
   `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`,
-  `@dwk/atproto-pds`, `@dwk/webdav`) keep a `test-harness.ts` (excluded from
+  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`) keep a
+  `test-harness.ts` (excluded from
   both the build and the published `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
   Object (from `pod.ts`) and a GC handler (`gc.ts`).
 
@@ -246,7 +261,7 @@ when adding a package:
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
-  `@dwk/atproto-pds`, `@dwk/webdav`.
+  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`.
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.
