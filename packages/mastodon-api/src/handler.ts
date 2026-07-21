@@ -12,6 +12,7 @@ import { recordNotFound } from "./errors.js";
 import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
+import { stubRouteEntries } from "./stubs.js";
 
 /** Per-request context threaded to route handlers. */
 export interface RouteContext {
@@ -36,6 +37,7 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],
+    ...stubRouteEntries(),
   ],
 );
 
