@@ -303,10 +303,16 @@ returns Mastodon's error shape (`404` + `{"error": "..."}`).
 
 Mastodon IDs must be strings that sort chronologically, and enough clients
 parse them as 64-bit integers that they must be numeric. Entries use
-**Mastodon's own snowflake scheme**: `(received_at_ms << 16) | (seq & 0xFFFF)`
-rendered as a decimal string — chronologically ordered, unique per actor
-(the DO's `seq` breaks same-millisecond ties), and derivable from existing
-columns with no schema change. The DO route translates snowflakes back to
+**Mastodon's own snowflake scheme**:
+`(received_at_ms << 16) | (source << 15) | (seq & 0x7FFF)` rendered as a
+decimal string — chronologically ordered, unique per actor, and derivable
+from existing columns with no schema change. `source` is a reserved bit
+distinguishing the row's table (`0` = inbox, `1` = outbox): v1 only ever
+mints inbox IDs, but reserving the bit now means the phase-3 merge of the
+owner's own posts into the home timeline is purely additive — IDs are
+persisted in client caches and in `mastodon_markers`, so their meaning must
+never change after first ship. The remaining 15 bits of `seq` break
+same-millisecond ties. The DO route translates snowflakes back to
 `seq` bounds for its SQL cursor. List endpoints honor `limit` (clamped),
 `max_id`, `since_id`, `min_id` and return RFC 8288 `Link: rel="next"/"prev"`
 headers, which is how every client pages.
@@ -459,9 +465,10 @@ The suite is "real clients log in and render", not a rocks-style harness:
    `@dwk/activitypub`; timelines/home; notifications; statuses/:id;
    accounts/:id; snowflake pagination. Acceptance: the pixelfed-qa step-4
    like + reply are visible in a real client; runbook + status.json land.
-3. **Fidelity**: actor-profile hydration cache; counters; any quirks the
-   client matrix surfaces (each recorded in the runbook, fixed, and
-   fixture-tested).
+3. **Fidelity**: actor-profile hydration cache; merging the owner's own
+   `outbox` posts into the home timeline (additive thanks to the reserved
+   snowflake source bit); counters; any quirks the client matrix surfaces
+   (each recorded in the runbook, fixed, and fixture-tested).
 
 Each phase is independently shippable and changeset-recorded; phases 2–3
 change `@dwk/activitypub` only additively (internal routes, one export).
@@ -478,11 +485,12 @@ change `@dwk/activitypub` only additively (internal routes, one export).
   token-minting paths (one extra `grant_type` branch, account-less token
   with public-only reach), and a client that needs it fails *before*
   login — the one place the conformance matrix cannot route around.
-- **Home-timeline completeness** — v1 serves the inbox (posts *received*
-  from followed actors). Mastodon's home also shows the owner's own posts;
-  merging `outbox` rows into the timeline needs an id-space decision (a
-  source bit in the snowflake) and is deferred until a client-matrix run
-  shows it matters for the read-your-notifications use case.
+- ~~Home-timeline completeness~~ — **resolved (#327 discussion): reserve
+  the snowflake source bit now, merge later.** v1 serves the inbox only
+  (posts *received* from followed actors — the motivating use case), but
+  the ID scheme reserves a source bit from day one so IDs already persisted
+  by clients and `mastodon_markers` survive the phase-3 merge of the
+  owner's own `outbox` posts unchanged (see IDs and pagination).
 - **Naming** — `@dwk/mastodon-api` here; the issue floated
   `@dwk/mastodon-client-api`. Decide before the catalog id (forever-stable)
   lands in phase 1.
