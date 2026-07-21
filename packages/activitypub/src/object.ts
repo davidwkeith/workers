@@ -1291,6 +1291,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * occurrences (replay burst). A row larger than the remaining budget is
    * split — the drained part is decremented off, the rest stays queued for the
    * next drain — so a backlog is never dropped, only spread across requests.
+   * Selection order (`event, fields`) is deterministic, not FIFO/fair: under
+   * sustained churn with rare drains, alphabetically-later keys can be
+   * delayed behind ever-reincremented earlier ones — acceptable because these
+   * counters are delay-tolerant aggregates, and never lost (the cardinality
+   * cap, not ordering, is the only place attribution degrades).
    */
   #drainPendingMetrics(): PendingMetric[] {
     const rows = this.#sql
