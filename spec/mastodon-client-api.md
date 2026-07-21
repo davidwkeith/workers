@@ -197,10 +197,13 @@ or token format. Rationale:
   redeem the code single-use (conditional-UPDATE, the IndieAuth store
   pattern), verify PKCE when a challenge was recorded, mint the access
   token. Response `{access_token, token_type: "Bearer", scope, created_at}`.
-  The `client_credentials` grant is a SHOULD (some clients, including the
-  official Mastodon app, fetch an app-level token before login; it grants no
-  account access — only `/api/v1/apps/verify_credentials` and public
-  instance endpoints accept it).
+  The `client_credentials` grant ships in v1 (some clients, including the
+  official Mastodon app, fetch an app-level token before login, and a
+  missing grant fails them before the owner can even authorize): one extra
+  `grant_type` branch over the same client-auth and token-minting paths,
+  minting a token bound to no account — only
+  `/api/v1/apps/verify_credentials` and public instance endpoints accept
+  it.
 - **`POST /oauth/revoke`** — `@dwk/oauth`'s `createRevocationHandler` with
   client authentication; always `200` per RFC 7009 and Mastodon behavior.
 
@@ -470,9 +473,11 @@ change `@dwk/activitypub` only additively (internal routes, one export).
   account is two D1 rows (`mastodon_markers`), one store method and two
   thin handlers, so clients resume at the owner's read position from day
   one (see the endpoint roster and Storage).
-- **`client_credentials` necessity** — listed SHOULD; confirm during the
-  phase-1 client matrix whether the target clients actually require it and
-  drop it from scope if none do.
+- ~~`client_credentials` necessity~~ — **resolved (#327 discussion): in
+  for v1.** It reuses the authorization-code grant's client-auth and
+  token-minting paths (one extra `grant_type` branch, account-less token
+  with public-only reach), and a client that needs it fails *before*
+  login — the one place the conformance matrix cannot route around.
 - **Home-timeline completeness** — v1 serves the inbox (posts *received*
   from followed actors). Mastodon's home also shows the owner's own posts;
   merging `outbox` rows into the timeline needs an id-space decision (a
