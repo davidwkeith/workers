@@ -7,7 +7,11 @@ import {
   type ActivityPubEnv,
   type ForwardedConfig,
 } from "./config.js";
-import { ActivityPubLogEvent } from "./log.js";
+import {
+  ActivityPubLogEvent,
+  METRICS_DRAIN_HEADER,
+  METRICS_HEADER,
+} from "./log.js";
 
 /**
  * Branch-focused tests over the per-actor Durable Object ({@link
@@ -1941,6 +1945,22 @@ function deliveryCount(state: DurableObjectState): number {
     .one().n;
 }
 
+/**
+ * An internal request that opts in to draining the DO's pending counter
+ * deltas, as every front-door-forwarded request does (see handler.ts).
+ */
+function drainRequest(
+  username: string,
+  iris: ReturnType<typeof deriveIris>,
+): Request {
+  return new Request(`${iris.id}/__stats`, {
+    headers: {
+      [INTERNAL_HEADERS.config]: cfgHeader(username),
+      [METRICS_DRAIN_HEADER]: "1",
+    },
+  });
+}
+
 /** A request to the internal `__deliver` route that runs one delivery pass. */
 function deliverRequest(
   username: string,
@@ -2152,6 +2172,124 @@ describe("delivery outcome logging", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it("accumulates a counter delta per outcome and drains it on an opted-in request", async () => {
+    const { username, iris, stub } = freshUser();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) => {
+        await withFetch(
+          async () => new Response(null, { status: 202 }),
+          async () => {
+            // Two identical outcomes coalesce into one delta with n = 2.
+            seedDelivery(state, `${REMOTE}/inbox`);
+            seedDelivery(state, `${REMOTE}/inbox`);
+            await instance.fetch(deliverRequest(username, { privateKeyPem }));
+          },
+        );
+        const drained = await instance.fetch(drainRequest(username, iris));
+        expect(JSON.parse(drained.headers.get(METRICS_HEADER) ?? "")).toEqual([
+          {
+            event: ActivityPubLogEvent.DeliverySucceeded,
+            fields: { status: 202, targetHost: "remote.example" },
+            n: 2,
+          },
+        ]);
+        // Drained deltas are gone: the next drain carries nothing.
+        const again = await instance.fetch(drainRequest(username, iris));
+        expect(again.headers.get(METRICS_HEADER)).toBeNull();
+      });
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("retains counter deltas across a request that does not opt in to drain", async () => {
+    const { username, iris, stub } = freshUser();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) => {
+        seedDelivery(state, "https://localhost/inbox");
+        await instance.fetch(deliverRequest(username, { privateKeyPem }));
+        // A plain internal request (no drain header) must neither carry nor
+        // consume the deltas.
+        const plain = await instance.fetch(
+          new Request(`${iris.id}/__stats`, {
+            headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+          }),
+        );
+        expect(plain.headers.get(METRICS_HEADER)).toBeNull();
+        const drained = await instance.fetch(drainRequest(username, iris));
+        expect(JSON.parse(drained.headers.get(METRICS_HEADER) ?? "")).toEqual([
+          {
+            event: ActivityPubLogEvent.DeliveryBlocked,
+            fields: { reason: "blocked_host", targetHost: "localhost" },
+            n: 1,
+          },
+        ]);
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("tallies into the overflow counter at the pending-metrics cardinality cap", async () => {
+    const { username, stub } = freshUser();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await runInDurableObject(stub, async (instance, state) => {
+        for (let i = 0; i < 256; i++) {
+          state.storage.sql.exec(
+            `INSERT INTO pending_metrics (event, fields, n) VALUES (?, '{}', 1)`,
+            `filler.${i}`,
+          );
+        }
+        await withFetch(
+          async () => new Response(null, { status: 202 }),
+          async () => {
+            seedDelivery(state, `${REMOTE}/inbox`);
+            await instance.fetch(deliverRequest(username, { privateKeyPem }));
+          },
+        );
+        const overflow = state.storage.sql
+          .exec<{ n: number }>(
+            `SELECT n FROM pending_metrics WHERE event = ?`,
+            ActivityPubLogEvent.MetricsOverflow,
+          )
+          .toArray();
+        expect(overflow).toEqual([{ n: 1 }]);
+        const succeeded = state.storage.sql
+          .exec<{ n: number }>(
+            `SELECT COUNT(*) AS n FROM pending_metrics WHERE event = ?`,
+            ActivityPubLogEvent.DeliverySucceeded,
+          )
+          .one().n;
+        expect(succeeded).toBe(0);
+      });
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("splits a delta larger than the drain budget across successive drains", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO pending_metrics (event, fields, n) VALUES (?, '{}', 300)`,
+        ActivityPubLogEvent.DeliverySucceeded,
+      );
+      const first = await instance.fetch(drainRequest(username, iris));
+      expect(JSON.parse(first.headers.get(METRICS_HEADER) ?? "")).toEqual([
+        { event: ActivityPubLogEvent.DeliverySucceeded, fields: {}, n: 256 },
+      ]);
+      const second = await instance.fetch(drainRequest(username, iris));
+      expect(JSON.parse(second.headers.get(METRICS_HEADER) ?? "")).toEqual([
+        { event: ActivityPubLogEvent.DeliverySucceeded, fields: {}, n: 44 },
+      ]);
+      const third = await instance.fetch(drainRequest(username, iris));
+      expect(third.headers.get(METRICS_HEADER)).toBeNull();
+    });
   });
 
   it("logs a pending-accept inbox resolution failure via console.warn, not dropped", async () => {
