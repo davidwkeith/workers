@@ -203,3 +203,232 @@ describe("GET /oauth/authorize", () => {
     expect(html).toContain(match?.[1] ?? "@@nope@@");
   });
 });
+
+/** Drive authorize and pull the minted code off the redirect. */
+async function obtainCode(
+  app: { client_id: string },
+  extra: Record<string, string> = {},
+): Promise<string> {
+  const res = await api()(
+    new Request(
+      authorizeUrl({
+        client_id: app.client_id,
+        redirect_uri: "app://oauth-callback",
+        response_type: "code",
+        scope: "read write",
+        ...extra,
+      }),
+    ),
+  );
+  const code = new URL(res.headers.get("location") ?? "").searchParams.get(
+    "code",
+  );
+  if (!code) throw new Error("authorize did not mint a code");
+  return code;
+}
+
+interface TokenResponse {
+  readonly access_token: string;
+  readonly token_type: string;
+  readonly scope: string;
+  readonly created_at: number;
+}
+
+function tokenRequest(fields: Record<string, string>): Request {
+  return new Request("https://owner.example/oauth/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields),
+  });
+}
+
+describe("POST /oauth/token", () => {
+  beforeEach(resetDb);
+
+  it("exchanges a code for a bearer token (hashed at rest, owner-bound)", async () => {
+    const app = await registerApp();
+    const code = await obtainCode(app);
+    const res = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://oauth-callback",
+        code,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const token = (await res.json()) as TokenResponse;
+    expect(token.token_type).toBe("Bearer");
+    expect(token.scope).toBe("read write");
+    expect(token.access_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(token.created_at).toBeGreaterThan(1_700_000_000);
+
+    const stored = await createMastodonStore(testEnv).getToken(
+      await sha256Hex(token.access_token),
+    );
+    expect(stored).not.toBeNull();
+    expect(stored?.accountId).toBe("1");
+    expect(stored?.clientId).toBe(app.client_id);
+  });
+
+  it("rejects a replayed code", async () => {
+    const app = await registerApp();
+    const code = await obtainCode(app);
+    const fields = {
+      grant_type: "authorization_code",
+      client_id: app.client_id,
+      client_secret: app.client_secret,
+      redirect_uri: "app://oauth-callback",
+      code,
+    };
+    expect((await api()(tokenRequest(fields))).status).toBe(200);
+    const replay = await api()(tokenRequest(fields));
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as { error: string }).error).toBe(
+      "invalid_grant",
+    );
+  });
+
+  it("rejects a wrong client_secret with 401", async () => {
+    const app = await registerApp();
+    const code = await obtainCode(app);
+    const res = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: "wrong",
+        redirect_uri: "app://oauth-callback",
+        code,
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_client",
+    );
+  });
+
+  it("rejects a mismatched redirect_uri", async () => {
+    const app = await registerApp({
+      redirect_uris: "app://oauth-callback\napp://other",
+    });
+    const code = await obtainCode(app);
+    const res = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://other",
+        code,
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("verifies PKCE when a challenge was recorded", async () => {
+    const app = await registerApp();
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    const good = await obtainCode(app, {
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    });
+    const ok = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://oauth-callback",
+        code: good,
+        code_verifier: verifier,
+      }),
+    );
+    expect(ok.status).toBe(200);
+
+    const bad = await obtainCode(app, {
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    });
+    const rejected = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://oauth-callback",
+        code: bad,
+        code_verifier: "not-the-verifier-at-all-not-the-verifier-at",
+      }),
+    );
+    expect(rejected.status).toBe(400);
+  });
+
+  it("supports client_credentials with an account-less token", async () => {
+    const app = await registerApp();
+    const res = await api()(
+      tokenRequest({
+        grant_type: "client_credentials",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+      }),
+    );
+    expect(res.status).toBe(200);
+    const token = (await res.json()) as TokenResponse;
+    const stored = await createMastodonStore(testEnv).getToken(
+      await sha256Hex(token.access_token),
+    );
+    expect(stored?.accountId).toBeNull();
+  });
+
+  it("accepts HTTP Basic client authentication", async () => {
+    const app = await registerApp();
+    const res = await api()(
+      new Request("https://owner.example/oauth/token", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Basic ${btoa(
+            `${app.client_id}:${app.client_secret}`,
+          )}`,
+        },
+        body: new URLSearchParams({ grant_type: "client_credentials" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a JSON body", async () => {
+    const app = await registerApp();
+    const code = await obtainCode(app);
+    const res = await api()(
+      new Request("https://owner.example/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          client_id: app.client_id,
+          client_secret: app.client_secret,
+          redirect_uri: "app://oauth-callback",
+          code,
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects unsupported grant types", async () => {
+    const app = await registerApp();
+    const res = await api()(
+      tokenRequest({
+        grant_type: "password",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        username: "owner",
+        password: "hunter2",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "unsupported_grant_type",
+    );
+  });
+});

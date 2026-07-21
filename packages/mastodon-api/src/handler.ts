@@ -8,7 +8,7 @@
 import { handleCreateApp } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
-import { handleAuthorize } from "./oauth-flow.js";
+import { handleAuthorize, handleToken } from "./oauth-flow.js";
 
 /** Per-request context threaded to route handlers. */
 export interface RouteContext {
@@ -25,6 +25,7 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
   [
     ["POST /api/v1/apps", handleCreateApp],
     ["GET /oauth/authorize", handleAuthorize],
+    ["POST /oauth/token", handleToken],
   ],
 );
 

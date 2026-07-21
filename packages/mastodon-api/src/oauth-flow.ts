@@ -8,11 +8,13 @@
 
 import type { ClientRecord } from "@dwk/oauth";
 
+import { authenticateClient } from "./auth.js";
 import type { MastodonAuthorizationRequest } from "./config.js";
-import { randomToken } from "./encoding.js";
-import { mastodonError } from "./errors.js";
+import { OWNER_ACCOUNT_ID } from "./config.js";
+import { randomToken, sha256Hex, verifyPkceS256 } from "./encoding.js";
 import type { RouteContext } from "./handler.js";
-import { createMastodonStore } from "./store.js";
+import { mastodonError } from "./errors.js";
+import { createMastodonStore, type MastodonStore } from "./store.js";
 
 /** RFC 8252 §7.1 out-of-band redirect: render the code instead of redirecting. */
 export const OOB_REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob";
@@ -154,4 +156,123 @@ export async function handleAuthorize(ctx: RouteContext): Promise<Response> {
   location.searchParams.set("code", code);
   if (state !== null) location.searchParams.set("state", state);
   return Response.redirect(location.toString(), 302);
+}
+
+/** RFC 6749-style token-endpoint error in Mastodon's JSON shape. */
+function tokenError(
+  status: number,
+  error: string,
+  description: string,
+): Response {
+  return new Response(
+    JSON.stringify({ error, error_description: description }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+}
+
+/** Normalize a JSON or form-encoded token-request body to search params. */
+async function readTokenParams(request: Request): Promise<URLSearchParams> {
+  const params = new URLSearchParams();
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const parsed = (await request.json()) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === "string") params.set(key, value);
+        }
+      }
+    } catch {
+      // Empty params; grant validation reports the 400.
+    }
+    return params;
+  }
+  try {
+    const form = await request.formData();
+    for (const [key, value] of form) {
+      if (typeof value === "string") params.set(key, value);
+    }
+  } catch {
+    // As above.
+  }
+  return params;
+}
+
+/** Mint, persist (hashed), and serialize an access token. */
+async function issueToken(
+  store: MastodonStore,
+  clientId: string,
+  scope: string,
+  accountId: string | null,
+): Promise<Response> {
+  const accessToken = randomToken();
+  const createdAt = Math.floor(Date.now() / 1000);
+  await store.saveToken({
+    tokenHash: await sha256Hex(accessToken),
+    clientId,
+    scope,
+    accountId,
+    createdAt,
+    revoked: false,
+  });
+  return Response.json({
+    access_token: accessToken,
+    token_type: "Bearer",
+    scope,
+    created_at: createdAt,
+  });
+}
+
+/** `POST /oauth/token` — `authorization_code` and `client_credentials`. */
+export async function handleToken(ctx: RouteContext): Promise<Response> {
+  const store = createMastodonStore(ctx.env);
+  const params = await readTokenParams(ctx.request);
+
+  const client = await authenticateClient(params, ctx.request.headers, store);
+  if (!client) {
+    return tokenError(401, "invalid_client", "client authentication failed");
+  }
+
+  const grantType = params.get("grant_type") ?? "";
+  if (grantType === "client_credentials") {
+    // App-level token (some clients fetch one before login): bound to no
+    // account — only apps/verify_credentials and public endpoints accept it.
+    const scope = params.get("scope") || registeredScope(client);
+    return issueToken(store, client.clientId, scope, null);
+  }
+
+  if (grantType !== "authorization_code") {
+    return tokenError(
+      400,
+      "unsupported_grant_type",
+      "supported grant types: authorization_code, client_credentials",
+    );
+  }
+
+  const code = params.get("code") ?? "";
+  const record = code
+    ? await store.redeemCode(code, Math.floor(Date.now() / 1000))
+    : null;
+  if (!record || record.clientId !== client.clientId) {
+    return tokenError(
+      400,
+      "invalid_grant",
+      "authorization code is invalid, expired, or already used",
+    );
+  }
+  if (params.get("redirect_uri") !== record.redirectUri) {
+    return tokenError(
+      400,
+      "invalid_grant",
+      "redirect_uri does not match the authorization request",
+    );
+  }
+  if (record.codeChallenge !== null) {
+    const verifier = params.get("code_verifier") ?? "";
+    if (!verifier || !(await verifyPkceS256(verifier, record.codeChallenge))) {
+      return tokenError(400, "invalid_grant", "PKCE verification failed");
+    }
+  }
+
+  return issueToken(store, client.clientId, record.scope, OWNER_ACCOUNT_ID);
 }
