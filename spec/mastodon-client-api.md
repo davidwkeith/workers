@@ -491,6 +491,8 @@ change `@dwk/activitypub` only additively (internal routes, one export).
   the ID scheme reserves a source bit from day one so IDs already persisted
   by clients and `mastodon_markers` survive the phase-3 merge of the
   owner's own `outbox` posts unchanged (see IDs and pagination).
-- **Naming** — `@dwk/mastodon-api` here; the issue floated
-  `@dwk/mastodon-client-api`. Decide before the catalog id (forever-stable)
-  lands in phase 1.
+- ~~Naming~~ — **resolved (#327 discussion): `@dwk/mastodon-api`**, catalog
+  id `mastodon-api`. It is the standard's own name for this surface, and
+  the composed Worker aims to be a first-class Mastodon citizen — not a
+  hedged "client-api" compatibility shim. The issue's floated
+  `@dwk/mastodon-client-api` is retired.
