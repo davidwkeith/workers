@@ -22,12 +22,7 @@ import {
   verifyJwt,
   type SessionClaims,
 } from "./auth.js";
-import {
-  encodeCarBlock,
-  encodeCarHeader,
-  writeCar,
-  type CarBlock,
-} from "./car.js";
+import { writeCar, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
 import {
@@ -1244,22 +1239,6 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   }
 
   /**
-   * The MST entries (key + CID) for every record, without decoding record
-   * bodies — used where only the tree shape is needed (a full `getRepo`
-   * export), so building it never base64-decodes the whole record set into
-   * memory the way {@link #entries} does for callers that need the bytes too.
-   */
-  #entryKeys(): MstEntry[] {
-    const rows = this.#sql
-      .exec("SELECT collection, rkey, cid FROM records")
-      .toArray();
-    return rows.map((row) => ({
-      key: recordPath(row.collection as string, row.rkey as string),
-      value: CID.parse(row.cid as string),
-    }));
-  }
-
-  /**
    * Build the MST, sign a new commit chaining to the prior head, and store it.
    * When `ops` is given (a record write/delete or a migration import), a
    * `#commit` event is appended to the firehose and broadcast to subscribers;
@@ -1524,52 +1503,22 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     }
   }
 
-  /**
-   * Export the full repository as a CARv1, streamed rather than buffered: the
-   * 128 MB DO memory budget and the "stream, never buffer a full blob" rule
-   * (spec/non-functional-requirements.md) both rule out materializing every
-   * record's bytes at once, which is what a large account's full `getRepo`
-   * sync (or the `tooBig` firehose fallback) would otherwise require. The MST
-   * is rebuilt from {@link #entryKeys} (key/CID pairs only, no record bodies,
-   * so building it doesn't decode the record set either); record blocks are
-   * then read and base64-decoded one SQL row at a time as the stream is
-   * pulled, so at most one record's bytes are live in memory at any point.
-   */
   async #getRepo(): Promise<Response> {
     const headCid = this.#kvGet("head_cid");
     const headBytes = this.#kvGet("head_bytes");
     if (!headCid || !headBytes)
       throw namedError(404, "RepoNotFound", "Empty repo");
-    const { blocks: nodeBlocks } = await buildMst(this.#entryKeys());
-
-    const chunks: Uint8Array[] = [
-      encodeCarHeader([CID.parse(headCid)]),
-      encodeCarBlock({ cid: CID.parse(headCid), bytes: unbase64(headBytes) }),
+    const { entries, blocks } = this.#entries();
+    const { blocks: nodeBlocks } = await buildMst(entries);
+    const car: CarBlock[] = [
+      { cid: CID.parse(headCid), bytes: unbase64(headBytes) },
     ];
     for (const [cidStr, bytes] of nodeBlocks) {
-      chunks.push(encodeCarBlock({ cid: CID.parse(cidStr), bytes }));
+      car.push({ cid: CID.parse(cidStr), bytes });
     }
-
-    const sql = this.#sql;
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const chunk of chunks) controller.enqueue(chunk);
-        const rows = sql.exec<{ cid: string; value: string }>(
-          "SELECT cid, value FROM records",
-        );
-        for (const row of rows) {
-          controller.enqueue(
-            encodeCarBlock({
-              cid: CID.parse(row.cid),
-              bytes: unbase64(row.value),
-            }),
-          );
-        }
-        controller.close();
-      },
-    });
-
-    return new Response(stream, {
+    car.push(...blocks);
+    const body = writeCar([CID.parse(headCid)], car);
+    return new Response(body as BodyInit, {
       headers: { "content-type": CAR_CONTENT_TYPE },
     });
   }

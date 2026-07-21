@@ -24,30 +24,20 @@ function lengthPrefixed(body: Uint8Array): Uint8Array {
   return concatBytes([encodeVarint(body.length), body]);
 }
 
-/** The length-prefixed CARv1 header declaring `roots` (§ container-level framing). */
-export function encodeCarHeader(roots: CID[]): Uint8Array {
-  return lengthPrefixed(
-    encodeCbor({ roots: roots.map((cid) => cid), version: 1 }),
-  );
-}
-
-/** One length-prefixed `CID ‖ block` CARv1 record. */
-export function encodeCarBlock(block: CarBlock): Uint8Array {
-  return lengthPrefixed(concatBytes([block.cid.bytes, block.bytes]));
-}
-
 /**
  * Serialise a CARv1 with `roots` as its declared roots and `blocks` as its body.
  * The caller is responsible for including every block transitively reachable
- * from the roots. Buffers the whole result — fine for the small, bounded CARs
- * this is used for (per-commit firehose diffs, migration import/export); a
- * full repository export streams instead (see `#getRepo` in `object.ts`) so it
- * never holds every record's bytes in memory at once.
+ * from the roots.
  */
 export function writeCar(roots: CID[], blocks: Iterable<CarBlock>): Uint8Array {
-  const chunks: Uint8Array[] = [encodeCarHeader(roots)];
+  const header = encodeCbor({
+    roots: roots.map((cid) => cid),
+    version: 1,
+  });
+  const chunks: Uint8Array[] = [lengthPrefixed(header)];
   for (const block of blocks) {
-    chunks.push(encodeCarBlock(block));
+    const record = concatBytes([block.cid.bytes, block.bytes]);
+    chunks.push(lengthPrefixed(record));
   }
   return concatBytes(chunks);
 }
