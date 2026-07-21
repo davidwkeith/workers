@@ -75,6 +75,7 @@ export type {
   PushedRequestRecord,
   PushedAuthorizationStore,
   ClientRecord,
+  ClientStore,
 } from "./store.js";
 
 export { OAuthLogEvent } from "./log.js";
