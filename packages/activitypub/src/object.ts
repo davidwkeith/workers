@@ -26,6 +26,7 @@ import {
   type JsonValue,
 } from "./as2.js";
 import { hostFromUrl } from "@dwk/log";
+import { safeFetch } from "@dwk/safe-fetch";
 
 import {
   ApOutcome,
@@ -1307,10 +1308,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       let response: Response | null;
       try {
-        response = await fetch(row.target, {
-          headers: { accept: "application/activity+json" },
-          signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-        });
+        // Routed through safeFetch (not the bare global `fetch`) so a
+        // redirect on this already-validated target is re-validated hop by
+        // hop, the same SSRF guard the initial `isSafeTarget` check applies
+        // to `row.target` itself (#298).
+        ({ response } = await safeFetch(
+          fetch,
+          row.target,
+          { headers: { accept: "application/activity+json" } },
+          { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
+        ));
       } catch {
         response = null;
       }
@@ -1647,11 +1654,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
     let response: Response;
     try {
-      response = await fetch(actor, {
-        headers: { accept: "application/activity+json" },
-        // Bound the lookup so a slow/hung remote cannot pin the inbound request.
-        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-      });
+      // Routed through safeFetch (not the bare global `fetch`) so a redirect
+      // off this already-validated actor IRI is re-validated hop by hop
+      // rather than trusting the initial `assertPublicHttpsTarget` check
+      // alone (#298).
+      ({ response } = await safeFetch(
+        fetch,
+        actor,
+        { headers: { accept: "application/activity+json" } },
+        { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
+      ));
     } catch {
       return null;
     }

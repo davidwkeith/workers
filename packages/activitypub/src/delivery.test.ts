@@ -58,6 +58,14 @@ describe("assertPublicHttpsTarget", () => {
     "https://example.onion/inbox",
     "https://example.onion./inbox",
     "https://foo.internal./inbox",
+    // Regression cases for #298: a hand-rolled IPv6 check previously let
+    // mapped/6to4/Teredo-embedded IPv4 addresses through unblocked.
+    "https://[::ffff:127.0.0.1]/inbox",
+    "https://[2002:7f00:1::]/inbox",
+    // Decimal/octal/hex IPv4 forms — the WHATWG URL parser normalizes these to
+    // canonical dotted-decimal in `.hostname` before any host check runs.
+    "https://2130706433/inbox",
+    "https://0x7f000001/inbox",
   ])("rejects private/loopback target %s", (url) => {
     expect(() => assertPublicHttpsTarget(url)).toThrow(DeliveryBlockedError);
   });

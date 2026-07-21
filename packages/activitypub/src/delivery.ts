@@ -12,6 +12,8 @@
  * primitive; this module wires it to the network.
  */
 
+import { assertPublicUrl, SsrfError } from "@dwk/safe-fetch";
+
 import { signRequest, type SignerKey } from "./signature.js";
 
 /** Machine-readable cause of a blocked delivery target. */
@@ -28,85 +30,32 @@ export class DeliveryBlockedError extends Error {
   }
 }
 
-/** Parse a canonical dotted-decimal IPv4 host into its four octets. */
-function parseIPv4(host: string): [number, number, number, number] | null {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!match) return null;
-  const octets: number[] = [];
-  for (let i = 1; i <= 4; i++) {
-    const value = Number(match[i]);
-    if (value > 255) return null;
-    octets.push(value);
-  }
-  return octets as [number, number, number, number];
-}
-
-/** Whether an IPv4 address falls in a private, loopback, or link-local range. */
-function isPrivateIPv4(octets: [number, number, number, number]): boolean {
-  const [a, b] = octets;
-  if (a === 10) return true; // 10.0.0.0/8
-  if (a === 127) return true; // loopback
-  if (a === 0) return true; // "this network"
-  if (a === 169 && b === 254) return true; // link-local (incl. cloud metadata)
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16
-  if (a >= 224) return true; // multicast / reserved
-  return false;
-}
-
 /**
- * A host name that names the local host, an internal/reserved suffix, or the
- * RFC 7686 special-use TLD `.onion` (Tor-only — the Workers runtime cannot
- * reach it, so a `.onion` inbox is dropped as `blocked_host` instead of
- * failing at the network layer).
- */
-function isBlockedHostName(host: string): boolean {
-  // Strip the FQDN trailing dot so `example.onion.` matches the suffix checks.
-  const lower = host.toLowerCase().replace(/\.$/, "");
-  if (lower === "localhost") return true;
-  return (
-    lower.endsWith(".localhost") ||
-    lower.endsWith(".internal") ||
-    lower.endsWith(".local") ||
-    lower === "onion" ||
-    lower.endsWith(".onion")
-  );
-}
-
-/**
- * Validate a delivery target URL: HTTPS only, and a public host. Throws a
- * {@link DeliveryBlockedError} on any failure so the caller logs it and drops
- * the row rather than retrying a target that can never be reached.
+ * Validate a delivery target URL: HTTPS only, and a public host. Delegates to
+ * `@dwk/safe-fetch`'s {@link assertPublicUrl} — the repo's single SSRF choke
+ * point — rather than a second, hand-rolled copy of the private/reserved-host
+ * checks, so delivery targets get the same IPv6 coverage (loopback,
+ * unique-local, link-local, 6to4/Teredo/IPv4-mapped forms) as every other
+ * attacker-URL fetch in the repo. A hand-rolled IPv6 check here previously
+ * missed mapped/6to4/Teredo forms (e.g. `[::ffff:127.0.0.1]`), which
+ * `assertPublicUrl` already handles.
+ *
+ * Throws a {@link DeliveryBlockedError} on any failure so the caller logs it
+ * and drops the row rather than retrying a target that can never be reached.
  */
 export function assertPublicHttpsTarget(url: string): URL {
-  let parsed: URL;
   try {
-    parsed = new URL(url);
-  } catch {
-    throw new DeliveryBlockedError("invalid_url");
+    return assertPublicUrl(url, { allowedSchemes: ["https:"] });
+  } catch (error) {
+    if (error instanceof SsrfError) {
+      const reason: BlockedReason =
+        error.reason === "invalid_url" || error.reason === "disallowed_scheme"
+          ? error.reason
+          : "blocked_host";
+      throw new DeliveryBlockedError(reason);
+    }
+    throw error;
   }
-  if (parsed.protocol !== "https:") {
-    throw new DeliveryBlockedError("disallowed_scheme");
-  }
-  const host = parsed.hostname;
-  const ipv4 = parseIPv4(host);
-  if (ipv4 && isPrivateIPv4(ipv4)) {
-    throw new DeliveryBlockedError("blocked_host");
-  }
-  // IPv6 loopback / unique-local / link-local, and bracketed forms.
-  const v6 = host.replace(/^\[|\]$/g, "").toLowerCase();
-  if (
-    v6 === "::1" ||
-    v6.startsWith("fe80:") ||
-    v6.startsWith("fc") ||
-    v6.startsWith("fd")
-  ) {
-    throw new DeliveryBlockedError("blocked_host");
-  }
-  if (isBlockedHostName(host)) {
-    throw new DeliveryBlockedError("blocked_host");
-  }
-  return parsed;
 }
 
 /** The outcome of a single delivery attempt. */
