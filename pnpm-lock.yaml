@@ -176,6 +176,12 @@ importers:
 
   packages/log: {}
 
+  packages/mastodon-api:
+    dependencies:
+      '@dwk/oauth':
+        specifier: workspace:*
+        version: link:../oauth
+
   packages/mcp:
     dependencies:
       '@dwk/dpop':

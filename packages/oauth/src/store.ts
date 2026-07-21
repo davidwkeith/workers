@@ -91,3 +91,18 @@ export interface ClientRecord {
   /** The validated, normalized client metadata that was registered. */
   readonly metadata: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * Read/write storage for registered OAuth clients (RFC 7591).
+ *
+ * {@link ClientRegistrationConfig.saveClient} deliberately only *writes*; the
+ * grant endpoints a consumer builds on top (authorize, token) need the read
+ * side to verify redirect URIs and client secrets. This seam names both halves
+ * so consumers implement one interface and unit-test against a `Map`.
+ */
+export interface ClientStore {
+  /** Persist a newly registered client record. */
+  saveClient(record: ClientRecord): Promise<void>;
+  /** Fetch a registered client by `client_id`, or `null` when unknown. */
+  getClient(clientId: string): Promise<ClientRecord | null>;
+}

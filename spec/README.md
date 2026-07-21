@@ -51,7 +51,7 @@ generator) and intentionally have no package here.
 | `@dwk/oauth` | [packages/oauth.md](packages/oauth.md) | lib | [#62](https://github.com/davidwkeith/workers/issues/62) |
 | `@dwk/ldn` | [packages/ldn.md](packages/ldn.md) | endpoint (extraction candidate) | [#63](https://github.com/davidwkeith/workers/issues/63) |
 | `@dwk/webauthn` | [packages/webauthn.md](packages/webauthn.md) | endpoint + Durable Object | [#64](https://github.com/davidwkeith/workers/issues/64) |
-| `@dwk/mastodon-api` | [mastodon-client-api.md](mastodon-client-api.md) (design) | endpoint | [#327](https://github.com/davidwkeith/workers/issues/327) |
+| `@dwk/mastodon-api` | [packages/mastodon-api.md](packages/mastodon-api.md) · [mastodon-client-api.md](mastodon-client-api.md) (design) | endpoint | [#327](https://github.com/davidwkeith/workers/issues/327) |
 
 ## Conventions used in these specs
 

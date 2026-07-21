@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No `rootDir`: the `paths` mappings below resolve the workspace imports to
+    // their source (so `typecheck` works before the workspace is built — CI runs
+    // typecheck ahead of build), which would otherwise trip the
+    // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
+    "paths": {
+      "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/oauth": ["../oauth/src/index.ts"]
+    },
+    // @dwk/dpop and @dwk/log stay mapped (though not direct deps): aliasing
+    // @dwk/oauth to its src means tsc walks its imports as source too.
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
+    "noEmit": true
+  },
+  "include": ["src"]
+}
