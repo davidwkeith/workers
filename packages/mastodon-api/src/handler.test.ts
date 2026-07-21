@@ -1,32 +1,17 @@
-import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import { createMastodonApi } from "./index.js";
-import type { MastodonApiConfig, MastodonApiEnv } from "./index.js";
-
-export const config: MastodonApiConfig = {
-  baseUrl: "https://owner.example",
-  instance: { title: "Owner's site" },
-  account: { username: "owner" },
-  approveAuthorization: async () => ({ approved: true }),
-};
-
-const ctx = {} as ExecutionContext;
-
-export function api(cfg: MastodonApiConfig = config) {
-  const handler = createMastodonApi(cfg);
-  return (request: Request) =>
-    handler(request, env as unknown as MastodonApiEnv, ctx);
-}
+import type { MastodonApiEnv } from "./index.js";
+import { api, testConfig, testCtx } from "./test-harness.js";
 
 describe("createMastodonApi shell", () => {
   it("fails loudly when AUTH_DB is missing", async () => {
-    const handler = createMastodonApi(config);
+    const handler = createMastodonApi(testConfig);
     await expect(
       handler(
         new Request("https://owner.example/api/v1/instance"),
         {} as MastodonApiEnv,
-        ctx,
+        testCtx,
       ),
     ).rejects.toThrow(/AUTH_DB/);
   });

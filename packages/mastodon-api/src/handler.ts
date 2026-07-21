@@ -5,6 +5,7 @@
  * web clients (Elk, Phanpy) can call it; native apps ignore CORS.
  */
 
+import { handleCreateApp } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
 
@@ -20,7 +21,7 @@ type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 
 /** Exact-path routes, keyed `"METHOD /path"`. Feature modules add entries. */
 const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
-  [],
+  [["POST /api/v1/apps", handleCreateApp]],
 );
 
 const CORS_HEADERS = {
