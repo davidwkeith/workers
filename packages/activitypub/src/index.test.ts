@@ -221,6 +221,57 @@ describe("collections", () => {
   });
 });
 
+// The DO cannot call the injected Metrics seam across the isolate boundary,
+// so alarm-driven delivery counters accumulate in its SQLite and ride out to
+// the front door — where the seam IS wired — on the next forwarded request
+// (issue #336). These drive the full loop: deltas seeded in the DO, replayed
+// into the injected `metrics` by the front door, header stripped, drained
+// exactly once.
+describe("delivery metrics relay", () => {
+  it("replays drained DO counter deltas into the injected metrics and strips the header", async () => {
+    const counts: { event: string; fields: unknown }[] = [];
+    const config = makeConfig({
+      metrics: {
+        count: (event, fields) => counts.push({ event, fields }),
+        observe: () => {},
+      },
+    });
+    const handler = createActivityPub(config);
+    // Seed accumulated alarm-work deltas directly in this actor's DO, as a
+    // delivery pass would have left them (see object.test.ts for that half).
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(actorUrl(config)));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO pending_metrics (event, fields, n)
+           VALUES ('activitypub.delivery.succeeded', '{"status":202,"targetHost":"remote.example"}', 2)`,
+      );
+    });
+
+    const res = await handler(
+      new Request(`${actorUrl(config)}/followers`),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-ap-metrics")).toBeNull();
+    expect(counts).toEqual([
+      {
+        event: "activitypub.delivery.succeeded",
+        fields: { status: 202, targetHost: "remote.example" },
+      },
+      {
+        event: "activitypub.delivery.succeeded",
+        fields: { status: 202, targetHost: "remote.example" },
+      },
+    ]);
+
+    // Drained once: a second forwarded request replays nothing further.
+    counts.length = 0;
+    await handler(new Request(`${actorUrl(config)}/followers`), testEnv, ctx);
+    expect(counts).toEqual([]);
+  });
+});
+
 describe("inbox", () => {
   it("rejects an unsigned POST with 401", async () => {
     const config = makeConfig();

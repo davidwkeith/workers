@@ -138,3 +138,22 @@ Redaction is the caller's responsibility, but the seam helps.
     front door via an internal response header (`x-solid-outcome`); the front
     door — where the seams are wired, at the composition boundary — emits the
     events and strips the header before replying.
+  - `@dwk/activitypub` (`ActivityPubLogEvent`): signature
+    rejections/acceptances and publish rejections emit directly at the front
+    door; inbound inbox outcomes use the same request-scoped internal-header
+    relay as `@dwk/solid-pod` (`x-ap-outcome`). **Alarm-driven work** (the
+    DO's outbound delivery queue) has no HTTP response to relay through, so
+    its outcomes split by seam: the log line goes straight to `console` from
+    the DO (a reasonable escape hatch — `wrangler tail` reads `console`
+    regardless of any seam), while the matching **counter delta** accumulates
+    durably in the DO's SQLite, coalesced by `(event, fields)`, and is drained
+    on the next front-door-forwarded request via an internal response header
+    (`x-ap-metrics`, requested with `x-ap-metrics-drain`). The front door
+    replays each delta into the injected `Metrics` (one `count` per
+    occurrence; log lines are NOT re-emitted — they already fired in the DO)
+    and strips the header. Counters are delay-tolerant aggregates, so riding
+    the next request loses nothing an operator charts; drains are bounded per
+    response, and the pending table is cardinality-capped, overflowing into a
+    dedicated `activitypub.metrics.overflow` counter rather than losing counts
+    silently. This is the template for any future DO that must report metrics
+    for its own alarm-driven work.

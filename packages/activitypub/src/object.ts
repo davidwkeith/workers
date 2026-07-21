@@ -31,8 +31,11 @@ import { safeFetch } from "@dwk/safe-fetch";
 import {
   ApOutcome,
   ActivityPubLogEvent,
+  METRICS_DRAIN_HEADER,
+  METRICS_HEADER,
   OUTCOME_ACTIVITY_HEADER,
   OUTCOME_HEADER,
+  type PendingMetric,
 } from "./log.js";
 import { participationTarget } from "./events.js";
 import {
@@ -64,6 +67,24 @@ const RELAYED_ACTIVITY_TYPES = [
 ];
 /** How long relayed votes wait for their batched verification sweep (§2.2). */
 const VOTE_SWEEP_MS = 10 * 60_000;
+/**
+ * Cardinality cap on the pending-metrics table: at most this many distinct
+ * `(event, fields)` keys accumulate between drains. Delivery fields include
+ * the target host and attempt number, so a large follower set could otherwise
+ * grow the table without bound while the front door is quiet; at the cap, new
+ * keys tally into a single overflow counter instead (loss of attribution, not
+ * of count).
+ */
+const MAX_PENDING_METRIC_ROWS = 256;
+/** Max distinct deltas drained per response (bounds the header size). */
+const DRAIN_ROW_LIMIT = 32;
+/**
+ * Max total occurrences drained per response: the front door replays each
+ * drained delta as `n` individual `Metrics.count` calls, so this bounds the
+ * per-request replay burst. A backlog larger than this drains over successive
+ * requests (rows are decremented, not dropped).
+ */
+const DRAIN_COUNT_BUDGET = 256;
 
 function json(
   status: number,
@@ -178,6 +199,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS idx_verify_queue_next_at ON verify_queue (next_at)`,
     );
+    // Counter deltas for alarm-driven work (delivery outcomes), accumulated
+    // here because the DO cannot call the injected `Metrics` seam across the
+    // isolate boundary; drained to the front door via a response header on the
+    // next forwarded request (see #drainPendingMetrics). `fields` is the
+    // canonical (sorted-key) JSON of the same field bag the log line carries,
+    // so identical outcomes coalesce into one row.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS pending_metrics (
+         event TEXT NOT NULL, fields TEXT NOT NULL, n INTEGER NOT NULL,
+         PRIMARY KEY (event, fields))`,
+    );
     // Additive-column migrations for objects created before fediverse interop
     // phases 1–2 (#274/#275); fresh objects already get these from the CREATE
     // TABLEs above. Nullable by design: `object_type`/`audience` classify
@@ -218,6 +250,25 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#config = config;
     this.#persistDeliveryConfig(config);
 
+    const response = await this.#route(request, config);
+    // Alarm-driven work (delivery retries) has no request of its own, so its
+    // counter deltas accumulate in SQLite and ride out on the next forwarded
+    // request whose caller opted in to relay them (the front door does, on
+    // every request it forwards; see handler.ts). Opt-in keeps a caller that
+    // would not relay the header (the MCP tools) from consuming the deltas.
+    if (request.headers.get(METRICS_DRAIN_HEADER) !== "1") return response;
+    const pending = this.#drainPendingMetrics();
+    if (pending.length === 0) return response;
+    const headers = new Headers(response.headers);
+    headers.set(METRICS_HEADER, JSON.stringify(pending));
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  async #route(request: Request, config: ForwardedConfig): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const iris = config.iris;
@@ -1155,7 +1206,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * time, ...fields }`) and severity table (`spec/observability.md`): a
    * blocked SSRF attempt or a will-retry failure is `warn`, not `error` —
    * only a permanently-dropped delivery is. Never includes activity bodies,
-   * keys, or tokens (redaction policy).
+   * keys, or tokens (redaction policy). The metrics half of the vocabulary
+   * has no console-shaped escape hatch, so the matching counter is instead
+   * accumulated via {@link #recordMetric} and drained to the front door's
+   * injected `Metrics` on the next forwarded request.
    */
   #logDelivery(
     event: ActivityPubLogEvent,
@@ -1176,6 +1230,120 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
     else console.info(line);
+    // Counter parity (spec/observability.md: the same `(event, fields)` goes
+    // to both seams): the matching count accumulates durably here and reaches
+    // the injected `Metrics` when the front door next drains it.
+    this.#recordMetric(event, fields);
+  }
+
+  /**
+   * Accumulate one occurrence of `(event, fields)` for the injected `Metrics`
+   * seam the DO cannot call directly. Identical outcomes coalesce into one row
+   * (fields serialize with sorted keys); at the table's cardinality cap a new
+   * key tallies into the {@link ActivityPubLogEvent.MetricsOverflow} counter
+   * instead, so the count survives even when its attribution cannot. A single
+   * upsert does both the write and the was-it-a-new-row check: `RETURNING n`
+   * yields `1` only for a freshly created row (an existing row increments to
+   * ≥ 2), so the cap's row count runs only on that path.
+   */
+  #recordMetric(
+    event: string,
+    fields: Record<string, string | number | boolean>,
+  ): void {
+    const canonical: Record<string, string | number | boolean> = {};
+    for (const key of Object.keys(fields).sort()) {
+      canonical[key] = fields[key] as string | number | boolean;
+    }
+    const serialized = JSON.stringify(canonical);
+    const n = this.#sql
+      .exec<{ n: number }>(
+        `INSERT INTO pending_metrics (event, fields, n) VALUES (?, ?, 1)
+           ON CONFLICT(event, fields) DO UPDATE SET n = n + 1
+           RETURNING n`,
+        event,
+        serialized,
+      )
+      .one().n;
+    if (n > 1) return; // coalesced into an existing key: row count unchanged
+    // The overflow tally itself is exempt from the cap, so a full table can
+    // always still count (it adds at most one row beyond the cap).
+    if (event === ActivityPubLogEvent.MetricsOverflow) return;
+    if (this.#pendingMetricRows() > MAX_PENDING_METRIC_ROWS) {
+      this.#sql.exec(
+        `DELETE FROM pending_metrics WHERE event = ? AND fields = ?`,
+        event,
+        serialized,
+      );
+      this.#recordMetric(ActivityPubLogEvent.MetricsOverflow, {});
+    }
+  }
+
+  #pendingMetricRows(): number {
+    return this.#sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_metrics`)
+      .one().n;
+  }
+
+  /**
+   * Drain accumulated counter deltas for the front door to replay into the
+   * injected `Metrics`, bounded per response: at most {@link DRAIN_ROW_LIMIT}
+   * distinct deltas (header size) totalling {@link DRAIN_COUNT_BUDGET}
+   * occurrences (replay burst). A row larger than the remaining budget is
+   * split — the drained part is decremented off, the rest stays queued for the
+   * next drain — so a backlog is never dropped, only spread across requests.
+   * Selection order (`event, fields`) is deterministic, not FIFO/fair: under
+   * sustained churn with rare drains, alphabetically-later keys can be
+   * delayed behind ever-reincremented earlier ones — acceptable because these
+   * counters are delay-tolerant aggregates, and never lost (the cardinality
+   * cap, not ordering, is the only place attribution degrades).
+   */
+  #drainPendingMetrics(): PendingMetric[] {
+    const rows = this.#sql
+      .exec<{ event: string; fields: string; n: number }>(
+        `SELECT event, fields, n FROM pending_metrics
+           ORDER BY event, fields LIMIT ?`,
+        DRAIN_ROW_LIMIT,
+      )
+      .toArray();
+    const drained: PendingMetric[] = [];
+    let budget = DRAIN_COUNT_BUDGET;
+    for (const row of rows) {
+      if (budget <= 0) break;
+      const take = Math.min(row.n, budget);
+      budget -= take;
+      let fields: Record<string, string | number | boolean>;
+      try {
+        fields = JSON.parse(row.fields) as Record<
+          string,
+          string | number | boolean
+        >;
+      } catch {
+        // An unreadable row can never drain; delete it rather than wedge the
+        // queue re-selecting it forever.
+        this.#sql.exec(
+          `DELETE FROM pending_metrics WHERE event = ? AND fields = ?`,
+          row.event,
+          row.fields,
+        );
+        continue;
+      }
+      drained.push({ event: row.event, fields, n: take });
+      if (take === row.n) {
+        this.#sql.exec(
+          `DELETE FROM pending_metrics WHERE event = ? AND fields = ?`,
+          row.event,
+          row.fields,
+        );
+      } else {
+        this.#sql.exec(
+          `UPDATE pending_metrics SET n = n - ? WHERE event = ? AND fields = ?`,
+          take,
+          row.event,
+          row.fields,
+        );
+      }
+    }
+    return drained;
   }
 
   /**

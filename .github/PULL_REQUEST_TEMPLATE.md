@@ -1,3 +1,19 @@
+<!--
+PR title must be Conventional Commits style: type(scope): subject
+(lowercase type, scope = package name minus "@dwk/", no capitalized subject).
+This repo squash-merges, so the PR title becomes the permanent git log entry.
+  Correct:   fix(solid-pod): strip client-forged ldp:contains from container PUT
+  Incorrect: Fix solid-pod: strip client-forged ldp:contains from container PUT
+  Incorrect: Add AGENTS.md symlink to CLAUDE.md (missing type prefix)
+
+Keep this template's section headings as-is (don't rename "Checklist" to
+"Verification", don't collapse it into prose). Leave inapplicable checklist
+items unchecked with a one-line reason instead of deleting them.
+
+Resolve every review conversation before merging — push a fix and resolve
+the thread, or reply with why no change is needed and then resolve it.
+-->
+
 ## Summary
 
 <!-- What does this PR change, and why? Link the relevant issue if there is one. -->
