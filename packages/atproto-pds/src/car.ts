@@ -75,6 +75,13 @@ export function writeCarStream(
       }
       controller.enqueue(carBlockRecord(next.value));
     },
+    cancel() {
+      // An early-aborted read (e.g. a Relay disconnecting mid-`getRepo`, the
+      // scenario this streaming form exists for) must not leave a
+      // generator-backed `blocks` iterator (holding a live SQL cursor)
+      // suspended for GC to eventually finalize.
+      iterator.return?.();
+    },
   });
 }
 

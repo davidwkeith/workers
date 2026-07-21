@@ -77,4 +77,29 @@ describe("CAR", () => {
     expect(pulled).toBe(blocks.length);
     expect([...out]).toEqual([...writeCar([root], blocks)]);
   });
+
+  it("writeCarStream releases the block iterator when the reader cancels early", async () => {
+    const blocks = [
+      await block({ a: 1 }),
+      await block({ b: 2 }),
+      await block({ c: 3 }),
+    ];
+    const root = blocks[0]!.cid;
+    let returned = false;
+    function* trackedBlocks(): Generator<CarBlock> {
+      try {
+        yield* blocks;
+      } finally {
+        returned = true;
+      }
+    }
+    const stream = writeCarStream([root], trackedBlocks());
+    const reader = stream.getReader();
+    await reader.read(); // header
+    await reader.read(); // first block — the generator body has now started,
+    // so it holds whatever resource (e.g. a SQL cursor) its `try` opened
+    expect(returned).toBe(false);
+    await reader.cancel("client disconnected mid-sync");
+    expect(returned).toBe(true);
+  });
 });
