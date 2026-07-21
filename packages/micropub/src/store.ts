@@ -57,6 +57,17 @@ export interface MicropubStore {
   ): Promise<boolean>;
   /** Set a post's soft-delete flag. Returns `false` if the URL is unknown. */
   setDeleted(url: string, deleted: boolean, now: number): Promise<boolean>;
+  /**
+   * Distinct string `category` (tag) values across all live posts, for the
+   * `q=category` autocomplete extension. `filter` narrows to values that
+   * contain the substring (case-insensitive); `limit` caps the count. Ordered
+   * alphabetically for a stable response. Non-string categories (e.g. nested
+   * `h-card` tag objects) are excluded.
+   */
+  listCategories(options?: {
+    filter?: string;
+    limit?: number;
+  }): Promise<string[]>;
 }
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS posts (
@@ -169,6 +180,33 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
         .bind(deleted ? 1 : 0, now, url)
         .run();
       return result.meta.changes > 0;
+    },
+
+    async listCategories(options = {}) {
+      await ensureSchema();
+      const { filter, limit } = options;
+      // Walk each live post's `category` array with SQLite's json_each; a post
+      // without the property (or a non-array value) simply contributes no rows.
+      // `je.type = 'text'` keeps plain-string tags and drops nested objects.
+      const clauses = ["p.deleted = 0", "je.type = 'text'"];
+      const binds: unknown[] = [];
+      if (filter) {
+        clauses.push("instr(lower(je.value), lower(?)) > 0");
+        binds.push(filter);
+      }
+      let sql = `SELECT DISTINCT je.value AS category
+           FROM posts AS p, json_each(p.properties, '$.category') AS je
+          WHERE ${clauses.join(" AND ")}
+          ORDER BY category ASC`;
+      if (limit !== undefined) {
+        sql += " LIMIT ?";
+        binds.push(limit);
+      }
+      const result = await db
+        .prepare(sql)
+        .bind(...binds)
+        .all<{ category: string }>();
+      return (result.results ?? []).map((row) => row.category);
     },
   };
 }

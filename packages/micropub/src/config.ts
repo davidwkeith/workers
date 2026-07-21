@@ -12,6 +12,45 @@ import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 import type { FediverseSyndicationConfig } from "./fediverse.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
+/**
+ * The maturity group a Micropub extension belongs to, per the approval stages
+ * on [indieweb.org/Micropub-extensions](https://indieweb.org/Micropub-extensions):
+ * `official` (adopted into the Micropub spec), `stable` (widely implemented and
+ * settled), and `proposed` (experimental, may still change). A deployment
+ * enables extensions a group at a time via {@link ExtensionGroupsConfig}.
+ */
+export type ExtensionMaturity = "official" | "stable" | "proposed";
+
+/**
+ * Which maturity groups of Micropub extensions this endpoint enables. Each new
+ * extension is tagged with its group and only advertised/honoured when that
+ * group is on. Defaults follow the wiki's maturity: `official` and `stable` on,
+ * `proposed` off — so a deployment opts in to experimental behaviour explicitly.
+ *
+ * Already-shipped core commands (`mp-slug`, `mp-syndicate-to`) and the core
+ * `q=source`/`q=config` queries are always available and are not gated here.
+ */
+export interface ExtensionGroupsConfig {
+  /** Extensions adopted into the Micropub spec. Defaults to `true`. */
+  readonly official?: boolean;
+  /** Stable, widely-implemented extensions. Defaults to `true`. */
+  readonly stable?: boolean;
+  /** Proposed/experimental extensions. Defaults to `false`. */
+  readonly proposed?: boolean;
+}
+
+/**
+ * A post type advertised as `post-types` in `q=config` — the stable Supported
+ * Vocabulary extension. Purely the site's editorial vocabulary shown to
+ * clients; the store persists posts generically regardless of this list.
+ */
+export interface PostTypeConfig {
+  /** The post type identifier, e.g. `"note"`, `"article"`, `"photo"`. */
+  readonly type: string;
+  /** Human-readable name shown in the client UI, e.g. `"Note"`. */
+  readonly name: string;
+}
+
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
 export interface SyndicationTarget {
   /** Stable identifier the client echoes back as `mp-syndicate-to`. */
@@ -60,6 +99,18 @@ export interface MicropubConfig {
   readonly tokenIssuer?: string;
   /** Scopes advertised in `q=config`. Informational only. */
   readonly scopesSupported?: readonly string[];
+  /**
+   * Which maturity groups of Micropub extensions to enable (see
+   * {@link ExtensionGroupsConfig}). Defaults to `official` + `stable` on,
+   * `proposed` off.
+   */
+  readonly extensions?: ExtensionGroupsConfig;
+  /**
+   * Post types advertised as `post-types` in `q=config` (the stable Supported
+   * Vocabulary extension). Omitted from the response when unset, or when the
+   * `stable` extension group is disabled.
+   */
+  readonly postTypes?: readonly PostTypeConfig[];
   /**
    * Syndication targets advertised by `q=config` / `q=syndicate-to` — a
    * static list, or an async provider for lists that change at runtime (e.g.
@@ -118,6 +169,9 @@ export interface ResolvedConfig {
   readonly mediaPath: string;
   readonly tokenIssuer: string;
   readonly scopesSupported: readonly string[];
+  /** Resolved per-group enablement flags (every group present). */
+  readonly extensions: Readonly<Record<ExtensionMaturity, boolean>>;
+  readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
   readonly fediverse?: FediverseSyndicationConfig;
@@ -222,6 +276,12 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       "delete",
       "media",
     ],
+    extensions: {
+      official: config.extensions?.official ?? true,
+      stable: config.extensions?.stable ?? true,
+      proposed: config.extensions?.proposed ?? false,
+    },
+    ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),
     maxMediaBytes: config.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,

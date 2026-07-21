@@ -278,6 +278,59 @@ function asPropertyMap(
 export class Mf2ParseError extends Error {}
 
 /**
+ * Allowed values for the `post-status` property — the stable Post Status
+ * extension. A post is either `published` (the default when the property is
+ * absent) or a `draft` that should be omitted from public listings.
+ *
+ * @see https://indieweb.org/Micropub-extensions#Post_Status
+ */
+export const POST_STATUS_VALUES = ["published", "draft"] as const;
+
+/**
+ * Allowed values for the `visibility` property — the stable Visibility
+ * extension. `public` is the default when the property is absent.
+ *
+ * This endpoint only *stores and advertises* visibility; actually enforcing
+ * `unlisted`/`private` at read time is the serving layer's responsibility (a
+ * consuming site, or WAC in `@dwk/solid-pod`), not this package's — see
+ * `spec/packages/micropub.md`.
+ *
+ * @see https://indieweb.org/Micropub-extensions#Visibility
+ */
+export const VISIBILITY_VALUES = ["public", "unlisted", "private"] as const;
+
+/** Reject a property whose values fall outside an extension's allowed set. */
+function assertEnumProperty(
+  properties: Readonly<Record<string, readonly unknown[]>>,
+  key: string,
+  allowed: readonly string[],
+): void {
+  const values = properties[key];
+  if (values === undefined) return;
+  for (const value of values) {
+    if (typeof value !== "string" || !allowed.includes(value)) {
+      throw new Mf2ParseError(
+        `\`${key}\` must be one of ${allowed.map((v) => `\`${v}\``).join(", ")}`,
+      );
+    }
+  }
+}
+
+/**
+ * Validate the stable-extension vocabulary of a create/update's final property
+ * map — `post-status` and `visibility` — throwing {@link Mf2ParseError} on an
+ * unrecognised value. An absent property is the extension's documented default
+ * (published / public), so it never fails. Enforced on create and on the merged
+ * result of an update, so a stored post can only ever carry a known value.
+ */
+export function validateVocabulary(
+  properties: Readonly<Record<string, readonly unknown[]>>,
+): void {
+  assertEnumProperty(properties, "post-status", POST_STATUS_VALUES);
+  assertEnumProperty(properties, "visibility", VISIBILITY_VALUES);
+}
+
+/**
  * Order-independent deep equality, for `delete`-by-value matching. Compares
  * objects by key membership rather than serialized form, so a nested value like
  * `{ html, value }` matches regardless of the property order the client sends.

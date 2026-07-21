@@ -20,6 +20,7 @@ import {
   parseJsonBody,
   parseUpdateOperations,
   sourceView,
+  validateVocabulary,
   Mf2ParseError,
   type Mf2Object,
   type MicropubCommands,
@@ -128,6 +129,32 @@ export function absoluteUrl(value: string, base: string): string {
   } catch {
     return value;
   }
+}
+
+/**
+ * Upper bound on `q=category` results, regardless of the requested `limit`.
+ * Set high because this is an autocomplete *tag list*, not a paginated feed —
+ * a client generally wants every tag so it can filter locally.
+ */
+const MAX_CATEGORY_LIMIT = 1000;
+
+/**
+ * Parse the `limit` query parameter (the stable Limit extension) for
+ * `q=category`: a positive integer, capped at {@link MAX_CATEGORY_LIMIT}. An
+ * absent or malformed value yields `undefined` — i.e. the full (capped) list —
+ * because a tag list for autocomplete has no useful small default page size.
+ *
+ * This is a *deliberate* divergence from the forthcoming post-list query
+ * (`q=source` with no `url`, #351/#353), whose pagination defaults a malformed
+ * `limit` to a small page: a tag list and a post feed want different defaults.
+ * Both share the same philosophy — a malformed `limit` never 400s, it is a
+ * client convenience, not a contract.
+ */
+function parseLimitParam(raw: string | null): number | undefined {
+  if (raw === null || !/^\d+$/.test(raw)) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(n, MAX_CATEGORY_LIMIT);
 }
 
 // --- Body parsing -----------------------------------------------------------
@@ -385,14 +412,34 @@ async function handleQuery(
   const q = params.get("q");
 
   if (q === "config") {
+    // Advertise the extension queries whose maturity group is enabled, so a
+    // client discovers `q=category` (stable) only when we will actually serve
+    // it. `post-types` (the stable Supported Vocabulary extension) is included
+    // only when configured and its group is on.
+    const supportedQueries = ["source", "config", "syndicate-to"];
+    if (config.extensions.stable) supportedQueries.push("category");
     return json({
       "media-endpoint": config.mediaEndpoint,
       "syndicate-to": await config.syndicateTo(),
-      q: ["source", "config", "syndicate-to"],
+      ...(config.extensions.stable && config.postTypes
+        ? { "post-types": config.postTypes }
+        : {}),
+      q: supportedQueries,
     });
   }
   if (q === "syndicate-to") {
     return json({ "syndicate-to": await config.syndicateTo() });
+  }
+  if (q === "category" && config.extensions.stable) {
+    // Stable Category/Tag List extension: distinct tags for client
+    // autocomplete, narrowable via the `filter` and `limit` parameters.
+    const limit = parseLimitParam(params.get("limit"));
+    const filter = params.get("filter");
+    const categories = await store.listCategories({
+      ...(limit !== undefined ? { limit } : {}),
+      ...(filter ? { filter } : {}),
+    });
+    return json({ categories });
   }
   if (q === "source") {
     const url = params.get("url");
@@ -591,6 +638,29 @@ export async function publishPost(
       status: 400,
     };
   }
+  // Stable Post Status / Visibility extensions: reject an unrecognised
+  // `post-status`/`visibility` before persisting, so a stored post only ever
+  // carries a known value. Skipped when the `stable` group is disabled, in
+  // which case the properties pass through as opaque mf2.
+  if (config.extensions.stable) {
+    try {
+      validateVocabulary(mf2.properties);
+    } catch (err) {
+      if (err instanceof Mf2ParseError) {
+        emit(config, "warn", MicropubLogEvent.RequestRejected, {
+          reason: "invalid_vocabulary",
+        });
+        return {
+          ok: false,
+          error: "invalid_request",
+          description: err.message,
+          status: 400,
+        };
+      }
+      throw err;
+    }
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const properties: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(mf2.properties)) {
@@ -693,6 +763,21 @@ async function doUpdate(
     throw err;
   }
   const next = applyUpdate(record.properties, ops);
+  // Validate the *merged* result so an update introducing a bad
+  // `post-status`/`visibility` is rejected (stable group only).
+  if (config.extensions.stable) {
+    try {
+      validateVocabulary(next);
+    } catch (err) {
+      if (err instanceof Mf2ParseError) {
+        emit(config, "warn", MicropubLogEvent.RequestRejected, {
+          reason: "invalid_vocabulary",
+        });
+        return error("invalid_request", err.message, 400);
+      }
+      throw err;
+    }
+  }
   const updated = await store.updateProperties(
     url,
     next,

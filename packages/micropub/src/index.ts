@@ -34,6 +34,9 @@ export type {
   SyndicationTarget,
   SyndicationTargetsProvider,
   GeneratePostUrl,
+  ExtensionMaturity,
+  ExtensionGroupsConfig,
+  PostTypeConfig,
 } from "./config.js";
 
 export {
@@ -60,6 +63,9 @@ export {
   parseUpdateOperations,
   applyUpdate,
   sourceView,
+  validateVocabulary,
+  POST_STATUS_VALUES,
+  VISIBILITY_VALUES,
   Mf2ParseError,
   type Mf2Object,
   type MicropubCommands,

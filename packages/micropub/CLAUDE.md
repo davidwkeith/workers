@@ -8,10 +8,29 @@ Handles create/update/delete of posts via the Micropub protocol. Accepts both
 form-encoded and JSON request bodies, parses Microformats 2 (mf2) objects,
 and stores posts in D1. Includes an R2-backed media endpoint for file uploads.
 Requires IndieAuth access tokens with scope-based authorization — `create`,
-`update`, `delete`, `media` scopes. Supports `q=config` and `q=source` queries.
+`update`, `delete`, `media` scopes. Supports `q=config`, `q=source`, and
+`q=category` queries.
 Also contributes a `@dwk/mcp` tool (`createMicropubMcpTools` →
 `micropub_publish`) so an authorized agent can publish through the same
 `publishPost` path the HTTP `create` action uses.
+
+## Micropub extensions
+
+Implements a curated subset of the
+[IndieWeb Micropub extensions](https://indieweb.org/Micropub-extensions),
+toggled by maturity group via the `extensions` config
+(`{ official?, stable?, proposed? }`; defaults `official`+`stable` on,
+`proposed` off). Currently all **stable**:
+
+- **Post Status** (`post-status`) / **Visibility** (`visibility`) — validated on
+  create/update; stored & advertised only. Read-time enforcement (hiding drafts,
+  gating private posts) is the serving layer's job, not this package's.
+- **Supported Vocabulary** — optional `postTypes` config advertised as
+  `post-types` in `q=config`.
+- **Category/Tag List** (`q=category`, with `limit`/`filter`) — distinct tags of
+  live posts for autocomplete.
+
+Post-list (`q=source` with no `url`) is tracked separately (#351/#353).
 
 ## Spec
 
