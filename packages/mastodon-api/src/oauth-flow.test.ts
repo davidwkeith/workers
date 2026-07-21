@@ -432,3 +432,82 @@ describe("POST /oauth/token", () => {
     );
   });
 });
+
+describe("POST /oauth/revoke", () => {
+  beforeEach(resetDb);
+
+  async function issueToken(): Promise<{
+    app: Awaited<ReturnType<typeof registerApp>>;
+    accessToken: string;
+  }> {
+    const app = await registerApp();
+    const code = await obtainCode(app);
+    const res = await api()(
+      tokenRequest({
+        grant_type: "authorization_code",
+        client_id: app.client_id,
+        client_secret: app.client_secret,
+        redirect_uri: "app://oauth-callback",
+        code,
+      }),
+    );
+    const token = (await res.json()) as TokenResponse;
+    return { app, accessToken: token.access_token };
+  }
+
+  it("revokes an issued token (200) and the store marks it revoked", async () => {
+    const { app, accessToken } = await issueToken();
+    const res = await api()(
+      new Request("https://owner.example/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: app.client_id,
+          client_secret: app.client_secret,
+          token: accessToken,
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const stored = await createMastodonStore(testEnv).getToken(
+      await sha256Hex(accessToken),
+    );
+    expect(stored?.revoked).toBe(true);
+  });
+
+  it("returns 200 for an unknown token (RFC 7009)", async () => {
+    const { app } = await issueToken();
+    const res = await api()(
+      new Request("https://owner.example/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: app.client_id,
+          client_secret: app.client_secret,
+          token: "never-issued",
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects bad client credentials with 401", async () => {
+    const { app, accessToken } = await issueToken();
+    const res = await api()(
+      new Request("https://owner.example/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: app.client_id,
+          client_secret: "wrong",
+          token: accessToken,
+        }),
+      }),
+    );
+    expect(res.status).toBe(401);
+    const stored = await createMastodonStore(testEnv).getToken(
+      await sha256Hex(accessToken),
+    );
+    expect(stored?.revoked).toBe(false);
+  });
+});

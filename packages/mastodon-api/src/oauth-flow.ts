@@ -6,7 +6,7 @@
  * owner password (spec/mastodon-client-api.md, Decision 2).
  */
 
-import type { ClientRecord } from "@dwk/oauth";
+import { createRevocationHandler, type ClientRecord } from "@dwk/oauth";
 
 import { authenticateClient } from "./auth.js";
 import type { MastodonAuthorizationRequest } from "./config.js";
@@ -275,4 +275,26 @@ export async function handleToken(ctx: RouteContext): Promise<Response> {
   }
 
   return issueToken(store, client.clientId, record.scope, OWNER_ACCOUNT_ID);
+}
+
+/**
+ * `POST /oauth/revoke` — `@dwk/oauth`'s RFC 7009 handler (idempotent, always
+ * `200` for a well-formed request) with Mastodon-style client authentication.
+ */
+export async function handleRevoke(ctx: RouteContext): Promise<Response> {
+  const store = createMastodonStore(ctx.env);
+  const revoke = createRevocationHandler({
+    revokeToken: async (token) => {
+      await store.revokeToken(await sha256Hex(token));
+    },
+    authenticate: async (request) => {
+      // The handler clones the request before consuming the body, so the
+      // form is still readable here.
+      const params = new URLSearchParams(await request.text());
+      return (
+        (await authenticateClient(params, request.headers, store)) !== null
+      );
+    },
+  });
+  return revoke(ctx.request);
 }
