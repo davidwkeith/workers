@@ -36,7 +36,8 @@ createX(config): (request: Request, env: Env, ctx: ExecutionContext) => Promise<
 
 `Request`, `Response`, `fetch`, `ReadableStream`, `Blob`, `crypto.subtle`, and
 `crypto.randomUUID` are all part of the **WHATWG/Web platform** and are
-implemented natively by **Node.js ≥ 20** (the repo's stated minimum). The
+implemented natively by **Node.js ≥ 22** (the repo's stated minimum; see
+[§16](#16-resolved-decisions) decision 2). The
 endpoint handlers are written against those globals, not against Node or
 Cloudflare HTTP APIs. This means:
 
