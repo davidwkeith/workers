@@ -1397,20 +1397,23 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     });
     const stored = quads.map(quadToStored);
     // A container's `ldp:contains` listing is server-managed; clients never
-    // send it, so a PUT that replaced all quads would orphan every child.
-    // Preserve existing containment (and re-assert the container types).
+    // send it, so a PUT that replaced all quads would orphan every child. Rather
+    // than read the existing containment here — outside the write transaction,
+    // where a concurrent child `POST` could slip a membership triple in between
+    // the read and the write and have it silently dropped — hand the store a
+    // `preserveWhere` predicate so it re-reads and merges containment atomically,
+    // inside the transaction. We still re-assert the container type triples.
     const containerIri = toIri(origin, path);
-    const preserved =
-      isContainer(path) && store.head(path) !== null
-        ? store.readQuads(path).filter((q) => isContainsQuad(q, containerIri))
-        : [];
     const withType = isContainer(path)
-      ? [...stored, ...containerTypeQuads(containerIri), ...preserved]
+      ? [...stored, ...containerTypeQuads(containerIri)]
       : stored;
     await store.putResource(path, inlineBytes, {
       quads: withType,
       contentType,
       ...preconditions,
+      ...(isContainer(path)
+        ? { preserveWhere: (q: StoredQuad) => isContainsQuad(q, containerIri) }
+        : {}),
     });
   }
 
