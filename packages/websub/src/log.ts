@@ -41,8 +41,12 @@ export const WebSubLogEvent = {
   SubscriptionRemoved: "websub.subscription.removed",
   /** A subscription was denied (`hub.mode=denied`). Emitted whether or not the callback was reachable; `notified` records whether it accepted the GET. Fields: `callbackHost`, `topicHost`, `notified`, `reason`. */
   SubscriptionDenied: "websub.subscription.denied",
+  /** A distribution plan fanned out into per-subscriber deliver jobs. Fields: `topicHost`, `subscriberCount`, `staged` (whether the snapshot was staged in R2 vs. inlined). */
+  DeliveryScheduled: "websub.delivery.scheduled",
   /** A content-distribution delivery to one subscriber finished. Fields: `callbackHost`, `delivered`, `status`. */
   DeliveryCompleted: "websub.delivery.completed",
+  /** A per-subscriber deliver job referenced an R2-staged snapshot that was absent (reclaimed before the delivery retried), so the delivery was dropped. Fields: `callbackHost`. */
+  StagedContentMissing: "websub.staged.missing",
   /** A distribution job could not fetch the topic content. Fields: `topicHost`, `status`. */
   TopicFetchFailed: "websub.topic.fetch_failed",
   /** The topic declared no `Content-Type` and no fallback was configured, so distribution was refused rather than mislabeled (WebSub §7). Fields: `topicHost`, `status`. */

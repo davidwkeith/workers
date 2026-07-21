@@ -74,14 +74,26 @@ export {
   buildLinkHeader,
   fetchTopicContent,
   deliverToSubscriber,
+  stageContent,
+  readStagedContent,
+  encodeInlineBody,
+  decodeInlineBody,
+  MAX_INLINE_BODY_BYTES,
   DEFAULT_SIGNATURE_ALGORITHM,
   type SignatureAlgorithm,
   type TopicContent,
   type TopicFetchResult,
   type DeliveryResult,
+  type DeliveryTarget,
   type DistributeOptions,
 } from "./distribute.js";
-export type { WebSubJob, VerifyJob, DistributeJob } from "./queue.js";
+export type {
+  WebSubJob,
+  VerifyJob,
+  DistributeJob,
+  DeliverJob,
+  DeliverPayload,
+} from "./queue.js";
 export {
   safeFetch,
   assertPublicUrl,

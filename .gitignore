@@ -11,3 +11,4 @@ coverage/
 # from an accidental `npm install` / `yarn`.
 package-lock.json
 yarn.lock
+.env

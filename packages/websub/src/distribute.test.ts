@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   contentSignature,
   buildLinkHeader,
+  decodeInlineBody,
+  encodeInlineBody,
   fetchTopicContent,
   deliverToSubscriber,
   type TopicContent,
@@ -10,6 +12,27 @@ import type { Subscription } from "./store.js";
 import type { FetchLike } from "@dwk/safe-fetch";
 
 const encoder = new TextEncoder();
+
+describe("encodeInlineBody / decodeInlineBody", () => {
+  it("round-trips arbitrary bytes through a base64 string", () => {
+    const bytes = new Uint8Array(512);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7) & 0xff;
+    const encoded = encodeInlineBody(bytes);
+    expect(typeof encoded).toBe("string");
+    // Base64 is a plain ASCII string — it survives JSON serialization intact,
+    // unlike a raw Uint8Array (which JSON turns into a `{"0":..}` byte map).
+    expect(JSON.parse(JSON.stringify(encoded))).toBe(encoded);
+    expect([...decodeInlineBody(encoded)]).toEqual([...bytes]);
+  });
+
+  it("round-trips UTF-8 text (including multi-byte characters)", () => {
+    const text = "café — 日本語 — 🎉";
+    const decoded = decodeInlineBody(
+      encodeInlineBody(new TextEncoder().encode(text)),
+    );
+    expect(new TextDecoder().decode(decoded)).toBe(text);
+  });
+});
 
 describe("contentSignature", () => {
   it("computes sha256=<hex> HMAC matching a known vector", async () => {
