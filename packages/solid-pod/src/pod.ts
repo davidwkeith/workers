@@ -1434,8 +1434,14 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     // `preserveWhere` predicate so it re-reads and merges containment atomically,
     // inside the transaction. We still re-assert the container type triples.
     const containerIri = toIri(origin, path);
+    // Containment is entirely server-managed and already preserved atomically
+    // above; strip any client-forged `ldp:contains` triples on the container
+    // itself so they can't be persisted alongside the real listing.
     const withType = isContainer(path)
-      ? [...stored, ...containerTypeQuads(containerIri)]
+      ? [
+          ...stored.filter((q) => !isContainsQuad(q, containerIri)),
+          ...containerTypeQuads(containerIri),
+        ]
       : stored;
     await store.putResource(path, inlineBytes, {
       quads: withType,

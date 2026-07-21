@@ -1475,6 +1475,32 @@ describe("@dwk/solid-pod LDP", () => {
     expect(body).toContain("My container");
   });
 
+  it("strips a client-forged ldp:contains triple from a container PUT (issue #337)", async () => {
+    const pod = freshPod();
+    // A real resource that exists elsewhere in the pod.
+    const other = await pod.send("PUT", "/other", {
+      webid: OWNER,
+      body: "<#a> <#b> <#c> .",
+      headers: { "content-type": TURTLE },
+    });
+    expect(other.status).toBe(201);
+
+    // PUT the container with a forged ldp:contains pointing at that
+    // existing-but-unrelated resource; clients never legitimately send
+    // containment, so this must not be persisted.
+    const put = await pod.send("PUT", "/c/", {
+      webid: OWNER,
+      body: `@prefix ldp: <http://www.w3.org/ns/ldp#> .
+<> ldp:contains <${pod.base}/other> .`,
+      headers: { "content-type": TURTLE },
+    });
+    expect(put.status).toBe(201);
+
+    const listing = await pod.send("GET", "/c/", { webid: OWNER });
+    const body = await listing.text();
+    expect(body).not.toContain("/other");
+  });
+
   it("DELETE removes a resource (404 thereafter)", async () => {
     const pod = freshPod();
     await pod.send("PUT", "/gone", {
