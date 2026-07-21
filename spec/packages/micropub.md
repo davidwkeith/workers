@@ -13,7 +13,8 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
 - **Create / update / delete** actions.
 - Accept both `application/json` and **form-encoded** request bodies.
 - **Media endpoint** backed by **R2**.
-- Query support: `q=config` and `q=source`.
+- Query support: `q=config`, `q=source`, and `q=category` (see
+  [Micropub extensions](#micropub-extensions)).
 
 ## Event post type (`h=event`)
 
@@ -47,6 +48,55 @@ It maps `uid` (falling back to `url`) → identity, `name` → title,
 `summary`/`content` → description, `dt-start`/`dt-end` → start/end, `location` →
 locations, `category` → keywords, and `published`/`updated` → timestamps; it is
 pure and unit-tested for the `h-event → CalendarEvent → .ics` round-trip.
+
+## Micropub extensions
+
+Beyond the core protocol the endpoint implements a curated subset of the
+[IndieWeb Micropub extensions](https://indieweb.org/Micropub-extensions).
+Those extensions are organised there into three **maturity groups** —
+`official` (adopted into the spec), `stable` (widely implemented and settled),
+and `proposed` (experimental) — and the endpoint mirrors that model: each
+extension is tagged with its group and is only advertised and honoured when that
+group is enabled.
+
+- **Group toggle.** The `extensions` config (`{ official?, stable?, proposed? }`)
+  enables extensions a group at a time. Defaults follow the wiki's maturity:
+  `official` and `stable` **on**, `proposed` **off**, so a deployment opts in to
+  experimental behaviour explicitly. The already-shipped core commands
+  (`mp-slug`, `mp-syndicate-to`) and the core `q=config`/`q=source` queries are
+  always available and are not gated.
+
+Currently implemented (all **stable**):
+
+- **Post Status** (`post-status`: `published` | `draft`) and **Visibility**
+  (`visibility`: `public` | `unlisted` | `private`). Validated on create and on
+  the merged result of an update, so a stored post only ever carries a known
+  value; an unrecognised value is rejected `400 invalid_request`. An absent
+  property is the extension's documented default (`published` / `public`).
+  **Scope of enforcement:** the endpoint *stores and advertises* these — it does
+  **not** itself gate reads. Hiding a `draft` from public listings and
+  access-controlling a `private` post are the **serving layer's**
+  responsibility (the consuming site, or WAC in [`@dwk/solid-pod`](solid-pod.md)).
+  This boundary is deliberate: `@dwk/micropub` is a publishing endpoint, not the
+  renderer.
+- **Supported Vocabulary** (`post-types` in `q=config`). The optional
+  `postTypes` config advertises the site's editorial post-type vocabulary
+  (`[{ type, name }]`) to clients. Omitted from the response when unset or when
+  the `stable` group is off; the store persists posts generically regardless.
+- **Category/Tag List** (`q=category`). Returns `{ "categories": [...] }` — the
+  distinct string `category` (tag) values across all **live** posts (soft-deleted
+  posts are excluded), alphabetised, for client autocomplete. Narrowed by the
+  **Limit** (`limit=`) and **Filter** (`filter=`, case-insensitive substring)
+  parameters; `limit` is capped server-side. Nested non-string tags (e.g.
+  `h-card` objects) are excluded from the list.
+
+Not yet implemented / tracked separately:
+
+- **Query for Post List** (`q=source` with no `url`) with offset pagination is
+  handled independently (issue #351 / PR #353), not by this increment.
+- Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
+  `location-visibility`, and the richer query filters) are off by default and
+  unimplemented; they are the roadmap tracked in the extensions issue.
 
 ## Auth / security
 

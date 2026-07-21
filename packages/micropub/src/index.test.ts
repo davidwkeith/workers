@@ -1270,6 +1270,246 @@ describe("@dwk/micropub query and action edge cases", () => {
   });
 });
 
+describe("@dwk/micropub stable extensions", () => {
+  /** Create an h-entry with the given mf2 properties via the default handler. */
+  async function createEntry(
+    minted: MintedToken,
+    properties: Record<string, unknown[]>,
+    mount = handler,
+  ): Promise<Response> {
+    return mount(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({ type: ["h-entry"], properties }),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("advertises `category` in q=config's supported queries", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await res.json()) as { q: string[] }).q).toContain("category");
+  });
+
+  it("advertises configured post-types in q=config", async () => {
+    const withTypes = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      postTypes: [
+        { type: "note", name: "Note" },
+        { type: "article", name: "Article" },
+      ],
+    });
+    const minted = await mintToken("create");
+    const res = await withTypes(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(
+      ((await res.json()) as Record<string, unknown>)["post-types"],
+    ).toEqual([
+      { type: "note", name: "Note" },
+      { type: "article", name: "Article" },
+    ]);
+  });
+
+  it("accepts a valid post-status/visibility and round-trips them", async () => {
+    const minted = await mintToken("create");
+    const res = await createEntry(minted, {
+      content: ["a draft"],
+      "post-status": ["draft"],
+      visibility: ["unlisted"],
+    });
+    expect(res.status).toBe(201);
+    const location = res.headers.get("location")!;
+    const source = await handler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(location)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.properties["post-status"]).toEqual(["draft"]);
+    expect(body.properties.visibility).toEqual(["unlisted"]);
+  });
+
+  it("rejects an unknown post-status value", async () => {
+    const minted = await mintToken("create");
+    const res = await createEntry(minted, {
+      content: ["x"],
+      "post-status": ["bogus"],
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("rejects an unknown visibility value", async () => {
+    const minted = await mintToken("create");
+    const res = await createEntry(minted, {
+      content: ["x"],
+      visibility: ["secret"],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an update that introduces an invalid post-status", async () => {
+    const minted = await mintToken("create update");
+    const created = await createEntry(minted, { content: ["x"] });
+    const location = created.headers.get("location")!;
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: location,
+          replace: { "post-status": ["nope"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("q=category returns distinct tags, alphabetised, filterable and limitable", async () => {
+    const minted = await mintToken("create");
+    await createEntry(minted, {
+      content: ["one"],
+      category: ["zzcat-indieweb", "zzcat-micropub"],
+    });
+    await createEntry(minted, {
+      content: ["two"],
+      category: ["zzcat-indieweb", "zzcat-cloudflare"],
+    });
+
+    // Scope assertions with the unique `zzcat-` prefix: the store accumulates
+    // rows across tests in this file, so filter rather than assert the whole set.
+    const all = await handler(
+      new Request(`${MICROPUB}?q=category&filter=zzcat-`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await all.json()) as { categories: string[] }).categories).toEqual(
+      ["zzcat-cloudflare", "zzcat-indieweb", "zzcat-micropub"],
+    );
+
+    const filtered = await handler(
+      new Request(`${MICROPUB}?q=category&filter=zzcat-indie`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(
+      ((await filtered.json()) as { categories: string[] }).categories,
+    ).toEqual(["zzcat-indieweb"]);
+
+    const limited = await handler(
+      new Request(`${MICROPUB}?q=category&filter=zzcat-&limit=1`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(
+      ((await limited.json()) as { categories: string[] }).categories,
+    ).toHaveLength(1);
+  });
+
+  it("q=category excludes a soft-deleted post's tags", async () => {
+    const minted = await mintToken("create delete");
+    const created = await createEntry(minted, {
+      content: ["gone"],
+      category: ["zzdel-ephemeral"],
+    });
+    const location = created.headers.get("location")!;
+    await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({ action: "delete", url: location }),
+      }),
+      harness,
+      ctx,
+    );
+    const res = await handler(
+      new Request(`${MICROPUB}?q=category&filter=zzdel-ephemeral`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await res.json()) as { categories: string[] }).categories).toEqual(
+      [],
+    );
+  });
+
+  it("disabling the stable group hides q=category and skips vocabulary validation", async () => {
+    const noStable = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      extensions: { stable: false },
+    });
+    const minted = await mintToken("create");
+
+    const cfg = await noStable(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await cfg.json()) as { q: string[] }).q).not.toContain("category");
+
+    const cat = await noStable(
+      new Request(`${MICROPUB}?q=category`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(cat.status).toBe(400);
+
+    // With the group off, `post-status` is just an opaque property — no
+    // validation, so an otherwise-rejected value is stored verbatim.
+    const created = await createEntry(
+      minted,
+      { content: ["x"], "post-status": ["bogus"] },
+      noStable,
+    );
+    expect(created.status).toBe(201);
+  });
+});
+
 describe("@dwk/micropub DPoP htu binding behind a proxy", () => {
   it("binds htu to the configured endpoint, not request.url", async () => {
     // Path-rewriting proxy: the client signs the PUBLIC endpoint, but the
