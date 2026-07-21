@@ -34,8 +34,11 @@ import {
 import {
   ActivityPubLogEvent,
   ApOutcome,
+  METRICS_DRAIN_HEADER,
+  METRICS_HEADER,
   OUTCOME_ACTIVITY_HEADER,
   OUTCOME_HEADER,
+  type PendingMetric,
 } from "./log.js";
 import { verifyInboxSignature, type InboxRequest } from "./signature.js";
 
@@ -120,7 +123,7 @@ function actorStub(config: ResolvedConfig, env: ActivityPubEnv) {
 }
 
 /** Forward a request to the DO with the internal config (and optional) headers. */
-function forwardToDo(
+async function forwardToDo(
   config: ResolvedConfig,
   env: ActivityPubEnv,
   url: string,
@@ -132,6 +135,12 @@ function forwardToDo(
 ): Promise<Response> {
   const headers = new Headers();
   headers.set(INTERNAL_HEADERS.config, JSON.stringify(forwardedConfig(config)));
+  // Ask the DO to drain counter deltas its alarm-driven work accumulated
+  // (delivery outcomes have no request of their own to report through); the
+  // deltas come back on a response header relayed into the injected `Metrics`
+  // below. Opt-in per request so internal callers that build their own DO
+  // requests (the MCP tools) never consume deltas they would not relay.
+  headers.set(METRICS_DRAIN_HEADER, "1");
   const accept = init.extra?.accept;
   if (accept) headers.set("accept", accept);
   for (const [k, v] of Object.entries(init.extra ?? {})) {
@@ -142,7 +151,47 @@ function forwardToDo(
     headers,
     ...(init.body !== undefined ? { body: init.body } : {}),
   });
-  return actorStub(config, env).fetch(request);
+  const response = await actorStub(config, env).fetch(request);
+  return relayDoMetrics(config, response);
+}
+
+/**
+ * Replay the DO's drained counter deltas (see `object.ts`
+ * `#drainPendingMetrics`) into the injected `Metrics` seam — wired here at the
+ * composition boundary, unreachable from inside the DO — then strip the
+ * internal header before the response goes any further. Metrics only: the
+ * matching log lines were already emitted from the DO via `console` (#330), so
+ * relaying them to the Logger too would double-log. Each delta replays as `n`
+ * individual `count` calls, preserving one-data-point-per-occurrence
+ * semantics; `n` is bounded by the DO's per-drain budget.
+ */
+function relayDoMetrics(config: ResolvedConfig, response: Response): Response {
+  const raw = response.headers.get(METRICS_HEADER);
+  if (raw === null) return response;
+  let pending: PendingMetric[];
+  try {
+    pending = JSON.parse(raw) as PendingMetric[];
+  } catch {
+    pending = [];
+  }
+  if (Array.isArray(pending)) {
+    for (const delta of pending) {
+      if (!delta || typeof delta.event !== "string") continue;
+      // Defensive ceiling matching the DO's whole-drain budget, so a
+      // malformed header can never spin an unbounded replay loop.
+      const n = Math.min(Math.max(Math.floor(delta.n), 0), 256);
+      for (let i = 0; i < n; i++) {
+        config.metrics.count(delta.event, delta.fields);
+      }
+    }
+  }
+  const headers = new Headers(response.headers);
+  headers.delete(METRICS_HEADER);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 /**
