@@ -73,10 +73,30 @@ pnpm test        # full vitest suite, Node + workerd projects
    is set — changesets does not auto-commit). Repo-only changes (CI, docs,
    scripts) don't need one.
 
-6. **Open a pull request.** Keep PRs focused; reference the issue they
-   address. Commit messages follow the
-   [Conventional Commits](https://www.conventionalcommits.org/) style used in
-   the history (`feat(scope): …`, `fix(scope): …`, `chore: …`, `docs: …`).
+6. **Write commit messages (and the PR title) in Conventional Commits
+   style**, matching the history: `<type>(<scope>): <subject>` — lowercase
+   type, subject not capitalized, no trailing period. Common types: `feat`,
+   `fix`, `chore`, `docs`. Scope is the package name minus the `@dwk/` prefix
+   (`fix(solid-pod): …`), a comma-separated list for several packages
+   (`fix(store,solid-pod): …`), or omitted for a repo-wide change
+   (`chore: …`, `docs: …`).
+
+   ✅ `fix(solid-pod): strip client-forged ldp:contains from container PUT`
+   ❌ `Fix solid-pod: strip client-forged ldp:contains from container PUT` — capitalized, and a bare colon instead of a `(scope)`
+   ❌ `Add AGENTS.md symlink to CLAUDE.md` — no type prefix at all
+
+   This repo squash-merges PRs, so the **PR title** becomes the permanent
+   history entry — get the title right, not just the commit messages on the
+   branch.
+
+7. **Open a pull request from `.github/PULL_REQUEST_TEMPLATE.md`.** GitHub
+   pre-fills this body automatically when a PR is opened against the repo;
+   keep its section headings (`Summary`, `Packages affected`, `Checklist`)
+   verbatim instead of renaming or collapsing them into free-form prose (e.g.
+   don't rename `Checklist` to `Verification`). Tick each checklist box, or
+   leave it unchecked with a one-line reason if it doesn't apply — don't
+   delete items that don't apply. Keep PRs focused and reference the issue
+   they address.
 
 ## Running tests
 
