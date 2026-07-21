@@ -5,7 +5,8 @@
  * web clients (Elk, Phanpy) can call it; native apps ignore CORS.
  */
 
-import { handleCreateApp } from "./apps.js";
+import { handleVerifyAccountCredentials } from "./accounts.js";
+import { handleCreateApp, handleVerifyAppCredentials } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
@@ -24,6 +25,8 @@ type RouteHandler = (ctx: RouteContext) => Promise<Response>;
 const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
   [
     ["POST /api/v1/apps", handleCreateApp],
+    ["GET /api/v1/apps/verify_credentials", handleVerifyAppCredentials],
+    ["GET /api/v1/accounts/verify_credentials", handleVerifyAccountCredentials],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],

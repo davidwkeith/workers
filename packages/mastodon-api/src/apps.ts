@@ -9,9 +9,10 @@
 
 import { validateClientMetadata, type ClientRecord } from "@dwk/oauth";
 
+import { authenticateBearer } from "./auth.js";
 import { randomToken, sha256Hex } from "./encoding.js";
 import { applicationEntity } from "./entities.js";
-import { mastodonError } from "./errors.js";
+import { invalidToken, mastodonError } from "./errors.js";
 import type { RouteContext } from "./handler.js";
 import { createMastodonStore } from "./store.js";
 
@@ -115,4 +116,20 @@ export async function handleCreateApp(ctx: RouteContext): Promise<Response> {
   await createMastodonStore(ctx.env).saveClient(record);
 
   return Response.json(applicationEntity(record, { clientSecret }));
+}
+
+/**
+ * `GET /api/v1/apps/verify_credentials` — validates any live token (an
+ * app-level `client_credentials` token suffices) and returns the token's
+ * `Application`, never with credentials.
+ */
+export async function handleVerifyAppCredentials(
+  ctx: RouteContext,
+): Promise<Response> {
+  const store = createMastodonStore(ctx.env);
+  const token = await authenticateBearer(ctx.request, store);
+  if (!token) return invalidToken();
+  const client = await store.getClient(token.clientId);
+  if (!client) return invalidToken();
+  return Response.json(applicationEntity(client));
 }

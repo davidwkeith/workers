@@ -73,3 +73,43 @@ export async function registerApp(
   }
   return (await res.json()) as AppResponse;
 }
+
+/**
+ * Complete the whole login flow through the real endpoints and return a
+ * usable bearer token. `grantType` selects an owner-bound token
+ * (`authorization_code`) or an app-level one (`client_credentials`).
+ */
+export async function obtainAccessToken(
+  grantType: "authorization_code" | "client_credentials" = "authorization_code",
+): Promise<string> {
+  const app = await registerApp();
+  const fields: Record<string, string> = {
+    grant_type: grantType,
+    client_id: app.client_id,
+    client_secret: app.client_secret,
+  };
+  if (grantType === "authorization_code") {
+    const authorize = new URL("https://owner.example/oauth/authorize");
+    authorize.searchParams.set("client_id", app.client_id);
+    authorize.searchParams.set("redirect_uri", "app://oauth-callback");
+    authorize.searchParams.set("response_type", "code");
+    const redirect = await api()(new Request(authorize.toString()));
+    const code = new URL(
+      redirect.headers.get("location") ?? "",
+    ).searchParams.get("code");
+    if (!code) throw new Error("obtainAccessToken: authorize minted no code");
+    fields["redirect_uri"] = "app://oauth-callback";
+    fields["code"] = code;
+  }
+  const res = await api()(
+    new Request("https://owner.example/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields),
+    }),
+  );
+  if (res.status !== 200) {
+    throw new Error(`obtainAccessToken: unexpected ${res.status}`);
+  }
+  return ((await res.json()) as { access_token: string }).access_token;
+}
