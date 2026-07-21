@@ -41,6 +41,11 @@ pnpm test        # full vitest suite, Node + workerd projects
 > change to a dependency package) needs `pnpm build` before the dependent
 > package's tests will pass.
 
+> **Windows: enable symlinks.** The repo tracks `AGENTS.md` as a symlink to
+> `CLAUDE.md`. Without `core.symlinks=true` (requires Developer Mode or an
+> admin `git clone`), Windows checkouts silently materialize it as a plain
+> text file containing `CLAUDE.md` instead of the real guidance.
+
 ## Development workflow
 
 1. **Branch** off `main`.
