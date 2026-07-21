@@ -2,9 +2,12 @@ name: Conformance
 
 # Wires conformance + the release gate into CI (issue #12). The cheap, always-on
 # jobs (release-gate, integration) run on every PR/push and gate stable
-# releases. The hosted conformance suites need a deployed, publicly reachable
-# Worker, so they run on demand (workflow_dispatch) or on a weekly schedule,
-# against a target URL — they never block ordinary pushes.
+# releases. deploy-target auto-deploys packages/conformance-target to
+# conformance.dwk.io on every push to main, in addition to on demand
+# (workflow_dispatch) or the weekly schedule. The hosted conformance suites
+# need a deployed, publicly reachable Worker, so they only run on demand or on
+# the weekly schedule, against a target URL — they never block ordinary
+# pushes.
 
 on:
   pull_request:
@@ -86,9 +89,14 @@ jobs:
   # Deploys the composed conformance target (packages/conformance-target) to
   # conformance.dwk.io so the hosted suites have something to run against.
   # Skips gracefully when the Cloudflare secrets are not configured, so the
-  # weekly schedule stays green on forks / before one-time setup.
+  # weekly schedule (and pushes to main, on forks) stays green before
+  # one-time setup. Runs on every push to main so conformance.dwk.io tracks
+  # main directly, in addition to the manual/scheduled paths.
   deploy-target:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - name: Check Cloudflare credentials
