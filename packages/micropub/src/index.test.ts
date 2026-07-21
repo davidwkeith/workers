@@ -1252,16 +1252,21 @@ describe("@dwk/micropub query and action edge cases", () => {
       ctx,
     );
     expect(res.status).toBe(200);
-    const data = (await res.json()) as Record<string, unknown>;
+    const data = (await res.json()) as {
+      items?: unknown[];
+    };
     expect(data).toHaveProperty("items");
     expect(Array.isArray(data.items)).toBe(true);
-    const urls = (data.items as Record<string, unknown>[]).map(
-      (item) => (item.properties as Record<string, unknown>).url?.[0],
-    );
+    const urls = (data.items as Record<string, unknown>[]).map((item) => {
+      const props = item.properties as Record<string, unknown>;
+      const url = props.url as unknown[] | undefined;
+      return url?.[0];
+    });
     expect(urls).toContain(url1.href);
     expect(urls).toContain(url2.href);
-    expect(data.items[0]).toHaveProperty("type");
-    expect(data.items[0]).toHaveProperty("properties");
+    const firstItem = data.items?.[0];
+    expect(firstItem).toHaveProperty("type");
+    expect(firstItem).toHaveProperty("properties");
   });
 
   it("respects limit parameter on q=source list", async () => {
@@ -1291,7 +1296,7 @@ describe("@dwk/micropub query and action edge cases", () => {
       ctx,
     );
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as { items?: unknown[] };
     expect(data.items).toHaveLength(2);
   });
 
@@ -1321,7 +1326,7 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    const data1 = await res1.json();
+    const data1 = (await res1.json()) as { items?: unknown[] };
     const res2 = await handler(
       new Request(`${MICROPUB}?q=source&limit=2&offset=2`, {
         headers: await authHeaders(minted, "GET", MICROPUB),
@@ -1329,9 +1334,9 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    const data2 = await res2.json();
-    expect(data2.items.length).toBeGreaterThan(0);
-    expect(data1.items.length).toBeGreaterThan(0);
+    const data2 = (await res2.json()) as { items?: unknown[] };
+    expect((data2.items as unknown[]).length).toBeGreaterThan(0);
+    expect((data1.items as unknown[]).length).toBeGreaterThan(0);
   });
 
   it("applies property filtering to q=source list items", async () => {
@@ -1359,10 +1364,15 @@ describe("@dwk/micropub query and action edge cases", () => {
       ctx,
     );
     expect(res2.status).toBe(200);
-    const data = (await res2.json()) as Record<string, unknown>;
-    expect(data.items[0]).toHaveProperty("properties");
-    expect(data.items[0]?.properties).toHaveProperty("content");
-    expect(data.items[0]?.properties).not.toHaveProperty("name");
+    const data = (await res2.json()) as { items?: unknown[] };
+    const firstItem = (data.items as Record<string, unknown>[])?.[0];
+    expect(firstItem).toHaveProperty("properties");
+    expect(
+      (firstItem?.properties as Record<string, unknown>) || {},
+    ).toHaveProperty("content");
+    expect(
+      (firstItem?.properties as Record<string, unknown>) || {},
+    ).not.toHaveProperty("name");
   });
 
   it("returns 404 for q=source on a non-existent post", async () => {
