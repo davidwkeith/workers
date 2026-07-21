@@ -97,6 +97,9 @@ pnpm test        # full vitest suite, Node + workerd projects
    leave it unchecked with a one-line reason if it doesn't apply — don't
    delete items that don't apply. Keep PRs focused and reference the issue
    they address.
+8. **Resolve every review conversation before merging.** Push a fix and
+   resolve the thread, or reply explaining why no change is needed and then
+   resolve it. A PR isn't ready to merge with outstanding unresolved threads.
 
 ## Running tests
 

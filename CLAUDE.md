@@ -276,6 +276,10 @@ both groups in one pass.
   `Verification` or replace it with free-form prose, and don't delete a
   checklist item that doesn't apply — leave it unchecked with a one-line
   reason instead (`- [ ] Updated catalog.json/conformance/status.json — not applicable, no new worker`).
+- **Review threads:** resolve every review conversation before merging —
+  either by pushing a fix and marking the thread resolved, or by replying
+  with why no change is needed and then resolving it. Don't merge with
+  outstanding unresolved threads.
 - **Releases:** independent semver per package via **Changesets**. To record a
   change, run `pnpm changeset`, select the affected packages and bump, and commit
   the generated markdown in `.changeset/` alongside the code. `commit: false` —
