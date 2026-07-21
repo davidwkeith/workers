@@ -300,8 +300,13 @@ Everything remains DO-SQLite authoritative state — never KV — per
   the comment-control `capabilities` extension beyond tolerating them inbound.
 - **Video hosting** (PeerTube producer side). Consuming announced `Video`
   objects is covered by classification; serving video is not.
-- **Platform client APIs** (Mastodon REST API, Lemmy HTTP API). Clients speak
-  micropub/MCP/outbox to *this* Worker; only federation is multi-platform.
+- **Platform client APIs** (Mastodon REST API, Lemmy HTTP API) *inside
+  `@dwk/activitypub`*. Clients speak micropub/MCP/outbox to *this* Worker;
+  only federation is multi-platform. A read-only Mastodon-compatible client
+  API is now designed as a **separate optional package** reading the same DO
+  through the internal seam — see
+  [mastodon-client-api.md](mastodon-client-api.md) (#327); the federation
+  package itself stays free of platform client vocabulary.
 - **Per-platform actor sniffing or behavior switches** — see the design
   principle.
 

@@ -133,6 +133,18 @@ one record.
   subset ([open-questions.md](../open-questions.md) §4). See
   [conformance-and-testing.md](../conformance-and-testing.md).
 
+## Mastodon-compatible client API (design)
+
+A read-only Mastodon client API — so the owner can log in with an
+off-the-shelf fediverse app (Pixelfed, Tusky) and browse their own
+notifications and timeline — is designed in
+[mastodon-client-api.md](../mastodon-client-api.md) (#327). It lives in a
+separate package (`@dwk/mastodon-api`); this package's additive part is a
+`createActivitypubMastodonApi` adapter export plus internal-header-gated
+`__client/*` DO read routes and extended `__stats` counts, mirroring how
+`createSolidPodWebdav` composes `@dwk/webdav`. Federation behavior is
+unchanged.
+
 ## Multi-platform interop (design)
 
 v1 interop targets Mastodon. The approved design for interoperating with
