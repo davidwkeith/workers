@@ -105,11 +105,14 @@ export function createMastodonApi(
       if (request.method.toUpperCase() !== method) continue;
       const match = pattern.exec(url.pathname);
       if (match?.[1]) {
+        let id: string;
+        try {
+          id = decodeURIComponent(match[1]);
+        } catch {
+          return withCors(recordNotFound());
+        }
         return withCors(
-          await dynamicHandler(
-            { config, env, request, url },
-            decodeURIComponent(match[1]),
-          ),
+          await dynamicHandler({ config, env, request, url }, id),
         );
       }
     }
