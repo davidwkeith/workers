@@ -1665,6 +1665,169 @@ describe("@dwk/micropub stable extensions", () => {
   });
 });
 
+describe("@dwk/micropub proposed audience and location visibility", () => {
+  const proposedHandler = createMicropub({
+    baseUrl: BASE,
+    me: ME,
+    extensions: { proposed: true },
+    audiences: [
+      { uid: "family", name: "Family" },
+      { uid: "project-alpha", name: "Project Alpha" },
+    ],
+  });
+
+  async function createEntry(
+    minted: MintedToken,
+    properties: Record<string, unknown[]>,
+  ): Promise<Response> {
+    return proposedHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({ type: ["h-entry"], properties }),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("advertises proposed properties and the configured named audiences", async () => {
+    const minted = await mintToken("create");
+    const res = await proposedHandler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.properties).toEqual(["audience", "location-visibility"]);
+    expect(body.audiences).toEqual([
+      { uid: "family", name: "Family" },
+      { uid: "project-alpha", name: "Project Alpha" },
+    ]);
+  });
+
+  it("stores normalized audience and location-visibility metadata in source", async () => {
+    const minted = await mintToken("create");
+    const created = await createEntry(minted, {
+      content: ["meet us there"],
+      visibility: ["private"],
+      audience: ["family", "family", "project-alpha"],
+      location: ["The Park", "geo:45.5,-122.6"],
+      "location-visibility": ["text"],
+    });
+    expect(created.status).toBe(201);
+    const location = created.headers.get("location")!;
+    const source = await proposedHandler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(location)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.properties.audience).toEqual(["family", "project-alpha"]);
+    expect(body.properties["location-visibility"]).toEqual(["text"]);
+  });
+
+  it("enforces configured private audiences and meaningful location disclosure", async () => {
+    const minted = await mintToken("create");
+    await expect(
+      createEntry(minted, {
+        visibility: ["private"],
+        audience: ["unknown"],
+      }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, { audience: ["family"] }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, { "location-visibility": ["text"] }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, {
+        location: ["The Park"],
+        "location-visibility": ["coordinates"],
+      }),
+    ).resolves.toHaveProperty("status", 400);
+  });
+
+  it("allows a private location on a public post for field-level redaction", async () => {
+    const minted = await mintToken("create");
+    const created = await createEntry(minted, {
+      visibility: ["public"],
+      location: ["The Park"],
+      "location-visibility": ["private"],
+    });
+    expect(created.status).toBe(201);
+  });
+
+  it("validates the merged update result", async () => {
+    const minted = await mintToken("create update");
+    const created = await createEntry(minted, {
+      visibility: ["private"],
+      audience: ["family"],
+    });
+    const res = await proposedHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: created.headers.get("location"),
+          replace: { visibility: ["public"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("keeps proposed property values opaque and unadvertised when disabled", async () => {
+    const minted = await mintToken("create");
+    const config = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect((await config.json()) as Record<string, unknown>).not.toHaveProperty(
+      "audiences",
+    );
+
+    const created = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: {
+            audience: ["not-a-configured-audience"],
+            "location-visibility": ["anything"],
+          },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+  });
+});
+
 describe("@dwk/micropub DPoP htu binding behind a proxy", () => {
   it("binds htu to the configured endpoint, not request.url", async () => {
     // Path-rewriting proxy: the client signs the PUBLIC endpoint, but the
