@@ -6,7 +6,7 @@
 | **Ships a DO?** | no (reads `@dwk/activitypub`'s DO through the `MastodonBackend` seam) |
 | **Used by** | `@dwk/activitypub` (the phase-2 `createActivitypubMastodonApi` adapter) |
 | **Standard** | [Mastodon client API](https://docs.joinmastodon.org/client/intro/) (de-facto) |
-| **Status** | phase 1 implemented (auth + identity); phases 2–3 tracked in [#349](https://github.com/davidwkeith/workers/issues/349) / [#350](https://github.com/davidwkeith/workers/issues/350) |
+| **Status** | phase 1 (auth + identity) and phase 2 (DO-backed read surface, [#349](https://github.com/davidwkeith/workers/issues/349)) implemented; phase 3 (fidelity) tracked in [#350](https://github.com/davidwkeith/workers/issues/350) |
 
 A Mastodon-compatible client API subset so a site owner can **log in with an
 off-the-shelf fediverse client** (Pixelfed's app, Tusky, Elk) and browse their
@@ -121,14 +121,132 @@ opportunistically pruned), `mastodon_tokens` (hash-keyed), and
 **never KV**. No `requires` edge onto `indieauth`; the binding name is shared
 so composers deduplicate onto one auth database.
 
-## Phase 2/3 (not yet implemented)
+## Endpoint roster (phase 2)
 
-Tracked in [#349](https://github.com/davidwkeith/workers/issues/349) and
-[#350](https://github.com/davidwkeith/workers/issues/350), specified in the
-[design doc](../mastodon-client-api.md): the `__client/*` DO routes and
-extended `__stats` in `@dwk/activitypub`, `createActivitypubMastodonApi`,
-timelines/notifications/statuses with snowflake IDs and `Link` pagination,
-`accounts/:id`, the AS2 → entity mapping with read-time sanitization and
-FEP-1b12 reblog provenance, actor-profile hydration, and the
-`conformance/mastodon-client-qa.md` real-client runbook (Pixelfed app,
-Tusky) with `conformance/status.json` gating.
+Implemented in [#349](https://github.com/davidwkeith/workers/issues/349),
+the DO-backed read surface. Every route below requires an account-bound
+token (`422` for an app-level `client_credentials` token, same as phase
+1's account endpoints) and, absent a configured `backend`, degrades to an
+empty-but-valid response (`[]` for the two list endpoints, `404` for the
+two entry endpoints) rather than erroring.
+
+| Endpoint | Auth | Backing |
+| --- | --- | --- |
+| `GET /api/v1/timelines/home` | account token | `MastodonBackend.timeline()` |
+| `GET /api/v1/notifications` | account token | `MastodonBackend.notifications()` |
+| `GET /api/v1/statuses/:id` | account token | `MastodonBackend.entry(id)` |
+| `GET /api/v1/accounts/:id` | account token | owner (config) or reversibly-decoded remote id — no backend call |
+
+List endpoints (`timelines/home`, `notifications`) accept `limit`,
+`max_id`, `since_id`, `min_id` (opaque decimal snowflake strings) and
+answer an RFC 8288 `Link: rel="next"/"prev"` header built from the
+returned page's first/last ids, Mastodon's own pagination convention.
+
+## The `MastodonBackend` seam, in practice
+
+`@dwk/activitypub`'s `createActivitypubMastodonApi`
+(`packages/activitypub/src/mastodon-api.ts`) is the only implementation:
+it builds a synthetic internal `Request` to the owning actor's Durable
+Object (`__stats`, `__client/timeline`, `__client/notifications`,
+`__client/entry`, carrying `INTERNAL_HEADERS.config` +
+`INTERNAL_HEADERS.internal`) rather than holding an in-DO closure —
+the `mcp-tools.ts`/`syndication.ts` internal-fetch pattern, not
+`createSolidPodWebdav`'s. `@dwk/mastodon-api` itself never computes a
+DO row's `received_at`/`seq`; it only ever handles the opaque decimal
+snowflake strings the seam's `maxId`/`sinceId`/`minId`/`id` params
+already specify.
+
+## Snowflake ID scheme
+
+Mastodon-shaped, decimal-string ids for phase-2 inbox-derived entries:
+`(receivedAtMs << 16) | (source << 15) | (seq & 0x7FFF)`. `source` is
+reserved and always `0` in v1 (inbox rows only); phase 3 reserves `1` for
+outbox-derived rows without changing already-minted ids.
+
+This encoding is **lossy on `seq`**: only its low 15 bits survive, so a
+naive decode-and-compare against the DO's `inbox.seq` column silently
+targets the wrong row once a table exceeds 32768 entries. The resolution
+(`@dwk/activitypub`'s adapter, not this package) is to bound and locate
+rows by `received_at` — preserved exactly by the encoding, only ever
+shifted, never masked — with the decoded `seq` low bits used solely as a
+same-millisecond tiebreak, never as a bare recovered bound. See
+`docs/superpowers/specs/2026-07-21-mastodon-phase2-implementation-notes.md`
+for the full cursor contract (`max_received_at`/`since_received_at`/
+`min_received_at` + `tie_seq` on the internal DO routes).
+
+## Entity fields emitted (phase 2)
+
+- **`Status`** (from a `Create`/`Announce` inbox row): `id` (snowflake),
+  `created_at`, `in_reply_to_id: null`, `in_reply_to_account_id: null`
+  (reply-threading to a local snowflake is a known v1 gap — see below),
+  `sensitive`, `spoiler_text`, `visibility: "public"`, `language: null`,
+  `uri`/`url` (the embedded object's `id`, falling back to the entry id),
+  `replies_count`/`reblogs_count`/`favourites_count: 0`, `content`
+  (sanitized HTML — see below), `reblog` (non-null only for a
+  `relayed_by` row — FEP-1b12 group-relay provenance, wrapped as a boost
+  attributed to the relaying group's account), `account` (best-effort
+  remote `Account`, see below), `media_attachments`, `mentions: []`,
+  `tags: []`, `emojis: []`, `card: null`, `poll: null`.
+- **`Notification`**: `Like` → `favourite`, `Announce` → `reblog`, a
+  `Create` whose `inReplyTo` targets this instance → `mention` (with the
+  full mapped `Status` attached); any other row maps to `null` and is
+  omitted from the page. **`Follow` has no case in phase 2** — see Known
+  gaps below.
+- **Remote `Account`** (embedded in `Status.account` /
+  `Notification.account`): synthesized purely from the actor IRI, no
+  backend call and no outbound fetch (`spec/mastodon-client-api.md`:
+  "no enumeration"). `id` is `r_<base64url(actorIri)>` — reversible, so
+  `GET /api/v1/accounts/:id` can resolve it back to the IRI and re-derive
+  the same best-effort entity with zero backend calls. `username`/`acct`
+  come from the IRI's last path segment and host; every count is `0`,
+  `discoverable: false`; actor-document hydration (real display name,
+  avatar, bio) is phase 3's actor-profile hydration cache.
+
+## Read-time HTML sanitization
+
+Inbound status `content` is attacker-controlled remote-server AS2 JSON, so
+`sanitize.ts`'s `sanitizeStatusHtml` runs a small allowlist sanitizer
+(`p`, `br`, `a`, `span`, `b`, `strong`, `i`, `em`, `ul`, `ol`, `li`; a
+short per-tag attribute allowlist; `href`/`src` reject non-http(s)
+schemes) before any content reaches a client. It is **fail-safe by
+construction**: every `<` the scanner finds is either fully consumed as
+part of a tag matching the recognized grammar, or HTML-escaped — there is
+no third path where an unrecognized or malformed tag-shaped span is
+passed through as live markup. Unusual markup degrading to escaped plain
+text is correct behavior, not a bug.
+
+## Known gaps (phase 2)
+
+- **Follow notifications are deferred to phase 3 (#350).** `#onFollow`
+  writes only to the `followers`/`pending_accept` tables — inbound
+  `Follow` activities never reach `inbox`, so `GET /api/v1/notifications`
+  has no data to classify as `follow` and never emits one. This was a
+  scope decision (confirmed with the repo owner), not an oversight —
+  phase 2 was scoped as additive DO routes only, and teaching `#onFollow`
+  to also write an `inbox` row (or merging a second `followers`-sourced
+  stream into the notification cursor) is real federation-write-path
+  surgery.
+- **Bare-IRI `Announce` objects render as empty statuses.** A plain
+  (non-relayed) boost's `object` is often just the boosted post's IRI as
+  a string, not an embedded object; `statusEntity` reads object fields
+  assuming an embedded shape, so such a row currently renders as a
+  content-less `Status` rather than the actual boosted post. Safe (no
+  crash), but a known fidelity gap — see the phase-2 implementation notes
+  for the open question of whether to denormalize `Announce` rows at
+  write time or add a dereference branch at read time.
+- **`in_reply_to_id` is always `null`.** Full reply-threading to a local
+  snowflake isn't implemented; a reply still surfaces correctly as a
+  `mention` notification, so this doesn't block the phase-2 acceptance
+  bar.
+
+## Phase 3 (not yet implemented)
+
+Tracked in [#350](https://github.com/davidwkeith/workers/issues/350),
+specified in the [design doc](../mastodon-client-api.md): actor-profile
+hydration (real display name/avatar/bio for remote accounts, replacing
+the best-effort IRI-derived entity above); merging the owner's own
+`outbox` posts into the home timeline (additive, via the snowflake's
+reserved source bit); Follow notifications; `in_reply_to_id` threading;
+counters and any other fidelity quirks the client matrix surfaces (each
+recorded in `conformance/mastodon-client-qa.md`, fixed, and
+fixture-tested).
