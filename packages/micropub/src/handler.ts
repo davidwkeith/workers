@@ -34,6 +34,12 @@ import {
   type MicropubStore,
   type MicropubStoreEnv,
 } from "./store.js";
+import {
+  ContactValidationError,
+  contactView,
+  contactWrite,
+  type MicropubContactStore,
+} from "./contacts.js";
 import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
 import { syndicateEntry } from "./fediverse.js";
 
@@ -157,6 +163,87 @@ function parseLimitParam(raw: string | null): number | undefined {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return undefined;
   return Math.min(n, MAX_CATEGORY_LIMIT);
+}
+
+function contactsEnabled(config: ResolvedConfig): boolean {
+  return config.extensions.proposed && config.contacts !== undefined;
+}
+
+function contactInternalUrl(config: ResolvedConfig, id: string): string {
+  return `${config.micropubEndpoint.replace(/\/$/, "")}/contacts/${encodeURIComponent(id)}`;
+}
+
+function contactIdFromUrl(raw: string, config: ResolvedConfig): string | null {
+  try {
+    const target = new URL(raw);
+    const endpoint = new URL(config.micropubEndpoint);
+    const prefix = `${endpoint.pathname.replace(/\/$/, "")}/contacts/`;
+    if (
+      target.origin !== endpoint.origin ||
+      !target.pathname.startsWith(prefix) ||
+      target.search ||
+      target.hash
+    )
+      return null;
+    const encoded = target.pathname.slice(prefix.length);
+    return encoded && !encoded.includes("/")
+      ? decodeURIComponent(encoded)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseContactPage(params: URLSearchParams): {
+  filter?: string;
+  limit: number;
+  offset: number;
+} {
+  const allowed = new Set(["q", "filter", "search", "limit", "offset"]);
+  for (const key of params.keys()) {
+    if (!allowed.has(key))
+      throw new ContactValidationError(
+        `unsupported contact query parameter \`${key}\``,
+      );
+  }
+  const one = (name: string): string | null => {
+    const values = params.getAll(name);
+    if (values.length > 1)
+      throw new ContactValidationError(`\`${name}\` must not be repeated`);
+    return values[0] ?? null;
+  };
+  if (params.getAll("q").length !== 1)
+    throw new ContactValidationError("`q` must be supplied exactly once");
+  const filter = one("filter");
+  const search = one("search");
+  if (filter !== null && search !== null)
+    throw new ContactValidationError(
+      "`filter` and `search` cannot be combined",
+    );
+  const limit = one("limit");
+  const offset = one("offset");
+  if (
+    limit !== null &&
+    (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 100)
+  ) {
+    throw new ContactValidationError(
+      "`limit` must be a base-10 integer from 1 to 100",
+    );
+  }
+  if (
+    offset !== null &&
+    (!/^\d+$/.test(offset) || !Number.isSafeInteger(Number(offset)))
+  ) {
+    throw new ContactValidationError(
+      "`offset` must be a non-negative base-10 integer",
+    );
+  }
+  const selected = filter ?? search;
+  return {
+    ...(selected ? { filter: selected.normalize("NFKC").toLowerCase() } : {}),
+    limit: limit === null ? 100 : Number(limit),
+    offset: offset === null ? 0 : Number(offset),
+  };
 }
 
 // --- Body parsing -----------------------------------------------------------
@@ -387,6 +474,25 @@ async function handleMediaGet(
 
 // --- Queries ----------------------------------------------------------------
 
+async function handleContactQuery(
+  params: URLSearchParams,
+  config: ResolvedConfig,
+  store: MicropubContactStore,
+): Promise<Response> {
+  try {
+    const contacts = await store.list(parseContactPage(params));
+    return json({
+      contacts: contacts.map((contact) =>
+        contactView(contact, contactInternalUrl(config, contact.id)),
+      ),
+    });
+  } catch (err) {
+    if (err instanceof ContactValidationError)
+      return error("invalid_request", err.message, 400);
+    throw err;
+  }
+}
+
 /** Handle `GET` to the Micropub endpoint: `q=config`/`source`/`syndicate-to`. */
 async function handleQuery(
   request: Request,
@@ -420,6 +526,7 @@ async function handleQuery(
     // only when configured and its group is on.
     const supportedQueries = ["source", "config", "syndicate-to"];
     if (config.extensions.stable) supportedQueries.push("category");
+    if (contactsEnabled(config)) supportedQueries.push("contact");
     return json({
       "media-endpoint": config.mediaEndpoint,
       "syndicate-to": await config.syndicateTo(),
@@ -442,6 +549,9 @@ async function handleQuery(
       ...(filter ? { filter } : {}),
     });
     return json({ categories });
+  }
+  if (q === "contact" && config.extensions.proposed && config.contacts) {
+    return handleContactQuery(params, config, config.contacts(env));
   }
   if (q === "source") {
     const filter = [
@@ -500,6 +610,138 @@ async function parseRequest(request: Request): Promise<ParsedBody> {
   return parseFormBody(await readForm(request));
 }
 
+function contactResponse(location: string): Response {
+  return new Response(JSON.stringify({ _internal_url: location }), {
+    status: 201,
+    headers: { "content-type": "application/json", location, ...CORS_HEADERS },
+  });
+}
+
+function contactUpdateHasInternalUrl(
+  ops: ReturnType<typeof parseUpdateOperations>,
+): boolean {
+  return (
+    ops.replace?._internal_url !== undefined ||
+    ops.add?._internal_url !== undefined ||
+    (Array.isArray(ops.delete)
+      ? ops.delete.includes("_internal_url")
+      : ops.delete?._internal_url !== undefined)
+  );
+}
+
+async function handleContactAction(
+  parsed: ParsedBody,
+  rawJson: unknown,
+  isJson: boolean,
+  config: ResolvedConfig,
+  store: MicropubContactStore,
+): Promise<Response> {
+  const action = parsed.action ?? "create";
+  if (action === "create") {
+    const mf2 =
+      !isJson && parsed.url
+        ? {
+            type: parsed.mf2.type,
+            properties: { ...parsed.mf2.properties, url: [parsed.url] },
+          }
+        : parsed.mf2;
+    if (!mf2.type.includes("h-card")) {
+      return error(
+        "invalid_request",
+        "a contact create must include the `h-card` microformats type",
+        400,
+      );
+    }
+    const id = crypto.randomUUID();
+    try {
+      if (
+        (await store.create(
+          contactWrite(id, mf2.properties, Math.floor(Date.now() / 1000)),
+        )) === "conflict"
+      ) {
+        return error("invalid_request", "a contact already has that URL", 409);
+      }
+    } catch (err) {
+      if (err instanceof ContactValidationError)
+        return error("invalid_request", err.message, 400);
+      throw err;
+    }
+    const location = contactInternalUrl(config, id);
+    emit(config, "info", MicropubLogEvent.ActionCompleted, {
+      action: "contact-create",
+    });
+    return contactResponse(location);
+  }
+  if (!parsed.url)
+    return error(
+      "invalid_request",
+      "`url` is required for contact updates",
+      400,
+    );
+  const id = contactIdFromUrl(parsed.url, config);
+  if (!id)
+    return error("invalid_request", "no contact exists at that URL", 404);
+  if (action === "delete") {
+    if (!(await store.delete(id)))
+      return error("invalid_request", "no contact exists at that URL", 404);
+    emit(config, "info", MicropubLogEvent.ActionCompleted, {
+      action: "contact-delete",
+    });
+    return noContent();
+  }
+  if (action !== "update")
+    return error(
+      "invalid_request",
+      `unsupported contact action \`${action}\``,
+      400,
+    );
+  if (!isJson)
+    return error(
+      "invalid_request",
+      "contact `update` requests must use `application/json`",
+      400,
+    );
+  const record = await store.get(id);
+  if (!record)
+    return error("invalid_request", "no contact exists at that URL", 404);
+  let ops;
+  try {
+    ops = parseUpdateOperations(rawJson);
+  } catch (err) {
+    if (err instanceof Mf2ParseError)
+      return error("invalid_request", err.message, 400);
+    throw err;
+  }
+  if (contactUpdateHasInternalUrl(ops)) {
+    return error(
+      "invalid_request",
+      "`_internal_url` is response metadata and cannot be modified",
+      400,
+    );
+  }
+  try {
+    const result = await store.update(
+      contactWrite(
+        id,
+        applyUpdate(record.properties, ops),
+        Math.floor(Date.now() / 1000),
+      ),
+    );
+    if (result === "not_found")
+      return error("invalid_request", "no contact exists at that URL", 404);
+    if (result === "conflict")
+      return error("invalid_request", "a contact already has that URL", 409);
+  } catch (err) {
+    if (err instanceof ContactValidationError)
+      return error("invalid_request", err.message, 400);
+    throw err;
+  }
+  emit(config, "info", MicropubLogEvent.ActionCompleted, {
+    action: "contact-update",
+  });
+  return noContent();
+}
+
 /** Handle `POST` to the Micropub endpoint: dispatch on the action verb. */
 async function handleAction(
   request: Request,
@@ -544,6 +786,8 @@ async function handleAction(
   }
 
   const action = parsed.action ?? "create";
+  const isContactRequest =
+    new URL(request.url).searchParams.get("q") === "contact";
 
   // RFC 6750 §2: a client MUST NOT use more than one method to transmit the
   // token. Reject — before authorizing — when the token is present in BOTH the
@@ -575,6 +819,14 @@ async function handleAction(
       status: auth.status,
     });
     return error(auth.error, auth.description, auth.status);
+  }
+
+  if (isContactRequest) {
+    const contacts = config.contacts;
+    if (!config.extensions.proposed || !contacts) {
+      return error("invalid_request", "unsupported query `q=contact`", 400);
+    }
+    return handleContactAction(parsed, rawJson, isJson, config, contacts(env));
   }
 
   // Authorized: only now stream any uploaded multipart files to R2 and fold

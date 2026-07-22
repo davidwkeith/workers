@@ -14,7 +14,7 @@ in D1, and backs its media endpoint with R2.
 ## Usage
 
 ```ts
-import { createMicropub } from "@dwk/micropub";
+import { createMicropub, createMicropubContactStore } from "@dwk/micropub";
 
 const micropub = createMicropub({
   baseUrl: "https://example.com",
@@ -25,6 +25,8 @@ const micropub = createMicropub({
   micropubEndpoint: "https://example.com/micropub",
   mediaEndpoint: "https://example.com/media",
   syndicateTo: [{ uid: "https://news.example/@me", name: "Example News" }],
+  extensions: { proposed: true },
+  contacts: createMicropubContactStore,
 });
 
 export default {
@@ -52,6 +54,8 @@ The handler fails loudly at startup if any of these are missing:
 - **Media endpoint**: streams uploads to R2 and serves them back.
 - **Queries**: `q=config`, `q=source` (with a `properties[]` filter), and
   `q=syndicate-to`.
+- **Opt-in Contacts** (`q=contact`): a private h-card address book with
+  filtered, paginated listing and create/update/delete lifecycle actions.
 
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession

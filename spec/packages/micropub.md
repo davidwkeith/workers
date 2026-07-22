@@ -123,9 +123,35 @@ is a client's only way to browse its own drafts (#351).
 
 [mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
 
-Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
-`location-visibility`, and the richer query filters) are off by default and
-unimplemented; they are the roadmap tracked in the extensions issue.
+### Proposed Contacts (`q=contact`)
+
+Contacts are an opt-in proposed extension: it is advertised in `q=config` and
+routed only when `extensions.proposed` is true and a `contacts` store/provider
+is configured. It is private owner data, so every request uses the existing
+IndieAuth subject binding and mandatory DPoP validation. Reads require an
+authenticated token; create, update, and delete require their corresponding
+Micropub scopes.
+
+`GET ?q=contact` returns `{ "contacts": [...] }`, with h-card value objects
+and response-only `_internal_url` management handles. `filter` (or compatibility
+alias `search`) is a case-insensitive literal substring match across strings in
+known and unknown properties. Results have deterministic display-name ordering,
+with `limit` (1–100, default 100) and `offset` pagination.
+
+`POST ?q=contact` creates an `h-card`; `action=update` uses standard JSON
+replace/add/delete operations against `_internal_url`; and `action=delete`
+hard-deletes it. Contacts preserve arbitrary property arrays and structured
+values. A non-empty `name`, `nickname`, `url`, or `email` is required; the
+canonical first http(s) URL is unique among contacts. To person-tag a post, a
+client copies the selected h-card (not `_internal_url`) into `category` as an
+embedded h-card, preserving a historical snapshot.
+
+The built-in `createMicropubContactStore` creates a separate strongly-consistent
+D1 table with bound queries and indexes; custom stores implement the same
+`MicropubContactStore` seam. KV is never an authoritative contact store.
+
+Other proposed-group extensions (`q=geo`, `audience`, `location-visibility`,
+and richer query filters) remain unimplemented.
 
 ## Auth / security
 
