@@ -32,4 +32,77 @@ describe("sanitizeStatusHtml", () => {
       "<a>x</a>",
     );
   });
+
+  // Regression coverage for a Critical XSS sanitizer bypass: `/` is a valid
+  // attribute separator per WHATWG HTML5 tokenization (and a known
+  // XSS-filter-evasion technique), not just the self-closing marker. Before
+  // the fix, TAG_RE required literal whitespace before every attribute name,
+  // so a `/`-separated tag failed to match at all and fell through to the
+  // output completely unmodified — bypassing the tag allowlist,
+  // event-handler stripping, and `javascript:` URL rejection at once.
+  describe("`/` as attribute separator (tokenizer bypass)", () => {
+    it("strips a non-allowlisted tag using `/` before its first attribute", () => {
+      expect(sanitizeStatusHtml("<img/src=x onerror=alert(1)>")).toBe("");
+    });
+
+    it("strips svg using `/` before its first attribute", () => {
+      expect(sanitizeStatusHtml("<svg/onload=alert(1)>")).toBe("");
+    });
+
+    it("recognizes an `/`-separated allowlisted tag and rejects its javascript: href", () => {
+      expect(sanitizeStatusHtml('<a/href="javascript:alert(1)">x</a>')).toBe(
+        "<a>x</a>",
+      );
+    });
+
+    it("still self-closes <br/> correctly (no regression)", () => {
+      expect(sanitizeStatusHtml("<p>a<br/>b</p>")).toBe("<p>a<br />b</p>");
+    });
+
+    it("still keeps a normal space-separated <a href> (no regression)", () => {
+      const input = '<a href="https://example.com">text</a>';
+      expect(sanitizeStatusHtml(input)).toBe(input);
+    });
+
+    it("handles `/` followed by whitespace before the attribute", () => {
+      expect(sanitizeStatusHtml('<a/ href="javascript:alert(1)">x</a>')).toBe(
+        "<a>x</a>",
+      );
+    });
+
+    it("handles a doubled `/` separator", () => {
+      expect(sanitizeStatusHtml('<a//href="javascript:alert(1)">x</a>')).toBe(
+        "<a>x</a>",
+      );
+    });
+
+    it("handles multiple attributes after a `/`-separated first one", () => {
+      expect(
+        sanitizeStatusHtml('<a/href="/" onclick="evil()" rel="me">x</a>'),
+      ).toBe('<a href="/" rel="me">x</a>');
+    });
+  });
+
+  // Regression coverage for an unclosed <script>/<style> leaking its raw
+  // body text: before the fix, the `if (closeMatch)` guard skipped advancing
+  // the cursor when no closing tag was found anywhere in the remainder, so
+  // the opening tag was stripped but its body fell through as plain text on
+  // the next loop iteration(s).
+  describe("unclosed <script>/<style> (content-leak bypass)", () => {
+    it("drops everything after an unclosed <script> with no closing tag", () => {
+      expect(
+        sanitizeStatusHtml("<script>evil() /* no closing tag at all"),
+      ).toBe("");
+    });
+
+    it("drops everything after an unclosed <style> with no closing tag", () => {
+      expect(sanitizeStatusHtml("<style>body{color:red} no close")).toBe("");
+    });
+
+    it("still drops a properly closed <script> and keeps trailing text", () => {
+      expect(
+        sanitizeStatusHtml("<p>hi</p><script>evil()</script><p>bye</p>"),
+      ).toBe("<p>hi</p><p>bye</p>");
+    });
+  });
 });

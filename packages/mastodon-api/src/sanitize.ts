@@ -24,8 +24,13 @@ const ALLOWED_ATTRS: Record<string, readonly string[]> = {
   span: ["class"],
 };
 
+// The attribute-repetition group accepts `/` as a separator alongside
+// whitespace: per WHATWG HTML5 tokenization (and a known XSS-filter-evasion
+// technique), browsers treat `<img/src=x>` identically to `<img src=x>`. A
+// bare trailing `/` before `>` still falls through to the `\s*\/?>` tail as
+// the self-closing marker, since it has no attribute name following it.
 const TAG_RE =
-  /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*\/?>/g;
+  /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:[\s/]+[a-zA-Z-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*\/?>/g;
 const ATTR_RE = /([a-zA-Z-]+)(?:=("[^"]*"|'[^']*'|[^\s>]*))?/g;
 
 function safeUrl(raw: string): string | null {
@@ -58,8 +63,12 @@ export function sanitizeStatusHtml(html: string): string {
       const closeMatch = closeRe.exec(rest);
       if (closeMatch) {
         lastIndex += closeMatch.index + closeMatch[0].length;
-        TAG_RE.lastIndex = lastIndex;
+      } else {
+        // No matching close tag anywhere in the remainder: drop the rest of
+        // the input rather than letting its raw text fall through unescaped.
+        lastIndex = html.length;
       }
+      TAG_RE.lastIndex = lastIndex;
       continue;
     }
     if (!ALLOWED_TAGS.has(name)) continue; // strip tag, keep surrounding text
