@@ -99,6 +99,55 @@ describe("GET /api/v1/accounts/verify_credentials", () => {
   });
 });
 
+describe("GET /api/v1/accounts/:id", () => {
+  beforeEach(resetDb);
+
+  it("returns the owner account for the owner id", async () => {
+    const token = await obtainAccessToken();
+    const response = await api()(
+      new Request("https://owner.example/api/v1/accounts/1", {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { username: string }).username).toBe(
+      "owner",
+    );
+  });
+
+  it("re-synthesizes a remote account from its encoded id, no backend call", async () => {
+    const token = await obtainAccessToken();
+    const { encodeRemoteAccountId } = await import("./entities.js");
+    const id = encodeRemoteAccountId("https://remote.example/users/alice");
+    const response = await api()(
+      new Request(`https://owner.example/api/v1/accounts/${id}`, {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { username: string }).username).toBe(
+      "alice",
+    );
+  });
+
+  it("404s for an id that decodes to neither the owner nor a valid remote IRI", async () => {
+    const token = await obtainAccessToken();
+    const response = await api()(
+      new Request("https://owner.example/api/v1/accounts/not-a-real-id", {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("401s without a token", async () => {
+    const response = await api()(
+      new Request("https://owner.example/api/v1/accounts/1"),
+    );
+    expect(response.status).toBe(401);
+  });
+});
+
 describe("GET /api/v1/apps/verify_credentials", () => {
   beforeEach(resetDb);
 
