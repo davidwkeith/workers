@@ -144,8 +144,15 @@ export function buildMastodonBackend(options: {
     // `buildLinkHeader`, `timelines.ts`, `notifications.ts` — has a fixed
     // "always newest-first" contract regardless of which cursor selected the
     // page. Normalize here, at the DO-response boundary, so that contract
-    // holds unconditionally.
-    if (query.minId !== undefined) entries.reverse();
+    // holds unconditionally. Key this off whether `min_received_at` actually
+    // landed on the outgoing request URL, not the raw `query.minId`
+    // presence: `cursorParams`'s `bound()` helper silently no-ops when
+    // `decodeSnowflake` rejects the cursor (non-numeric or an
+    // unsafe-integer-decoded value), in which case `#listClientEntries`
+    // never took the oldest-first branch and the page arrives already
+    // newest-first — reversing it would reintroduce the bug this guard
+    // exists to prevent.
+    if (url.searchParams.has("min_received_at")) entries.reverse();
     return { entries };
   }
 

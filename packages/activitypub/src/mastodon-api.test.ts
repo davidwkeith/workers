@@ -376,6 +376,28 @@ describe("buildMastodonBackend", () => {
     ]);
   });
 
+  it("timeline() with an undecodable minId does NOT reverse the page (min_received_at never reached the DO request, so the DO's own default newest-first order must pass through unchanged)", async () => {
+    const config = freshConfig();
+    const first = createNote(config);
+    const second = createNote(config);
+    await seedActivity(config, first);
+    await seedActivity(config, second);
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    // "not-a-number" fails decodeSnowflake's `/^\d+$/` check, so
+    // cursorParams's bound() helper silently no-ops and never sets
+    // min_received_at on the outgoing DO request. The DO therefore takes its
+    // default (non-minId) branch and returns rows already newest-first; the
+    // adapter must NOT reverse this page. Keying the reversal off the raw
+    // `query.minId !== undefined` presence (the bug this test guards
+    // against) would incorrectly flip it to oldest-first.
+    const page = await backend.timeline({ limit: 10, minId: "not-a-number" });
+    expect(page.entries.map((e) => e.activity["id"])).toEqual([
+      second["id"],
+      first["id"],
+    ]);
+  });
+
   it("entry() decodes a snowflake id and fetches the exact row by received_at + seq_low", async () => {
     const config = freshConfig();
     await seedActivity(config, createNote(config));
