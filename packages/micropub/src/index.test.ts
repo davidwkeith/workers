@@ -1758,6 +1758,16 @@ describe("@dwk/micropub proposed audience and location visibility", () => {
     ).resolves.toHaveProperty("status", 400);
   });
 
+  it("allows a private location on a public post for field-level redaction", async () => {
+    const minted = await mintToken("create");
+    const created = await createEntry(minted, {
+      visibility: ["public"],
+      location: ["The Park"],
+      "location-visibility": ["private"],
+    });
+    expect(created.status).toBe(201);
+  });
+
   it("validates the merged update result", async () => {
     const minted = await mintToken("create update");
     const created = await createEntry(minted, {

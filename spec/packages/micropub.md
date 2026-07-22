@@ -144,7 +144,11 @@ interpreted, preserving the existing generic-mf2 behavior.
   `"location-visibility": ["public" | "private" | "text"]`. It requires at
   least one `location` property. `text` allows the serving layer to show a
   textual place name while withholding coordinates and other precise location
-  data. An absent value means `public`, matching the upstream proposal.
+  data. `private` means it must withhold the entire location even when the post
+  itself is public: it is a field-level redaction rule, not an audience or
+  access-control claim. This intentional asymmetry lets an owner publish a
+  public update without revealing where it was posted. An absent value means
+  `public`, matching the upstream proposal.
 - **Create/update/delete/source.** Create validates and stores these ordinary
   mf2 properties; JSON updates validate the merged result, so changing a
   private audience post to non-private (or removing its `location` while its

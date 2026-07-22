@@ -684,10 +684,7 @@ export async function publishPost(
 
   if (config.extensions.proposed) {
     try {
-      properties = normalizeProposedVocabulary(
-        properties,
-        config.audiences.map((audience) => audience.uid),
-      );
+      properties = normalizeProposedVocabulary(properties, config.audienceIds);
     } catch (err) {
       if (err instanceof Mf2ParseError) {
         emit(config, "warn", MicropubLogEvent.RequestRejected, {
@@ -817,10 +814,7 @@ async function doUpdate(
   }
   if (config.extensions.proposed) {
     try {
-      next = normalizeProposedVocabulary(
-        next,
-        config.audiences.map((audience) => audience.uid),
-      );
+      next = normalizeProposedVocabulary(next, config.audienceIds);
     } catch (err) {
       if (err instanceof Mf2ParseError) {
         emit(config, "warn", MicropubLogEvent.RequestRejected, {

@@ -355,7 +355,7 @@ export function validateVocabulary(
  */
 export function normalizeProposedVocabulary(
   properties: Readonly<Record<string, readonly unknown[]>>,
-  audienceIds: readonly string[],
+  audienceIds: ReadonlySet<string>,
 ): Record<string, unknown[]> {
   const normalized: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(properties)) {
@@ -364,11 +364,10 @@ export function normalizeProposedVocabulary(
 
   const audience = properties.audience;
   if (audience !== undefined) {
-    const knownAudienceIds = new Set(audienceIds);
     const seen = new Set<string>();
     const values: string[] = [];
     for (const value of audience) {
-      if (typeof value !== "string" || !knownAudienceIds.has(value)) {
+      if (typeof value !== "string" || !audienceIds.has(value)) {
         throw new Mf2ParseError(
           "`audience` values must be configured audience `uid` strings",
         );

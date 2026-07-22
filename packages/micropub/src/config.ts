@@ -192,6 +192,8 @@ export interface ResolvedConfig {
   readonly extensions: Readonly<Record<ExtensionMaturity, boolean>>;
   /** Named audience IDs accepted by the proposed Audience extension. */
   readonly audiences: readonly AudienceConfig[];
+  /** Precomputed membership set for validating proposed audience IDs. */
+  readonly audienceIds: ReadonlySet<string>;
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
@@ -316,6 +318,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       proposed: config.extensions?.proposed ?? false,
     },
     audiences,
+    audienceIds,
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),
