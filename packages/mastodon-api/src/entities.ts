@@ -11,7 +11,8 @@ import type { ClientRecord } from "@dwk/oauth";
 import type { MastodonApiConfig } from "./config.js";
 import { OWNER_ACCOUNT_ID } from "./config.js";
 import type { MastodonMarkerRecord } from "./store.js";
-import type { BackendAccountCounts } from "./backend.js";
+import type { BackendAccountCounts, BackendEntry } from "./backend.js";
+import { sanitizeStatusHtml } from "./sanitize.js";
 
 /**
  * 1×1 transparent PNG. `avatar`/`header` are required by clients (some crash
@@ -186,4 +187,181 @@ export function markerEntity(
     version: record.version,
     updated_at: new Date(record.updatedAt * 1000).toISOString(),
   };
+}
+
+const REMOTE_ACCOUNT_PREFIX = "r_";
+
+function base64UrlEncode(value: string): string {
+  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(value: string): string | null {
+  try {
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+    const pad =
+      padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+    return atob(padded + pad);
+  } catch {
+    return null;
+  }
+}
+
+/** Reversible remote-account id — see Task 5's header note on why. */
+export function encodeRemoteAccountId(actorIri: string): string {
+  return REMOTE_ACCOUNT_PREFIX + base64UrlEncode(actorIri);
+}
+
+export function decodeRemoteAccountId(id: string): string | null {
+  if (!id.startsWith(REMOTE_ACCOUNT_PREFIX)) return null;
+  return base64UrlDecode(id.slice(REMOTE_ACCOUNT_PREFIX.length));
+}
+
+/** Best-effort local part from an actor IRI's path (last segment). */
+function usernameFromIri(actorIri: string): string {
+  try {
+    const url = new URL(actorIri);
+    const segments = url.pathname.split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? url.hostname;
+  } catch {
+    return actorIri;
+  }
+}
+
+/**
+ * Best-effort remote `Account`, synthesized purely from the actor IRI — no
+ * backend call, no outbound fetch (design doc: "no enumeration"). Embedded
+ * actor-document enrichment is phase 3's actor-profile hydration cache.
+ */
+export function remoteAccountEntity(actorIri: string): Record<string, unknown> {
+  const username = usernameFromIri(actorIri);
+  let host = actorIri;
+  try {
+    host = new URL(actorIri).hostname;
+  } catch {
+    /* fall through with the raw IRI as a last resort */
+  }
+  return {
+    id: encodeRemoteAccountId(actorIri),
+    username,
+    acct: `${username}@${host}`,
+    display_name: username,
+    locked: false,
+    bot: false,
+    discoverable: false,
+    group: false,
+    created_at: "1970-01-01T00:00:00.000Z",
+    note: "",
+    url: actorIri,
+    avatar: TRANSPARENT_PIXEL,
+    avatar_static: TRANSPARENT_PIXEL,
+    header: TRANSPARENT_PIXEL,
+    header_static: TRANSPARENT_PIXEL,
+    followers_count: 0,
+    following_count: 0,
+    statuses_count: 0,
+    last_status_at: null,
+    emojis: [],
+    fields: [],
+  };
+}
+
+interface RawAttachment {
+  readonly type?: string;
+  readonly url?: string;
+  readonly mediaType?: string;
+  readonly name?: string;
+  readonly blurhash?: string;
+}
+
+const MEDIA_TYPE_MAP: Record<string, string> = {
+  Image: "image",
+  Video: "video",
+  Audio: "audio",
+  Document: "unknown",
+};
+
+function mediaAttachments(raw: unknown): Record<string, unknown>[] {
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list
+    .filter(
+      (item): item is RawAttachment =>
+        typeof item === "object" && item !== null,
+    )
+    .map((item, index) => ({
+      id: String(index),
+      type: MEDIA_TYPE_MAP[item.type ?? ""] ?? "unknown",
+      url: item.url ?? "",
+      preview_url: item.url ?? "",
+      description: item.name ?? null,
+      blurhash: item.blurhash ?? null,
+      meta: {},
+    }));
+}
+
+/**
+ * `Create`/`Announce` row → `Status`. A `relayed_by` row is wrapped as a
+ * reblog attributed to the relaying group's account (FEP-1b12 provenance —
+ * spec/mastodon-client-api.md Decision 3's MCP-spec provenance requirement).
+ */
+export function statusEntity(
+  entry: BackendEntry,
+  opts: { readonly baseUrl: string },
+): Record<string, unknown> {
+  const activity = entry.activity as {
+    readonly type?: string;
+    readonly actor?: unknown;
+    readonly object?: {
+      readonly id?: string;
+      readonly content?: string;
+      readonly summary?: string;
+      readonly sensitive?: boolean;
+      readonly inReplyTo?: string;
+      readonly attachment?: unknown;
+      readonly published?: string;
+    };
+  };
+  const actorIri = typeof activity.actor === "string" ? activity.actor : "";
+  const object = activity.object ?? {};
+  const content = sanitizeStatusHtml(object.content ?? "");
+  const uri = object.id ?? entry.id;
+
+  const inner: Record<string, unknown> = {
+    id: entry.id,
+    created_at: object.published ?? new Date(entry.receivedAt).toISOString(),
+    in_reply_to_id: null,
+    in_reply_to_account_id: null,
+    sensitive: object.sensitive ?? false,
+    spoiler_text: object.summary ?? "",
+    visibility: "public",
+    language: null,
+    uri,
+    url: uri,
+    replies_count: 0,
+    reblogs_count: 0,
+    favourites_count: 0,
+    content,
+    reblog: null,
+    account: actorIri
+      ? remoteAccountEntity(actorIri)
+      : remoteAccountEntity(opts.baseUrl),
+    media_attachments: mediaAttachments(object.attachment),
+    mentions: [],
+    tags: [],
+    emojis: [],
+    card: null,
+    poll: null,
+  };
+
+  if (entry.relayedBy) {
+    return {
+      ...inner,
+      id: entry.id,
+      content: "",
+      spoiler_text: "",
+      media_attachments: [],
+      account: remoteAccountEntity(entry.relayedBy),
+      reblog: inner,
+    };
+  }
+  return inner;
 }

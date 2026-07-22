@@ -8,10 +8,16 @@ import {
   applicationEntity,
   compatibilityVersion,
   credentialAccountEntity,
+  decodeRemoteAccountId,
+  encodeRemoteAccountId,
   instanceV1Entity,
   instanceV2Entity,
   markerEntity,
+  remoteAccountEntity,
+  statusEntity,
 } from "./entities.js";
+import { encodeSnowflake } from "./snowflake.js";
+import type { BackendEntry } from "./backend.js";
 
 const record: ClientRecord = {
   clientId: "client-1",
@@ -179,5 +185,89 @@ describe("markerEntity", () => {
       version: 3,
       updated_at: "2023-11-14T22:13:20.000Z",
     });
+  });
+});
+
+describe("statusEntity", () => {
+  const baseUrl = "https://owner.example";
+
+  it("maps a Create/Note to a Status with sanitized content and CW", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_000, 1),
+      receivedAt: 1_753_000_000_000,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/1",
+        type: "Create",
+        actor: "https://remote.example/users/alice",
+        object: {
+          id: "https://remote.example/objects/1",
+          type: "Note",
+          content: "<p>hi <script>bad()</script></p>",
+          summary: "cw text",
+          sensitive: true,
+          attachment: [
+            {
+              type: "Image",
+              url: "https://remote.example/media/1.jpg",
+              mediaType: "image/jpeg",
+              name: "alt text",
+            },
+          ],
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.id).toBe(entry.id);
+    expect(status.content).toBe("<p>hi </p>");
+    expect(status.spoiler_text).toBe("cw text");
+    expect(status.sensitive).toBe(true);
+    expect((status.media_attachments as unknown[])[0]).toMatchObject({
+      type: "image",
+      url: "https://remote.example/media/1.jpg",
+      description: "alt text",
+    });
+    expect((status.account as { acct: string }).acct).toContain("alice");
+  });
+
+  it("wraps a relayed_by row as a reblog attributed to the relaying group", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_001, 1),
+      receivedAt: 1_753_000_000_001,
+      objectType: "Note",
+      relayedBy: "https://lemmy.example/c/birding",
+      activity: {
+        id: "https://remote.example/activities/2",
+        type: "Create",
+        actor: "https://remote.example/users/bob",
+        object: {
+          id: "https://remote.example/objects/2",
+          type: "Note",
+          content: "<p>bird</p>",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect((status.account as { acct: string }).acct).toContain("birding");
+    expect(status.reblog).not.toBeNull();
+    expect((status.reblog as { content: string }).content).toBe("<p>bird</p>");
+  });
+});
+
+describe("remote account id round trip", () => {
+  it("encodes and decodes the actor IRI", () => {
+    const iri = "https://remote.example/users/alice";
+    const id = encodeRemoteAccountId(iri);
+    expect(id.startsWith("r_")).toBe(true);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+
+  it("synthesizes username/acct/url from the IRI shape", () => {
+    const account = remoteAccountEntity("https://remote.example/users/alice");
+    expect(account.username).toBe("alice");
+    expect(account.acct).toBe("alice@remote.example");
+    expect(account.url).toBe("https://remote.example/users/alice");
+    expect(account.avatar).toBeTruthy();
   });
 });
