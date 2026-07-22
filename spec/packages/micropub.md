@@ -123,9 +123,115 @@ is a client's only way to browse its own drafts (#351).
 
 [mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
 
-Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
-`location-visibility`, and the richer query filters) are off by default and
-unimplemented; they are the roadmap tracked in the extensions issue.
+### Proposed Contacts (`q=contact`)
+
+Contacts are an opt-in proposed extension: it is advertised in `q=config` and
+routed only when `extensions.proposed` is true and a `contacts` store/provider
+is configured. It is private owner data, so every request uses the existing
+IndieAuth subject binding and mandatory DPoP validation. Reads require an
+authenticated token but no particular action scope (intentionally matching
+`q=source`); create, update, and delete require their corresponding Micropub
+scopes.
+
+`GET ?q=contact` returns `{ "contacts": [...] }`, with h-card value objects
+and response-only `_internal_url` management handles. `filter` (or compatibility
+alias `search`) is a case-insensitive literal substring match across strings in
+known and unknown properties. Results have deterministic display-name ordering,
+with `limit` (1–100, default 100) and `offset` pagination.
+
+`POST ?q=contact` creates an `h-card` from JSON, form-encoded, or multipart
+input; multipart files are streamed to R2 and folded into their matching h-card
+properties. `action=update` uses standard JSON replace/add/delete operations
+against `_internal_url`; and `action=delete` hard-deletes it. Contacts preserve
+arbitrary property arrays and structured values. A non-empty `name`,
+`nickname`, `url`, or `email` is required; the canonical first http(s) URL is
+unique among contacts. To person-tag a post, a client copies the selected
+h-card (not `_internal_url`) into `category` as an embedded h-card, preserving
+a historical snapshot.
+
+The built-in `createMicropubContactStore` creates a separate strongly-consistent
+D1 table with bound queries and indexes; custom stores implement the same
+`MicropubContactStore` seam. KV is never an authoritative contact store.
+
+### Proposed Audience and Location Visibility
+
+The IndieWeb extensions reference reserves the `audience` and
+`location-visibility` property names, but leaves their detailed mf2 payload
+shapes open. This package defines a deliberately small, client-operable
+contract for both. It is enabled only with `extensions: { proposed: true }`;
+with the default setting (`false`) neither capability is advertised or
+interpreted, preserving the existing generic-mf2 behavior.
+
+- **Audience** is a multi-valued mf2 property of stable string IDs:
+  `"audience": ["family", "project-alpha"]`. The deployment configures the
+  accepted IDs as `audiences: [{ uid, name }]`; clients discover that exact
+  list in `q=config`'s `audiences` array and persist the `uid`, not the display
+  name. Values must be configured IDs, are de-duplicated in first-seen order,
+  and require `visibility: ["private"]` as the final stored value. This avoids
+  recording an audience on a publicly visible post, which would misleadingly
+  suggest access control exists.
+- **Location Visibility** is a single-value mf2 property:
+  `"location-visibility": ["public" | "private" | "text"]`. It requires at
+  least one `location` property. `text` allows the serving layer to show a
+  textual place name while withholding coordinates and other precise location
+  data. `private` means it must withhold the entire location even when the post
+  itself is public: it is a field-level redaction rule, not an audience or
+  access-control claim. This intentional asymmetry lets an owner publish a
+  public update without revealing where it was posted. An absent value means
+  `public`, matching the upstream proposal.
+- **Create/update/delete/source.** Create validates and stores these ordinary
+  mf2 properties; JSON updates validate the merged result, so changing a
+  private audience post to non-private (or removing its `location` while its
+  disclosure preference remains) is rejected. Delete/undelete retain their
+  existing whole-record behavior. `q=source` returns the stored metadata,
+  including in list items and property-filtered projections.
+- **Capability advertisement.** With the group enabled, `q=config` adds
+  `"properties": ["audience", "location-visibility"]` and the configured
+  `"audiences": [{ "uid", "name" }]`. With it disabled, neither member is
+  returned and the properties remain opaque mf2 data rather than taking on
+  privacy semantics.
+- **Serving boundary (load-bearing).** Micropub only validates, persists, and
+  advertises intent. It does **not** resolve contacts, restrict reads, redact
+  coordinates, or make a private post private. The consuming site or WAC layer
+  maps audience IDs to readers and applies `location-visibility` when rendering
+  or serializing a post. This includes the authenticated `q=source` endpoint:
+  it intentionally returns the source record unchanged.
+
+### Proposed richer `q=source` list filters
+
+This package-defined proposed extension is enabled only with
+`extensions.proposed`. Otherwise its parameters return `400 invalid_request`
+and the existing offset list is unchanged. It applies only to `q=source`
+without `url`; `q=config` advertises it as `source-filters` when enabled.
+
+All filters apply only to the authenticated caller's live posts. The serving
+layer remains responsible for public visibility and access control.
+
+| Parameter | Encoding and semantics |
+| --- | --- |
+| `after`, `before` | One whole-second RFC 3339 date-time each; exclusive creation-time bounds. |
+| `order` | `desc` (default) or `asc`; canonical URL is the deterministic tie-breaker. |
+| `post-type`, `post-status`, `visibility` | Repeatable exact values: OR within one filter and AND across filters. Missing status/visibility use `published`/`public`. |
+| `property-exists[]` | Repeatable mf2 property name; each must exist. |
+| `property-value[name]` | Repeatable exact direct string value. Values for a name are OR; names are AND. Nested h-* values do not match. |
+
+Property names use only letters, digits, and hyphens after an initial letter.
+Malformed dates, names, values, or ordering return `400 invalid_request`.
+`properties[]` remains a response projection and never affects matching.
+There may be at most 100 dynamic values across the value-bearing filters, and
+at most 100 `property-exists[]` predicates; exceeding either bound is `400`
+rather than a D1 host-parameter failure.
+
+The existing `limit`/`offset` path remains for compatibility. Filtered clients
+should use the opaque `next-cursor`; it is bound to the full filter set and
+ordering, and is exclusive over the `(created_at, url)` tuple. `cursor` and
+`offset` cannot be combined. The D1 store binds all values and indexes
+`(deleted, created_at, url)` plus `(deleted, type, created_at, url)`; arbitrary
+property predicates remain safe exact JSON predicates rather than full-text
+search.
+
+The proposed-group `q=geo` extension remains unimplemented and is tracked
+separately.
 
 ## Auth / security
 
@@ -196,6 +302,10 @@ so on).
 - `baseUrl` / domain.
 - `me` — the site owner's IndieAuth profile URL. Required; tokens whose subject
   is not this `me` are rejected.
+- `audiences` — optional stable `{ uid, name }` IDs for the proposed Audience
+  extension. They are only advertised and validated when
+  `extensions.proposed` is enabled; the consuming site/WAC layer supplies their
+  actual authorization mapping.
 - Media bucket binding name and any size thresholds.
 - Mapping/policy for where created posts are stored.
 

@@ -11,6 +11,7 @@
 
 import type { Mf2Object } from "./mf2.js";
 import type { PageRequest } from "./pagination.js";
+import type { SourceListCursor, SourceListFilters } from "./source-filters.js";
 
 /** Cloudflare binding required by the Micropub post store. */
 export interface MicropubStoreEnv {
@@ -32,6 +33,15 @@ export interface PostRecord {
   readonly createdAt: number;
   /** Last-modification time (seconds since the epoch). */
   readonly updatedAt: number;
+}
+
+/** Additional proposed filters for the `q=source` list store query. */
+export interface SourceListQuery {
+  readonly filters: SourceListFilters;
+  /** Exclusive keyset position from the preceding response. */
+  readonly cursor?: SourceListCursor;
+  /** Fetch one extra row so the handler can issue a next cursor. */
+  readonly lookahead?: boolean;
 }
 
 /** Storage interface over published posts. */
@@ -73,7 +83,10 @@ export interface MicropubStore {
    * List live (non-deleted) posts newest-first, for the `q=source` list query.
    * Offset-based pagination; the caller owns limit/offset validation.
    */
-  listPosts(page: PageRequest): Promise<readonly PostRecord[]>;
+  listPosts(
+    page: PageRequest,
+    query?: SourceListQuery,
+  ): Promise<readonly PostRecord[]>;
 }
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS posts (
@@ -84,6 +97,11 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS posts (
    created_at INTEGER NOT NULL,
    updated_at INTEGER NOT NULL
  )`;
+
+const INDEXES = [
+  "CREATE INDEX IF NOT EXISTS posts_live_created_url ON posts (deleted, created_at, url)",
+  "CREATE INDEX IF NOT EXISTS posts_live_type_created_url ON posts (deleted, type, created_at, url)",
+];
 
 interface PostRow {
   readonly url: string;
@@ -127,7 +145,9 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
     ready ??= db
       .prepare(SCHEMA)
       .run()
-      .then(() => undefined)
+      .then(async () => {
+        await db.batch(INDEXES.map((sql) => db.prepare(sql)));
+      })
       .catch((err: unknown) => {
         ready = null;
         throw err;
@@ -215,17 +235,70 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
       return (result.results ?? []).map((row) => row.category);
     },
 
-    async listPosts({ limit, offset }) {
+    async listPosts({ limit, offset }, query) {
       await ensureSchema();
+      const filters = query?.filters;
+      const clauses = ["deleted = 0"];
+      const binds: unknown[] = [];
+      if (filters) {
+        if (filters.after !== undefined) {
+          clauses.push("created_at > ?");
+          binds.push(filters.after);
+        }
+        if (filters.before !== undefined) {
+          clauses.push("created_at < ?");
+          binds.push(filters.before);
+        }
+        if (filters.postTypes.length > 0) {
+          clauses.push(
+            `type IN (${filters.postTypes.map(() => "?").join(", ")})`,
+          );
+          binds.push(...filters.postTypes);
+        }
+        if (filters.postStatuses.length > 0) {
+          clauses.push(
+            `COALESCE(json_extract(properties, '$."post-status"[0]'), 'published') IN (${filters.postStatuses.map(() => "?").join(", ")})`,
+          );
+          binds.push(...filters.postStatuses);
+        }
+        if (filters.visibilities.length > 0) {
+          clauses.push(
+            `COALESCE(json_extract(properties, '$.visibility[0]'), 'public') IN (${filters.visibilities.map(() => "?").join(", ")})`,
+          );
+          binds.push(...filters.visibilities);
+        }
+        for (const property of filters.propertyExists) {
+          clauses.push(`json_type(properties, '$.${property}') IS NOT NULL`);
+        }
+        for (const { property, values } of filters.propertyValues) {
+          clauses.push(
+            `EXISTS (SELECT 1 FROM json_each(properties, '$.${property}') AS value WHERE value.type = 'text' AND value.value IN (${values.map(() => "?").join(", ")}))`,
+          );
+          binds.push(...values);
+        }
+        if (query?.cursor) {
+          const comparison = filters.order === "desc" ? "<" : ">";
+          clauses.push(
+            `(created_at ${comparison} ? OR (created_at = ? AND url ${comparison} ?))`,
+          );
+          binds.push(
+            query.cursor.createdAt,
+            query.cursor.createdAt,
+            query.cursor.url,
+          );
+        }
+      }
+      const order = filters?.order === "asc" ? "ASC" : "DESC";
+      const requestedLimit = limit + (query?.lookahead ? 1 : 0);
       const { results } = await db
         .prepare(
           `SELECT url, type, properties, deleted, created_at, updated_at
              FROM posts
-            WHERE deleted = 0
-            ORDER BY created_at DESC, url DESC
+            WHERE ${clauses.join(" AND ")}
+            ORDER BY created_at ${order}, url ${order}
             LIMIT ? OFFSET ?`,
         )
-        .bind(limit, offset)
+        .bind(...binds, requestedLimit, offset)
         .all<PostRow>();
       return results.map(rowToRecord);
     },

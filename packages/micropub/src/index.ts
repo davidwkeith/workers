@@ -37,6 +37,8 @@ export type {
   ExtensionMaturity,
   ExtensionGroupsConfig,
   PostTypeConfig,
+  MicropubContactStoreProvider,
+  AudienceConfig,
 } from "./config.js";
 
 export {
@@ -55,7 +57,25 @@ export {
   type MicropubStore,
   type MicropubStoreEnv,
   type PostRecord,
+  type SourceListQuery,
 } from "./store.js";
+
+export {
+  createMicropubContactStore,
+  canonicalContactUrl,
+  contactView,
+  contactWrite,
+  normalizeContactText,
+  ContactValidationError,
+  INTERNAL_CONTACT_URL,
+} from "./contacts.js";
+export type {
+  ContactListQuery,
+  ContactRecord,
+  ContactWrite,
+  MicropubContactStore,
+  MicropubContactStoreEnv,
+} from "./contacts.js";
 
 export {
   parseFormBody,
@@ -67,6 +87,8 @@ export {
   validateVocabulary,
   POST_STATUS_VALUES,
   VISIBILITY_VALUES,
+  LOCATION_VISIBILITY_VALUES,
+  normalizeProposedVocabulary,
   Mf2ParseError,
   type Mf2Object,
   type MicropubCommands,
@@ -80,6 +102,22 @@ export {
   MAX_LIMIT,
   type PageRequest,
 } from "./pagination.js";
+
+export {
+  decodeSourceListCursor,
+  encodeSourceListCursor,
+  hasProposedSourceFilter,
+  MAX_SOURCE_FILTER_VALUES,
+  parseSourceListFilters,
+  sourceFilterFingerprint,
+  SourceFilterError,
+} from "./source-filters.js";
+export type {
+  PropertyValueFilter,
+  SourceListCursor,
+  SourceListFilters,
+  SourceListOrder,
+} from "./source-filters.js";
 
 export {
   H_EVENT,

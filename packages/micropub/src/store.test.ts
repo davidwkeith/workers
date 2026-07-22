@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 import { createDpopReplayStore } from "./replay.js";
+import { parseSourceListFilters } from "./source-filters.js";
 import { createMicropubStore, type MicropubStoreEnv } from "./store.js";
 
 /**
@@ -139,5 +140,53 @@ describe("listPosts", () => {
     const urls1 = posts1.map((p) => p.url);
     const urls2 = posts2.map((p) => p.url);
     expect(urls1).toEqual(urls2);
+  });
+
+  it("composes proposed filters and continues from an exclusive keyset", async () => {
+    const store = createMicropubStore(harness);
+    await store.init();
+    await store.insertPost({
+      url: "https://example.com/filter-a",
+      type: "h-entry",
+      properties: {
+        content: ["a"],
+        category: ["workers"],
+        "post-status": ["draft"],
+      },
+      now: 10,
+    });
+    await store.insertPost({
+      url: "https://example.com/filter-b",
+      type: "h-entry",
+      properties: {
+        content: ["b"],
+        category: ["workers"],
+        "post-status": ["draft"],
+      },
+      now: 11,
+    });
+    const filters = parseSourceListFilters(
+      new URLSearchParams(
+        "post-type=h-entry&post-status=draft&property-exists%5B%5D=content&property-value%5Bcategory%5D=workers",
+      ),
+    );
+    const first = await store.listPosts(
+      { limit: 1, offset: 0 },
+      { filters, lookahead: true },
+    );
+    expect(first.map((post) => post.url)).toEqual([
+      "https://example.com/filter-b",
+      "https://example.com/filter-a",
+    ]);
+    const second = await store.listPosts(
+      { limit: 1, offset: 0 },
+      {
+        filters,
+        cursor: { createdAt: first[0]!.createdAt, url: first[0]!.url },
+      },
+    );
+    expect(second.map((post) => post.url)).toEqual([
+      "https://example.com/filter-a",
+    ]);
   });
 });

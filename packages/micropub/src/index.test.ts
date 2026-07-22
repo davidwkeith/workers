@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { signAccessToken, createIndieAuthStore } from "@dwk/indieauth";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createMicropub } from "./index.js";
+import { createMicropub, createMicropubContactStore } from "./index.js";
 import type { MicropubEnv } from "./index.js";
 
 const harness = env as unknown as MicropubEnv;
@@ -143,10 +143,18 @@ const handler = createMicropub({
   me: ME,
   syndicateTo: [{ uid: "https://twitter.com/alice", name: "Alice on Twitter" }],
 });
+const contactStore = createMicropubContactStore(harness);
+const contactsHandler = createMicropub({
+  baseUrl: BASE,
+  me: ME,
+  extensions: { proposed: true },
+  contacts: createMicropubContactStore,
+});
 
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
   await (await import("./store.js")).createMicropubStore(harness).init();
+  await contactStore.init();
   await (await import("./replay.js")).createDpopReplayStore(harness).init();
 });
 
@@ -1193,6 +1201,126 @@ describe("@dwk/micropub routing and method handling", () => {
 });
 
 describe("@dwk/micropub query and action edge cases", () => {
+  it("gates proposed source filters, advertises them, and pages them by cursor", async () => {
+    const minted = await mintToken("create");
+    const filterValue = `issue-362-${crypto.randomUUID()}`;
+    const proposed = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      extensions: { proposed: true },
+    });
+    for (const content of ["first", "second"]) {
+      const created = await proposed(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(await authHeaders(minted, "POST", MICROPUB)),
+          },
+          body: JSON.stringify({
+            type: ["h-entry"],
+            properties: { content: [content], category: [filterValue] },
+          }),
+        }),
+        harness,
+        ctx,
+      );
+      expect(created.status).toBe(201);
+    }
+    const query = new URLSearchParams({
+      q: "source",
+      limit: "1",
+      "property-value[category]": filterValue,
+    });
+    const disabled = await handler(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(disabled.status).toBe(400);
+    const config = await proposed(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(
+      ((await config.json()) as Record<string, unknown>)["source-filters"],
+    ).toBeDefined();
+    const first = await proposed(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const firstBody = (await first.json()) as {
+      items: Array<{ properties: { url: string[] } }>;
+      "next-cursor"?: string;
+    };
+    expect(firstBody.items).toHaveLength(1);
+    expect(firstBody["next-cursor"]).toEqual(expect.any(String));
+
+    const malformedCursor = new URLSearchParams(query);
+    malformedCursor.set("cursor", "not-a-cursor");
+    const malformed = await proposed(
+      new Request(`${MICROPUB}?${malformedCursor}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(malformed.status).toBe(400);
+
+    const cursorAndOffset = new URLSearchParams(malformedCursor);
+    cursorAndOffset.set("offset", "0");
+    const conflictingPagination = await proposed(
+      new Request(`${MICROPUB}?${cursorAndOffset}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(conflictingPagination.status).toBe(400);
+
+    const emptyQuery = new URLSearchParams({
+      q: "source",
+      "property-value[category]": `${filterValue}-missing`,
+    });
+    const empty = await proposed(
+      new Request(`${MICROPUB}?${emptyQuery}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const emptyBody = (await empty.json()) as {
+      items: unknown[];
+      "next-cursor"?: string;
+    };
+    expect(emptyBody.items).toEqual([]);
+    expect(emptyBody).not.toHaveProperty("next-cursor");
+
+    query.set("cursor", firstBody["next-cursor"]!);
+    const second = await proposed(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const secondBody = (await second.json()) as {
+      items: Array<{ properties: { url: string[] } }>;
+    };
+    expect(secondBody.items).toHaveLength(1);
+    expect(secondBody.items[0]!.properties.url[0]).not.toBe(
+      firstBody.items[0]!.properties.url[0],
+    );
+  });
+
   it("rejects an unsupported query type", async () => {
     const minted = await mintToken("create");
     const res = await handler(
@@ -1665,6 +1793,169 @@ describe("@dwk/micropub stable extensions", () => {
   });
 });
 
+describe("@dwk/micropub proposed audience and location visibility", () => {
+  const proposedHandler = createMicropub({
+    baseUrl: BASE,
+    me: ME,
+    extensions: { proposed: true },
+    audiences: [
+      { uid: "family", name: "Family" },
+      { uid: "project-alpha", name: "Project Alpha" },
+    ],
+  });
+
+  async function createEntry(
+    minted: MintedToken,
+    properties: Record<string, unknown[]>,
+  ): Promise<Response> {
+    return proposedHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({ type: ["h-entry"], properties }),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("advertises proposed properties and the configured named audiences", async () => {
+    const minted = await mintToken("create");
+    const res = await proposedHandler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.properties).toEqual(["audience", "location-visibility"]);
+    expect(body.audiences).toEqual([
+      { uid: "family", name: "Family" },
+      { uid: "project-alpha", name: "Project Alpha" },
+    ]);
+  });
+
+  it("stores normalized audience and location-visibility metadata in source", async () => {
+    const minted = await mintToken("create");
+    const created = await createEntry(minted, {
+      content: ["meet us there"],
+      visibility: ["private"],
+      audience: ["family", "family", "project-alpha"],
+      location: ["The Park", "geo:45.5,-122.6"],
+      "location-visibility": ["text"],
+    });
+    expect(created.status).toBe(201);
+    const location = created.headers.get("location")!;
+    const source = await proposedHandler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(location)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.properties.audience).toEqual(["family", "project-alpha"]);
+    expect(body.properties["location-visibility"]).toEqual(["text"]);
+  });
+
+  it("enforces configured private audiences and meaningful location disclosure", async () => {
+    const minted = await mintToken("create");
+    await expect(
+      createEntry(minted, {
+        visibility: ["private"],
+        audience: ["unknown"],
+      }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, { audience: ["family"] }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, { "location-visibility": ["text"] }),
+    ).resolves.toHaveProperty("status", 400);
+    await expect(
+      createEntry(minted, {
+        location: ["The Park"],
+        "location-visibility": ["coordinates"],
+      }),
+    ).resolves.toHaveProperty("status", 400);
+  });
+
+  it("allows a private location on a public post for field-level redaction", async () => {
+    const minted = await mintToken("create");
+    const created = await createEntry(minted, {
+      visibility: ["public"],
+      location: ["The Park"],
+      "location-visibility": ["private"],
+    });
+    expect(created.status).toBe(201);
+  });
+
+  it("validates the merged update result", async () => {
+    const minted = await mintToken("create update");
+    const created = await createEntry(minted, {
+      visibility: ["private"],
+      audience: ["family"],
+    });
+    const res = await proposedHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: created.headers.get("location"),
+          replace: { visibility: ["public"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("keeps proposed property values opaque and unadvertised when disabled", async () => {
+    const minted = await mintToken("create");
+    const config = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect((await config.json()) as Record<string, unknown>).not.toHaveProperty(
+      "audiences",
+    );
+
+    const created = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: {
+            audience: ["not-a-configured-audience"],
+            "location-visibility": ["anything"],
+          },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+  });
+});
+
 describe("@dwk/micropub DPoP htu binding behind a proxy", () => {
   it("binds htu to the configured endpoint, not request.url", async () => {
     // Path-rewriting proxy: the client signs the PUBLIC endpoint, but the
@@ -1691,5 +1982,195 @@ describe("@dwk/micropub DPoP htu binding behind a proxy", () => {
       ctx,
     );
     expect(res.status).toBe(201);
+  });
+});
+
+describe("@dwk/micropub proposed contacts", () => {
+  it("advertises and manages private h-cards", async () => {
+    const creator = await mintToken("create");
+    const config = await contactsHandler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(creator, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await config.json()) as { q: string[] }).q).toContain("contact");
+    const created = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          ...(await authHeaders(creator, "POST", MICROPUB)),
+        },
+        body: new URLSearchParams({
+          h: "card",
+          name: "Ada Lovelace",
+          url: "HTTPS://Ada.EXAMPLE:443",
+          nickname: "ada",
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+    const location = created.headers.get("location");
+    const listed = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact&filter=ada`, {
+        headers: await authHeaders(creator, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect((await listed.json()) as Record<string, unknown>).toMatchObject({
+      contacts: [{ name: "Ada Lovelace", _internal_url: location }],
+    });
+    const deniedDelete = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          ...(await authHeaders(creator, "POST", MICROPUB)),
+        },
+        body: new URLSearchParams({ action: "delete", url: location ?? "" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(deniedDelete.status).toBe(403);
+    expect(((await deniedDelete.json()) as { error: string }).error).toBe(
+      "insufficient_scope",
+    );
+    const mediaReader = await mintToken("media");
+    const mediaScopedRead = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        headers: await authHeaders(mediaReader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(mediaScopedRead.status).toBe(200);
+    const updater = await mintToken("update");
+    const protectedMetadata = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(updater, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: location,
+          replace: { _internal_url: ["forged"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(protectedMetadata.status).toBe(400);
+    const updated = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(updater, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          action: "update",
+          url: location,
+          replace: { name: ["Ada King"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(updated.status).toBe(204);
+    const deleter = await mintToken("delete");
+    const deleted = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          ...(await authHeaders(deleter, "POST", MICROPUB)),
+        },
+        body: new URLSearchParams({ action: "delete", url: location ?? "" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(deleted.status).toBe(204);
+  });
+
+  it("folds an uploaded photo into a multipart contact create", async () => {
+    const creator = await mintToken("create");
+    const form = new FormData();
+    form.set("h", "card");
+    form.set("name", "Photo Contact");
+    form.set(
+      "photo",
+      new File([new Uint8Array([8, 6, 7, 5, 3, 0, 9])], "photo.png", {
+        type: "image/png",
+      }),
+    );
+    const created = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: await authHeaders(creator, "POST", MICROPUB),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+    const listed = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact&filter=photo%20contact`, {
+        headers: await authHeaders(creator, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await listed.json()) as {
+      contacts: Array<{ photo?: string }>;
+    };
+    const photo = body.contacts[0]?.photo;
+    expect(typeof photo).toBe("string");
+    expect((photo as string).startsWith(`${MEDIA}/`)).toBe(true);
+    const media = await contactsHandler(
+      new Request(photo as string),
+      harness,
+      ctx,
+    );
+    expect(media.status).toBe(200);
+  });
+
+  it("rejects duplicate public URLs and malformed contact queries", async () => {
+    const creator = await mintToken("create");
+    const create = async (name: string, url: string): Promise<Response> =>
+      contactsHandler(
+        new Request(`${MICROPUB}?q=contact`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            ...(await authHeaders(creator, "POST", MICROPUB)),
+          },
+          body: new URLSearchParams({ h: "card", name, url }),
+        }),
+        harness,
+        ctx,
+      );
+    expect((await create("Grace Hopper", "https://grace.example")).status).toBe(
+      201,
+    );
+    expect(
+      (await create("Grace Duplicate", "https://GRACE.example:443/")).status,
+    ).toBe(409);
+    const malformed = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact&limit=0`, {
+        headers: await authHeaders(creator, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(malformed.status).toBe(400);
   });
 });
