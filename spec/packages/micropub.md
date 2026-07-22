@@ -188,6 +188,9 @@ layer remains responsible for public visibility and access control.
 Property names use only letters, digits, and hyphens after an initial letter.
 Malformed dates, names, values, or ordering return `400 invalid_request`.
 `properties[]` remains a response projection and never affects matching.
+There may be at most 100 dynamic values across the value-bearing filters, and
+at most 100 `property-exists[]` predicates; exceeding either bound is `400`
+rather than a D1 host-parameter failure.
 
 The existing `limit`/`offset` path remains for compatibility. Filtered clients
 should use the opaque `next-cursor`; it is bound to the full filter set and

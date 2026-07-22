@@ -1254,6 +1254,48 @@ describe("@dwk/micropub query and action edge cases", () => {
       "next-cursor"?: string;
     };
     expect(firstBody.items).toHaveLength(1);
+    expect(firstBody["next-cursor"]).toEqual(expect.any(String));
+
+    const malformedCursor = new URLSearchParams(query);
+    malformedCursor.set("cursor", "not-a-cursor");
+    const malformed = await proposed(
+      new Request(`${MICROPUB}?${malformedCursor}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(malformed.status).toBe(400);
+
+    const cursorAndOffset = new URLSearchParams(malformedCursor);
+    cursorAndOffset.set("offset", "0");
+    const conflictingPagination = await proposed(
+      new Request(`${MICROPUB}?${cursorAndOffset}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(conflictingPagination.status).toBe(400);
+
+    const emptyQuery = new URLSearchParams({
+      q: "source",
+      "property-value[category]": `${filterValue}-missing`,
+    });
+    const empty = await proposed(
+      new Request(`${MICROPUB}?${emptyQuery}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const emptyBody = (await empty.json()) as {
+      items: unknown[];
+      "next-cursor"?: string;
+    };
+    expect(emptyBody.items).toEqual([]);
+    expect(emptyBody).not.toHaveProperty("next-cursor");
+
     query.set("cursor", firstBody["next-cursor"]!);
     const second = await proposed(
       new Request(`${MICROPUB}?${query}`, {

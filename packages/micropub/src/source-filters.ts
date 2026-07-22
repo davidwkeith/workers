@@ -47,6 +47,8 @@ const PROPOSED_PARAMETER_NAMES = new Set([
 ]);
 const PROPERTY_VALUE_PREFIX = "property-value[";
 const PROPERTY_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
+/** Keeps all dynamic D1 value bindings far below SQLite's variable limit. */
+export const MAX_SOURCE_FILTER_VALUES = 100;
 const RFC3339_DATE_TIME =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/;
 
@@ -125,15 +127,33 @@ export function parseSourceListFilters(
       property,
       values: [...new Set(values)].sort(),
     }));
+  const postTypes = requiredValues(params, "post-type");
+  const postStatuses = requiredValues(params, "post-status");
+  const visibilities = requiredValues(params, "visibility");
+  const valueCount =
+    postTypes.length +
+    postStatuses.length +
+    visibilities.length +
+    propertyValues.reduce((total, { values }) => total + values.length, 0);
+  if (valueCount > MAX_SOURCE_FILTER_VALUES) {
+    throw new SourceFilterError(
+      `at most ${MAX_SOURCE_FILTER_VALUES} source-list filter values are allowed`,
+    );
+  }
+  if (propertyExists.length > MAX_SOURCE_FILTER_VALUES) {
+    throw new SourceFilterError(
+      `at most ${MAX_SOURCE_FILTER_VALUES} property-exists filters are allowed`,
+    );
+  }
   const after = parseBoundary(params.get("after"), "after");
   const before = parseBoundary(params.get("before"), "before");
   return {
     ...(after !== undefined ? { after } : {}),
     ...(before !== undefined ? { before } : {}),
     order: orderRaw,
-    postTypes: requiredValues(params, "post-type"),
-    postStatuses: requiredValues(params, "post-status"),
-    visibilities: requiredValues(params, "visibility"),
+    postTypes,
+    postStatuses,
+    visibilities,
     propertyExists,
     propertyValues,
   };
@@ -148,7 +168,18 @@ interface EncodedCursor {
 }
 
 export function sourceFilterFingerprint(filters: SourceListFilters): string {
-  return JSON.stringify(filters);
+  // Parse normalizes every array (deduplicated + sorted); this explicit tuple
+  // fixes the cursor contract without relying on object-property order.
+  return JSON.stringify([
+    filters.after ?? null,
+    filters.before ?? null,
+    filters.order,
+    filters.postTypes,
+    filters.postStatuses,
+    filters.visibilities,
+    filters.propertyExists,
+    filters.propertyValues,
+  ]);
 }
 
 export function encodeSourceListCursor(

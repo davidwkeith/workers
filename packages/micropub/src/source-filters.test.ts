@@ -6,6 +6,7 @@ import {
   hasProposedSourceFilter,
   parseSourceListFilters,
   SourceFilterError,
+  MAX_SOURCE_FILTER_VALUES,
 } from "./source-filters.js";
 
 describe("proposed q=source filters", () => {
@@ -40,6 +41,23 @@ describe("proposed q=source filters", () => {
     expect(() => parseSourceListFilters(new URLSearchParams(query))).toThrow(
       SourceFilterError,
     );
+  });
+
+  it("identifies only the proposed filter parameters", () => {
+    expect(hasProposedSourceFilter(new URLSearchParams("limit=10"))).toBe(
+      false,
+    );
+    expect(
+      hasProposedSourceFilter(new URLSearchParams("property-value[name]=x")),
+    ).toBe(true);
+  });
+
+  it("caps dynamic filter values before they reach D1", () => {
+    const params = new URLSearchParams();
+    for (let index = 0; index <= MAX_SOURCE_FILTER_VALUES; index++) {
+      params.append("post-type", `h-entry-${index}`);
+    }
+    expect(() => parseSourceListFilters(params)).toThrow("at most");
   });
 
   it("binds a cursor to the complete filter query", () => {

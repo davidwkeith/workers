@@ -89,6 +89,7 @@ export {
   decodeSourceListCursor,
   encodeSourceListCursor,
   hasProposedSourceFilter,
+  MAX_SOURCE_FILTER_VALUES,
   parseSourceListFilters,
   sourceFilterFingerprint,
   SourceFilterError,

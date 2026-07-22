@@ -33,6 +33,7 @@ import {
   decodeSourceListCursor,
   encodeSourceListCursor,
   hasProposedSourceFilter,
+  MAX_SOURCE_FILTER_VALUES,
   parseSourceListFilters,
   SourceFilterError,
 } from "./source-filters.js";
@@ -41,6 +42,7 @@ import {
   recordToMf2,
   type MicropubStore,
   type MicropubStoreEnv,
+  type PostRecord,
 } from "./store.js";
 import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
 import { syndicateEntry } from "./fediverse.js";
@@ -69,6 +71,15 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json", ...CORS_HEADERS },
   });
+}
+
+/** Reconstruct a stored post as a list item, retaining its canonical URL. */
+function sourceListItem(record: PostRecord): Mf2Object {
+  const mf2 = recordToMf2(record);
+  return {
+    ...mf2,
+    properties: { ...mf2.properties, url: [record.url] },
+  };
 }
 
 /** A Micropub error body (`{ error, error_description }`) at `status`. */
@@ -448,6 +459,7 @@ async function handleQuery(
               visibility: "repeatable",
               "property-exists[]": "repeatable",
               "property-value[name]": "repeatable exact string value",
+              "max-values": MAX_SOURCE_FILTER_VALUES,
               pagination: ["offset", "cursor"],
             },
           }
@@ -494,13 +506,7 @@ async function handleQuery(
       const page = parsePageRequest(params);
       if (!hasProposedFilters) {
         const records = await store.listPosts(page);
-        const mf2Objects = records.map((record) => {
-          const mf2 = recordToMf2(record);
-          return {
-            ...mf2,
-            properties: { ...mf2.properties, url: [record.url] },
-          };
-        });
+        const mf2Objects = records.map(sourceListItem);
         return json(sourceListView(mf2Objects, filter));
       }
       if (params.has("cursor") && params.has("offset")) {
@@ -531,13 +537,7 @@ async function handleQuery(
         lookahead: true,
       });
       const pageRecords = records.slice(0, page.limit);
-      const mf2Objects = records.map((record) => {
-        const mf2 = recordToMf2(record);
-        return {
-          ...mf2,
-          properties: { ...mf2.properties, url: [record.url] },
-        };
-      });
+      const mf2Objects = records.map(sourceListItem);
       const body = sourceListView(mf2Objects.slice(0, page.limit), filter);
       const last = pageRecords.at(-1);
       return json({
