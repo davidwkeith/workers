@@ -67,6 +67,16 @@ The handler fails loudly at startup if any of these are missing:
   list by creation bounds, type, status, visibility, or exact mf2 properties;
   filtered lists use deterministic keyset cursors.
 
+### Proposed Location/Venue design
+
+`q=geo` is a proposed extension and remains disabled by default; it is not yet
+implemented. Its API and injected, strongly-consistent `VenueStore` contract
+are defined in the [package specification](../../spec/packages/micropub.md#proposed-locationvenue-qgeo).
+When implemented, a Geo URI or `lat`/`lon`/`u` query will return a
+reverse-geocoded `geo` suggestion and nearby `venues`. Venue lookup is separate
+from post storage; a client references a selected venue with the ordinary
+`location` post property.
+
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession
 binding completed via [`@dwk/dpop`](../dpop) and revocation checked against the

@@ -233,6 +233,151 @@ search.
 The proposed-group `q=geo` extension remains unimplemented and is tracked
 separately.
 
+### Proposed Location/Venue (`q=geo`)
+
+This is the implementation contract for issue #359. It is **not implemented by
+this issue**. Venue lookup is a proximity search over an injected venue system,
+never a scan of post `location` properties; its schema, lifecycle, and indexes
+therefore remain independent of Micropub's D1 post records.
+
+The design follows the [IndieWeb Location/Venue proposal][mp-ext-geo]:
+`q=geo` accepts a Geo URI or WGS-84 coordinates and returns an optional
+location suggestion plus venue suggestions. The proposal's prose calls the
+array `venues` while its old example says `places`; this package standardizes
+on **`venues`**, the name used by the proposal issue, and emits no alias.
+
+[mp-ext-geo]: https://indieweb.org/Micropub-extensions#Location/Venue
+
+#### Enablement, request, and validation
+
+A future implementation MUST advertise `"geo"` in `q=config` and route
+`q=geo` only when `extensions.proposed` is `true` *and* a venue-store seam is
+configured. The default remains unchanged: `q=geo` is not advertised and is an
+unsupported-query `400 invalid_request`. Enabling proposed extensions without
+a venue store MUST fail loudly during handler configuration; it must not expose
+an empty, partial, or ephemeral lookup service.
+
+Exactly one positional form is accepted:
+
+```
+?q=geo&uri=geo:37.786971,-122.399677;u=250
+?q=geo&lat=37.786971&lon=-122.399677&u=250
+```
+
+`uri` is a WGS-84 [RFC 5870][rfc-5870] Geo URI with exactly latitude and
+longitude; altitude and parameters other than `u` are rejected. `lat` and
+`lon` are finite decimal degrees, inclusive in `[-90, 90]` and `[-180, 180]`.
+The forms cannot be combined and each coordinate must occur exactly once. A
+standalone `u` query parameter is allowed only with individual coordinates;
+the equivalent Geo URI value is its `;u=` component. A standalone `u` alongside
+`uri` is rejected, even when that URI has no `;u=` component. It is a
+non-negative decimal number of metres: both the Geo URI uncertainty and the
+inclusive search radius (a venue qualifies when its great-circle distance is
+`<= u`). `u=0` is valid and means only exact-coordinate matches qualify; it is
+not normalized to the default radius. An absent `u` means 1,000 metres; values
+above 50,000 metres are rejected. This avoids a new `radius` spelling
+incompatible with clients that already send `u`.
+
+`limit` is a positive base-10 integer (default 20, maximum 100). `offset` is a
+non-negative base-10 integer (default zero), and is accepted only with an
+explicit valid `limit`, matching the proposed Offset extension. Duplicate or
+unknown parameters, empty/non-decimal values, out-of-range coordinates/radius,
+and unsupported Geo URI components return the normal Micropub `400`
+`invalid_request` body. Silently broadening a location search can disclose
+saved places beyond the precision a client intended.
+
+[rfc-5870]: https://www.rfc-editor.org/rfc/rfc5870
+
+#### Response, ordering, and pagination
+
+The JSON response always has `venues` (possibly empty); `geo` appears only when
+the venue system has a reverse-geocoded suggestion. These are the proposal's
+h-adr/h-card-shaped properties, not a complete mf2 document:
+
+```json
+{
+  "geo": {
+    "label": "123 Main Street",
+    "latitude": "37.786971",
+    "longitude": "-122.399677"
+  },
+  "venues": [
+    {
+      "name": "Main Street Apothecary",
+      "latitude": "37.786900",
+      "longitude": "-122.399610",
+      "url": "https://example.com/venues/apothecary"
+    }
+  ]
+}
+```
+
+`geo.label`, `geo.latitude`, and `geo.longitude` are required when `geo` is
+present. Every venue has an absolute `url`, non-empty `name`, and valid WGS-84
+`latitude`/`longitude`; coordinates are decimal strings, as in common
+microformats JSON. `visibility` is deliberately absent: it belongs to the
+separate Location Visibility proposal and must not be enabled by venue lookup.
+
+Filter to the inclusive radius before paginating, then sort by great-circle
+distance ascending and canonical venue URL ascending as the deterministic
+tie-breaker. `offset` skips that order and `limit` caps it. There is no count or
+cursor. The backing store must apply ordering and pagination atomically so
+concurrent venue changes cannot destabilize a page.
+
+#### Venue ownership, lifecycle, and storage seam
+
+Venues are single-owner resources for the configured `me`; they are not posts,
+not rows in `MICROPUB_DB`, and never inferred from historic post locations. A
+venue URL is immutable identity. Updating a venue changes metadata at that URL;
+deleting it removes future `q=geo` results. Existing post source is never
+rewritten or cascaded when a venue changes or is deleted.
+
+The first `q=geo` implementation is intentionally read-only. A post selects or
+references a venue by putting the returned venue `url` in its normal `location`
+property (or a nested location h-card's `url`); generic mf2 source round-trips
+it unchanged. Free-text locations remain valid. Venue create/update/delete stay
+with the composed application's venue system: a top-level `h=card` post and an
+undocumented Micropub action must not create venues. This avoids contaminating
+`q=source` post listings and reserves explicit write scopes/concurrency for a
+future separately designed venue-write extension.
+
+When implemented, `MicropubConfig` requires this injected,
+strongly-consistent seam whenever `extensions.proposed` is true:
+
+```ts
+interface GeoPoint {
+  readonly latitude: number;
+  readonly longitude: number;
+}
+interface GeoSuggestion extends GeoPoint {
+  readonly label: string;
+}
+interface Venue extends GeoPoint {
+  readonly url: string;
+  readonly name: string;
+}
+interface VenueStore {
+  searchNearby(input: {
+    readonly point: GeoPoint;
+    readonly radiusMetres: number;
+    readonly limit: number;
+    readonly offset: number;
+  }): Promise<{
+    readonly geo?: GeoSuggestion;
+    /** Filtered, distance-then-URL ordered, and already paginated. */
+    readonly venues: readonly Venue[];
+  }>;
+}
+```
+
+The adapter owns durable indexes and transactions; it must not use KV for
+venue data or results. A missing adapter binding must likewise fail at startup.
+The handler validates store output before serialization and treats invalid
+output as a server error. Implementation coverage must exercise Geo
+URI/parameter validation, malformed-query HTTP errors, disabled-group
+non-advertisement, store ordering/pagination, and missing store/binding startup
+failures.
+
 ## Auth / security
 
 - Authorize via an **IndieAuth access token + scope** (see
