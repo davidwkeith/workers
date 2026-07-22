@@ -257,7 +257,7 @@ unsupported-query `400 invalid_request`. Enabling proposed extensions without
 a venue store MUST fail loudly during handler configuration; it must not expose
 an empty, partial, or ephemeral lookup service.
 
-Exactly one position form is accepted:
+Exactly one positional form is accepted:
 
 ```
 ?q=geo&uri=geo:37.786971,-122.399677;u=250
@@ -269,11 +269,14 @@ longitude; altitude and parameters other than `u` are rejected. `lat` and
 `lon` are finite decimal degrees, inclusive in `[-90, 90]` and `[-180, 180]`.
 The forms cannot be combined and each coordinate must occur exactly once. A
 standalone `u` query parameter is allowed only with individual coordinates;
-the equivalent Geo URI value is its `;u=` component. It is a non-negative
-decimal number of metres: both the Geo URI uncertainty and the inclusive search
-radius (a venue qualifies when its great-circle distance is `<= u`). An absent
-`u` means 1,000 metres; values above 50,000 metres are rejected. This avoids a
-new `radius` spelling incompatible with clients that already send `u`.
+the equivalent Geo URI value is its `;u=` component. A standalone `u` alongside
+`uri` is rejected, even when that URI has no `;u=` component. It is a
+non-negative decimal number of metres: both the Geo URI uncertainty and the
+inclusive search radius (a venue qualifies when its great-circle distance is
+`<= u`). `u=0` is valid and means only exact-coordinate matches qualify; it is
+not normalized to the default radius. An absent `u` means 1,000 metres; values
+above 50,000 metres are rejected. This avoids a new `radius` spelling
+incompatible with clients that already send `u`.
 
 `limit` is a positive base-10 integer (default 20, maximum 100). `offset` is a
 non-negative base-10 integer (default zero), and is accepted only with an
