@@ -185,6 +185,29 @@ describe("safeFetch", () => {
     expect(init?.signal).not.toBe(controller.signal);
   });
 
+  it("releases its timeout after a successful request", async () => {
+    vi.useFakeTimers();
+    try {
+      const received = { signal: null as AbortSignal | null };
+      const doFetch: FetchLike = async (_input, init) => {
+        received.signal = init?.signal ?? null;
+        return new Response("ok");
+      };
+
+      await safeFetch(
+        doFetch,
+        "https://example.com/",
+        { method: "GET" },
+        { timeoutMs: 10 },
+      );
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(received.signal?.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a blocked initial host", async () => {
     const doFetch: FetchLike = vi.fn(async () => new Response("ok"));
     await expect(

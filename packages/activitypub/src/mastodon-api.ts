@@ -85,7 +85,7 @@ function toBackendEntry(row: ClientEntryRow): BackendEntry {
  * Translate a Mastodon-shaped page query (snowflake cursors) into the DO's
  * `__client/*` query params: each of `maxId`/`sinceId`/`minId` decodes to
  * `{receivedAtMs, seqLow}`, which becomes `<prefix>_received_at` + the
- * shared `tie_seq` same-millisecond tiebreak the DO route expects.
+ * shared source-aware same-millisecond tiebreak the DO route expects.
  */
 function cursorParams(query: BackendPageQuery): URLSearchParams {
   const params = new URLSearchParams();
@@ -99,6 +99,7 @@ function cursorParams(query: BackendPageQuery): URLSearchParams {
     if (!decoded) return;
     params.set(`${prefix}_received_at`, String(decoded.receivedAtMs));
     params.set("tie_seq", String(decoded.seqLow));
+    params.set("tie_source", String(decoded.source));
   };
   bound(query.maxId, "max");
   bound(query.sinceId, "since");

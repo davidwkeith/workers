@@ -15,6 +15,7 @@
 import { assertPublicUrl, SsrfError } from "@dwk/safe-fetch";
 
 import { signRequest, type SignerKey } from "./signature.js";
+import { createTimeoutSignal } from "./timeout.js";
 
 /** Machine-readable cause of a blocked delivery target. */
 export type BlockedReason =
@@ -87,16 +88,19 @@ export async function deliverActivity(
   const signed = await signRequest(inboxUrl, body, signer, { now });
 
   let response: Response;
+  const timeout = createTimeoutSignal(timeoutMs);
   try {
     response = await fetchImpl(inboxUrl, {
       method: "POST",
       headers: signed.headers,
       body: signed.body as BufferSource,
       // A hung peer must not pin the delivery worker; a timeout is retryable.
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: timeout.signal,
     });
   } catch {
     return { ok: false, status: 0, retryable: true };
+  } finally {
+    timeout.cancel();
   }
 
   if (response.status >= 200 && response.status < 300) {
