@@ -13,6 +13,7 @@ import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
 import { stubRouteEntries } from "./stubs.js";
+import { handleHomeTimeline } from "./timelines.js";
 
 /** Per-request context threaded to route handlers. */
 export interface RouteContext {
@@ -34,6 +35,7 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["GET /api/v2/instance", handleInstanceV2],
     ["GET /api/v1/markers", handleGetMarkers],
     ["POST /api/v1/markers", handleSaveMarkers],
+    ["GET /api/v1/timelines/home", handleHomeTimeline],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],
