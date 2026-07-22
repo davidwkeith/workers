@@ -63,6 +63,9 @@ The handler fails loudly at startup if any of these are missing:
   `location-visibility` (`public`, `private`, or textual-only `text`). They
   are persisted and returned by `q=source`; the site or WAC layer enforces
   access control and redaction.
+- **Opt-in source-list filters**: proposed deployments can filter a `q=source`
+  list by creation bounds, type, status, visibility, or exact mf2 properties;
+  filtered lists use deterministic keyset cursors.
 
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession

@@ -30,10 +30,19 @@ import {
 } from "./mf2.js";
 import { parsePageRequest } from "./pagination.js";
 import {
+  decodeSourceListCursor,
+  encodeSourceListCursor,
+  hasProposedSourceFilter,
+  MAX_SOURCE_FILTER_VALUES,
+  parseSourceListFilters,
+  SourceFilterError,
+} from "./source-filters.js";
+import {
   createMicropubStore,
   recordToMf2,
   type MicropubStore,
   type MicropubStoreEnv,
+  type PostRecord,
 } from "./store.js";
 import {
   ContactValidationError,
@@ -68,6 +77,15 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json", ...CORS_HEADERS },
   });
+}
+
+/** Reconstruct a stored post as a list item, retaining its canonical URL. */
+function sourceListItem(record: PostRecord): Mf2Object {
+  const mf2 = recordToMf2(record);
+  return {
+    ...mf2,
+    properties: { ...mf2.properties, url: [record.url] },
+  };
 }
 
 /** A Micropub error body (`{ error, error_description }`) at `status`. */
@@ -538,6 +556,19 @@ async function handleQuery(
         ? {
             properties: ["audience", "location-visibility"],
             audiences: config.audiences,
+            "source-filters": {
+              after: "whole-second RFC3339 exclusive creation-time lower bound",
+              before:
+                "whole-second RFC3339 exclusive creation-time upper bound",
+              order: ["asc", "desc"],
+              "post-type": "repeatable",
+              "post-status": "repeatable",
+              visibility: "repeatable",
+              "property-exists[]": "repeatable",
+              "property-value[name]": "repeatable exact string value",
+              "max-values": MAX_SOURCE_FILTER_VALUES,
+              pagination: ["offset", "cursor"],
+            },
           }
         : {}),
       q: supportedQueries,
@@ -566,17 +597,70 @@ async function handleQuery(
       ...params.getAll("properties"),
     ];
     const url = params.get("url");
+    const hasProposedFilters = hasProposedSourceFilter(params);
+    if (hasProposedFilters && !config.extensions.proposed) {
+      return error(
+        "invalid_request",
+        "proposed source-list filters are not enabled",
+        400,
+      );
+    }
+    if (url && hasProposedFilters) {
+      return error(
+        "invalid_request",
+        "proposed source-list filters apply only when `q=source` has no `url`",
+        400,
+      );
+    }
     if (!url) {
       const page = parsePageRequest(params);
-      const records = await store.listPosts(page);
-      const mf2Objects = records.map((record) => {
-        const mf2 = recordToMf2(record);
-        return {
-          ...mf2,
-          properties: { ...mf2.properties, url: [record.url] },
-        };
+      if (!hasProposedFilters) {
+        const records = await store.listPosts(page);
+        const mf2Objects = records.map(sourceListItem);
+        return json(sourceListView(mf2Objects, filter));
+      }
+      if (params.has("cursor") && params.has("offset")) {
+        return error(
+          "invalid_request",
+          "`cursor` and `offset` cannot be combined",
+          400,
+        );
+      }
+      let filters;
+      let cursor;
+      try {
+        filters = parseSourceListFilters(params);
+        const cursorRaw = params.get("cursor");
+        cursor =
+          cursorRaw === null
+            ? undefined
+            : decodeSourceListCursor(cursorRaw, filters);
+      } catch (err) {
+        if (err instanceof SourceFilterError) {
+          return error("invalid_request", err.message, 400);
+        }
+        throw err;
+      }
+      const records = await store.listPosts(page, {
+        filters,
+        ...(cursor ? { cursor } : {}),
+        lookahead: true,
       });
-      return json(sourceListView(mf2Objects, filter));
+      const pageRecords = records.slice(0, page.limit);
+      const mf2Objects = records.map(sourceListItem);
+      const body = sourceListView(mf2Objects.slice(0, page.limit), filter);
+      const last = pageRecords.at(-1);
+      return json({
+        ...body,
+        ...(records.length > page.limit && last
+          ? {
+              "next-cursor": encodeSourceListCursor(
+                { createdAt: last.createdAt, url: last.url },
+                filters,
+              ),
+            }
+          : {}),
+      });
     }
     const record = await store.getPost(url);
     if (!record || record.deleted) {

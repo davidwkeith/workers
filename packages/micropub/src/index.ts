@@ -57,6 +57,7 @@ export {
   type MicropubStore,
   type MicropubStoreEnv,
   type PostRecord,
+  type SourceListQuery,
 } from "./store.js";
 
 export {
@@ -101,6 +102,22 @@ export {
   MAX_LIMIT,
   type PageRequest,
 } from "./pagination.js";
+
+export {
+  decodeSourceListCursor,
+  encodeSourceListCursor,
+  hasProposedSourceFilter,
+  MAX_SOURCE_FILTER_VALUES,
+  parseSourceListFilters,
+  sourceFilterFingerprint,
+  SourceFilterError,
+} from "./source-filters.js";
+export type {
+  PropertyValueFilter,
+  SourceListCursor,
+  SourceListFilters,
+  SourceListOrder,
+} from "./source-filters.js";
 
 export {
   H_EVENT,
