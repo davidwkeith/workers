@@ -4,6 +4,21 @@
  * dependency (runtime budget); works at the tag-token level. Unknown tags
  * are stripped but their text content is kept; allowlisted tags keep only
  * their allowlisted attributes, and `href`/`src` reject non-http(s) schemes.
+ *
+ * Fail-safe by construction. The scanner walks the input `<` by `<` (see
+ * `LT_RE` below), and every `<` it finds is either fully consumed as part
+ * of a tag that matches the recognized grammar — name, then a well-formed
+ * attribute list, then a terminating `>` — and processed through the
+ * allowlist, or it is HTML-escaped (`&lt;`) and scanning resumes one
+ * character past it. There is no third path where an unrecognized `<`
+ * (whatever the reason it wasn't recognized: wrong shape, no separator
+ * before an attribute, no reachable `>`, anything a future grammar gap
+ * might miss) is copied through to the output as live, unescaped markup.
+ * An earlier version fell back to passing such spans through verbatim,
+ * which turned every gap in tag-grammar coverage into a live XSS bypass;
+ * this design cannot repeat that failure mode even if the grammar below is
+ * still imperfect, because the *default* outcome for anything it doesn't
+ * recognize is "escape", not "trust".
  */
 
 const ALLOWED_TAGS = new Set([
@@ -24,9 +39,23 @@ const ALLOWED_ATTRS: Record<string, readonly string[]> = {
   span: ["class"],
 };
 
-// Matches only the `<`/`</` plus the tag name — no attribute content.
-// `scanTagBody` below (a hand-rolled, monotonic-cursor tokenizer) locates
-// the rest of the tag: its attribute list and terminating `>`.
+// Finds every literal `<` in the input. This is the outer scan's anchor:
+// each match is a *candidate* tag start, and — per the fail-safe design
+// above — every one of them is resolved to exactly one of "consumed by a
+// recognized tag" or "escaped", never left as ambiguous pass-through text.
+// A plain global scan over `<` is unconditionally linear (each `exec` call
+// only ever searches forward from the previous match), so this cannot be
+// the source of any superlinear behavior; see `scanTagBody` below for why
+// the work done *per candidate* is also bounded.
+const LT_RE = /</g;
+
+// Matched with the sticky (`y`) flag anchored exactly at a `<` already
+// found by `LT_RE`: the optional `/` plus the tag name, no attribute
+// content. `scanTagBody` below (a hand-rolled, monotonic-cursor tokenizer)
+// locates the rest of the tag: its attribute list and terminating `>`. If
+// this doesn't match at that exact position (e.g. a bare `<` in prose, or
+// `<3`, or `<!--`), the `<` isn't tag-shaped at all and the caller escapes
+// it — see `sanitizeStatusHtml`.
 //
 // This split is deliberate. A previous version matched a whole tag — name,
 // attributes, and `>` — in a single regex whose attribute list was a
@@ -41,7 +70,7 @@ const ALLOWED_ATTRS: Record<string, readonly string[]> = {
 // Matching only the tag name here has no repeated group at all, so there
 // is nothing for *this* regex to backtrack over; see `scanTagBody` for how
 // the attribute list is tokenized without reintroducing that shape.
-const TAG_START_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)/g;
+const TAG_NAME_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)/y;
 
 // A single attribute token — separator, name, optional value — matched with
 // the sticky (`y`) flag so each `exec` call only ever tries to match
@@ -52,7 +81,20 @@ const TAG_START_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)/g;
 // is no repetition of this pattern *inside itself*, so a single attempt
 // cannot backtrack exponentially, and across the loop the cursor only ever
 // moves forward over text it has not already scanned.
-const ATTR_TOKEN_RE = /[\s/]+[a-zA-Z-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?/y;
+//
+// Both value alternatives exclude `<` (`[^"<]*`, `[^'<]*`, `[^\s<>]*`) —
+// this is load-bearing, not cosmetic. Without it, an unterminated quoted or
+// unquoted value greedily consumes across a *subsequent* candidate tag's
+// `<…` text (there is nothing else stopping it), so a chain of malformed
+// tags — e.g. `("<a x=" + "y".repeat(20)).repeat(n)` — makes a single
+// failing `scanTagBody` call walk all the way to the end of the string.
+// The outer loop then retries at the next `<` and repeats that same
+// O(remaining length) walk, for O(n²) total. Excluding `<` from every
+// value class means a value attempt can never read past the next `<`, so a
+// failing `scanTagBody` call costs at most O(distance to the next `<`) —
+// see the complexity note on `sanitizeStatusHtml`'s main loop for how that
+// bounds the whole scan to O(n).
+const ATTR_TOKEN_RE = /[\s/]+[a-zA-Z-]+(?:=(?:"[^"<]*"|'[^'<]*'|[^\s<>]*))?/y;
 // The optional trailing whitespace / self-closing slash immediately before
 // `>`, matched sticky at whatever cursor `scanTagBody`'s attribute loop
 // stopped at.
@@ -73,11 +115,19 @@ const ATTR_RE = /([a-zA-Z-]+)(?:=("[^"]*"|'[^']*'|[^\s>]*))?/g;
  * fails and stops, without ever re-scanning already-consumed text or
  * backtracking across more than one token. Returns the index just past the
  * closing `>` and the raw attribute text, or `null` if this position isn't
- * a well-formed tag (no reachable `>`) — the same outcome the old regex
- * produced by failing to match, just reached in linear rather than
- * exponential time. The caller treats a `null` result by leaving the
- * leading `<` as ordinary text and continuing to scan for the next
- * possible tag start, exactly as a failed regex match would.
+ * a well-formed tag (no reachable `>`).
+ *
+ * On failure, the cursor this function reached internally is discarded —
+ * the caller (`sanitizeStatusHtml`) does *not* resume scanning from there.
+ * It escapes only the single `<` that started this attempt and resumes at
+ * the very next character instead. That is safe (nothing between here and
+ * the failure point is treated as anything other than ordinary text, since
+ * no tag was recognized) and it is what keeps this whole tokenizer linear:
+ * because `ATTR_TOKEN_RE`'s value classes exclude `<` (see its comment),
+ * this function's internal walk can never read past the *next* `<` in the
+ * input, so the span it examines before failing is disjoint from the span
+ * the next call (starting at that next `<`) will examine. Every character
+ * is walked by at most one `scanTagBody` call across the whole input.
  */
 function scanTagBody(
   html: string,
@@ -107,22 +157,51 @@ function safeUrl(raw: string): string | null {
   return null;
 }
 
+// Complexity: the loop's cursor (`lastIndex`, and `LT_RE.lastIndex` kept in
+// step with it) advances strictly forward every iteration — either to
+// `tagEnd` (past a fully-consumed, successfully-parsed tag) or to
+// `tagStart + 1` (past exactly one escaped `<`) — so the number of
+// iterations is bounded by `html.length`. Per iteration: `LT_RE.exec`'s
+// forward scan for the next `<` is amortized O(1) across the whole loop
+// (a monotonically-advancing global-regex scan never revisits a character);
+// `TAG_NAME_RE`'s sticky match consumes only characters that are
+// provably not `<` (tag-name chars), so distinct attempts never overlap;
+// and `scanTagBody` either consumes a span it will never be re-entered for
+// (success) or fails after walking at most up to the *next* `<` (see its
+// doc comment and `ATTR_TOKEN_RE`'s), which is exactly the span `LT_RE`
+// would have had to scan next regardless. No character is ever examined by
+// more than a constant number of these operations, so the whole function
+// is O(n) in `html.length` — this is what closes the O(n²) DoS: a chain of
+// malformed tags no longer causes overlapping re-scans (see
+// sanitize.test.ts's ReDoS-resistance suite for a regression test with
+// concrete timings).
 export function sanitizeStatusHtml(html: string): string {
   let out = "";
   let lastIndex = 0;
-  TAG_START_RE.lastIndex = 0;
-  let startMatch: RegExpExecArray | null;
-  while ((startMatch = TAG_START_RE.exec(html)) !== null) {
-    const tagStart = startMatch.index;
-    const nameEnd = TAG_START_RE.lastIndex;
-    const body = scanTagBody(html, nameEnd);
-    if (body === null) continue; // not a well-formed tag; keep scanning
+  LT_RE.lastIndex = 0;
+  let ltMatch: RegExpExecArray | null;
+  while ((ltMatch = LT_RE.exec(html)) !== null) {
+    const tagStart = ltMatch.index;
+    TAG_NAME_RE.lastIndex = tagStart;
+    const nameMatch = TAG_NAME_RE.exec(html);
+    const body = nameMatch ? scanTagBody(html, TAG_NAME_RE.lastIndex) : null;
+    if (nameMatch === null || body === null) {
+      // Fail-safe: this `<` isn't the start of a tag the grammar above
+      // recognizes — either it isn't tag-shaped at all, or `scanTagBody`
+      // never reached a terminating `>`. Escape just this one character
+      // (never the whole candidate span) and resume immediately past it.
+      out += html.slice(lastIndex, tagStart);
+      out += "&lt;";
+      lastIndex = tagStart + 1;
+      LT_RE.lastIndex = lastIndex;
+      continue;
+    }
     const { tagEnd, rawAttrs } = body;
     out += html.slice(lastIndex, tagStart);
     lastIndex = tagEnd;
-    TAG_START_RE.lastIndex = lastIndex;
-    const name = (startMatch[2] ?? "").toLowerCase();
-    const isClosing = startMatch[1] === "/";
+    LT_RE.lastIndex = lastIndex;
+    const name = (nameMatch[2] ?? "").toLowerCase();
+    const isClosing = nameMatch[1] === "/";
     if (name === "script" || name === "style") {
       // Skip to the matching closing tag, dropping all content between.
       const closeRe = new RegExp(`</${name}\\s*>`, "i");
@@ -135,7 +214,7 @@ export function sanitizeStatusHtml(html: string): string {
         // the input rather than letting its raw text fall through unescaped.
         lastIndex = html.length;
       }
-      TAG_START_RE.lastIndex = lastIndex;
+      LT_RE.lastIndex = lastIndex;
       continue;
     }
     if (!ALLOWED_TAGS.has(name)) continue; // strip tag, keep surrounding text
