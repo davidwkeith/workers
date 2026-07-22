@@ -1193,6 +1193,84 @@ describe("@dwk/micropub routing and method handling", () => {
 });
 
 describe("@dwk/micropub query and action edge cases", () => {
+  it("gates proposed source filters, advertises them, and pages them by cursor", async () => {
+    const minted = await mintToken("create");
+    const filterValue = `issue-362-${crypto.randomUUID()}`;
+    const proposed = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      extensions: { proposed: true },
+    });
+    for (const content of ["first", "second"]) {
+      const created = await proposed(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(await authHeaders(minted, "POST", MICROPUB)),
+          },
+          body: JSON.stringify({
+            type: ["h-entry"],
+            properties: { content: [content], category: [filterValue] },
+          }),
+        }),
+        harness,
+        ctx,
+      );
+      expect(created.status).toBe(201);
+    }
+    const query = new URLSearchParams({
+      q: "source",
+      limit: "1",
+      "property-value[category]": filterValue,
+    });
+    const disabled = await handler(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(disabled.status).toBe(400);
+    const config = await proposed(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(
+      ((await config.json()) as Record<string, unknown>)["source-filters"],
+    ).toBeDefined();
+    const first = await proposed(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const firstBody = (await first.json()) as {
+      items: Array<{ properties: { url: string[] } }>;
+      "next-cursor"?: string;
+    };
+    expect(firstBody.items).toHaveLength(1);
+    query.set("cursor", firstBody["next-cursor"]!);
+    const second = await proposed(
+      new Request(`${MICROPUB}?${query}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const secondBody = (await second.json()) as {
+      items: Array<{ properties: { url: string[] } }>;
+    };
+    expect(secondBody.items).toHaveLength(1);
+    expect(secondBody.items[0]!.properties.url[0]).not.toBe(
+      firstBody.items[0]!.properties.url[0],
+    );
+  });
+
   it("rejects an unsupported query type", async () => {
     const minted = await mintToken("create");
     const res = await handler(

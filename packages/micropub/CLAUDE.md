@@ -31,6 +31,8 @@ toggled by maturity group via the `extensions` config
   live posts for autocomplete.
 - **Post List** (`q=source` with no `url`) — the caller's live posts
   newest-first, with `limit`/`offset` pagination (#351/#353).
+- **Richer Post List Filters** — proposed-only `q=source` filters with keyset
+  cursors; see the package spec for the wire contract.
 
 ## Spec
 
@@ -72,6 +74,7 @@ src/mcp-tools.ts   # createMicropubMcpTools — the `micropub_publish` @dwk/mcp 
 src/store.ts       # createMicropubStore (D1-backed post persistence)
 src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view, list view
 src/pagination.ts  # offset-based pagination parsing/validation (pure, reusable)
+src/source-filters.ts # proposed source-list filter and cursor parsing (pure)
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
 src/event.ts       # h-event post type: markup rendering, h-event → CalendarEvent
 src/fediverse.ts   # h-entry → PostInput adapter + syndication to @dwk/activitypub's /publish (#278; wire-format contract, no AP import)
