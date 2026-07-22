@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   parseHandle,
@@ -138,6 +138,26 @@ describe("resolveHandle", () => {
       fetch: fetchJrd(200, JRD),
     });
     expect(actor).toBe("https://lemmy.example/c/birding");
+  });
+
+  it("releases its timeout after a successful lookup", async () => {
+    vi.useFakeTimers();
+    try {
+      const received = { signal: null as AbortSignal | null };
+      const actor = await resolveHandle("birding@lemmy.example", {
+        fetch: async (_input, init) => {
+          received.signal = init?.signal ?? null;
+          return new Response(JSON.stringify(JRD), { status: 200 });
+        },
+        timeoutMs: 10,
+      });
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(actor).toBe("https://lemmy.example/c/birding");
+      expect(received.signal?.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns null on a bad handle without fetching", async () => {

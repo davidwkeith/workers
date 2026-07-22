@@ -325,6 +325,101 @@ describe("buildMastodonBackend", () => {
     expect(decodeSnowflake(local!.id)?.source).toBe(1);
   });
 
+  it("pages from an owner-post cursor to same-millisecond inbox entries", async () => {
+    const config = freshConfig();
+    const timestamp = Date.now();
+    const inboxActivity = {
+      id: `${config.iris.id}/activities/same-millisecond-inbox`,
+      type: "Create",
+      actor: "https://remote.example/users/bob",
+      object: {
+        id: "https://remote.example/objects/same-millisecond-inbox",
+        type: "Note",
+        content: "inbox post",
+      },
+    };
+    const outboxActivity = {
+      id: `${config.iris.outbox}/same-millisecond-outbox`,
+      type: "Create",
+      actor: config.iris.id,
+      object: {
+        id: `${config.iris.outbox}/same-millisecond-outbox/object`,
+        type: "Note",
+        content: "owner post",
+      },
+    };
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, object_type)
+           VALUES (?, ?, ?, 'Note')`,
+        inboxActivity.id,
+        JSON.stringify(inboxActivity),
+        timestamp,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        outboxActivity.id,
+        JSON.stringify(outboxActivity),
+        timestamp,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const first = await backend.timeline({ limit: 1 });
+    expect(first.entries[0]?.source).toBe(1);
+
+    const next = await backend.timeline({
+      limit: 10,
+      maxId: first.entries[0]!.id,
+    });
+    expect(next.entries.map((entry) => entry.activity["id"])).toEqual([
+      inboxActivity.id,
+    ]);
+  });
+
+  it("fills an outbox page past non-post activities", async () => {
+    const config = freshConfig();
+    const timestamp = Date.now();
+    const ownerPost = {
+      id: `${config.iris.outbox}/older-owner-post`,
+      type: "Create",
+      actor: config.iris.id,
+      object: {
+        id: `${config.iris.outbox}/older-owner-post/object`,
+        type: "Note",
+        content: "owner post",
+      },
+    };
+    const ownerLike = {
+      id: `${config.iris.outbox}/newer-owner-like`,
+      type: "Like",
+      actor: config.iris.id,
+      object: "https://remote.example/objects/1",
+    };
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        ownerPost.id,
+        JSON.stringify(ownerPost),
+        timestamp,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        ownerLike.id,
+        JSON.stringify(ownerLike),
+        timestamp + 1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.timeline({ limit: 1 });
+    expect(page.entries.map((entry) => entry.activity["id"])).toEqual([
+      ownerPost.id,
+    ]);
+  });
+
   it("serves cached actor profile fields without an outbound request", async () => {
     const config = freshConfig();
     const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));

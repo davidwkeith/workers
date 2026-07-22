@@ -26,7 +26,7 @@ import {
   type JsonValue,
 } from "./as2.js";
 import { hostFromUrl } from "@dwk/log";
-import { safeFetch } from "@dwk/safe-fetch";
+import { readBodyCapped, safeFetch } from "@dwk/safe-fetch";
 
 import {
   ApOutcome,
@@ -69,6 +69,8 @@ const RELAYED_ACTIVITY_TYPES = [
 const VOTE_SWEEP_MS = 10 * 60_000;
 /** Small debounce before a newly seen actor document is hydrated. */
 const ACTOR_PROFILE_DEBOUNCE_MS = 1_000;
+/** Actor documents are optional display metadata; keep their cache well below a DO SQLite cell. */
+const ACTOR_PROFILE_MAX_BODY_BYTES = 128 * 1024;
 /**
  * Cardinality cap on the pending-metrics table: at most this many distinct
  * `(event, fields)` keys accumulate between drains. Delivery fields include
@@ -1291,40 +1293,57 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const sinceReceivedAt = url.searchParams.get("since_received_at");
     const minReceivedAt = url.searchParams.get("min_received_at");
     const tieSeq = url.searchParams.get("tie_seq");
+    const tieSource: 0 | 1 = url.searchParams.get("tie_source") === "1" ? 1 : 0;
 
     const oldestFirst = minReceivedAt !== null;
-    let where = "verify_state IS NOT 'failed'"; // defensive; see cursor-contract note
-    const params: (string | number)[] = [];
-    if (maxReceivedAt !== null) {
-      where +=
-        tieSeq !== null
-          ? " AND (received_at < ? OR (received_at = ? AND seq < ?))"
-          : " AND received_at < ?";
-      params.push(Number(maxReceivedAt));
-      if (tieSeq !== null) {
-        params.push(Number(maxReceivedAt), Number(tieSeq));
-      }
-    }
-    if (sinceReceivedAt !== null) {
-      where +=
-        tieSeq !== null
-          ? " AND (received_at > ? OR (received_at = ? AND seq > ?))"
-          : " AND received_at > ?";
-      params.push(Number(sinceReceivedAt));
-      if (tieSeq !== null) {
-        params.push(Number(sinceReceivedAt), Number(tieSeq));
-      }
-    }
-    if (minReceivedAt !== null) {
-      where +=
-        tieSeq !== null
-          ? " AND (received_at > ? OR (received_at = ? AND seq > ?))"
-          : " AND received_at > ?";
-      params.push(Number(minReceivedAt));
-      if (tieSeq !== null) {
-        params.push(Number(minReceivedAt), Number(tieSeq));
-      }
-    }
+    /**
+     * Convert a combined timeline snowflake bound into a bound for one source
+     * table. At the same timestamp every outbox (source 1) id sorts after
+     * every inbox (source 0) id, regardless of their independent SQL seqs.
+     */
+    const boundedWhere = (
+      timestamp: "received_at" | "published_at",
+      source: 0 | 1,
+      initial: string,
+    ): { where: string; params: number[] } => {
+      let where = initial;
+      const params: number[] = [];
+      const addBound = (
+        value: string | null,
+        direction: "before" | "after",
+      ): void => {
+        if (value === null) return;
+        const receivedAt = Number(value);
+        if (tieSeq === null) {
+          where += ` AND ${timestamp} ${direction === "before" ? "<" : ">"} ?`;
+          params.push(receivedAt);
+          return;
+        }
+        const seq = Number(tieSeq);
+        if (source === tieSource) {
+          where +=
+            direction === "before"
+              ? ` AND (${timestamp} < ? OR (${timestamp} = ? AND seq < ?))`
+              : ` AND (${timestamp} > ? OR (${timestamp} = ? AND seq > ?))`;
+          params.push(receivedAt, receivedAt, seq);
+        } else if (direction === "before") {
+          where += ` AND ${timestamp} ${source < tieSource ? "<=" : "<"} ?`;
+          params.push(receivedAt);
+        } else {
+          where += ` AND ${timestamp} ${source > tieSource ? ">=" : ">"} ?`;
+          params.push(receivedAt);
+        }
+      };
+      addBound(maxReceivedAt, "before");
+      addBound(sinceReceivedAt, "after");
+      addBound(minReceivedAt, "after");
+      return { where, params };
+    };
+    const { where, params } = boundedWhere(
+      "received_at",
+      0,
+      "verify_state IS NOT 'failed'", // defensive; see cursor-contract note
+    );
 
     const order = oldestFirst ? "ASC" : "DESC";
     const matches: {
@@ -1416,72 +1435,79 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // publish and a delivery share the same millisecond.
     let combinedNewestFirst = false;
     if (kind === "timeline") {
-      let outboxWhere = "1 = 1";
-      const outboxParams: number[] = [];
-      if (maxReceivedAt !== null) {
-        outboxWhere +=
-          tieSeq !== null
-            ? " AND (published_at < ? OR (published_at = ? AND seq < ?))"
-            : " AND published_at < ?";
-        outboxParams.push(Number(maxReceivedAt));
-        if (tieSeq !== null) {
-          outboxParams.push(Number(maxReceivedAt), Number(tieSeq));
+      const initialOutbox = boundedWhere("published_at", 1, "1 = 1");
+      const outboxMatches: typeof matches = [];
+      let outboxCursorReceivedAt =
+        maxReceivedAt !== null
+          ? Number(maxReceivedAt)
+          : sinceReceivedAt !== null
+            ? Number(sinceReceivedAt)
+            : minReceivedAt !== null
+              ? Number(minReceivedAt)
+              : null;
+      let outboxCursorSeq = tieSeq !== null ? Number(tieSeq) : null;
+      let outboxExhausted = false;
+      let isFirstOutboxBatch = true;
+      while (outboxMatches.length < limit && !outboxExhausted) {
+        let outboxWhere = initialOutbox.where;
+        const outboxParams = [...initialOutbox.params];
+        if (outboxCursorReceivedAt !== null && !isFirstOutboxBatch) {
+          outboxWhere +=
+            outboxCursorSeq !== null
+              ? oldestFirst
+                ? " AND (published_at > ? OR (published_at = ? AND seq > ?))"
+                : " AND (published_at < ? OR (published_at = ? AND seq < ?))"
+              : oldestFirst
+                ? " AND published_at > ?"
+                : " AND published_at < ?";
+          outboxParams.push(outboxCursorReceivedAt);
+          if (outboxCursorSeq !== null) {
+            outboxParams.push(outboxCursorReceivedAt, outboxCursorSeq);
+          }
         }
+        const rows = this.#sql
+          .exec<{ seq: number; json: string; published_at: number }>(
+            `SELECT seq, json, published_at FROM outbox WHERE ${outboxWhere}
+               ORDER BY published_at ${order}, seq ${order} LIMIT ?`,
+            ...outboxParams,
+            BATCH,
+          )
+          .toArray();
+        isFirstOutboxBatch = false;
+        if (rows.length === 0) break;
+        for (const row of rows) {
+          const activity = JSON.parse(row.json) as ActivityObject;
+          const type = activity.type;
+          const shape = objectType(activity.object);
+          if (
+            (type === "Create" || type === "Update") &&
+            (shape === "Note" ||
+              shape === "Article" ||
+              shape === "Page" ||
+              shape === "Video")
+          ) {
+            outboxMatches.push({
+              seq: row.seq,
+              receivedAt: row.published_at,
+              activity: activity as unknown as JsonValue,
+              relayedBy: null,
+              source: 1,
+            });
+            if (outboxMatches.length >= limit) break;
+          }
+        }
+        const last = rows[rows.length - 1];
+        outboxCursorReceivedAt = last!.published_at;
+        outboxCursorSeq = last!.seq;
+        if (rows.length < BATCH) outboxExhausted = true;
       }
-      if (sinceReceivedAt !== null) {
-        outboxWhere +=
-          tieSeq !== null
-            ? " AND (published_at > ? OR (published_at = ? AND seq > ?))"
-            : " AND published_at > ?";
-        outboxParams.push(Number(sinceReceivedAt));
-        if (tieSeq !== null) {
-          outboxParams.push(Number(sinceReceivedAt), Number(tieSeq));
-        }
-      }
-      if (minReceivedAt !== null) {
-        outboxWhere +=
-          tieSeq !== null
-            ? " AND (published_at > ? OR (published_at = ? AND seq > ?))"
-            : " AND published_at > ?";
-        outboxParams.push(Number(minReceivedAt));
-        if (tieSeq !== null) {
-          outboxParams.push(Number(minReceivedAt), Number(tieSeq));
-        }
-      }
-      const outbox = this.#sql
-        .exec<{ seq: number; json: string; published_at: number }>(
-          `SELECT seq, json, published_at FROM outbox WHERE ${outboxWhere}
-             ORDER BY published_at ${order}, seq ${order} LIMIT ?`,
-          ...outboxParams,
-          limit,
-        )
-        .toArray();
-      let mergedOutbox = false;
-      for (const row of outbox) {
-        const activity = JSON.parse(row.json) as ActivityObject;
-        const type = activity.type;
-        const shape = objectType(activity.object);
-        if (
-          (type === "Create" || type === "Update") &&
-          (shape === "Note" ||
-            shape === "Article" ||
-            shape === "Page" ||
-            shape === "Video")
-        ) {
-          matches.push({
-            seq: row.seq,
-            receivedAt: row.published_at,
-            activity: activity as unknown as JsonValue,
-            relayedBy: null,
-            source: 1,
-          });
-          mergedOutbox = true;
-        }
+      if (outboxMatches.length > 0) {
+        matches.push(...outboxMatches);
       }
       // Retain the inbox reader's oldest-first contract for min_id requests
       // when there is nothing to merge; the adapter normalizes that ordering.
       // Once owner rows are present, normalize the combined sources here.
-      if (mergedOutbox) {
+      if (outboxMatches.length > 0) {
         matches.sort(
           (a, b) =>
             b.receivedAt - a.receivedAt ||
@@ -2101,11 +2127,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         }
         continue;
       }
-      let doc: unknown;
-      try {
-        doc = await response.json();
-      } catch {
-        doc = null;
+      const body = await readBodyCapped(response, ACTOR_PROFILE_MAX_BODY_BYTES);
+      let doc: unknown = null;
+      if (body !== null) {
+        try {
+          doc = JSON.parse(body) as unknown;
+        } catch {
+          // Invalid actor JSON is a terminal profile-cache miss, not a retry.
+        }
       }
       if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
         this.#sql.exec(

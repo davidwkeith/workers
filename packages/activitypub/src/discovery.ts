@@ -12,6 +12,7 @@
 import { resolveHandle } from "@dwk/webfinger";
 
 import { assertPublicHttpsTarget } from "./delivery.js";
+import { createTimeoutSignal } from "./timeout.js";
 
 /** Whether a string looks like a handle rather than an IRI. */
 export function isHandleShaped(value: string): boolean {
@@ -111,13 +112,16 @@ export async function fetchActorGuarded(
   fetchImpl: typeof fetch,
 ): Promise<ResolvedActor | null> {
   let response: Response;
+  const timeout = createTimeoutSignal(10_000);
   try {
     response = await guardedFetch(fetchImpl)(iri, {
       headers: { accept: "application/activity+json" },
-      signal: AbortSignal.timeout(10_000),
+      signal: timeout.signal,
     });
   } catch {
     return null;
+  } finally {
+    timeout.cancel();
   }
   if (!response.ok) return null;
   const doc = await readJsonCapped(response, MAX_ACTOR_DOC_BYTES);

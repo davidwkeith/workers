@@ -38,6 +38,39 @@ const DEFAULT_ALLOWED_SCHEMES = ["http:", "https:"] as const;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
+ * Create a request signal that is cancelled by either the caller or an
+ * overall timeout. Unlike `AbortSignal.timeout()`, its timer can be released
+ * as soon as the request completes.
+ */
+function createTimeoutSignal(
+  callerSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): { readonly signal: AbortSignal; readonly cancel: () => void } {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  let removeCallerAbort: (() => void) | undefined;
+
+  if (callerSignal != null) {
+    if (callerSignal.aborted) {
+      abort();
+    } else {
+      callerSignal.addEventListener("abort", abort, { once: true });
+      removeCallerAbort = () =>
+        callerSignal.removeEventListener("abort", abort);
+    }
+  }
+
+  const timeout = setTimeout(abort, timeoutMs);
+  return {
+    signal: controller.signal,
+    cancel: () => {
+      clearTimeout(timeout);
+      removeCallerAbort?.();
+    },
+  };
+}
+
+/**
  * Machine-readable cause of an {@link SsrfError}, suitable for logging as a
  * structured field (no free-text parsing required).
  */
@@ -415,9 +448,9 @@ const BASE_STRIP_HEADERS = [
  *
  * The initial host and every redirect target are validated with
  * {@link assertPublicUrl}; redirects are followed manually (`redirect:
- * "manual"`) up to `maxRedirects` hops; and a single {@link AbortSignal.timeout},
- * combined with any signal already on `init` via `AbortSignal.any`, bounds the
- * whole chain. The request method, headers, and body from `init` are
+ * "manual"`) up to `maxRedirects` hops; and a cancellable timeout signal,
+ * combined with any signal already on `init`, bounds the whole chain. The
+ * request method, headers, and body from `init` are
  * preserved across hops for 307/308 — a redirected `POST` re-POSTs to the
  * (re-validated) new location rather than silently degrading to `GET`. A 303
  * (and a 301/302 responding to a `POST`) instead downgrades to a bodyless
@@ -450,12 +483,8 @@ export async function safeFetch(
     ...(options?.stripHeadersCrossOrigin ?? []),
   ];
   // Bound the chain with our own timeout, but don't clobber a caller's signal
-  // (e.g. a worker-shutdown abort): combine them so either can cancel.
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal =
-    init.signal != null
-      ? AbortSignal.any([init.signal, timeoutSignal])
-      : timeoutSignal;
+  // (e.g. a worker-shutdown abort): either one can cancel the request.
+  const timeout = createTimeoutSignal(init.signal, timeoutMs);
 
   // Validate one hop; when a private/reserved host passed only because it is
   // allowlisted (a local-dev composition), leave an audit trail.
@@ -479,7 +508,7 @@ export async function safeFetch(
       const response = await doFetch(currentUrl, {
         ...currentInit,
         redirect: "manual",
-        signal,
+        signal: timeout.signal,
       });
 
       if (!REDIRECT_STATUSES.has(response.status)) {
@@ -549,5 +578,7 @@ export async function safeFetch(
       metrics.count(logEvent, fields);
     }
     throw err;
+  } finally {
+    timeout.cancel();
   }
 }

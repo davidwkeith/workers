@@ -106,6 +106,32 @@ describe("deliverActivity", () => {
     expect(headers.Date).toBeTruthy();
   });
 
+  it("releases its timeout after a successful delivery", async () => {
+    const pem = await privateKeyPem();
+    vi.useFakeTimers();
+    try {
+      const received = { signal: null as AbortSignal | null };
+      const fetchImpl = (async (_url: string, init?: RequestInit) => {
+        received.signal = init?.signal ?? null;
+        return new Response(null, { status: 202 });
+      }) as typeof fetch;
+
+      await deliverActivity(
+        "https://remote.example/inbox",
+        JSON.stringify({ type: "Accept" }),
+        { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
+        fetchImpl,
+        undefined,
+        10,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(received.signal?.aborted).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("classifies a 4xx as a permanent (non-retryable) failure", async () => {
     const pem = await privateKeyPem();
     const fetchImpl = (async () =>
