@@ -167,8 +167,41 @@ interpreted, preserving the existing generic-mf2 behavior.
   or serializing a post. This includes the authenticated `q=source` endpoint:
   it intentionally returns the source record unchanged.
 
-Proposed-group extensions (`q=geo`, `q=contact`, and richer post-list filters)
-remain unimplemented and are tracked separately.
+### Proposed richer `q=source` list filters
+
+This package-defined proposed extension is enabled only with
+`extensions.proposed`. Otherwise its parameters return `400 invalid_request`
+and the existing offset list is unchanged. It applies only to `q=source`
+without `url`; `q=config` advertises it as `source-filters` when enabled.
+
+All filters apply only to the authenticated caller's live posts. The serving
+layer remains responsible for public visibility and access control.
+
+| Parameter | Encoding and semantics |
+| --- | --- |
+| `after`, `before` | One whole-second RFC 3339 date-time each; exclusive creation-time bounds. |
+| `order` | `desc` (default) or `asc`; canonical URL is the deterministic tie-breaker. |
+| `post-type`, `post-status`, `visibility` | Repeatable exact values: OR within one filter and AND across filters. Missing status/visibility use `published`/`public`. |
+| `property-exists[]` | Repeatable mf2 property name; each must exist. |
+| `property-value[name]` | Repeatable exact direct string value. Values for a name are OR; names are AND. Nested h-* values do not match. |
+
+Property names use only letters, digits, and hyphens after an initial letter.
+Malformed dates, names, values, or ordering return `400 invalid_request`.
+`properties[]` remains a response projection and never affects matching.
+There may be at most 100 dynamic values across the value-bearing filters, and
+at most 100 `property-exists[]` predicates; exceeding either bound is `400`
+rather than a D1 host-parameter failure.
+
+The existing `limit`/`offset` path remains for compatibility. Filtered clients
+should use the opaque `next-cursor`; it is bound to the full filter set and
+ordering, and is exclusive over the `(created_at, url)` tuple. `cursor` and
+`offset` cannot be combined. The D1 store binds all values and indexes
+`(deleted, created_at, url)` plus `(deleted, type, created_at, url)`; arbitrary
+property predicates remain safe exact JSON predicates rather than full-text
+search.
+
+Proposed-group extensions (`q=geo` and `q=contact`) remain unimplemented and
+are tracked separately.
 
 ## Auth / security
 
