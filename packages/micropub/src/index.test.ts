@@ -1742,6 +1742,31 @@ describe("@dwk/micropub proposed contacts", () => {
     expect((await listed.json()) as Record<string, unknown>).toMatchObject({
       contacts: [{ name: "Ada Lovelace", _internal_url: location }],
     });
+    const deniedDelete = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          ...(await authHeaders(creator, "POST", MICROPUB)),
+        },
+        body: new URLSearchParams({ action: "delete", url: location ?? "" }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(deniedDelete.status).toBe(403);
+    expect(((await deniedDelete.json()) as { error: string }).error).toBe(
+      "insufficient_scope",
+    );
+    const mediaReader = await mintToken("media");
+    const mediaScopedRead = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        headers: await authHeaders(mediaReader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(mediaScopedRead.status).toBe(200);
     const updater = await mintToken("update");
     const protectedMetadata = await contactsHandler(
       new Request(`${MICROPUB}?q=contact`, {
@@ -1791,6 +1816,48 @@ describe("@dwk/micropub proposed contacts", () => {
       ctx,
     );
     expect(deleted.status).toBe(204);
+  });
+
+  it("folds an uploaded photo into a multipart contact create", async () => {
+    const creator = await mintToken("create");
+    const form = new FormData();
+    form.set("h", "card");
+    form.set("name", "Photo Contact");
+    form.set(
+      "photo",
+      new File([new Uint8Array([8, 6, 7, 5, 3, 0, 9])], "photo.png", {
+        type: "image/png",
+      }),
+    );
+    const created = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact`, {
+        method: "POST",
+        headers: await authHeaders(creator, "POST", MICROPUB),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+    const listed = await contactsHandler(
+      new Request(`${MICROPUB}?q=contact&filter=photo%20contact`, {
+        headers: await authHeaders(creator, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await listed.json()) as {
+      contacts: Array<{ photo?: string }>;
+    };
+    const photo = body.contacts[0]?.photo;
+    expect(typeof photo).toBe("string");
+    expect((photo as string).startsWith(`${MEDIA}/`)).toBe(true);
+    const media = await contactsHandler(
+      new Request(photo as string),
+      harness,
+      ctx,
+    );
+    expect(media.status).toBe(200);
   });
 
   it("rejects duplicate public URLs and malformed contact queries", async () => {

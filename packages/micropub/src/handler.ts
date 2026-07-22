@@ -821,17 +821,9 @@ async function handleAction(
     return error(auth.error, auth.description, auth.status);
   }
 
-  if (isContactRequest) {
-    const contacts = config.contacts;
-    if (!config.extensions.proposed || !contacts) {
-      return error("invalid_request", "unsupported query `q=contact`", 400);
-    }
-    return handleContactAction(parsed, rawJson, isJson, config, contacts(env));
-  }
-
   // Authorized: only now stream any uploaded multipart files to R2 and fold
-  // their URLs into the create. (Files on a non-create action are ignored, so
-  // they never produce orphaned blobs.)
+  // their URLs into the create, including contact h-cards. (Files on a
+  // non-create action are ignored, so they never produce orphaned blobs.)
   if (pendingFiles.length > 0 && action === "create") {
     try {
       parsed = await foldUploadedMedia(parsed, pendingFiles, env, config);
@@ -844,6 +836,14 @@ async function handleAction(
       }
       throw err;
     }
+  }
+
+  if (isContactRequest) {
+    const contacts = config.contacts;
+    if (!config.extensions.proposed || !contacts) {
+      return error("invalid_request", "unsupported query `q=contact`", 400);
+    }
+    return handleContactAction(parsed, rawJson, isJson, config, contacts(env));
   }
 
   switch (action) {
