@@ -93,7 +93,7 @@ Currently implemented (all **stable**):
   paginated default. Nested non-string tags (e.g. `h-card` objects)
   are excluded from the list.
 - **Post List** (`q=source` without a `url`) — the caller's live posts
-  newest-first, with offset `limit`/`offset` pagination (#351/#353). Fully
+  newest-first, with `limit`/`offset` pagination (#351/#353). Fully
   specified under [Query support](#query-support) below.
 
 ## Query support
