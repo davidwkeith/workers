@@ -59,10 +59,12 @@ need the runtime).
 ## Task 1: Extend `__stats` with followers/following/statuses counts
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts:1809-1812` (`#stats`)
 - Test: `packages/activitypub/src/object.test.ts` (existing file — add a case)
 
 **Interfaces:**
+
 - Consumes: `#count(kind)` (`object.ts:1058-1069`, already supports
   `"followers" | "following" | "outbox"`).
 - Produces: `#stats()` response body gains `followers`, `following`,
@@ -133,12 +135,14 @@ git commit -m "feat(activitypub): extend __stats with follower/following/status 
 ## Task 2: `__client/timeline` and `__client/notifications` DO routes
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (add two private methods +
   two route entries in `#route`, near the existing `__inbox`/`__following`
   block at lines 291-312)
 - Test: `packages/activitypub/src/object.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `INTERNAL_HEADERS.internal` gate (`config.ts:203-210`, same
   pattern as `__inbox`); `this.#sql` (DO SQLite handle); `JsonValue` type.
 - Produces:
@@ -148,7 +152,7 @@ git commit -m "feat(activitypub): extend __stats with follower/following/status 
   - `GET <actor>/__client/notifications?limit=&max_received_at=&since_received_at=&min_received_at=&tie_seq=`
     → same shape, filtered to favourite/reblog/mention rows.
   - `ClientEntry` shape (both routes): `{ seq: number, receivedAt: number,
-    activity: JsonValue, relayedBy: string | null }`. `id`/`objectType`/
+activity: JsonValue, relayedBy: string | null }`. `id`/`objectType`/
     `verifyState` are not needed by the adapter (it works from the parsed
     `activity` for classification) so they are omitted from the wire shape
     to keep the row payload small.
@@ -235,24 +239,24 @@ Add to `#route` (`object.ts`, right after the existing `__following` block,
 before the `if (path === pathOf(iris.followers))` line):
 
 ```ts
-    if (path === `${pathOf(iris.id)}/__client/timeline`) {
-      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
-        return text(404, "not found");
-      }
-      return this.#listClientEntries(request, "timeline");
-    }
-    if (path === `${pathOf(iris.id)}/__client/notifications`) {
-      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
-        return text(404, "not found");
-      }
-      return this.#listClientEntries(request, "notifications");
-    }
-    if (path === `${pathOf(iris.id)}/__client/entry`) {
-      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
-        return text(404, "not found");
-      }
-      return this.#clientEntry(request);
-    }
+if (path === `${pathOf(iris.id)}/__client/timeline`) {
+  if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+    return text(404, "not found");
+  }
+  return this.#listClientEntries(request, "timeline");
+}
+if (path === `${pathOf(iris.id)}/__client/notifications`) {
+  if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+    return text(404, "not found");
+  }
+  return this.#listClientEntries(request, "notifications");
+}
+if (path === `${pathOf(iris.id)}/__client/entry`) {
+  if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+    return text(404, "not found");
+  }
+  return this.#clientEntry(request);
+}
 ```
 
 Add these private methods near `#listInbox`/`#listFollowing`
@@ -483,10 +487,12 @@ git commit -m "feat(activitypub): additive __client/timeline, __client/notificat
 ## Task 3: `@dwk/mastodon-api` snowflake ID codec
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/snowflake.ts`
 - Test: `packages/mastodon-api/src/snowflake.test.ts`
 
 **Interfaces:**
+
 - Produces: `encodeSnowflake(receivedAtMs: number, seq: number): string`,
   `decodeSnowflake(id: string): { receivedAtMs: number, seqLow: number } | null`.
   Consumed by Task 6 (activitypub adapter, to build `BackendEntry.id` and to
@@ -603,10 +609,12 @@ git commit -m "feat(mastodon-api): Mastodon-shaped snowflake ID codec"
 ## Task 4: `@dwk/mastodon-api` allowlist HTML sanitizer
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/sanitize.ts`
 - Test: `packages/mastodon-api/src/sanitize.test.ts`
 
 **Interfaces:**
+
 - Produces: `sanitizeStatusHtml(html: string): string`. Consumed by Task 8
   (`statusEntity`'s `content` field).
 
@@ -619,7 +627,8 @@ import { sanitizeStatusHtml } from "./sanitize.js";
 
 describe("sanitizeStatusHtml", () => {
   it("keeps allowlisted tags and their href/rel", () => {
-    const input = '<p>Hello <a href="https://example.com" rel="me">world</a></p>';
+    const input =
+      '<p>Hello <a href="https://example.com" rel="me">world</a></p>';
     expect(sanitizeStatusHtml(input)).toBe(input);
   });
 
@@ -659,7 +668,7 @@ Expected: FAIL — module doesn't exist.
 A small hand-rolled walker, not a parser dependency (runtime-budget
 constraint — `spec/non-functional-requirements.md`). It operates on the
 tag-token level with a regex tokenizer, which is safe here because the
-output is only ever used as HTML *text* rendered by a client, not
+output is only ever used as HTML _text_ rendered by a client, not
 re-parsed as trusted markup on this origin.
 
 ```ts
@@ -671,18 +680,35 @@ re-parsed as trusted markup on this origin.
  * their allowlisted attributes, and `href`/`src` reject non-http(s) schemes.
  */
 
-const ALLOWED_TAGS = new Set(["p", "br", "a", "span", "b", "strong", "i", "em", "ul", "ol", "li"]);
+const ALLOWED_TAGS = new Set([
+  "p",
+  "br",
+  "a",
+  "span",
+  "b",
+  "strong",
+  "i",
+  "em",
+  "ul",
+  "ol",
+  "li",
+]);
 const ALLOWED_ATTRS: Record<string, readonly string[]> = {
   a: ["href", "rel", "class", "target"],
   span: ["class"],
 };
 
-const TAG_RE = /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*\/?>/g;
+const TAG_RE =
+  /<\/?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*\/?>/g;
 const ATTR_RE = /([a-zA-Z-]+)(?:=("[^"]*"|'[^']*'|[^\s>]*))?/g;
 
 function safeUrl(raw: string): string | null {
   const value = raw.trim();
-  if (/^(https?:)?\/\//i.test(value) || value.startsWith("/") || value.startsWith("#")) {
+  if (
+    /^(https?:)?\/\//i.test(value) ||
+    value.startsWith("/") ||
+    value.startsWith("#")
+  ) {
     return value;
   }
   return null;
@@ -759,18 +785,20 @@ git commit -m "feat(mastodon-api): allowlist HTML sanitizer for inbound status c
 ## Task 5: Entity mapping — `Status` from timeline entries
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/entities.ts` (add `statusEntity`,
   `remoteAccountEntity`, `REMOTE_ACCOUNT_PREFIX`)
 - Test: `packages/mastodon-api/src/entities.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `BackendEntry` (`backend.ts:31-38`, already defined),
   `sanitizeStatusHtml` (Task 4), `TRANSPARENT_PIXEL` (already in
   `entities.ts`).
 - Produces: `statusEntity(entry: BackendEntry, opts: { baseUrl: string })
-  : Record<string, unknown>`, `remoteAccountEntity(actorIri: string):
-  Record<string, unknown>`, `encodeRemoteAccountId(actorIri: string):
-  string`, `decodeRemoteAccountId(id: string): string | null`. Consumed by
+: Record<string, unknown>`, `remoteAccountEntity(actorIri: string):
+Record<string, unknown>`, `encodeRemoteAccountId(actorIri: string):
+string`, `decodeRemoteAccountId(id: string): string | null`. Consumed by
   Task 10 (timeline/notification route handlers) and Task 12
   (`accounts/:id`).
 
@@ -786,7 +814,12 @@ approved `MastodonBackend` seam's 4 methods — no new backend method needed.
 Add to `entities.test.ts`:
 
 ```ts
-import { statusEntity, remoteAccountEntity, encodeRemoteAccountId, decodeRemoteAccountId } from "./entities.js";
+import {
+  statusEntity,
+  remoteAccountEntity,
+  encodeRemoteAccountId,
+  decodeRemoteAccountId,
+} from "./entities.js";
 import { encodeSnowflake } from "./snowflake.js";
 import type { BackendEntry } from "./backend.js";
 
@@ -843,7 +876,11 @@ describe("statusEntity", () => {
         id: "https://remote.example/activities/2",
         type: "Create",
         actor: "https://remote.example/users/bob",
-        object: { id: "https://remote.example/objects/2", type: "Note", content: "<p>bird</p>" },
+        object: {
+          id: "https://remote.example/objects/2",
+          type: "Note",
+          content: "<p>bird</p>",
+        },
       },
     };
     const status = statusEntity(entry, { baseUrl });
@@ -893,7 +930,8 @@ function base64UrlEncode(value: string): string {
 function base64UrlDecode(value: string): string | null {
   try {
     const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-    const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+    const pad =
+      padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
     return atob(padded + pad);
   } catch {
     return null;
@@ -977,7 +1015,10 @@ const MEDIA_TYPE_MAP: Record<string, string> = {
 function mediaAttachments(raw: unknown): Record<string, unknown>[] {
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
   return list
-    .filter((item): item is RawAttachment => typeof item === "object" && item !== null)
+    .filter(
+      (item): item is RawAttachment =>
+        typeof item === "object" && item !== null,
+    )
     .map((item, index) => ({
       id: String(index),
       type: MEDIA_TYPE_MAP[item.type ?? ""] ?? "unknown",
@@ -1032,7 +1073,9 @@ export function statusEntity(
     favourites_count: 0,
     content,
     reblog: null,
-    account: actorIri ? remoteAccountEntity(actorIri) : remoteAccountEntity(opts.baseUrl),
+    account: actorIri
+      ? remoteAccountEntity(actorIri)
+      : remoteAccountEntity(opts.baseUrl),
     media_attachments: mediaAttachments(object.attachment),
     mentions: [],
     tags: [],
@@ -1058,11 +1101,11 @@ export function statusEntity(
 
 Note: `in_reply_to_id` resolution to a **local** snowflake (per the design
 doc: "`inReplyTo` → `in_reply_to_id` when it resolves to a local snowflake,
-else null") needs the *caller* (the route handler in Task 10) to pass in a
+else null") needs the _caller_ (the route handler in Task 10) to pass in a
 resolver, since `statusEntity` itself has no backend access — leave it
 `null` for now in this task; Task 10 documents this as a follow-up if
 `entry(id)` lookups per-status prove necessary for the acceptance bar (the
-pixelfed-qa reply only needs to show up as a *notification*, not require
+pixelfed-qa reply only needs to show up as a _notification_, not require
 in-thread linking to render — see Task 6/#350 fidelity phase for full
 threading).
 
@@ -1083,13 +1126,15 @@ git commit -m "feat(mastodon-api): Status entity mapping with reblog provenance 
 ## Task 6: Entity mapping — `Notification`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/entities.ts` (add `notificationEntity`)
 - Test: `packages/mastodon-api/src/entities.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `statusEntity`, `remoteAccountEntity` (Task 5).
 - Produces: `notificationEntity(entry: BackendEntry, opts: { baseUrl:
-  string }): Record<string, unknown> | null` — `null` for a row that
+string }): Record<string, unknown> | null` — `null` for a row that
   classifies to none of `favourite`/`reblog`/`mention` (the design doc:
   "Rows that fit no type are omitted from this endpoint"). Consumed by
   Task 11 (`GET /api/v1/notifications`).
@@ -1200,7 +1245,9 @@ export function notificationEntity(
     readonly object?: unknown;
   };
   const actorIri = typeof activity.actor === "string" ? activity.actor : "";
-  const account = actorIri ? remoteAccountEntity(actorIri) : remoteAccountEntity(opts.baseUrl);
+  const account = actorIri
+    ? remoteAccountEntity(actorIri)
+    : remoteAccountEntity(opts.baseUrl);
 
   if (activity.type === "Like") {
     return {
@@ -1257,12 +1304,14 @@ git commit -m "feat(mastodon-api): Notification entity mapping (favourite/reblog
 ## Task 7: RFC 8288 `Link` pagination helper
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/pagination.ts`
 - Test: `packages/mastodon-api/src/pagination.test.ts`
 
 **Interfaces:**
+
 - Produces: `buildLinkHeader(requestUrl: URL, page: { firstId?: string,
-  lastId?: string }): string | null`. Consumed by Task 10/11.
+lastId?: string }): string | null`. Consumed by Task 10/11.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1282,11 +1331,18 @@ describe("buildLinkHeader", () => {
   });
 
   it("returns null for an empty page", () => {
-    expect(buildLinkHeader(new URL("https://owner.example/api/v1/timelines/home"), {})).toBeNull();
+    expect(
+      buildLinkHeader(
+        new URL("https://owner.example/api/v1/timelines/home"),
+        {},
+      ),
+    ).toBeNull();
   });
 
   it("replaces an existing max_id/min_id rather than duplicating it", () => {
-    const url = new URL("https://owner.example/api/v1/timelines/home?max_id=999");
+    const url = new URL(
+      "https://owner.example/api/v1/timelines/home?max_id=999",
+    );
     const header = buildLinkHeader(url, { firstId: "100", lastId: "1" });
     expect(header).toContain("max_id=1>");
     expect(header).not.toContain("max_id=999");
@@ -1348,6 +1404,7 @@ git commit -m "feat(mastodon-api): RFC 8288 Link header pagination helper"
 ## Task 8: `@dwk/activitypub` — `createActivitypubMastodonApi` adapter
 
 **Files:**
+
 - Create: `packages/activitypub/src/mastodon-api.ts`
 - Modify: `packages/activitypub/src/index.ts` (export)
 - Modify: `packages/activitypub/package.json` (add `@dwk/mastodon-api` dep)
@@ -1355,6 +1412,7 @@ git commit -m "feat(mastodon-api): RFC 8288 Link header pagination helper"
 - Test: `packages/activitypub/src/mastodon-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `MastodonBackend`/`BackendAccount`/`BackendPage`/
   `BackendPageQuery`/`BackendEntry` (`@dwk/mastodon-api`'s `backend.ts`),
   `createMastodonApi`/`MastodonApiConfig` (`@dwk/mastodon-api`),
@@ -1363,10 +1421,10 @@ git commit -m "feat(mastodon-api): RFC 8288 Link header pagination helper"
   (`@dwk/mastodon-api`'s `snowflake.js` — exported from its `index.ts` in
   Task 9).
 - Produces: `createActivitypubMastodonApi(options: {
-  config: ResolvedConfig, actor: DurableObjectNamespace<ActivityPubObject>,
-  mastodonConfig: Omit<MastodonApiConfig, "backend">,
+config: ResolvedConfig, actor: DurableObjectNamespace<ActivityPubObject>,
+mastodonConfig: Omit<MastodonApiConfig, "backend">,
 }): (request: Request, env: MastodonApiEnv & ActivityPubEnv, ctx:
-  ExecutionContext) => Promise<Response>`. Mounted directly by composers
+ExecutionContext) => Promise<Response>`. Mounted directly by composers
   (conformance-target in Task 13, the catalog entry already declares
   `handler: "createMastodonApi"` — Task 13 also confirms whether the
   catalog needs updating to `createActivitypubMastodonApi`, since that's
@@ -1487,7 +1545,8 @@ function toBackendEntry(row: ClientEntryRow): BackendEntry {
     id: encodeSnowflake(row.receivedAt, row.seq),
     activity: row.activity,
     receivedAt: row.receivedAt,
-    objectType: typeof row.activity.type === "string" ? row.activity.type : null,
+    objectType:
+      typeof row.activity.type === "string" ? row.activity.type : null,
     relayedBy: row.relayedBy,
   };
 }
@@ -1513,14 +1572,19 @@ export function createActivitypubMastodonApi(
   options: ActivitypubMastodonApiOptions,
 ): (
   request: Request,
-  env: MastodonApiEnv & { readonly ACTOR: DurableObjectNamespace<ActivityPubObject> },
+  env: MastodonApiEnv & {
+    readonly ACTOR: DurableObjectNamespace<ActivityPubObject>;
+  },
   ctx: ExecutionContext,
 ) => Promise<Response> {
   const { config, actor, mastodonConfig } = options;
 
   const internalHeaders = (): Headers => {
     const headers = new Headers();
-    headers.set(INTERNAL_HEADERS.config, JSON.stringify(forwardedConfig(config)));
+    headers.set(
+      INTERNAL_HEADERS.config,
+      JSON.stringify(forwardedConfig(config)),
+    );
     headers.set(INTERNAL_HEADERS.internal, "1");
     return headers;
   };
@@ -1529,7 +1593,9 @@ export function createActivitypubMastodonApi(
   const backend: MastodonBackend = {
     async account(): Promise<BackendAccount> {
       const response = await stub().fetch(
-        new Request(`${config.iris.id}/__stats`, { headers: internalHeaders() }),
+        new Request(`${config.iris.id}/__stats`, {
+          headers: internalHeaders(),
+        }),
       );
       const stats = response.ok
         ? ((await response.json()) as Record<string, number>)
@@ -1543,11 +1609,15 @@ export function createActivitypubMastodonApi(
       };
     },
 
-    async timeline(query: BackendPageQuery): Promise<BackendPage<BackendEntry>> {
+    async timeline(
+      query: BackendPageQuery,
+    ): Promise<BackendPage<BackendEntry>> {
       return listEntries("timeline", query);
     },
 
-    async notifications(query: BackendPageQuery): Promise<BackendPage<BackendEntry>> {
+    async notifications(
+      query: BackendPageQuery,
+    ): Promise<BackendPage<BackendEntry>> {
       return listEntries("notifications", query);
     },
 
@@ -1557,7 +1627,9 @@ export function createActivitypubMastodonApi(
       const url = new URL(`${config.iris.id}/__client/entry`);
       url.searchParams.set("received_at", String(decoded.receivedAtMs));
       url.searchParams.set("seq_low", String(decoded.seqLow));
-      const response = await stub().fetch(new Request(url.toString(), { headers: internalHeaders() }));
+      const response = await stub().fetch(
+        new Request(url.toString(), { headers: internalHeaders() }),
+      );
       if (!response.ok) return null;
       const row = (await response.json()) as ClientEntryRow;
       return toBackendEntry(row);
@@ -1569,8 +1641,11 @@ export function createActivitypubMastodonApi(
     query: BackendPageQuery,
   ): Promise<BackendPage<BackendEntry>> {
     const url = new URL(`${config.iris.id}/__client/${kind}`);
-    for (const [key, value] of cursorParams(query)) url.searchParams.set(key, value);
-    const response = await stub().fetch(new Request(url.toString(), { headers: internalHeaders() }));
+    for (const [key, value] of cursorParams(query))
+      url.searchParams.set(key, value);
+    const response = await stub().fetch(
+      new Request(url.toString(), { headers: internalHeaders() }),
+    );
     if (!response.ok) return { entries: [] };
     const body = (await response.json()) as { items: ClientEntryRow[] };
     return { entries: body.items.map(toBackendEntry) };
@@ -1635,11 +1710,13 @@ git commit -m "feat(activitypub,mastodon-api): createActivitypubMastodonApi adap
 ## Task 9: Export snowflake + remote-account helpers from `@dwk/mastodon-api`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/index.ts`
 
 **Interfaces:**
+
 - Produces: adds `encodeSnowflake`, `decodeSnowflake`, `type
-  DecodedSnowflake` (from `./snowflake.js`), `encodeRemoteAccountId`,
+DecodedSnowflake` (from `./snowflake.js`), `encodeRemoteAccountId`,
   `decodeRemoteAccountId`, `remoteAccountEntity`, `statusEntity`,
   `notificationEntity` (from `./entities.js`) to the public surface — Task
   8's adapter and Task 10/11/12's route handlers both need to import these
@@ -1693,11 +1770,13 @@ git commit -m "feat(mastodon-api): export snowflake codec and entity-mapping hel
 ## Task 10: `GET /api/v1/timelines/home`
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/timelines.ts`
 - Modify: `packages/mastodon-api/src/handler.ts` (register the route)
 - Test: `packages/mastodon-api/src/timelines.test.ts`
 
 **Interfaces:**
+
 - Consumes: `authenticateBearer` (`./auth.js`), `RouteContext`
   (`./handler.js`), `statusEntity` (Task 5), `buildLinkHeader` (Task 7),
   `config.backend` (`MastodonApiConfig.backend`, already optional per
@@ -1710,13 +1789,21 @@ git commit -m "feat(mastodon-api): export snowflake codec and entity-mapping hel
 ```ts
 import { describe, expect, it } from "vitest";
 
-import { api, testEnv, resetDb, registerApp, obtainAccessToken } from "./test-harness.js";
+import {
+  api,
+  testEnv,
+  resetDb,
+  registerApp,
+  obtainAccessToken,
+} from "./test-harness.js";
 import type { MastodonBackend } from "./backend.js";
 import { encodeSnowflake } from "./snowflake.js";
 
 function fakeBackend(entries: unknown[]): MastodonBackend {
   return {
-    account: async () => ({ counts: { followers: 0, following: 0, statuses: 0 } }),
+    account: async () => ({
+      counts: { followers: 0, following: 0, statuses: 0 },
+    }),
     timeline: async () => ({ entries: entries as never }),
     notifications: async () => ({ entries: [] }),
     entry: async () => null,
@@ -1726,7 +1813,9 @@ function fakeBackend(entries: unknown[]): MastodonBackend {
 describe("GET /api/v1/timelines/home", () => {
   it("401s without a bearer token", async () => {
     await resetDb();
-    const response = await api()(new Request("https://owner.example/api/v1/timelines/home"));
+    const response = await api()(
+      new Request("https://owner.example/api/v1/timelines/home"),
+    );
     expect(response.status).toBe(401);
   });
 
@@ -1744,7 +1833,10 @@ describe("GET /api/v1/timelines/home", () => {
         object: { type: "Note", content: "<p>hi</p>" },
       },
     };
-    const cfgWithBackend = { ...(await import("./test-harness.js")).testConfig, backend: fakeBackend([entry]) };
+    const cfgWithBackend = {
+      ...(await import("./test-harness.js")).testConfig,
+      backend: fakeBackend([entry]),
+    };
     const response = await api(cfgWithBackend)(
       new Request("https://owner.example/api/v1/timelines/home", {
         headers: { authorization: `Bearer ${token}` },
@@ -1784,13 +1876,20 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 40;
 
 export async function handleHomeTimeline(ctx: RouteContext): Promise<Response> {
-  const token = await authenticateBearer(ctx.request, createMastodonStore(ctx.env));
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
   if (!token) return invalidToken();
   if (token.accountId === null) return accountRequired();
   if (!ctx.config.backend) return Response.json([]);
 
   const limit = Math.min(
-    Math.max(1, Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) || DEFAULT_LIMIT),
+    Math.max(
+      1,
+      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
+        DEFAULT_LIMIT,
+    ),
     ctx.config.pageSize?.max ?? MAX_LIMIT,
   );
   const page = await ctx.config.backend.timeline({
@@ -1799,7 +1898,9 @@ export async function handleHomeTimeline(ctx: RouteContext): Promise<Response> {
     sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
     minId: ctx.url.searchParams.get("min_id") ?? undefined,
   });
-  const statuses = page.entries.map((entry) => statusEntity(entry, { baseUrl: ctx.config.baseUrl }));
+  const statuses = page.entries.map((entry) =>
+    statusEntity(entry, { baseUrl: ctx.config.baseUrl }),
+  );
   const link = buildLinkHeader(ctx.url, {
     firstId: page.entries[0]?.id,
     lastId: page.entries[page.entries.length - 1]?.id,
@@ -1835,11 +1936,13 @@ git commit -m "feat(mastodon-api): GET /api/v1/timelines/home"
 ## Task 11: `GET /api/v1/notifications`
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/notifications.ts`
 - Modify: `packages/mastodon-api/src/handler.ts` (register the route)
 - Test: `packages/mastodon-api/src/notifications.test.ts`
 
 **Interfaces:**
+
 - Consumes: same as Task 10, plus `notificationEntity` (Task 6).
 - Produces: `handleNotifications(ctx: RouteContext): Promise<Response>`,
   registered as `"GET /api/v1/notifications"`.
@@ -1859,7 +1962,9 @@ import { encodeSnowflake } from "./snowflake.js";
 
 function fakeBackend(entries: unknown[]): MastodonBackend {
   return {
-    account: async () => ({ counts: { followers: 0, following: 0, statuses: 0 } }),
+    account: async () => ({
+      counts: { followers: 0, following: 0, statuses: 0 },
+    }),
     timeline: async () => ({ entries: [] }),
     notifications: async () => ({ entries: entries as never }),
     entry: async () => null,
@@ -1869,7 +1974,9 @@ function fakeBackend(entries: unknown[]): MastodonBackend {
 describe("GET /api/v1/notifications", () => {
   it("401s without a bearer token", async () => {
     await resetDb();
-    const response = await api()(new Request("https://owner.example/api/v1/notifications"));
+    const response = await api()(
+      new Request("https://owner.example/api/v1/notifications"),
+    );
     expect(response.status).toBe(401);
   });
 
@@ -1921,14 +2028,23 @@ import { createMastodonStore } from "./store.js";
 const DEFAULT_LIMIT = 15;
 const MAX_LIMIT = 30;
 
-export async function handleNotifications(ctx: RouteContext): Promise<Response> {
-  const token = await authenticateBearer(ctx.request, createMastodonStore(ctx.env));
+export async function handleNotifications(
+  ctx: RouteContext,
+): Promise<Response> {
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
   if (!token) return invalidToken();
   if (token.accountId === null) return accountRequired();
   if (!ctx.config.backend) return Response.json([]);
 
   const limit = Math.min(
-    Math.max(1, Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) || DEFAULT_LIMIT),
+    Math.max(
+      1,
+      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
+        DEFAULT_LIMIT,
+    ),
     ctx.config.pageSize?.max ?? MAX_LIMIT,
   );
   const page = await ctx.config.backend.notifications({
@@ -1972,6 +2088,7 @@ git commit -m "feat(mastodon-api): GET /api/v1/notifications (favourite/reblog/m
 ## Task 12: Dynamic-path routing + `GET /api/v1/statuses/:id` and `GET /api/v1/accounts/:id`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/handler.ts` (add a small dynamic-route
   fallback after the exact-match `ROUTES` lookup)
 - Create: `packages/mastodon-api/src/statuses.ts`
@@ -1981,9 +2098,10 @@ git commit -m "feat(mastodon-api): GET /api/v1/notifications (favourite/reblog/m
   additions to `packages/mastodon-api/src/accounts.test.ts`
 
 **Interfaces:**
+
 - Produces: `handleGetStatus(ctx: RouteContext, id: string):
-  Promise<Response>`, `handleGetAccount(ctx: RouteContext, id: string):
-  Promise<Response>`. Both take the path parameter as a second argument —
+Promise<Response>`, `handleGetAccount(ctx: RouteContext, id: string):
+Promise<Response>`. Both take the path parameter as a second argument —
   the router extracts it, per the dynamic-route mechanism below.
 
 `createMastodonApi`'s router (`handler.ts:28-42`) is currently an
@@ -2008,15 +2126,20 @@ describe("GET /api/v1/statuses/:id", () => {
     await resetDb();
     const token = await obtainAccessToken();
     const backend: MastodonBackend = {
-      account: async () => ({ counts: { followers: 0, following: 0, statuses: 0 } }),
+      account: async () => ({
+        counts: { followers: 0, following: 0, statuses: 0 },
+      }),
       timeline: async () => ({ entries: [] }),
       notifications: async () => ({ entries: [] }),
       entry: async () => null,
     };
     const response = await api({ ...testConfig, backend })(
-      new Request(`https://owner.example/api/v1/statuses/${encodeSnowflake(1, 1)}`, {
-        headers: { authorization: `Bearer ${token}` },
-      }),
+      new Request(
+        `https://owner.example/api/v1/statuses/${encodeSnowflake(1, 1)}`,
+        {
+          headers: { authorization: `Bearer ${token}` },
+        },
+      ),
     );
     expect(response.status).toBe(404);
   });
@@ -2026,7 +2149,9 @@ describe("GET /api/v1/statuses/:id", () => {
     const token = await obtainAccessToken();
     const id = encodeSnowflake(1_753_000_000_020, 1);
     const backend: MastodonBackend = {
-      account: async () => ({ counts: { followers: 0, following: 0, statuses: 0 } }),
+      account: async () => ({
+        counts: { followers: 0, following: 0, statuses: 0 },
+      }),
       timeline: async () => ({ entries: [] }),
       notifications: async () => ({ entries: [] }),
       entry: async (requested) =>
@@ -2068,7 +2193,9 @@ describe("GET /api/v1/accounts/:id", () => {
       }),
     );
     expect(response.status).toBe(200);
-    expect(((await response.json()) as { username: string }).username).toBe("owner");
+    expect(((await response.json()) as { username: string }).username).toBe(
+      "owner",
+    );
   });
 
   it("re-synthesizes a remote account from its encoded id, no backend call", async () => {
@@ -2082,7 +2209,9 @@ describe("GET /api/v1/accounts/:id", () => {
       }),
     );
     expect(response.status).toBe(200);
-    expect(((await response.json()) as { username: string }).username).toBe("alice");
+    expect(((await response.json()) as { username: string }).username).toBe(
+      "alice",
+    );
   });
 
   it("404s for an id that decodes to neither the owner nor a valid remote IRI", async () => {
@@ -2114,8 +2243,16 @@ type DynamicRouteHandler = (ctx: RouteContext, id: string) => Promise<Response>;
 
 /** `METHOD` + a regex capturing the one path parameter these routes need. */
 const DYNAMIC_ROUTES: readonly [string, RegExp, DynamicRouteHandler][] = [
-  ["GET", /^\/api\/v1\/statuses\/([^/]+)$/, (ctx, id) => handleGetStatus(ctx, id)],
-  ["GET", /^\/api\/v1\/accounts\/([^/]+)$/, (ctx, id) => handleGetAccount(ctx, id)],
+  [
+    "GET",
+    /^\/api\/v1\/statuses\/([^/]+)$/,
+    (ctx, id) => handleGetStatus(ctx, id),
+  ],
+  [
+    "GET",
+    /^\/api\/v1\/accounts\/([^/]+)$/,
+    (ctx, id) => handleGetAccount(ctx, id),
+  ],
 ];
 ```
 
@@ -2126,18 +2263,23 @@ In `createMastodonApi`'s returned function, after the exact-match `route`
 lookup misses and before falling through to `recordNotFound()`:
 
 ```ts
-    const route = ROUTES.get(`${request.method.toUpperCase()} ${url.pathname}`);
-    if (route) {
-      return withCors(await route({ config, env, request, url }));
-    }
-    for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
-      if (request.method.toUpperCase() !== method) continue;
-      const match = pattern.exec(url.pathname);
-      if (match?.[1]) {
-        return withCors(await dynamicHandler({ config, env, request, url }, decodeURIComponent(match[1])));
-      }
-    }
-    return withCors(recordNotFound());
+const route = ROUTES.get(`${request.method.toUpperCase()} ${url.pathname}`);
+if (route) {
+  return withCors(await route({ config, env, request, url }));
+}
+for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
+  if (request.method.toUpperCase() !== method) continue;
+  const match = pattern.exec(url.pathname);
+  if (match?.[1]) {
+    return withCors(
+      await dynamicHandler(
+        { config, env, request, url },
+        decodeURIComponent(match[1]),
+      ),
+    );
+  }
+}
+return withCors(recordNotFound());
 ```
 
 - [ ] **Step 3b: Implement `handleGetStatus`**
@@ -2153,8 +2295,14 @@ import { accountRequired, invalidToken, recordNotFound } from "./errors.js";
 import type { RouteContext } from "./handler.js";
 import { createMastodonStore } from "./store.js";
 
-export async function handleGetStatus(ctx: RouteContext, id: string): Promise<Response> {
-  const token = await authenticateBearer(ctx.request, createMastodonStore(ctx.env));
+export async function handleGetStatus(
+  ctx: RouteContext,
+  id: string,
+): Promise<Response> {
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
   if (!token) return invalidToken();
   if (token.accountId === null) return accountRequired();
   if (!ctx.config.backend) return recordNotFound();
@@ -2184,8 +2332,14 @@ import { recordNotFound } from "./errors.js";
  * account re-synthesized from its reversibly-encoded id, no backend call
  * (spec/mastodon-client-api.md: "no enumeration... no outbound fetches").
  */
-export async function handleGetAccount(ctx: RouteContext, id: string): Promise<Response> {
-  const token = await authenticateBearer(ctx.request, createMastodonStore(ctx.env));
+export async function handleGetAccount(
+  ctx: RouteContext,
+  id: string,
+): Promise<Response> {
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
   if (!token) return invalidToken();
 
   if (id === OWNER_ACCOUNT_ID) {
@@ -2231,6 +2385,7 @@ git commit -m "feat(mastodon-api): GET /api/v1/statuses/:id and GET /api/v1/acco
 ## Task 13: Mount `@dwk/mastodon-api` on the conformance target
 
 **Files:**
+
 - Modify: `packages/conformance-target/package.json` (add dependency)
 - Modify: `packages/conformance-target/src/config.ts` (add
   `mastodonApi`/`mastodonConfig` config + `MastodonApiEnv` binding)
@@ -2247,6 +2402,7 @@ git commit -m "feat(mastodon-api): GET /api/v1/statuses/:id and GET /api/v1/acco
   verified when it landed, per its own PR)
 
 **Interfaces:**
+
 - Consumes: `createActivitypubMastodonApi` (Task 8),
   `ActivitypubMastodonApiOptions`.
 - Produces: `/api/v1/*`, `/api/v2/*`, `/oauth/authorize`, `/oauth/token`,
@@ -2254,15 +2410,15 @@ git commit -m "feat(mastodon-api): GET /api/v1/statuses/:id and GET /api/v1/acco
   actor DO — closing the pixelfed-qa step-4 gap.
 
 - [ ] **Step 1: Read `packages/conformance-target/src/approval.ts` and
-  `config.ts` in full before writing this task's code** (they weren't
-  covered by phase 2's research pass — read them now to match the existing
-  `approveAuthorization`/`ApproveIndieAuthAuthorization` pattern exactly,
-  since inventing a divergent shape here would be a real defect, not just
-  style). Confirm: does `approval.ts` already export a reusable owner-auth
-  check (e.g. a shared password/session check) that
-  `ApproveMastodonAuthorization` can call into, or does it need its own
-  copy? Prefer reuse if the existing code makes it easy; don't force a
-  shared abstraction if the two hooks' auth flows have diverged.
+      `config.ts` in full before writing this task's code** (they weren't
+      covered by phase 2's research pass — read them now to match the existing
+      `approveAuthorization`/`ApproveIndieAuthAuthorization` pattern exactly,
+      since inventing a divergent shape here would be a real defect, not just
+      style). Confirm: does `approval.ts` already export a reusable owner-auth
+      check (e.g. a shared password/session check) that
+      `ApproveMastodonAuthorization` can call into, or does it need its own
+      copy? Prefer reuse if the existing code makes it easy; don't force a
+      shared abstraction if the two hooks' auth flows have diverged.
 
 - [ ] **Step 2: Add the D1 binding and dependency**
 
@@ -2354,6 +2510,7 @@ git commit -m "feat(conformance-target): mount @dwk/mastodon-api (/api/, /oauth/
 ## Task 14: Conformance runbook + changesets
 
 **Files:**
+
 - Create: `conformance/mastodon-client-qa.md`
 - Create: `.changeset/mastodon-api-phase-2.md`
 - Modify: `spec/packages/mastodon-api.md` (move the phase-2 items from
@@ -2390,11 +2547,11 @@ that runbook's step 4 could only confirm indirectly.
 
 ## Environment
 
-|                       |                                                          |
-| --------------------- | -------------------------------------------------------- |
-| Target instance       | `https://conformance.dwk.io`                              |
-| Test client 1         | Pixelfed's own app                                        |
-| Test client 2         | Tusky                                                      |
+|                 |                              |
+| --------------- | ---------------------------- |
+| Target instance | `https://conformance.dwk.io` |
+| Test client 1   | Pixelfed's own app           |
+| Test client 2   | Tusky                        |
 
 ## Procedure
 
@@ -2405,7 +2562,7 @@ that runbook's step 4 could only confirm indirectly.
 3. Confirm the client shows the owner's profile (`verify_credentials`).
 
 - [ ] **Pass** (Pixelfed app) — [ ] **Pass** (Tusky)
-- [ ] **Fail** — note what happened: ________________________________
+- [ ] **Fail** — note what happened: **************\_\_\_\_**************
 
 ### Step 2 — Home timeline renders
 
@@ -2414,7 +2571,7 @@ its inbox (reuse pixelfed-qa's follow + publish steps against a second
 test account, or any existing federated content).
 
 - [ ] **Pass** — timeline renders with media/CW/alt text as expected
-- [ ] **Fail** — note what's missing: ________________________________
+- [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ### Step 3 — Notifications render the pixelfed-qa step-4 like + reply
 
@@ -2423,16 +2580,16 @@ liked and replied to a post), confirm both now render as notifications:
 
 - [ ] **Pass** — the `Like` renders as a favourite notification
 - [ ] **Pass** — the reply renders as a mention notification
-- [ ] **Fail** — note what's missing: ________________________________
+- [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ## Result
 
-|                             |     |
-| --------------------------- | --- |
-| Overall result               | ☐ Passing / ☐ Failing |
-| Run date                     |     |
-| Tester                       |     |
-| Notes / follow-ups           |     |
+|                    |                       |
+| ------------------ | --------------------- |
+| Overall result     | ☐ Passing / ☐ Failing |
+| Run date           |                       |
+| Tester             |                       |
+| Notes / follow-ups |                       |
 
 ## Recording the result
 
@@ -2530,7 +2687,7 @@ git commit -m "docs(mastodon-api,activitypub): phase 2 conformance runbook, chan
 - **Known follow-up gaps intentionally left in this plan, not silently
   dropped:** (1) Follow notifications — phase 3/#350, confirmed decision.
   (2) `in_reply_to_id` on mapped `Status` entities is always `null` in
-  phase 2 (Task 5's note) — full reply-threading to a *local* snowflake
+  phase 2 (Task 5's note) — full reply-threading to a _local_ snowflake
   isn't needed for the acceptance bar (a reply shows up as a mention
   notification either way) but is worth flagging in the PR description as
   a known v1 gap, not a bug.
