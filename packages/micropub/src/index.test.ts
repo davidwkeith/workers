@@ -1321,6 +1321,30 @@ describe("@dwk/micropub query and action edge cases", () => {
     );
   });
 
+  it("does not advertise or handle proposed q=geo by default", async () => {
+    const minted = await mintToken("create");
+    const config = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await config.json()) as { q: string[] }).q).not.toContain("geo");
+
+    const geo = await handler(
+      new Request(`${MICROPUB}?q=geo&lat=37.786971&lon=-122.399677`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(geo.status).toBe(400);
+    expect(((await geo.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
   it("rejects an unsupported query type", async () => {
     const minted = await mintToken("create");
     const res = await handler(
