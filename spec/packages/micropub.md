@@ -123,6 +123,36 @@ is a client's only way to browse its own drafts (#351).
 
 [mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
 
+### Proposed Contacts (`q=contact`)
+
+Contacts are an opt-in proposed extension: it is advertised in `q=config` and
+routed only when `extensions.proposed` is true and a `contacts` store/provider
+is configured. It is private owner data, so every request uses the existing
+IndieAuth subject binding and mandatory DPoP validation. Reads require an
+authenticated token but no particular action scope (intentionally matching
+`q=source`); create, update, and delete require their corresponding Micropub
+scopes.
+
+`GET ?q=contact` returns `{ "contacts": [...] }`, with h-card value objects
+and response-only `_internal_url` management handles. `filter` (or compatibility
+alias `search`) is a case-insensitive literal substring match across strings in
+known and unknown properties. Results have deterministic display-name ordering,
+with `limit` (1–100, default 100) and `offset` pagination.
+
+`POST ?q=contact` creates an `h-card` from JSON, form-encoded, or multipart
+input; multipart files are streamed to R2 and folded into their matching h-card
+properties. `action=update` uses standard JSON replace/add/delete operations
+against `_internal_url`; and `action=delete` hard-deletes it. Contacts preserve
+arbitrary property arrays and structured values. A non-empty `name`,
+`nickname`, `url`, or `email` is required; the canonical first http(s) URL is
+unique among contacts. To person-tag a post, a client copies the selected
+h-card (not `_internal_url`) into `category` as an embedded h-card, preserving
+a historical snapshot.
+
+The built-in `createMicropubContactStore` creates a separate strongly-consistent
+D1 table with bound queries and indexes; custom stores implement the same
+`MicropubContactStore` seam. KV is never an authoritative contact store.
+
 ### Proposed Audience and Location Visibility
 
 The IndieWeb extensions reference reserves the `audience` and
@@ -200,8 +230,8 @@ ordering, and is exclusive over the `(created_at, url)` tuple. `cursor` and
 property predicates remain safe exact JSON predicates rather than full-text
 search.
 
-Proposed-group extensions (`q=geo` and `q=contact`) remain unimplemented and
-are tracked separately.
+The proposed-group `q=geo` extension remains unimplemented and is tracked
+separately.
 
 ## Auth / security
 

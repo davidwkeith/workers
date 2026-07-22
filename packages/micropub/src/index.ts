@@ -37,6 +37,7 @@ export type {
   ExtensionMaturity,
   ExtensionGroupsConfig,
   PostTypeConfig,
+  MicropubContactStoreProvider,
   AudienceConfig,
 } from "./config.js";
 
@@ -58,6 +59,23 @@ export {
   type PostRecord,
   type SourceListQuery,
 } from "./store.js";
+
+export {
+  createMicropubContactStore,
+  canonicalContactUrl,
+  contactView,
+  contactWrite,
+  normalizeContactText,
+  ContactValidationError,
+  INTERNAL_CONTACT_URL,
+} from "./contacts.js";
+export type {
+  ContactListQuery,
+  ContactRecord,
+  ContactWrite,
+  MicropubContactStore,
+  MicropubContactStoreEnv,
+} from "./contacts.js";
 
 export {
   parseFormBody,

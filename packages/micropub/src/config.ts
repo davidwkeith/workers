@@ -10,6 +10,10 @@ import { canonicalizeProfileUrl } from "@dwk/indieauth";
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
 import type { FediverseSyndicationConfig } from "./fediverse.js";
+import type {
+  MicropubContactStore,
+  MicropubContactStoreEnv,
+} from "./contacts.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /**
@@ -80,6 +84,11 @@ export interface SyndicationTarget {
 export type SyndicationTargetsProvider = () =>
   Promise<readonly SyndicationTarget[]> | readonly SyndicationTarget[];
 
+/** Builds a request-bound Contacts store from the composed Worker bindings. */
+export type MicropubContactStoreProvider = (
+  env: MicropubContactStoreEnv,
+) => MicropubContactStore;
+
 /**
  * Derive the canonical URL of a newly created post from its microformats2
  * object and the parsed `mp-*` commands. Returning a relative path is allowed;
@@ -124,6 +133,11 @@ export interface MicropubConfig {
    * or enforce access control for any audience.
    */
   readonly audiences?: readonly AudienceConfig[];
+  /**
+   * Private h-card store for the proposed Contacts extension. Contacts are
+   * advertised only when this is set and the proposed group is enabled.
+   */
+  readonly contacts?: MicropubContactStore | MicropubContactStoreProvider;
   /**
    * Post types advertised as `post-types` in `q=config` (the stable Supported
    * Vocabulary extension). Omitted from the response when unset, or when the
@@ -194,6 +208,8 @@ export interface ResolvedConfig {
   readonly audiences: readonly AudienceConfig[];
   /** Precomputed membership set for validating proposed audience IDs. */
   readonly audienceIds: ReadonlySet<string>;
+  /** Normalized Contacts store provider, when the extension is configured. */
+  readonly contacts?: MicropubContactStoreProvider;
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
@@ -256,6 +272,13 @@ function normalizeSyndicateTo(
   return async () => syndicateTo;
 }
 
+function normalizeContactStore(
+  contacts: MicropubContactStore | MicropubContactStoreProvider | undefined,
+): MicropubContactStoreProvider | undefined {
+  if (contacts === undefined) return undefined;
+  return typeof contacts === "function" ? contacts : () => contacts;
+}
+
 function pathOf(absoluteUrl: string, label: string): string {
   try {
     return new URL(absoluteUrl).pathname;
@@ -285,6 +308,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
 
   const micropubEndpoint = config.micropubEndpoint ?? `${origin}/micropub`;
   const mediaEndpoint = config.mediaEndpoint ?? `${origin}/media`;
+  const contactStore = normalizeContactStore(config.contacts);
   const audiences = config.audiences ?? [];
   const audienceIds = new Set<string>();
   for (const audience of audiences) {
@@ -319,6 +343,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     },
     audiences,
     audienceIds,
+    ...(contactStore ? { contacts: contactStore } : {}),
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),
