@@ -294,6 +294,62 @@ describe("buildMastodonBackend", () => {
     expect(decoded!.receivedAtMs).toBe(page.entries[0]!.receivedAt);
   });
 
+  it("timeline() merges the owner's outbox posts with source-bit-1 ids", async () => {
+    const config = freshConfig();
+    await seedActivity(config, createNote(config));
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${config.iris.outbox}/local-1`,
+        JSON.stringify({
+          id: `${config.iris.outbox}/local-1`,
+          type: "Create",
+          actor: config.iris.id,
+          object: {
+            id: `${config.iris.outbox}/local-1/object`,
+            type: "Note",
+            content: "local post",
+          },
+        }),
+        Date.now() + 1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.timeline({ limit: 10 });
+    const local = page.entries.find(
+      (entry) => entry.activity["id"] === `${config.iris.outbox}/local-1`,
+    );
+    expect(local?.source).toBe(1);
+    expect(decodeSnowflake(local!.id)?.source).toBe(1);
+  });
+
+  it("serves cached actor profile fields without an outbound request", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO actor_cache (actor, json, fetched_at) VALUES (?, ?, ?)`,
+        "https://remote.example/users/bob",
+        JSON.stringify({
+          preferredUsername: "bob",
+          name: "Bob Example",
+          summary: "<p>bio</p>",
+          icon: { url: "https://remote.example/avatar.png" },
+        }),
+        Date.now(),
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    expect(
+      await backend.actorProfile?.("https://remote.example/users/bob"),
+    ).toMatchObject({
+      name: "Bob Example",
+      icon: "https://remote.example/avatar.png",
+    });
+  });
+
   it("timeline() excludes mentions/favourites/reblogs (notification-shaped rows)", async () => {
     const config = freshConfig();
     await seedActivity(config, createNote(config));
@@ -303,6 +359,44 @@ describe("buildMastodonBackend", () => {
 
     const page = await backend.timeline({ limit: 10 });
     expect(page.entries).toHaveLength(1);
+  });
+
+  it("derives reply, favourite, and reblog counts from stored inbox activity", async () => {
+    const config = freshConfig();
+    const post = createNote(config);
+    const target = (post["object"] as { id: string }).id;
+    await seedActivity(config, post);
+    await seedActivity(config, {
+      id: `${config.iris.id}/activities/like-count`,
+      type: "Like",
+      actor: "https://remote.example/users/like",
+      object: target,
+    });
+    await seedActivity(config, {
+      id: `${config.iris.id}/activities/reblog-count`,
+      type: "Announce",
+      actor: "https://remote.example/users/reblog",
+      object: target,
+    });
+    await seedActivity(config, {
+      id: `${config.iris.id}/activities/reply-count`,
+      type: "Create",
+      actor: "https://remote.example/users/reply",
+      object: {
+        id: `${config.iris.id}/objects/reply-count`,
+        type: "Note",
+        inReplyTo: target,
+      },
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const entry = (await backend.timeline({ limit: 10 })).entries.find(
+      (candidate) => candidate.activity["id"] === post["id"],
+    );
+    expect(entry?.interactions).toEqual({
+      replies: 1,
+      favourites: 1,
+      reblogs: 1,
+    });
   });
 
   it("notifications() surfaces mentions and favourites, not plain timeline posts", async () => {

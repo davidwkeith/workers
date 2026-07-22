@@ -4,9 +4,9 @@
 |---|---|
 | **Type** | endpoint (client API) |
 | **Ships a DO?** | no (reads `@dwk/activitypub`'s DO through the `MastodonBackend` seam) |
-| **Used by** | `@dwk/activitypub` (the phase-2 `createActivitypubMastodonApi` adapter) |
+| **Used by** | `@dwk/activitypub` (the `createActivitypubMastodonApi` adapter) |
 | **Standard** | [Mastodon client API](https://docs.joinmastodon.org/client/intro/) (de-facto) |
-| **Status** | phase 1 (auth + identity) and phase 2 (DO-backed read surface, [#349](https://github.com/davidwkeith/workers/issues/349)) implemented; phase 3 (fidelity) tracked in [#350](https://github.com/davidwkeith/workers/issues/350) |
+| **Status** | phases 1–3 implemented (phase 3 manual client QA pending, [#350](https://github.com/davidwkeith/workers/issues/350)) |
 
 A Mastodon-compatible client API subset so a site owner can **log in with an
 off-the-shelf fediverse client** (Pixelfed's app, Tusky, Elk) and browse their
@@ -239,14 +239,18 @@ text is correct behavior, not a bug.
   `mention` notification, so this doesn't block the phase-2 acceptance
   bar.
 
-## Phase 3 (not yet implemented)
+## Phase 3 (implemented; manual QA pending)
 
 Tracked in [#350](https://github.com/davidwkeith/workers/issues/350),
-specified in the [design doc](../mastodon-client-api.md): actor-profile
-hydration (real display name/avatar/bio for remote accounts, replacing
-the best-effort IRI-derived entity above); merging the owner's own
-`outbox` posts into the home timeline (additive, via the snowflake's
-reserved source bit); Follow notifications; `in_reply_to_id` threading;
-counters and any other fidelity quirks the client matrix surfaces (each
-recorded in `conformance/mastodon-client-qa.md`, fixed, and
-fixture-tested).
+implements actor-profile hydration (real display name/avatar/bio for remote
+accounts, refreshed by the actor DO's alarm and never in a client request),
+merges the owner's own `outbox` posts into the home timeline (additive, via
+the snowflake's reserved source bit), and derives reply/favourite/reblog
+counters from stored inbox activity. The Pixelfed and Tusky runs remain the
+acceptance gate in `conformance/mastodon-client-qa.md`; record/fix client
+quirks there before marking the conformance suite passing.
+
+Follow notifications and `in_reply_to_id` threading remain known fidelity
+gaps: inbound `Follow` activities are intentionally not persisted in the
+inbox, and a remote reply target cannot yet be reliably translated to a local
+snowflake id.

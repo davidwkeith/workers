@@ -35,6 +35,27 @@ export interface BackendEntry {
   readonly receivedAt: number;
   readonly objectType: string | null;
   readonly relayedBy: string | null;
+  /** `0` inbox or `1` owner outbox; encoded into the snowflake id. */
+  readonly source?: 0 | 1;
+  /** Counts cheaply derived by the DO from stored inbound interactions. */
+  readonly interactions?: {
+    readonly replies: number;
+    readonly favourites: number;
+    readonly reblogs: number;
+  };
+  /** Cached actor documents keyed by IRI, never fetched in a request path. */
+  readonly actorProfiles?: Readonly<Record<string, BackendActorProfile>>;
+}
+
+/** Safe, best-effort fields retained from a cached remote AS2 actor document. */
+export interface BackendActorProfile {
+  readonly actor: string;
+  readonly preferredUsername?: string;
+  readonly name?: string;
+  readonly summary?: string;
+  readonly url?: string;
+  readonly icon?: string;
+  readonly image?: string;
 }
 
 export interface BackendPage<T> {
@@ -50,4 +71,6 @@ export interface MastodonBackend {
   notifications(query: BackendPageQuery): Promise<BackendPage<BackendEntry>>;
   /** Single stored entry by snowflake id. */
   entry(id: string): Promise<BackendEntry | null>;
+  /** Cached remote actor profile, or null when it has not resolved yet. */
+  actorProfile?(actor: string): Promise<BackendActorProfile | null>;
 }

@@ -198,6 +198,14 @@ describe("statusEntity", () => {
       receivedAt: 1_753_000_000_000,
       objectType: "Note",
       relayedBy: null,
+      interactions: { replies: 2, favourites: 3, reblogs: 4 },
+      actorProfiles: {
+        "https://remote.example/users/alice": {
+          actor: "https://remote.example/users/alice",
+          name: "Alice Example",
+          icon: "https://remote.example/alice.png",
+        },
+      },
       activity: {
         id: "https://remote.example/activities/1",
         type: "Create",
@@ -230,6 +238,12 @@ describe("statusEntity", () => {
       description: "alt text",
     });
     expect((status.account as { acct: string }).acct).toContain("alice");
+    expect((status.account as { display_name: string }).display_name).toBe(
+      "Alice Example",
+    );
+    expect(status.replies_count).toBe(2);
+    expect(status.favourites_count).toBe(3);
+    expect(status.reblogs_count).toBe(4);
   });
 
   it("wraps a relayed_by row as a reblog attributed to the relaying group", () => {
