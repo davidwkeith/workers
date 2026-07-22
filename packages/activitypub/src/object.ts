@@ -67,6 +67,8 @@ const RELAYED_ACTIVITY_TYPES = [
 ];
 /** How long relayed votes wait for their batched verification sweep (§2.2). */
 const VOTE_SWEEP_MS = 10 * 60_000;
+/** Small debounce before a newly seen actor document is hydrated. */
+const ACTOR_PROFILE_DEBOUNCE_MS = 1_000;
 /**
  * Cardinality cap on the pending-metrics table: at most this many distinct
  * `(event, fields)` keys accumulate between drains. Delivery fields include
@@ -196,6 +198,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          target TEXT NOT NULL, expect TEXT NOT NULL,
          attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
     );
+    // Remote actor documents used only to enrich the optional Mastodon client
+    // API. They are populated from the alarm, never from a client request, so
+    // a slow peer cannot hold the actor's input gate while a timeline renders.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS actor_cache (
+         actor TEXT PRIMARY KEY, json TEXT NOT NULL, fetched_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS actor_profile_queue (
+         actor TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0,
+         next_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_actor_profile_queue_next_at
+         ON actor_profile_queue (next_at)`,
+    );
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS idx_verify_queue_next_at ON verify_queue (next_at)`,
     );
@@ -286,7 +304,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       const resolved = await this.#processPendingAccepts();
       const due = await this.#processDeliveries();
       const verified = await this.#processVerifications();
-      return json(200, { processed: due + resolved + verified });
+      const profiles = await this.#processActorProfiles();
+      return json(200, { processed: due + resolved + verified + profiles });
     }
     // Owner-only inbox listing for the `@dwk/mcp` tool contribution
     // (`activitypub_list_inbox`). Distinct from `iris.inbox`, which stays
@@ -331,6 +350,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         return text(404, "not found");
       }
       return this.#clientEntry(request);
+    }
+    if (path === `${pathOf(iris.id)}/__client/actor`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#clientActor(request);
     }
 
     if (path === pathOf(iris.followers)) {
@@ -438,16 +463,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         if (!attributionMatches(activity)) {
           return text(403, "Embedded object attributedTo does not match actor");
         }
-        this.#storeInbox(activity);
+        await this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
         break;
       case "Like":
       case "Dislike":
-        this.#storeInbox(activity);
+        await this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
         break;
       case "Announce":
-        this.#storeInbox(activity);
+        await this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
         // FEP-1b12: a followed Group relays member activities wrapped in its
         // own Announce — unwrap and store the inner activity too (§2.2).
@@ -679,7 +704,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const mode = this.#verifyMode(config);
     const verifyTarget = relayedVerificationTarget(innerActivity);
     const verifiable = mode !== "off" && verifyTarget !== null;
-    this.#storeInbox(innerActivity, {
+    await this.#storeInbox(innerActivity, {
       relayedBy: announcer,
       verifyState: "pending",
       audienceFallback: announcer,
@@ -702,7 +727,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
   }
 
-  #storeInbox(
+  async #storeInbox(
     activity: ActivityObject,
     relay?: {
       /** The Group actor that relayed this activity (provenance, §2.2). */
@@ -712,7 +737,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       /** Audience recorded when the activity itself names none (the group). */
       audienceFallback: string;
     },
-  ): void {
+  ): Promise<void> {
     const id =
       typeof activity.id === "string" ? activity.id : crypto.randomUUID();
     // Classification only (object type + community audience) so reads can
@@ -731,6 +756,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       relay?.relayedBy ?? null,
       relay?.verifyState ?? null,
     );
+    const actor = actorIri(activity.actor);
+    if (actor && isSafeTarget(actor)) this.#queueActorProfile(actor);
+    if (relay?.relayedBy && isSafeTarget(relay.relayedBy)) {
+      this.#queueActorProfile(relay.relayedBy);
+    }
+    await this.#armAlarm();
   }
 
   /**
@@ -1301,6 +1332,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       receivedAt: number;
       activity: JsonValue;
       relayedBy: string | null;
+      source?: 0 | 1;
     }[] = [];
     // Classify-and-fill: batches of 4x the page size keep the number of
     // round-trips small for the common case (most rows are timeline-shaped)
@@ -1379,8 +1411,189 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       cursorSeq = last!.seq;
       if (rows.length < BATCH) exhausted = true;
     }
+    // Owner posts are part of the home timeline too. They receive source bit
+    // 1 in their snowflake so they never collide with inbox rows, even when a
+    // publish and a delivery share the same millisecond.
+    let combinedNewestFirst = false;
+    if (kind === "timeline") {
+      let outboxWhere = "1 = 1";
+      const outboxParams: number[] = [];
+      if (maxReceivedAt !== null) {
+        outboxWhere +=
+          tieSeq !== null
+            ? " AND (published_at < ? OR (published_at = ? AND seq < ?))"
+            : " AND published_at < ?";
+        outboxParams.push(Number(maxReceivedAt));
+        if (tieSeq !== null) {
+          outboxParams.push(Number(maxReceivedAt), Number(tieSeq));
+        }
+      }
+      if (sinceReceivedAt !== null) {
+        outboxWhere +=
+          tieSeq !== null
+            ? " AND (published_at > ? OR (published_at = ? AND seq > ?))"
+            : " AND published_at > ?";
+        outboxParams.push(Number(sinceReceivedAt));
+        if (tieSeq !== null) {
+          outboxParams.push(Number(sinceReceivedAt), Number(tieSeq));
+        }
+      }
+      if (minReceivedAt !== null) {
+        outboxWhere +=
+          tieSeq !== null
+            ? " AND (published_at > ? OR (published_at = ? AND seq > ?))"
+            : " AND published_at > ?";
+        outboxParams.push(Number(minReceivedAt));
+        if (tieSeq !== null) {
+          outboxParams.push(Number(minReceivedAt), Number(tieSeq));
+        }
+      }
+      const outbox = this.#sql
+        .exec<{ seq: number; json: string; published_at: number }>(
+          `SELECT seq, json, published_at FROM outbox WHERE ${outboxWhere}
+             ORDER BY published_at ${order}, seq ${order} LIMIT ?`,
+          ...outboxParams,
+          limit,
+        )
+        .toArray();
+      let mergedOutbox = false;
+      for (const row of outbox) {
+        const activity = JSON.parse(row.json) as ActivityObject;
+        const type = activity.type;
+        const shape = objectType(activity.object);
+        if (
+          (type === "Create" || type === "Update") &&
+          (shape === "Note" ||
+            shape === "Article" ||
+            shape === "Page" ||
+            shape === "Video")
+        ) {
+          matches.push({
+            seq: row.seq,
+            receivedAt: row.published_at,
+            activity: activity as unknown as JsonValue,
+            relayedBy: null,
+            source: 1,
+          });
+          mergedOutbox = true;
+        }
+      }
+      // Retain the inbox reader's oldest-first contract for min_id requests
+      // when there is nothing to merge; the adapter normalizes that ordering.
+      // Once owner rows are present, normalize the combined sources here.
+      if (mergedOutbox) {
+        matches.sort(
+          (a, b) =>
+            b.receivedAt - a.receivedAt ||
+            (b.source ?? 0) - (a.source ?? 0) ||
+            b.seq - a.seq,
+        );
+        matches.splice(limit);
+        combinedNewestFirst = true;
+      }
+    }
 
-    return json(200, { items: matches } as unknown as JsonValue);
+    const items = matches.map((entry) => ({
+      ...entry,
+      interactions: this.#clientInteractions(entry.activity),
+      actorProfiles: this.#clientActorProfiles(entry.activity, entry.relayedBy),
+    }));
+    return json(200, {
+      items,
+      combinedNewestFirst,
+    } as unknown as JsonValue);
+  }
+
+  /** Extract interaction counts from the stored inbox without any network I/O. */
+  #clientInteractions(activity: JsonValue): {
+    replies: number;
+    favourites: number;
+    reblogs: number;
+  } {
+    const record = activity as Record<string, JsonValue>;
+    const object = record.object;
+    const objectId_ = objectId(object);
+    const activityId = typeof record.id === "string" ? record.id : null;
+    const targets = [objectId_, activityId].filter(
+      (value): value is string => !!value,
+    );
+    if (targets.length === 0) return { replies: 0, favourites: 0, reblogs: 0 };
+    const placeholders = targets.map(() => "?").join(", ");
+    const row = this.#sql
+      .exec<{ replies: number; favourites: number; reblogs: number }>(
+        `SELECT
+           SUM(CASE WHEN json_extract(json, '$.type') IN ('Create', 'Update')
+                         AND json_extract(json, '$.object.inReplyTo') IN (${placeholders}) THEN 1 ELSE 0 END) AS replies,
+           SUM(CASE WHEN json_extract(json, '$.type') = 'Like'
+                         AND json_extract(json, '$.object') IN (${placeholders}) THEN 1 ELSE 0 END) AS favourites,
+           SUM(CASE WHEN json_extract(json, '$.type') = 'Announce'
+                         AND json_extract(json, '$.object') IN (${placeholders}) THEN 1 ELSE 0 END) AS reblogs
+         FROM inbox WHERE verify_state IS NOT 'failed'`,
+        ...targets,
+        ...targets,
+        ...targets,
+      )
+      .one();
+    return {
+      replies: Number(row.replies ?? 0),
+      favourites: Number(row.favourites ?? 0),
+      reblogs: Number(row.reblogs ?? 0),
+    };
+  }
+
+  /** Return cached AS2 actor fields for the activity's author and relay group. */
+  #clientActorProfiles(
+    activity: JsonValue,
+    relayedBy: string | null,
+  ): Record<string, Record<string, string>> {
+    const actors = [
+      actorIri((activity as ActivityObject).actor),
+      relayedBy,
+    ].filter((value): value is string => !!value);
+    const profiles: Record<string, Record<string, string>> = {};
+    for (const actor of actors) {
+      const profile = this.#cachedActorProfile(actor);
+      if (profile) profiles[actor] = profile;
+    }
+    return profiles;
+  }
+
+  #cachedActorProfile(actor: string): Record<string, string> | null {
+    const row = this.#sql
+      .exec<{ json: string }>(
+        `SELECT json FROM actor_cache WHERE actor = ?`,
+        actor,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    let raw: Record<string, unknown>;
+    try {
+      raw = JSON.parse(row.json) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    const imageUrl = (value: unknown): string | undefined => {
+      if (typeof value === "string") return safeProfileUrl(value);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const url = (value as Record<string, unknown>).url;
+        return typeof url === "string" ? safeProfileUrl(url) : undefined;
+      }
+      return undefined;
+    };
+    const pick = (key: string): string | undefined =>
+      typeof raw[key] === "string" ? (raw[key] as string) : undefined;
+    const profile: Record<string, string> = { actor };
+    for (const [key, value] of Object.entries({
+      preferredUsername: pick("preferredUsername"),
+      name: pick("name"),
+      summary: pick("summary"),
+      url: pick("url") ? safeProfileUrl(pick("url")!) : undefined,
+      icon: imageUrl(raw.icon),
+      image: imageUrl(raw.image),
+    })) {
+      if (value) profile[key] = value;
+    }
+    return profile;
   }
 
   /**
@@ -1393,9 +1606,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const url = new URL(request.url);
     const receivedAt = Number(url.searchParams.get("received_at"));
     const seqLow = url.searchParams.get("seq_low");
+    const source = url.searchParams.get("source");
     if (!Number.isFinite(receivedAt)) {
       return json(404, { error: "not found" } as JsonValue);
     }
+    const table = source === "1" ? "outbox" : "inbox";
+    const timestamp = source === "1" ? "published_at" : "received_at";
     const rows = this.#sql
       .exec<{
         seq: number;
@@ -1403,7 +1619,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         received_at: number;
         relayed_by: string | null;
       }>(
-        `SELECT seq, json, received_at, relayed_by FROM inbox WHERE received_at = ? ORDER BY seq`,
+        source === "1"
+          ? `SELECT seq, json, published_at AS received_at, NULL AS relayed_by FROM ${table} WHERE ${timestamp} = ? ORDER BY seq`
+          : `SELECT seq, json, received_at, relayed_by FROM ${table} WHERE ${timestamp} = ? ORDER BY seq`,
         receivedAt,
       )
       .toArray();
@@ -1417,7 +1635,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       receivedAt: row.received_at,
       activity: JSON.parse(row.json) as JsonValue,
       relayedBy: row.relayed_by,
+      source: source === "1" ? 1 : 0,
+      interactions: this.#clientInteractions(JSON.parse(row.json) as JsonValue),
+      actorProfiles: this.#clientActorProfiles(
+        JSON.parse(row.json) as JsonValue,
+        row.relayed_by,
+      ),
     } as unknown as JsonValue);
+  }
+
+  /** Cached remote profile lookup for `GET /api/v1/accounts/:id`. */
+  #clientActor(request: Request): Response {
+    const actor = new URL(request.url).searchParams.get("actor");
+    if (!actor) return json(404, { error: "not found" } as JsonValue);
+    const profile = this.#cachedActorProfile(actor);
+    if (!profile) return json(404, { error: "not found" } as JsonValue);
+    return json(200, profile as unknown as JsonValue);
   }
 
   // -- dedup -----------------------------------------------------------------
@@ -1804,6 +2037,99 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return due.length;
   }
 
+  /** Queue one actor-document hydration without duplicating work. */
+  #queueActorProfile(actor: string): void {
+    this.#sql.exec(
+      `INSERT INTO actor_profile_queue (actor, attempts, next_at) VALUES (?, 0, ?)
+         ON CONFLICT(actor) DO NOTHING`,
+      actor,
+      Date.now() + ACTOR_PROFILE_DEBOUNCE_MS,
+    );
+  }
+
+  /**
+   * Refresh a bounded batch of remote actor documents from the alarm. The
+   * cache is deliberately best-effort: a missing or stale profile never hides
+   * an inbox activity, it only falls back to the deterministic synthesized
+   * account that phase 2 already returned.
+   */
+  async #processActorProfiles(): Promise<number> {
+    const due = this.#sql
+      .exec<{ actor: string; attempts: number }>(
+        `SELECT actor, attempts FROM actor_profile_queue WHERE next_at <= ?
+           ORDER BY next_at ASC LIMIT ?`,
+        Date.now(),
+        DELIVERY_BATCH,
+      )
+      .toArray();
+    for (const row of due) {
+      if (!isSafeTarget(row.actor)) {
+        this.#sql.exec(
+          `DELETE FROM actor_profile_queue WHERE actor = ?`,
+          row.actor,
+        );
+        continue;
+      }
+      let response: Response | null = null;
+      try {
+        ({ response } = await safeFetch(
+          fetch,
+          row.actor,
+          { headers: { accept: "application/activity+json" } },
+          { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
+        ));
+      } catch {
+        // Retried below using the same bounded backoff policy as deliveries.
+      }
+      if (!response?.ok) {
+        const next = row.attempts + 1;
+        if (next >= this.#deliveryPolicy("deliveryMaxAttempts", 8)) {
+          this.#sql.exec(
+            `DELETE FROM actor_profile_queue WHERE actor = ?`,
+            row.actor,
+          );
+        } else {
+          const delay =
+            this.#deliveryPolicy("deliveryBaseDelayMs", 60_000) *
+            2 ** row.attempts;
+          this.#sql.exec(
+            `UPDATE actor_profile_queue SET attempts = ?, next_at = ? WHERE actor = ?`,
+            next,
+            Date.now() + delay,
+            row.actor,
+          );
+        }
+        continue;
+      }
+      let doc: unknown;
+      try {
+        doc = await response.json();
+      } catch {
+        doc = null;
+      }
+      if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+        this.#sql.exec(
+          `DELETE FROM actor_profile_queue WHERE actor = ?`,
+          row.actor,
+        );
+        continue;
+      }
+      this.#sql.exec(
+        `INSERT INTO actor_cache (actor, json, fetched_at) VALUES (?, ?, ?)
+           ON CONFLICT(actor) DO UPDATE SET json = excluded.json, fetched_at = excluded.fetched_at`,
+        row.actor,
+        JSON.stringify(doc),
+        Date.now(),
+      );
+      this.#sql.exec(
+        `DELETE FROM actor_profile_queue WHERE actor = ?`,
+        row.actor,
+      );
+    }
+    await this.#armAlarm();
+    return due.length;
+  }
+
   #markVerified(seq: number, activityId: string): void {
     this.#sql.exec(
       `UPDATE inbox SET verify_state = 'verified' WHERE id = ?`,
@@ -2042,6 +2368,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
            SELECT next_at FROM pending_accept
            UNION ALL
            SELECT next_at FROM verify_queue
+           UNION ALL
+           SELECT next_at FROM actor_profile_queue
          )`,
       )
       .one().next_at;
@@ -2055,6 +2383,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     await this.#processPendingAccepts();
     await this.#processDeliveries();
     await this.#processVerifications();
+    await this.#processActorProfiles();
   }
 
   // -- helpers ---------------------------------------------------------------
@@ -2201,6 +2530,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 /** The path portion (with query) of an IRI, for routing comparisons. */
 function pathOf(iri: string): string {
   return new URL(iri).pathname;
+}
+
+/** Only surface safe absolute HTTPS asset/profile URLs from remote actor docs. */
+function safeProfileUrl(value: string): string | undefined {
+  try {
+    return new URL(value).protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

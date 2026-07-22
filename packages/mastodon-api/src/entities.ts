@@ -11,7 +11,11 @@ import type { ClientRecord } from "@dwk/oauth";
 import type { MastodonApiConfig } from "./config.js";
 import { OWNER_ACCOUNT_ID } from "./config.js";
 import type { MastodonMarkerRecord } from "./store.js";
-import type { BackendAccountCounts, BackendEntry } from "./backend.js";
+import type {
+  BackendAccountCounts,
+  BackendActorProfile,
+  BackendEntry,
+} from "./backend.js";
 import { sanitizeStatusHtml } from "./sanitize.js";
 
 /**
@@ -255,8 +259,11 @@ function usernameFromIri(actorIri: string): string {
  * backend call, no outbound fetch (design doc: "no enumeration"). Embedded
  * actor-document enrichment is phase 3's actor-profile hydration cache.
  */
-export function remoteAccountEntity(actorIri: string): Record<string, unknown> {
-  const username = usernameFromIri(actorIri);
+export function remoteAccountEntity(
+  actorIri: string,
+  profile?: BackendActorProfile | null,
+): Record<string, unknown> {
+  const username = profile?.preferredUsername ?? usernameFromIri(actorIri);
   let host = actorIri;
   try {
     host = new URL(actorIri).hostname;
@@ -267,18 +274,18 @@ export function remoteAccountEntity(actorIri: string): Record<string, unknown> {
     id: encodeRemoteAccountId(actorIri),
     username,
     acct: `${username}@${host}`,
-    display_name: username,
+    display_name: profile?.name ?? username,
     locked: false,
     bot: false,
     discoverable: false,
     group: false,
     created_at: "1970-01-01T00:00:00.000Z",
-    note: "",
-    url: actorIri,
-    avatar: TRANSPARENT_PIXEL,
-    avatar_static: TRANSPARENT_PIXEL,
-    header: TRANSPARENT_PIXEL,
-    header_static: TRANSPARENT_PIXEL,
+    note: profile?.summary ? sanitizeStatusHtml(profile.summary) : "",
+    url: profile?.url ?? actorIri,
+    avatar: profile?.icon ?? TRANSPARENT_PIXEL,
+    avatar_static: profile?.icon ?? TRANSPARENT_PIXEL,
+    header: profile?.image ?? TRANSPARENT_PIXEL,
+    header_static: profile?.image ?? TRANSPARENT_PIXEL,
     followers_count: 0,
     following_count: 0,
     statuses_count: 0,
@@ -328,7 +335,11 @@ function mediaAttachments(raw: unknown): Record<string, unknown>[] {
  */
 export function statusEntity(
   entry: BackendEntry,
-  opts: { readonly baseUrl: string },
+  opts: {
+    readonly baseUrl: string;
+    /** The configured local account, used for owner outbox statuses. */
+    readonly ownerAccount?: Record<string, unknown>;
+  },
 ): Record<string, unknown> {
   // Every field below is attacker-controlled remote-server JSON (AS2 from
   // the inbox), so each is read through a `typeof` guard with a safe
@@ -373,14 +384,17 @@ export function statusEntity(
     language: null,
     uri,
     url: uri,
-    replies_count: 0,
-    reblogs_count: 0,
-    favourites_count: 0,
+    replies_count: entry.interactions?.replies ?? 0,
+    reblogs_count: entry.interactions?.reblogs ?? 0,
+    favourites_count: entry.interactions?.favourites ?? 0,
     content,
     reblog: null,
-    account: actorIri
-      ? remoteAccountEntity(actorIri)
-      : remoteAccountEntity(opts.baseUrl),
+    account:
+      entry.source === 1 && opts.ownerAccount
+        ? opts.ownerAccount
+        : actorIri
+          ? remoteAccountEntity(actorIri, entry.actorProfiles?.[actorIri])
+          : remoteAccountEntity(opts.baseUrl),
     media_attachments: mediaAttachments(object.attachment),
     mentions: [],
     tags: [],
@@ -396,7 +410,10 @@ export function statusEntity(
       content: "",
       spoiler_text: "",
       media_attachments: [],
-      account: remoteAccountEntity(entry.relayedBy),
+      account: remoteAccountEntity(
+        entry.relayedBy,
+        entry.actorProfiles?.[entry.relayedBy],
+      ),
       reblog: inner,
     };
   }
@@ -427,7 +444,7 @@ export function notificationEntity(
   const type = typeof activity.type === "string" ? activity.type : "";
   const actorIri = typeof activity.actor === "string" ? activity.actor : "";
   const account = actorIri
-    ? remoteAccountEntity(actorIri)
+    ? remoteAccountEntity(actorIri, entry.actorProfiles?.[actorIri])
     : remoteAccountEntity(opts.baseUrl);
 
   if (type === "Like") {

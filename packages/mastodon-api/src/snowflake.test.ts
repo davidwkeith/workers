@@ -6,7 +6,11 @@ describe("snowflake codec", () => {
   it("round-trips receivedAtMs exactly and seq modulo 32768", () => {
     const id = encodeSnowflake(1_753_000_000_000, 42);
     const decoded = decodeSnowflake(id);
-    expect(decoded).toEqual({ receivedAtMs: 1_753_000_000_000, seqLow: 42 });
+    expect(decoded).toEqual({
+      receivedAtMs: 1_753_000_000_000,
+      seqLow: 42,
+      source: 0,
+    });
   });
 
   it("wraps seq at 32768", () => {
@@ -14,6 +18,18 @@ describe("snowflake codec", () => {
     expect(decodeSnowflake(id)).toEqual({
       receivedAtMs: 1_753_000_000_000,
       seqLow: 42,
+      source: 0,
+    });
+  });
+
+  it("round-trips the outbox source bit without changing inbox ids", () => {
+    const inbox = encodeSnowflake(1_753_000_000_000, 42);
+    const outbox = encodeSnowflake(1_753_000_000_000, 42, 1);
+    expect(BigInt(outbox)).toBe(BigInt(inbox) + (1n << 15n));
+    expect(decodeSnowflake(outbox)).toEqual({
+      receivedAtMs: 1_753_000_000_000,
+      seqLow: 42,
+      source: 1,
     });
   });
 

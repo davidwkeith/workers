@@ -1,6 +1,6 @@
 # Mastodon-compatible client API — QA runbook
 
-Manual acceptance test for `@dwk/mastodon-api` phase 2 (issue #349),
+Manual acceptance test for `@dwk/mastodon-api` phase 3 (issue #350),
 companion to [`pixelfed-qa.md`](./pixelfed-qa.md) — this is the read path
 that runbook's step 4 could only confirm indirectly (no way for a real
 client to browse notifications; see `spec/mastodon-client-api.md`'s
@@ -12,13 +12,10 @@ Motivation section). Run this doc, record results here, then update
 - **In scope:** app registration, OAuth round-trip (`verify_credentials`
   renders the owner profile), home timeline rendering (media, content
   warning, alt text), notifications rendering a real like + reply.
-- **Out of scope:** Follow notifications — deferred to phase 3
-  ([#350](https://github.com/davidwkeith/workers/issues/350)); `GET
-/api/v1/notifications` only ever returns `favourite`/`reblog`/`mention`
-  in phase 2, so a client's notification list will **not** show a Follow
-  even if one exists — this is a known, documented gap
-  (`docs/superpowers/specs/2026-07-21-mastodon-phase2-implementation-notes.md`),
-  not a bug to file. Also out of scope: posting or any write action
+- **Out of scope:** Follow notifications — `GET /api/v1/notifications` only
+  returns `favourite`/`reblog`/`mention`, because incoming Follows are not
+  persisted in the inbox. This remains a documented fidelity gap, not a bug
+  to file. Also out of scope: posting or any write action
   (non-goal, no write endpoint exists), streaming (non-goal, no
   `urls.streaming_api` is advertised).
 
@@ -65,9 +62,15 @@ test account, or any existing federated content).
 1. Open the client's home timeline for the `conformance.dwk.io` account.
 2. Confirm the published post(s) from `pixelfed-qa.md` step 2 (or any other
    federated content) render, including media, content warning, and alt
-   text where present.
+   text where present. Confirm the remote display name/avatar render after
+   the actor-profile hydration alarm has run.
+3. Confirm at least one post published by the target actor itself also appears
+   in home, with reply/favourite/reblog counts when the corresponding inbound
+   activity exists.
 
-- [ ] **Pass** — timeline renders with media/CW/alt text as expected
+- [ ] **Pass** — timeline renders with media/CW/alt text and hydrated account
+      details as expected
+- [ ] **Pass** — the owner's own post and available interaction counters render
 - [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ### Step 3 — Notifications render the pixelfed-qa step-4 like + reply

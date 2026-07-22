@@ -16,6 +16,7 @@ import {
   decodeSnowflake,
   encodeSnowflake,
   type BackendAccount,
+  type BackendActorProfile,
   type BackendEntry,
   type BackendPage,
   type BackendPageQuery,
@@ -55,6 +56,9 @@ interface ClientEntryRow {
   readonly receivedAt: number;
   readonly activity: Record<string, unknown>;
   readonly relayedBy: string | null;
+  readonly source?: 0 | 1;
+  readonly interactions?: BackendEntry["interactions"];
+  readonly actorProfiles?: BackendEntry["actorProfiles"];
 }
 
 /**
@@ -65,12 +69,15 @@ interface ClientEntryRow {
  */
 function toBackendEntry(row: ClientEntryRow): BackendEntry {
   return {
-    id: encodeSnowflake(row.receivedAt, row.seq),
+    id: encodeSnowflake(row.receivedAt, row.seq, row.source ?? 0),
     activity: row.activity,
     receivedAt: row.receivedAt,
     objectType:
       objectType(row.activity.object as JsonValue | undefined) ?? null,
     relayedBy: row.relayedBy,
+    source: row.source ?? 0,
+    interactions: row.interactions,
+    actorProfiles: row.actorProfiles,
   };
 }
 
@@ -136,7 +143,10 @@ export function buildMastodonBackend(options: {
       new Request(url.toString(), { headers: internalHeaders() }),
     );
     if (!response.ok) return { entries: [] };
-    const body = (await response.json()) as { items: ClientEntryRow[] };
+    const body = (await response.json()) as {
+      items: ClientEntryRow[];
+      combinedNewestFirst?: boolean;
+    };
     const entries = body.items.map(toBackendEntry);
     // `#listClientEntries` returns rows oldest-first when the query is
     // `minId`-style (it walks forward from the lower bound), but every
@@ -152,7 +162,9 @@ export function buildMastodonBackend(options: {
     // never took the oldest-first branch and the page arrives already
     // newest-first — reversing it would reintroduce the bug this guard
     // exists to prevent.
-    if (url.searchParams.has("min_received_at")) entries.reverse();
+    if (url.searchParams.has("min_received_at") && !body.combinedNewestFirst) {
+      entries.reverse();
+    }
     return { entries };
   }
 
@@ -184,12 +196,23 @@ export function buildMastodonBackend(options: {
       const url = new URL(`${config.iris.id}/__client/entry`);
       url.searchParams.set("received_at", String(decoded.receivedAtMs));
       url.searchParams.set("seq_low", String(decoded.seqLow));
+      url.searchParams.set("source", String(decoded.source));
       const response = await stub().fetch(
         new Request(url.toString(), { headers: internalHeaders() }),
       );
       if (!response.ok) return null;
       const row = (await response.json()) as ClientEntryRow;
       return toBackendEntry(row);
+    },
+
+    async actorProfile(actorIri: string): Promise<BackendActorProfile | null> {
+      const url = new URL(`${config.iris.id}/__client/actor`);
+      url.searchParams.set("actor", actorIri);
+      const response = await stub().fetch(
+        new Request(url.toString(), { headers: internalHeaders() }),
+      );
+      if (!response.ok) return null;
+      return (await response.json()) as BackendActorProfile;
     },
   };
 }
