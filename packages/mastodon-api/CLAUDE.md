@@ -45,22 +45,28 @@ pnpm test --project @dwk/mastodon-api
 ## File layout
 
 ```
-src/index.ts       # public surface: createMastodonApi, config + seam types
-src/config.ts      # MastodonApiConfig, Env fragment, approval hook types
-src/backend.ts     # MastodonBackend seam (implemented by @dwk/activitypub, phase 2)
-src/handler.ts     # createMastodonApi router (CORS, 404 fallback, route table)
-src/store.ts       # createMastodonStore (D1: apps, codes, tokens, markers)
-src/entities.ts    # Mastodon entity serializers (pure)
-src/apps.ts        # POST /api/v1/apps + apps/verify_credentials
-src/oauth-flow.ts  # /oauth/authorize + /oauth/token + /oauth/revoke
-src/auth.ts        # bearer + client authentication
-src/accounts.ts    # accounts/verify_credentials
-src/instance.ts    # instance v1 + v2
-src/markers.ts     # GET/POST /api/v1/markers
-src/stubs.ts       # data-driven valid-but-empty stub roster
-src/encoding.ts    # random tokens, SHA-256, PKCE S256
-src/errors.ts      # Mastodon error responses
-src/*.test.ts      # colocated tests
+src/index.ts         # public surface: createMastodonApi, config + seam types
+src/config.ts        # MastodonApiConfig, Env fragment, approval hook types
+src/backend.ts       # MastodonBackend seam (implemented by @dwk/activitypub, phase 2)
+src/handler.ts       # createMastodonApi router (CORS, 404 fallback, route table)
+src/store.ts         # createMastodonStore (D1: apps, codes, tokens, markers)
+src/entities.ts      # Mastodon entity serializers (pure)
+src/apps.ts          # POST /api/v1/apps + apps/verify_credentials
+src/oauth-flow.ts    # /oauth/authorize + /oauth/token + /oauth/revoke
+src/auth.ts          # bearer + client authentication
+src/accounts.ts      # accounts/verify_credentials, GET /api/v1/accounts/:id (handleGetAccount)
+src/instance.ts      # instance v1 + v2
+src/markers.ts       # GET/POST /api/v1/markers
+src/stubs.ts         # data-driven valid-but-empty stub roster
+src/encoding.ts      # random tokens, SHA-256, PKCE S256
+src/errors.ts        # Mastodon error responses
+src/snowflake.ts     # Mastodon-shaped snowflake ID codec
+src/sanitize.ts      # allowlist HTML sanitizer for inbound status content
+src/pagination.ts    # RFC 8288 Link header builder
+src/timelines.ts     # GET /api/v1/timelines/home
+src/notifications.ts # GET /api/v1/notifications
+src/statuses.ts      # GET /api/v1/statuses/:id
+src/*.test.ts        # colocated tests
 ```
 
 ## Dependencies

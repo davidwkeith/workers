@@ -36,4 +36,20 @@ describe("createMastodonApi shell", () => {
     const res = await api()(new Request("https://owner.example/api/v1/nope"));
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
+
+  it("404s a dynamic-route path with malformed percent-encoding instead of throwing", async () => {
+    const res = await api()(
+      new Request("https://owner.example/api/v1/accounts/%zz"),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Record not found" });
+  });
+
+  it("404s a malformed-percent-encoded statuses path the same way", async () => {
+    const res = await api()(
+      new Request("https://owner.example/api/v1/statuses/%zz"),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Record not found" });
+  });
 });

@@ -8,10 +8,17 @@ import {
   applicationEntity,
   compatibilityVersion,
   credentialAccountEntity,
+  decodeRemoteAccountId,
+  encodeRemoteAccountId,
   instanceV1Entity,
   instanceV2Entity,
   markerEntity,
+  notificationEntity,
+  remoteAccountEntity,
+  statusEntity,
 } from "./entities.js";
+import { encodeSnowflake } from "./snowflake.js";
+import type { BackendEntry } from "./backend.js";
 
 const record: ClientRecord = {
   clientId: "client-1",
@@ -179,5 +186,292 @@ describe("markerEntity", () => {
       version: 3,
       updated_at: "2023-11-14T22:13:20.000Z",
     });
+  });
+});
+
+describe("statusEntity", () => {
+  const baseUrl = "https://owner.example";
+
+  it("maps a Create/Note to a Status with sanitized content and CW", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_000, 1),
+      receivedAt: 1_753_000_000_000,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/1",
+        type: "Create",
+        actor: "https://remote.example/users/alice",
+        object: {
+          id: "https://remote.example/objects/1",
+          type: "Note",
+          content: "<p>hi <script>bad()</script></p>",
+          summary: "cw text",
+          sensitive: true,
+          attachment: [
+            {
+              type: "Image",
+              url: "https://remote.example/media/1.jpg",
+              mediaType: "image/jpeg",
+              name: "alt text",
+            },
+          ],
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.id).toBe(entry.id);
+    expect(status.content).toBe("<p>hi </p>");
+    expect(status.spoiler_text).toBe("cw text");
+    expect(status.sensitive).toBe(true);
+    expect((status.media_attachments as unknown[])[0]).toMatchObject({
+      type: "image",
+      url: "https://remote.example/media/1.jpg",
+      description: "alt text",
+    });
+    expect((status.account as { acct: string }).acct).toContain("alice");
+  });
+
+  it("wraps a relayed_by row as a reblog attributed to the relaying group", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_001, 1),
+      receivedAt: 1_753_000_000_001,
+      objectType: "Note",
+      relayedBy: "https://lemmy.example/c/birding",
+      activity: {
+        id: "https://remote.example/activities/2",
+        type: "Create",
+        actor: "https://remote.example/users/bob",
+        object: {
+          id: "https://remote.example/objects/2",
+          type: "Note",
+          content: "<p>bird</p>",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect((status.account as { acct: string }).acct).toContain("birding");
+    expect(status.reblog).not.toBeNull();
+    expect((status.reblog as { content: string }).content).toBe("<p>bird</p>");
+  });
+
+  it("does not throw and produces safe empty content when object.content is a number", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_002, 1),
+      receivedAt: 1_753_000_000_002,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/3",
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/3",
+          type: "Note",
+          content: 123,
+        },
+      },
+    };
+    expect(() => statusEntity(entry, { baseUrl })).not.toThrow();
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.content).toBe("");
+  });
+
+  it("does not throw and produces safe empty content when object.content is a plain object", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_003, 1),
+      receivedAt: 1_753_000_000_003,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/4",
+        type: "Create",
+        actor: "https://remote.example/users/dave",
+        object: {
+          id: "https://remote.example/objects/4",
+          type: "Note",
+          content: { malicious: "<script>bad()</script>" },
+        },
+      },
+    };
+    expect(() => statusEntity(entry, { baseUrl })).not.toThrow();
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.content).toBe("");
+  });
+
+  it("falls back to safe defaults when summary/sensitive are the wrong type", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_004, 1),
+      receivedAt: 1_753_000_000_004,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/5",
+        type: "Create",
+        actor: "https://remote.example/users/erin",
+        object: {
+          id: "https://remote.example/objects/5",
+          type: "Note",
+          content: "<p>hi</p>",
+          summary: 123,
+          sensitive: "yes",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.spoiler_text).toBe("");
+    expect(status.sensitive).toBe(false);
+  });
+});
+
+describe("remote account id round trip", () => {
+  it("encodes and decodes the actor IRI", () => {
+    const iri = "https://remote.example/users/alice";
+    const id = encodeRemoteAccountId(iri);
+    expect(id.startsWith("r_")).toBe(true);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+
+  it("synthesizes username/acct/url from the IRI shape", () => {
+    const account = remoteAccountEntity("https://remote.example/users/alice");
+    expect(account.username).toBe("alice");
+    expect(account.acct).toBe("alice@remote.example");
+    expect(account.url).toBe("https://remote.example/users/alice");
+    expect(account.avatar).toBeTruthy();
+  });
+
+  it("round-trips a non-ASCII (RFC 3987 IRI) actor id without throwing", () => {
+    const iri = "https://remote.example/users/日本";
+    expect(() => encodeRemoteAccountId(iri)).not.toThrow();
+    const id = encodeRemoteAccountId(iri);
+    expect(id.startsWith("r_")).toBe(true);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+
+  it("round-trips a mix of emoji and multi-byte scripts", () => {
+    const iri = "https://remote.example/users/名前🎉café";
+    const id = encodeRemoteAccountId(iri);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+});
+
+describe("notificationEntity", () => {
+  const baseUrl = "https://owner.example";
+
+  it("maps a Like to a favourite notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_002, 1),
+      receivedAt: 1_753_000_000_002,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/3",
+        type: "Like",
+        actor: "https://remote.example/users/carol",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    const notification = notificationEntity(entry, { baseUrl });
+    expect(notification).not.toBeNull();
+    expect(notification!.type).toBe("favourite");
+    expect((notification!.account as { acct: string }).acct).toContain("carol");
+  });
+
+  it("maps an Announce to a reblog notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_003, 1),
+      receivedAt: 1_753_000_000_003,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/4",
+        type: "Announce",
+        actor: "https://remote.example/users/dave",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    expect(notificationEntity(entry, { baseUrl })!.type).toBe("reblog");
+  });
+
+  it("maps a reply Create into this actor's namespace to a mention notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_004, 1),
+      receivedAt: 1_753_000_000_004,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/5",
+        type: "Create",
+        actor: "https://remote.example/users/erin",
+        object: {
+          id: "https://remote.example/objects/5",
+          type: "Note",
+          content: "<p>reply</p>",
+          inReplyTo: `${baseUrl}/users/owner/outbox/1`,
+        },
+      },
+    };
+    const notification = notificationEntity(entry, { baseUrl });
+    expect(notification!.type).toBe("mention");
+    expect(notification!.status).toBeTruthy();
+  });
+
+  it("returns null for a plain top-level Create with no reply target", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_005, 1),
+      receivedAt: 1_753_000_000_005,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        type: "Create",
+        actor: "https://remote.example/users/frank",
+        object: { type: "Note", content: "<p>unrelated</p>" },
+      },
+    };
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
+  });
+
+  // Regression tests for the Task 5 lesson: every field read off
+  // entry.activity is attacker-controlled remote AS2 JSON and must be
+  // individually type-guarded, never trusted as the "obviously right"
+  // type. These cover the two guards specific to notificationEntity:
+  // activity.object as a non-object, and activity.type as a non-string.
+
+  it("does not throw when a Create's object is a bare IRI reference, not an embedded object", () => {
+    // A realistic bare-IRI-Announce/reply-by-reference shape: some remote
+    // implementations send `object` as a plain string IRI rather than an
+    // embedded object, even on a Create. There is no `inReplyTo` to read
+    // off a string, so this must fall through to null, not crash.
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_006, 1),
+      receivedAt: 1_753_000_000_006,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/6",
+        type: "Create",
+        actor: "https://remote.example/users/grace",
+        object: "https://remote.example/objects/6",
+      },
+    };
+    expect(() => notificationEntity(entry, { baseUrl })).not.toThrow();
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
+  });
+
+  it("does not throw and returns null when activity.type is not a string", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_007, 1),
+      receivedAt: 1_753_000_000_007,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/7",
+        type: 12345,
+        actor: "https://remote.example/users/heidi",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    expect(() => notificationEntity(entry, { baseUrl })).not.toThrow();
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
   });
 });

@@ -67,6 +67,9 @@ importers:
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
+      '@dwk/mastodon-api':
+        specifier: workspace:*
+        version: link:../mastodon-api
       '@dwk/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -105,6 +108,9 @@ importers:
       '@dwk/indieauth':
         specifier: workspace:*
         version: link:../indieauth
+      '@dwk/mastodon-api':
+        specifier: workspace:*
+        version: link:../mastodon-api
       '@dwk/micropub':
         specifier: workspace:*
         version: link:../micropub

@@ -235,6 +235,25 @@ describe("IndieWeb endpoints", () => {
   });
 });
 
+describe("@dwk/mastodon-api", () => {
+  it("serves instance metadata", async () => {
+    const res = await call("/api/v1/instance");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string };
+    expect(body.title).toBe("Conformance Target");
+  });
+
+  it("rejects an authorization request for an unknown client", async () => {
+    const params = new URLSearchParams({
+      client_id: "https://app.example/",
+      redirect_uri: "https://app.example/callback",
+      response_type: "code",
+    });
+    const res = await call(`/oauth/authorize?${params}`);
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("storage and identity endpoints", () => {
   it("solid pod denies an anonymous read", async () => {
     const res = await call("/pod/");

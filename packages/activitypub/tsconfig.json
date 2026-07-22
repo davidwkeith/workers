@@ -18,7 +18,12 @@
       "@dwk/mcp": ["../mcp/src/index.ts"],
       // `@dwk/mcp`'s own source (path-mapped above) imports `@dwk/dpop` for its
       // auth bridge, and that import resolves under THIS program's paths too.
-      "@dwk/dpop": ["../dpop/src/index.ts"]
+      "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/mastodon-api": ["../mastodon-api/src/index.ts"],
+      // `@dwk/mastodon-api`'s own source (path-mapped above) imports
+      // `@dwk/oauth` for its client-metadata/revocation-handler seam, and
+      // that import resolves under THIS program's paths too.
+      "@dwk/oauth": ["../oauth/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

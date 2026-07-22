@@ -36,6 +36,10 @@ export {
   type ActivitypubMcpToolsConfig,
 } from "./mcp-tools.js";
 export {
+  createActivitypubMastodonApi,
+  type ActivitypubMastodonApiOptions,
+} from "./mastodon-api.js";
+export {
   createCommunitySyndicationTargets,
   type CommunityTarget,
   type CommunityTargetsOptions,

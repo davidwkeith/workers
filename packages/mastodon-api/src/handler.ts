@@ -5,14 +5,20 @@
  * web clients (Elk, Phanpy) can call it; native apps ignore CORS.
  */
 
-import { handleVerifyAccountCredentials } from "./accounts.js";
+import {
+  handleGetAccount,
+  handleVerifyAccountCredentials,
+} from "./accounts.js";
 import { handleCreateApp, handleVerifyAppCredentials } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { recordNotFound } from "./errors.js";
 import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
+import { handleNotifications } from "./notifications.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
+import { handleGetStatus } from "./statuses.js";
 import { stubRouteEntries } from "./stubs.js";
+import { handleHomeTimeline } from "./timelines.js";
 
 /** Per-request context threaded to route handlers. */
 export interface RouteContext {
@@ -34,12 +40,30 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["GET /api/v2/instance", handleInstanceV2],
     ["GET /api/v1/markers", handleGetMarkers],
     ["POST /api/v1/markers", handleSaveMarkers],
+    ["GET /api/v1/timelines/home", handleHomeTimeline],
+    ["GET /api/v1/notifications", handleNotifications],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],
     ...stubRouteEntries(),
   ],
 );
+
+type DynamicRouteHandler = (ctx: RouteContext, id: string) => Promise<Response>;
+
+/** `METHOD` + a regex capturing the one path parameter these routes need. */
+const DYNAMIC_ROUTES: readonly [string, RegExp, DynamicRouteHandler][] = [
+  [
+    "GET",
+    /^\/api\/v1\/statuses\/([^/]+)$/,
+    (ctx, id) => handleGetStatus(ctx, id),
+  ],
+  [
+    "GET",
+    /^\/api\/v1\/accounts\/([^/]+)$/,
+    (ctx, id) => handleGetAccount(ctx, id),
+  ],
+];
 
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -76,6 +100,21 @@ export function createMastodonApi(
     const route = ROUTES.get(`${request.method.toUpperCase()} ${url.pathname}`);
     if (route) {
       return withCors(await route({ config, env, request, url }));
+    }
+    for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
+      if (request.method.toUpperCase() !== method) continue;
+      const match = pattern.exec(url.pathname);
+      if (match?.[1]) {
+        let id: string;
+        try {
+          id = decodeURIComponent(match[1]);
+        } catch {
+          return withCors(recordNotFound());
+        }
+        return withCors(
+          await dynamicHandler({ config, env, request, url }, id),
+        );
+      }
     }
     return withCors(recordNotFound());
   };

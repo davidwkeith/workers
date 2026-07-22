@@ -37,3 +37,15 @@ export type {
   BackendEntry,
 } from "./backend.js";
 export { mastodonError } from "./errors.js";
+export {
+  encodeSnowflake,
+  decodeSnowflake,
+  type DecodedSnowflake,
+} from "./snowflake.js";
+export {
+  encodeRemoteAccountId,
+  decodeRemoteAccountId,
+  remoteAccountEntity,
+  statusEntity,
+  notificationEntity,
+} from "./entities.js";

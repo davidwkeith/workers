@@ -70,6 +70,7 @@ src/nodeinfo.ts     # NodeInfo 2.0/2.1 discovery and documents
 src/signature.ts    # HTTP signature signing/verification (draft-cavage profile)
 src/delivery.ts     # outbound activity delivery with SSRF guard (retry lives in the DO)
 src/mcp-tools.ts    # createActivitypubMcpTools — activitypub_publish (write), activitypub_resolve + activitypub_list_inbox (read)
+src/mastodon-api.ts # createActivitypubMastodonApi — composes @dwk/mastodon-api's router over the internal __client/* seam (#349)
 src/log.ts          # structured logging/metrics event vocabulary
 src/body.ts         # capped read for inbound request bodies (inbox/publish)
 src/test-harness.ts # test-only DO class (not published)
@@ -81,6 +82,9 @@ src/*.test.ts       # colocated tests
 - `@dwk/calendar` — canonical event model (the AS2 `Event` adapter reads it).
 - `@dwk/ldn` — inbox discovery and notification primitives.
 - `@dwk/log` — structured logging.
+- `@dwk/mastodon-api` — `createMastodonApi`, the `MastodonBackend` seam, and
+  the snowflake codec `mastodon-api.ts` composes over the internal DO seam
+  (phase 2, #349).
 - `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
 - `@dwk/webfinger` — the `lookup.ts` client half (handle → actor IRI), wired
   through the SSRF-guarded fetch for community discovery (#275/§2.4).

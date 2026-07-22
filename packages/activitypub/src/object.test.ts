@@ -2239,6 +2239,51 @@ describe("delivery outcome logging", () => {
     }
   });
 
+  it("__stats includes followers, following, and statuses counts", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Seed 1 follower
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        `${REMOTE}/actor`,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      // Seed 1 accepted following
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, ?, ?)`,
+        `${REMOTE}/actor2`,
+        "accepted",
+        1,
+      );
+      // Create 1 outbox entry via publish
+      const publishRes = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Create",
+            object: { type: "Note", content: "test" },
+          }),
+          true,
+        ),
+      );
+      expect(publishRes.status).toBe(201);
+
+      // Call __stats and verify counts
+      const statsRes = await instance.fetch(
+        new Request(`${iris.id}/__stats`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      const body = (await statsRes.json()) as Record<string, number>;
+      expect(body.followers).toBe(1);
+      expect(body.following).toBe(1);
+      expect(body.statuses).toBe(1);
+      expect(body.users).toBe(1);
+      expect(body.localPosts).toBe(1);
+    });
+  });
+
   it("tallies into the overflow counter at the pending-metrics cardinality cap", async () => {
     const { username, stub } = freshUser();
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -2324,5 +2369,397 @@ describe("delivery outcome logging", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// __client/timeline, __client/notifications, __client/entry (Mastodon client
+// API phase 2, #349): owner-only internal reads over `inbox`, gated exactly
+// like `__inbox`/`__following` (INTERNAL_HEADERS.internal !== "1" -> 404).
+// ---------------------------------------------------------------------------
+
+/** A Like activity from REMOTE targeting an opaque local object IRI. */
+function likeActivity(
+  id: string,
+  object = "https://social.example/notes/1",
+): Record<string, unknown> {
+  return { id, type: "Like", actor: REMOTE, object };
+}
+
+/** A Create(Note) activity from REMOTE, attributed to itself (a followed post). */
+function createNoteActivity(
+  id: string,
+  content = "hello",
+): Record<string, unknown> {
+  return {
+    id,
+    type: "Create",
+    actor: REMOTE,
+    object: { type: "Note", content, attributedTo: REMOTE },
+  };
+}
+
+/** An Announce activity from REMOTE wrapping a bare-IRI object. */
+function announceActivity(id: string, object: string): Record<string, unknown> {
+  return { id, type: "Announce", actor: REMOTE, object };
+}
+
+/**
+ * A Create(Note) activity from REMOTE that replies to (mentions) `inReplyTo`
+ * — a post shape (Note) AND a reply, to exercise the ordering between the
+ * "mention" and "timeline" branches of `#classifyClientEntry`.
+ */
+function mentionCreateActivity(
+  id: string,
+  inReplyTo: string,
+  content = "hey you",
+): Record<string, unknown> {
+  return {
+    id,
+    type: "Create",
+    actor: REMOTE,
+    object: { type: "Note", content, attributedTo: REMOTE, inReplyTo },
+  };
+}
+
+/** A GET to a `__client/*` internal route, with the internal marker set. */
+function clientRequest(username: string, pathAndQuery: string): Request {
+  const iris = deriveIris(BASE, username);
+  return new Request(`${iris.id}${pathAndQuery}`, {
+    headers: {
+      [INTERNAL_HEADERS.config]: cfgHeader(username),
+      [INTERNAL_HEADERS.internal]: "1",
+    },
+  });
+}
+
+describe("__client/timeline", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/timeline`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("returns Create/Note rows newest-first, excluding Like rows", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            likeActivity("https://remote.example/activities/timeline-like"),
+          ),
+        ),
+      );
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            createNoteActivity(
+              "https://remote.example/activities/timeline-create",
+            ),
+          ),
+        ),
+      );
+
+      const res = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { activity: { type: string } }[];
+      };
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0]?.activity.type).toBe("Create");
+    });
+  });
+
+  it("paginates with max_received_at + tie_seq without skipping or duplicating", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const ids = [
+        "https://remote.example/activities/page-1",
+        "https://remote.example/activities/page-2",
+        "https://remote.example/activities/page-3",
+      ];
+      for (const id of ids) {
+        const res = await instance.fetch(
+          inboxRequest(username, JSON.stringify(createNoteActivity(id))),
+        );
+        expect(res.status).toBe(202);
+      }
+
+      type Page = {
+        items: {
+          seq: number;
+          receivedAt: number;
+          activity: { id: string };
+        }[];
+      };
+
+      const page1Res = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=2"),
+      );
+      const page1 = (await page1Res.json()) as Page;
+      // Newest-first: page-3, then page-2.
+      expect(page1.items.map((i) => i.activity.id)).toEqual([ids[2], ids[1]]);
+
+      const last = page1.items[1]!;
+      const page2Res = await instance.fetch(
+        clientRequest(
+          username,
+          `/__client/timeline?limit=2&max_received_at=${last.receivedAt}&tie_seq=${last.seq}`,
+        ),
+      );
+      const page2 = (await page2Res.json()) as Page;
+      expect(page2.items.map((i) => i.activity.id)).toEqual([ids[0]]);
+
+      // Combined across both pages: exactly the 3 ids, in order, no
+      // duplication and no gap even when several rows share a `received_at`
+      // millisecond (the common case under a fast test clock).
+      const combined = [...page1.items, ...page2.items].map(
+        (i) => i.activity.id,
+      );
+      expect(combined).toEqual([ids[2], ids[1], ids[0]]);
+    });
+  });
+});
+
+describe("__client/notifications", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/notifications`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("classifies Like as favourite and Announce as reblog, omits Follow", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Follows never reach `inbox` at all (only `followers`/`pending_accept`
+      // rows) — deliver one to document that gap rather than silently relying
+      // on it, and confirm no row lands in `inbox` regardless.
+      const followRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/activities/notif-follow",
+            type: "Follow",
+            actor: REMOTE,
+            object: iris.id,
+          }),
+        ),
+      );
+      expect(followRes.status).toBe(202);
+      const followRows = state.storage.sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE json LIKE '%"Follow"%'`)
+        .one().n;
+      expect(followRows).toBe(0);
+
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            likeActivity("https://remote.example/activities/notif-like"),
+          ),
+        ),
+      );
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            announceActivity(
+              "https://remote.example/activities/notif-announce",
+              "https://social.example/notes/own-id",
+            ),
+          ),
+        ),
+      );
+
+      const res = await instance.fetch(
+        clientRequest(username, "/__client/notifications?limit=10"),
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      expect(body.items).toHaveLength(2);
+      expect(body.items.map((i) => i.activity.type).sort()).toEqual([
+        "Announce",
+        "Like",
+      ]);
+      expect(
+        body.items.some(
+          (i) =>
+            i.activity.id === "https://remote.example/activities/notif-follow",
+        ),
+      ).toBe(false);
+    });
+  });
+
+  it(
+    "finds a match in a later internal batch when the first batch (size " +
+      "max(limit*4, 40)) has zero matches — regression: the cursor-" +
+      "continuation clause must apply to every batch after the first " +
+      "regardless of how many matches have been found so far, or a zero-" +
+      "match first batch re-issues the same query forever",
+    async () => {
+      const { username, stub } = freshUser();
+      await runInDurableObject(stub, async (instance) => {
+        // Deliver the favourite (Like) row FIRST so it gets the lowest
+        // seq/received_at — i.e. it's the *oldest* row. With limit=1, BATCH
+        // = max(1*4, 40) = 40, and the default order is `received_at DESC,
+        // seq DESC` (newest first), so the first internal batch of 40 rows
+        // is exactly the 40 timeline (Create/Note) rows below, and the
+        // older Like row is only reachable via a second, cursor-continued
+        // batch.
+        const likeId = "https://remote.example/activities/batch-miss-like";
+        const likeRes = await instance.fetch(
+          inboxRequest(username, JSON.stringify(likeActivity(likeId))),
+        );
+        expect(likeRes.status).toBe(202);
+
+        for (let i = 0; i < 40; i++) {
+          const res = await instance.fetch(
+            inboxRequest(
+              username,
+              JSON.stringify(
+                createNoteActivity(
+                  `https://remote.example/activities/batch-miss-create-${i}`,
+                ),
+              ),
+            ),
+          );
+          expect(res.status).toBe(202);
+        }
+
+        const res = await instance.fetch(
+          clientRequest(username, "/__client/notifications?limit=1"),
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          items: { activity: { id: string; type: string } }[];
+        };
+        expect(body.items).toHaveLength(1);
+        expect(body.items[0]?.activity.id).toBe(likeId);
+      });
+    },
+    20_000,
+  );
+
+  it("classifies a reply Create(Note) targeting this actor as mention, not timeline (regression: post-shape check must not shadow inReplyTo)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const mentionId = "https://remote.example/activities/notif-mention";
+      const plainTimelineId =
+        "https://remote.example/activities/notif-plain-timeline";
+      const mentionRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            mentionCreateActivity(mentionId, `${iris.id}/posts/own-status-1`),
+          ),
+        ),
+      );
+      expect(mentionRes.status).toBe(202);
+      // A plain top-level Create/Note with no inReplyTo — must still land in
+      // the timeline, not notifications (no regression on the ordinary case).
+      const plainRes = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(createNoteActivity(plainTimelineId)),
+        ),
+      );
+      expect(plainRes.status).toBe(202);
+
+      const notifRes = await instance.fetch(
+        clientRequest(username, "/__client/notifications?limit=10"),
+      );
+      expect(notifRes.status).toBe(200);
+      const notifBody = (await notifRes.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      const notifIds = notifBody.items.map((i) => i.activity.id);
+      expect(notifIds).toContain(mentionId);
+      expect(notifIds).not.toContain(plainTimelineId);
+
+      const timelineRes = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      expect(timelineRes.status).toBe(200);
+      const timelineBody = (await timelineRes.json()) as {
+        items: { activity: { id: string; type: string } }[];
+      };
+      const timelineIds = timelineBody.items.map((i) => i.activity.id);
+      expect(timelineIds).not.toContain(mentionId);
+      expect(timelineIds).toContain(plainTimelineId);
+    });
+  });
+});
+
+describe("__client/entry", () => {
+  it("404s without the internal marker", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(`${iris.id}/__client/entry?received_at=1`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("looks up a single row by received_at, 404s when there is none", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify(
+            createNoteActivity("https://remote.example/activities/entry-1"),
+          ),
+        ),
+      );
+      const timeline = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=1"),
+      );
+      const { items } = (await timeline.json()) as {
+        items: { seq: number; receivedAt: number; activity: { id: string } }[];
+      };
+      const found = items[0]!;
+
+      const entryRes = await instance.fetch(
+        clientRequest(
+          username,
+          `/__client/entry?received_at=${found.receivedAt}&seq_low=${found.seq % 32768}`,
+        ),
+      );
+      expect(entryRes.status).toBe(200);
+      const entry = (await entryRes.json()) as {
+        activity: { id: string };
+      };
+      expect(entry.activity.id).toBe(
+        "https://remote.example/activities/entry-1",
+      );
+
+      const missing = await instance.fetch(
+        clientRequest(username, "/__client/entry?received_at=999999999"),
+      );
+      expect(missing.status).toBe(404);
+    });
   });
 });

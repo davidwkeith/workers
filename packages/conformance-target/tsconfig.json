@@ -25,7 +25,9 @@
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"],
       "@dwk/wac": ["../wac/src/index.ts"],
       "@dwk/store": ["../store/src/index.ts"],
-      "@dwk/webdav": ["../webdav/src/index.ts"]
+      "@dwk/webdav": ["../webdav/src/index.ts"],
+      "@dwk/mastodon-api": ["../mastodon-api/src/index.ts"],
+      "@dwk/oauth": ["../oauth/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",
