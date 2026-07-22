@@ -137,7 +137,16 @@ export function buildMastodonBackend(options: {
     );
     if (!response.ok) return { entries: [] };
     const body = (await response.json()) as { items: ClientEntryRow[] };
-    return { entries: body.items.map(toBackendEntry) };
+    const entries = body.items.map(toBackendEntry);
+    // `#listClientEntries` returns rows oldest-first when the query is
+    // `minId`-style (it walks forward from the lower bound), but every
+    // `BackendPage.entries` consumer — `@dwk/mastodon-api`'s
+    // `buildLinkHeader`, `timelines.ts`, `notifications.ts` — has a fixed
+    // "always newest-first" contract regardless of which cursor selected the
+    // page. Normalize here, at the DO-response boundary, so that contract
+    // holds unconditionally.
+    if (query.minId !== undefined) entries.reverse();
+    return { entries };
   }
 
   return {

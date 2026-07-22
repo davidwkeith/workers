@@ -83,6 +83,52 @@ describe("GET /api/v1/timelines/home", () => {
     expect(response.headers.get("link")).toBeNull();
   });
 
+  it("directs the Link header correctly for a min_id request (backend already newest-first, per the BackendPage.entries contract)", async () => {
+    await resetDb();
+    const token = await obtainAccessToken();
+    const newer = {
+      id: encodeSnowflake(1_753_000_000_002, 1),
+      receivedAt: 1_753_000_000_002,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        type: "Create",
+        actor: "https://remote.example/users/alice",
+        object: { type: "Note", content: "<p>newer</p>" },
+      },
+    };
+    const older = {
+      id: encodeSnowflake(1_753_000_000_001, 1),
+      receivedAt: 1_753_000_000_001,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        type: "Create",
+        actor: "https://remote.example/users/alice",
+        object: { type: "Note", content: "<p>older</p>" },
+      },
+    };
+    // A compliant backend (post-fix: @dwk/activitypub's adapter normalizes
+    // this) always returns entries newest-first, even when the request used
+    // a min_id cursor.
+    const cfgWithBackend = {
+      ...(await import("./test-harness.js")).testConfig,
+      backend: fakeBackend([newer, older]),
+    };
+    const response = await api(cfgWithBackend)(
+      new Request(
+        `https://owner.example/api/v1/timelines/home?min_id=${older.id}`,
+        { headers: { authorization: `Bearer ${token}` } },
+      ),
+    );
+    expect(response.status).toBe(200);
+    const link = response.headers.get("link");
+    expect(link).toContain(`max_id=${older.id}`);
+    expect(link).toContain(`min_id=${newer.id}`);
+    expect(link).toMatch(new RegExp(`max_id=${older.id}[^>]*>; rel="next"`));
+    expect(link).toMatch(new RegExp(`min_id=${newer.id}[^>]*>; rel="prev"`));
+  });
+
   it("clamps limit to the configured max", async () => {
     await resetDb();
     const token = await obtainAccessToken();

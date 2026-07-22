@@ -346,6 +346,36 @@ describe("buildMastodonBackend", () => {
     ]);
   });
 
+  it("timeline() minId cursor still returns entries newest-first (DO returns oldest-first for min_id-style queries; the adapter must normalize)", async () => {
+    const config = freshConfig();
+    const first = createNote(config);
+    const second = createNote(config);
+    const third = createNote(config);
+    await seedActivity(config, first);
+    await seedActivity(config, second);
+    await seedActivity(config, third);
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const fullPage = await backend.timeline({ limit: 10 });
+    expect(fullPage.entries.map((e) => e.activity["id"])).toEqual([
+      third["id"],
+      second["id"],
+      first["id"],
+    ]);
+    const oldestId = fullPage.entries[fullPage.entries.length - 1]!.id;
+
+    // A minId query walks forward from the oldest row: the DO's own
+    // #listClientEntries deliberately returns matches ASC (oldest-first) in
+    // this case, so the adapter must reverse before handing back
+    // BackendPage.entries, whose contract is "always newest-first"
+    // regardless of which cursor selected the page.
+    const newerPage = await backend.timeline({ limit: 10, minId: oldestId });
+    expect(newerPage.entries.map((e) => e.activity["id"])).toEqual([
+      third["id"],
+      second["id"],
+    ]);
+  });
+
   it("entry() decodes a snowflake id and fetches the exact row by received_at + seq_low", async () => {
     const config = freshConfig();
     await seedActivity(config, createNote(config));
