@@ -546,6 +546,7 @@ async function handleQuery(
     const supportedQueries = ["source", "config", "syndicate-to"];
     if (config.extensions.stable) supportedQueries.push("category");
     if (contactsEnabled(config)) supportedQueries.push("contact");
+  if (config.venues) supportedQueries.push("geo");
     return json({
       "media-endpoint": config.mediaEndpoint,
       "syndicate-to": await config.syndicateTo(),

@@ -67,15 +67,20 @@ The handler fails loudly at startup if any of these are missing:
   list by creation bounds, type, status, visibility, or exact mf2 properties;
   filtered lists use deterministic keyset cursors.
 
-### Proposed Location/Venue design
+### Location/Venue (`q=geo`) extension
 
-`q=geo` is a proposed extension and remains disabled by default; it is not yet
-implemented. Its API and injected, strongly-consistent `VenueStore` contract
-are defined in the [package specification](../../spec/packages/micropub.md#proposed-locationvenue-qgeo).
-When implemented, a Geo URI or `lat`/`lon`/`u` query will return a
-reverse-geocoded `geo` suggestion and nearby `venues`. Venue lookup is separate
-from post storage; a client references a selected venue with the ordinary
-`location` post property.
+The `q=geo` extension is implemented for the proposed Location/Venue feature.
+It remains disabled by default (`extensions.proposed: false`); clients must
+enable the `proposed` group and configure a `venues` store to use it.
+
+A `GET ?q=geo&uri=geo:lat,lon;u=radius` or `GET ?q=geo&lat=...&lon=...&u=...` query
+returns a reverse-geocoded `geo` suggestion (when available) and nearby venues
+ordered by distance. Each venue has `name`, `latitude`, `longitude`, and a
+canonical `url`. Clients reference a venue via the post's `location` property
+(either plain text or an `h-card` with `url`). The store is independent of
+post storage — querying `q=geo` never reads post data.
+
+See the [package specification](../../spec/packages/micropub.md#proposed-locationvenue-qgeo).
 
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession

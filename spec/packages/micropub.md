@@ -233,12 +233,15 @@ search.
 The proposed-group `q=geo` extension remains unimplemented and is tracked
 separately.
 
-### Proposed Location/Venue (`q=geo`)
+### Location/Venue (`q=geo`) extension
 
-This is the implementation contract for issue #359. It is **not implemented by
-this issue**. Venue lookup is a proximity search over an injected venue system,
-never a scan of post `location` properties; its schema, lifecycle, and indexes
-therefore remain independent of Micropub's D1 post records.
+This is the implementation for issue #359. The feature is **implemented** but
+**disabled by default** (`extensions.proposed: false`). Clients must enable the
+`proposed` group and configure a `venues` store to use it.
+
+Venue lookup is a proximity search over an injected venue system, never a scan
+of post `location` properties; its schema, lifecycle, and indexes therefore
+remain independent of Micropub's D1 post records.
 
 The design follows the [IndieWeb Location/Venue proposal][mp-ext-geo]:
 `q=geo` accepts a Geo URI or WGS-84 coordinates and returns an optional
