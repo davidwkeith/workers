@@ -29,8 +29,8 @@ toggled by maturity group via the `extensions` config
   `post-types` in `q=config`.
 - **Category/Tag List** (`q=category`, with `limit`/`filter`) — distinct tags of
   live posts for autocomplete.
-
-Post-list (`q=source` with no `url`) is tracked separately (#351/#353).
+- **Post List** (`q=source` with no `url`) — the caller's live posts
+  newest-first, with `limit`/`offset` pagination (#351/#353).
 
 ## Spec
 

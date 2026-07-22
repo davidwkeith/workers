@@ -92,6 +92,9 @@ Currently implemented (all **stable**):
   wants every tag — a deliberate difference from the post-list query's
   paginated default. Nested non-string tags (e.g. `h-card` objects)
   are excluded from the list.
+- **Post List** (`q=source` without a `url`) — the caller's live posts
+  newest-first, with `limit`/`offset` pagination (#351/#353). Fully
+  specified under [Query support](#query-support) below.
 
 ## Query support
 
@@ -111,8 +114,12 @@ Both forms support the `properties[]` parameter to filter which properties are
 returned per item (e.g., `?q=source&properties[]=content` returns only the
 `content` property, if present).
 
-Soft-deleted posts (those marked with `post-status: draft` or explicitly deleted)
-are **excluded** from the list and from single-post queries targeting them (404).
+Only **soft-deleted** posts — those removed via the `delete` action (the
+`deleted` flag) — are excluded from the list, and a single-post query targeting
+one returns `404`. Drafts (`post-status: draft`) are **not** soft-deleted: they
+appear in the list and resolve normally on a single-post query. That is
+deliberate — a draft never appears in the built site, so this authenticated list
+is a client's only way to browse its own drafts (#351).
 
 [mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
 
