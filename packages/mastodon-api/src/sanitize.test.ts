@@ -83,6 +83,32 @@ describe("sanitizeStatusHtml", () => {
     });
   });
 
+  // Regression coverage for a Critical ReDoS: THIS EXACT FIX (widening the
+  // attribute separator to `[\s/]+`) made it overlap with the unquoted
+  // attribute-value class `[^\s>]*` — both match `/` — so the old combined
+  // tag regex could backtrack through exponentially many ways to split a
+  // run of `/` characters between "end of value" and "start of separator"
+  // whenever a tag never reached a terminating `>`. Fixed by tokenizing the
+  // tag body with a monotonic-cursor loop (`scanTagBody` + sticky
+  // `ATTR_TOKEN_RE`/`TAG_CLOSE_RE`) instead of one regex with a repeated,
+  // ambiguous group. A payload that used to hang for seconds must now
+  // resolve well within a generous bound.
+  describe("ReDoS resistance (ambiguous separator/value backtracking)", () => {
+    it("sanitizes a large adversarial unterminated tag in bounded time", () => {
+      const payload = "<a " + "a=/".repeat(500);
+      const start = performance.now();
+      sanitizeStatusHtml(payload);
+      expect(performance.now() - start).toBeLessThan(1000);
+    });
+
+    it("still sanitizes the originally-reported hang size (repeat=25)", () => {
+      const payload = "<a " + "a=/".repeat(25);
+      const start = performance.now();
+      expect(sanitizeStatusHtml(payload)).toBe(payload);
+      expect(performance.now() - start).toBeLessThan(1000);
+    });
+  });
+
   // Regression coverage for an unclosed <script>/<style> leaking its raw
   // body text: before the fix, the `if (closeMatch)` guard skipped advancing
   // the cursor when no closing tag was found anywhere in the remainder, so
