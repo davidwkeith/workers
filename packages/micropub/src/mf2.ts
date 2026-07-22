@@ -299,6 +299,17 @@ export const POST_STATUS_VALUES = ["published", "draft"] as const;
  */
 export const VISIBILITY_VALUES = ["public", "unlisted", "private"] as const;
 
+/**
+ * Allowed values for the proposed `location-visibility` property. `text`
+ * means the serving layer may disclose a textual place name, but must not
+ * disclose coordinates or other precise location data.
+ */
+export const LOCATION_VISIBILITY_VALUES = [
+  "public",
+  "private",
+  "text",
+] as const;
+
 /** Reject a property whose values fall outside an extension's allowed set. */
 function assertEnumProperty(
   properties: Readonly<Record<string, readonly unknown[]>>,
@@ -328,6 +339,78 @@ export function validateVocabulary(
 ): void {
   assertEnumProperty(properties, "post-status", POST_STATUS_VALUES);
   assertEnumProperty(properties, "visibility", VISIBILITY_VALUES);
+}
+
+/**
+ * Validate and normalize the proposed Audience and Location Visibility
+ * properties. The upstream proposals reserve the property names but leave
+ * their exact data shapes open, so this package adopts a deliberately small
+ * interoperable mf2 contract: `audience` is a multi-valued list of configured
+ * string IDs, while `location-visibility` is a single string value.
+ *
+ * The returned map is a copy. Audience IDs are de-duplicated in first-seen
+ * order, making a create and an update persist the same canonical shape.
+ * Access control and actual location redaction remain the serving layer's
+ * responsibility; this function only protects the metadata contract.
+ */
+export function normalizeProposedVocabulary(
+  properties: Readonly<Record<string, readonly unknown[]>>,
+  audienceIds: readonly string[],
+): Record<string, unknown[]> {
+  const normalized: Record<string, unknown[]> = {};
+  for (const [key, values] of Object.entries(properties)) {
+    normalized[key] = [...values];
+  }
+
+  const audience = properties.audience;
+  if (audience !== undefined) {
+    const knownAudienceIds = new Set(audienceIds);
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const value of audience) {
+      if (typeof value !== "string" || !knownAudienceIds.has(value)) {
+        throw new Mf2ParseError(
+          "`audience` values must be configured audience `uid` strings",
+        );
+      }
+      if (!seen.has(value)) {
+        seen.add(value);
+        values.push(value);
+      }
+    }
+    if (values.length === 0) {
+      throw new Mf2ParseError("`audience` must name at least one audience");
+    }
+    const visibility = properties.visibility;
+    if (visibility?.length !== 1 || visibility[0] !== "private") {
+      throw new Mf2ParseError(
+        "`audience` requires `visibility` to be exactly `private`",
+      );
+    }
+    normalized.audience = values;
+  }
+
+  const locationVisibility = properties["location-visibility"];
+  if (locationVisibility !== undefined) {
+    if (
+      locationVisibility.length !== 1 ||
+      typeof locationVisibility[0] !== "string" ||
+      !LOCATION_VISIBILITY_VALUES.some(
+        (value) => value === locationVisibility[0],
+      )
+    ) {
+      throw new Mf2ParseError(
+        "`location-visibility` must be exactly one of `public`, `private`, `text`",
+      );
+    }
+    if ((properties.location?.length ?? 0) === 0) {
+      throw new Mf2ParseError(
+        "`location-visibility` requires a `location` property",
+      );
+    }
+  }
+
+  return normalized;
 }
 
 /**

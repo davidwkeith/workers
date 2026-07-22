@@ -123,9 +123,48 @@ is a client's only way to browse its own drafts (#351).
 
 [mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
 
-Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
-`location-visibility`, and the richer query filters) are off by default and
-unimplemented; they are the roadmap tracked in the extensions issue.
+### Proposed Audience and Location Visibility
+
+The IndieWeb extensions reference reserves the `audience` and
+`location-visibility` property names, but leaves their detailed mf2 payload
+shapes open. This package defines a deliberately small, client-operable
+contract for both. It is enabled only with `extensions: { proposed: true }`;
+with the default setting (`false`) neither capability is advertised or
+interpreted, preserving the existing generic-mf2 behavior.
+
+- **Audience** is a multi-valued mf2 property of stable string IDs:
+  `"audience": ["family", "project-alpha"]`. The deployment configures the
+  accepted IDs as `audiences: [{ uid, name }]`; clients discover that exact
+  list in `q=config`'s `audiences` array and persist the `uid`, not the display
+  name. Values must be configured IDs, are de-duplicated in first-seen order,
+  and require `visibility: ["private"]` as the final stored value. This avoids
+  recording an audience on a publicly visible post, which would misleadingly
+  suggest access control exists.
+- **Location Visibility** is a single-value mf2 property:
+  `"location-visibility": ["public" | "private" | "text"]`. It requires at
+  least one `location` property. `text` allows the serving layer to show a
+  textual place name while withholding coordinates and other precise location
+  data. An absent value means `public`, matching the upstream proposal.
+- **Create/update/delete/source.** Create validates and stores these ordinary
+  mf2 properties; JSON updates validate the merged result, so changing a
+  private audience post to non-private (or removing its `location` while its
+  disclosure preference remains) is rejected. Delete/undelete retain their
+  existing whole-record behavior. `q=source` returns the stored metadata,
+  including in list items and property-filtered projections.
+- **Capability advertisement.** With the group enabled, `q=config` adds
+  `"properties": ["audience", "location-visibility"]` and the configured
+  `"audiences": [{ "uid", "name" }]`. With it disabled, neither member is
+  returned and the properties remain opaque mf2 data rather than taking on
+  privacy semantics.
+- **Serving boundary (load-bearing).** Micropub only validates, persists, and
+  advertises intent. It does **not** resolve contacts, restrict reads, redact
+  coordinates, or make a private post private. The consuming site or WAC layer
+  maps audience IDs to readers and applies `location-visibility` when rendering
+  or serializing a post. This includes the authenticated `q=source` endpoint:
+  it intentionally returns the source record unchanged.
+
+Proposed-group extensions (`q=geo`, `q=contact`, and richer post-list filters)
+remain unimplemented and are tracked separately.
 
 ## Auth / security
 
@@ -196,6 +235,10 @@ so on).
 - `baseUrl` / domain.
 - `me` — the site owner's IndieAuth profile URL. Required; tokens whose subject
   is not this `me` are rejected.
+- `audiences` — optional stable `{ uid, name }` IDs for the proposed Audience
+  extension. They are only advertised and validated when
+  `extensions.proposed` is enabled; the consuming site/WAC layer supplies their
+  actual authorization mapping.
 - Media bucket binding name and any size thresholds.
 - Mapping/policy for where created posts are stored.
 

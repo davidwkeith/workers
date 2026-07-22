@@ -51,6 +51,19 @@ export interface PostTypeConfig {
   readonly name: string;
 }
 
+/**
+ * A named audience a client may assign to a private post when the proposed
+ * Audience extension is enabled. `uid` is the persisted mf2 `audience` value;
+ * `name` is display-only client metadata. The consuming site/WAC layer maps
+ * these stable IDs to its own access-control rules.
+ */
+export interface AudienceConfig {
+  /** Stable identifier a client stores in the `audience` mf2 property. */
+  readonly uid: string;
+  /** Human-readable label for the client's audience picker. */
+  readonly name: string;
+}
+
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
 export interface SyndicationTarget {
   /** Stable identifier the client echoes back as `mp-syndicate-to`. */
@@ -105,6 +118,12 @@ export interface MicropubConfig {
    * `proposed` off.
    */
   readonly extensions?: ExtensionGroupsConfig;
+  /**
+   * Named audiences advertised to clients when `extensions.proposed` is on.
+   * They are publishing metadata only: this package does not resolve contacts
+   * or enforce access control for any audience.
+   */
+  readonly audiences?: readonly AudienceConfig[];
   /**
    * Post types advertised as `post-types` in `q=config` (the stable Supported
    * Vocabulary extension). Omitted from the response when unset, or when the
@@ -171,6 +190,8 @@ export interface ResolvedConfig {
   readonly scopesSupported: readonly string[];
   /** Resolved per-group enablement flags (every group present). */
   readonly extensions: Readonly<Record<ExtensionMaturity, boolean>>;
+  /** Named audience IDs accepted by the proposed Audience extension. */
+  readonly audiences: readonly AudienceConfig[];
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
@@ -262,6 +283,19 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
 
   const micropubEndpoint = config.micropubEndpoint ?? `${origin}/micropub`;
   const mediaEndpoint = config.mediaEndpoint ?? `${origin}/media`;
+  const audiences = config.audiences ?? [];
+  const audienceIds = new Set<string>();
+  for (const audience of audiences) {
+    if (!audience.uid || !audience.name) {
+      throw new Error(
+        "@dwk/micropub: every audience requires non-empty `uid` and `name`",
+      );
+    }
+    if (audienceIds.has(audience.uid)) {
+      throw new Error("@dwk/micropub: audience `uid` values must be unique");
+    }
+    audienceIds.add(audience.uid);
+  }
 
   return {
     me,
@@ -281,6 +315,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       stable: config.extensions?.stable ?? true,
       proposed: config.extensions?.proposed ?? false,
     },
+    audiences,
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),
