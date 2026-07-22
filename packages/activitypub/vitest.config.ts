@@ -11,6 +11,11 @@ export default defineConfig({
         durableObjects: {
           ACTOR: { className: "ActivityPubObject", useSQLite: true },
         },
+        // `createActivitypubMastodonApi` composes `@dwk/mastodon-api`'s
+        // `createMastodonApi`, which requires the `AUTH_DB` D1 binding (its
+        // auth/app/token store) at request time — needed here so
+        // `mastodon-api.test.ts` can drive the composed handler end-to-end.
+        d1Databases: ["AUTH_DB"],
       },
     }),
   ],

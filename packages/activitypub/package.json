@@ -48,6 +48,7 @@
     "@dwk/http-signatures": "workspace:*",
     "@dwk/ldn": "workspace:*",
     "@dwk/log": "workspace:*",
+    "@dwk/mastodon-api": "workspace:*",
     "@dwk/mcp": "workspace:*",
     "@dwk/safe-fetch": "workspace:*",
     "@dwk/webfinger": "workspace:*"
