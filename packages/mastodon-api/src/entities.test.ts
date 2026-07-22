@@ -253,6 +253,74 @@ describe("statusEntity", () => {
     expect(status.reblog).not.toBeNull();
     expect((status.reblog as { content: string }).content).toBe("<p>bird</p>");
   });
+
+  it("does not throw and produces safe empty content when object.content is a number", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_002, 1),
+      receivedAt: 1_753_000_000_002,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/3",
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/3",
+          type: "Note",
+          content: 123,
+        },
+      },
+    };
+    expect(() => statusEntity(entry, { baseUrl })).not.toThrow();
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.content).toBe("");
+  });
+
+  it("does not throw and produces safe empty content when object.content is a plain object", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_003, 1),
+      receivedAt: 1_753_000_000_003,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/4",
+        type: "Create",
+        actor: "https://remote.example/users/dave",
+        object: {
+          id: "https://remote.example/objects/4",
+          type: "Note",
+          content: { malicious: "<script>bad()</script>" },
+        },
+      },
+    };
+    expect(() => statusEntity(entry, { baseUrl })).not.toThrow();
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.content).toBe("");
+  });
+
+  it("falls back to safe defaults when summary/sensitive are the wrong type", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_004, 1),
+      receivedAt: 1_753_000_000_004,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/5",
+        type: "Create",
+        actor: "https://remote.example/users/erin",
+        object: {
+          id: "https://remote.example/objects/5",
+          type: "Note",
+          content: "<p>hi</p>",
+          summary: 123,
+          sensitive: "yes",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.spoiler_text).toBe("");
+    expect(status.sensitive).toBe(false);
+  });
 });
 
 describe("remote account id round trip", () => {
@@ -269,5 +337,19 @@ describe("remote account id round trip", () => {
     expect(account.acct).toBe("alice@remote.example");
     expect(account.url).toBe("https://remote.example/users/alice");
     expect(account.avatar).toBeTruthy();
+  });
+
+  it("round-trips a non-ASCII (RFC 3987 IRI) actor id without throwing", () => {
+    const iri = "https://remote.example/users/日本";
+    expect(() => encodeRemoteAccountId(iri)).not.toThrow();
+    const id = encodeRemoteAccountId(iri);
+    expect(id.startsWith("r_")).toBe(true);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+
+  it("round-trips a mix of emoji and multi-byte scripts", () => {
+    const iri = "https://remote.example/users/名前🎉café";
+    const id = encodeRemoteAccountId(iri);
+    expect(decodeRemoteAccountId(id)).toBe(iri);
   });
 });

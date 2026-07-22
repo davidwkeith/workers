@@ -191,8 +191,26 @@ export function markerEntity(
 
 const REMOTE_ACCOUNT_PREFIX = "r_";
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+/**
+ * Byte-safe base64url of a UTF-8 string. `btoa` throws `InvalidCharacterError`
+ * on any code point above `0xFF`, and actor IRIs are attacker-controlled AS2
+ * fields that may legitimately carry raw Unicode (RFC 3987 IRIs) — so this
+ * goes through `TextEncoder` to bytes first rather than passing the raw
+ * UTF-16 string to `btoa` directly. Mirrors the pattern in `encoding.ts`'s
+ * `base64Url`, duplicated locally rather than importing (that helper isn't
+ * exported and has no decode counterpart).
+ */
 function base64UrlEncode(value: string): string {
-  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const bytes = textEncoder.encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 function base64UrlDecode(value: string): string | null {
@@ -200,7 +218,12 @@ function base64UrlDecode(value: string): string | null {
     const padded = value.replace(/-/g, "+").replace(/_/g, "/");
     const pad =
       padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
-    return atob(padded + pad);
+    const binary = atob(padded + pad);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return textDecoder.decode(bytes);
   } catch {
     return null;
   }
@@ -307,31 +330,45 @@ export function statusEntity(
   entry: BackendEntry,
   opts: { readonly baseUrl: string },
 ): Record<string, unknown> {
+  // Every field below is attacker-controlled remote-server JSON (AS2 from
+  // the inbox), so each is read through a `typeof` guard with a safe
+  // fallback rather than trusted at the cast's declared type — an
+  // unguarded non-string/non-boolean value here must degrade to a default,
+  // never propagate untyped or crash a downstream consumer (e.g.
+  // `sanitizeStatusHtml`, which assumes a string).
   const activity = entry.activity as {
-    readonly type?: string;
+    readonly type?: unknown;
     readonly actor?: unknown;
     readonly object?: {
-      readonly id?: string;
-      readonly content?: string;
-      readonly summary?: string;
-      readonly sensitive?: boolean;
-      readonly inReplyTo?: string;
+      readonly id?: unknown;
+      readonly content?: unknown;
+      readonly summary?: unknown;
+      readonly sensitive?: unknown;
+      readonly inReplyTo?: unknown;
       readonly attachment?: unknown;
-      readonly published?: string;
+      readonly published?: unknown;
     };
   };
   const actorIri = typeof activity.actor === "string" ? activity.actor : "";
   const object = activity.object ?? {};
-  const content = sanitizeStatusHtml(object.content ?? "");
-  const uri = object.id ?? entry.id;
+  const content = sanitizeStatusHtml(
+    typeof object.content === "string" ? object.content : "",
+  );
+  const objectId = typeof object.id === "string" ? object.id : null;
+  const uri = objectId ?? entry.id;
+  const published =
+    typeof object.published === "string" ? object.published : null;
+  const summary = typeof object.summary === "string" ? object.summary : "";
+  const sensitive =
+    typeof object.sensitive === "boolean" ? object.sensitive : false;
 
   const inner: Record<string, unknown> = {
     id: entry.id,
-    created_at: object.published ?? new Date(entry.receivedAt).toISOString(),
+    created_at: published ?? new Date(entry.receivedAt).toISOString(),
     in_reply_to_id: null,
     in_reply_to_account_id: null,
-    sensitive: object.sensitive ?? false,
-    spoiler_text: object.summary ?? "",
+    sensitive,
+    spoiler_text: summary,
     visibility: "public",
     language: null,
     uri,
