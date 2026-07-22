@@ -402,3 +402,67 @@ export function statusEntity(
   }
   return inner;
 }
+
+/**
+ * `Like`/`Announce`/reply-`Create` row → `Notification`, or `null` if the
+ * row fits none of the phase-2 notification types (design doc: "Rows that
+ * fit no type are omitted from this endpoint"). `Follow` is deliberately
+ * unhandled — deferred to phase 3, not an oversight.
+ */
+export function notificationEntity(
+  entry: BackendEntry,
+  opts: { readonly baseUrl: string },
+): Record<string, unknown> | null {
+  // Same discipline as statusEntity: every field read off entry.activity is
+  // attacker-controlled remote AS2 JSON (from the inbox of a remote
+  // server), so nothing is trusted at the cast's declared type — each is
+  // read through a `typeof`/`Array.isArray` guard with a safe fallback
+  // before use, never propagated untyped or allowed to crash a downstream
+  // consumer.
+  const activity = entry.activity as {
+    readonly type?: unknown;
+    readonly actor?: unknown;
+    readonly object?: unknown;
+  };
+  const type = typeof activity.type === "string" ? activity.type : "";
+  const actorIri = typeof activity.actor === "string" ? activity.actor : "";
+  const account = actorIri
+    ? remoteAccountEntity(actorIri)
+    : remoteAccountEntity(opts.baseUrl);
+
+  if (type === "Like") {
+    return {
+      id: entry.id,
+      type: "favourite",
+      created_at: new Date(entry.receivedAt).toISOString(),
+      account,
+      status: null,
+    };
+  }
+  if (type === "Announce") {
+    return {
+      id: entry.id,
+      type: "reblog",
+      created_at: new Date(entry.receivedAt).toISOString(),
+      account,
+      status: null,
+    };
+  }
+  if (type === "Create") {
+    const object = activity.object;
+    const inReplyTo =
+      object && typeof object === "object" && !Array.isArray(object)
+        ? (object as Record<string, unknown>).inReplyTo
+        : undefined;
+    if (typeof inReplyTo === "string" && inReplyTo.startsWith(opts.baseUrl)) {
+      return {
+        id: entry.id,
+        type: "mention",
+        created_at: new Date(entry.receivedAt).toISOString(),
+        account,
+        status: statusEntity(entry, opts),
+      };
+    }
+  }
+  return null;
+}

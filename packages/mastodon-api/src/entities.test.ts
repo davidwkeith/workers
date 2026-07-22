@@ -13,6 +13,7 @@ import {
   instanceV1Entity,
   instanceV2Entity,
   markerEntity,
+  notificationEntity,
   remoteAccountEntity,
   statusEntity,
 } from "./entities.js";
@@ -351,5 +352,126 @@ describe("remote account id round trip", () => {
     const iri = "https://remote.example/users/名前🎉café";
     const id = encodeRemoteAccountId(iri);
     expect(decodeRemoteAccountId(id)).toBe(iri);
+  });
+});
+
+describe("notificationEntity", () => {
+  const baseUrl = "https://owner.example";
+
+  it("maps a Like to a favourite notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_002, 1),
+      receivedAt: 1_753_000_000_002,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/3",
+        type: "Like",
+        actor: "https://remote.example/users/carol",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    const notification = notificationEntity(entry, { baseUrl });
+    expect(notification).not.toBeNull();
+    expect(notification!.type).toBe("favourite");
+    expect((notification!.account as { acct: string }).acct).toContain("carol");
+  });
+
+  it("maps an Announce to a reblog notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_003, 1),
+      receivedAt: 1_753_000_000_003,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/4",
+        type: "Announce",
+        actor: "https://remote.example/users/dave",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    expect(notificationEntity(entry, { baseUrl })!.type).toBe("reblog");
+  });
+
+  it("maps a reply Create into this actor's namespace to a mention notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_004, 1),
+      receivedAt: 1_753_000_000_004,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/5",
+        type: "Create",
+        actor: "https://remote.example/users/erin",
+        object: {
+          id: "https://remote.example/objects/5",
+          type: "Note",
+          content: "<p>reply</p>",
+          inReplyTo: `${baseUrl}/users/owner/outbox/1`,
+        },
+      },
+    };
+    const notification = notificationEntity(entry, { baseUrl });
+    expect(notification!.type).toBe("mention");
+    expect(notification!.status).toBeTruthy();
+  });
+
+  it("returns null for a plain top-level Create with no reply target", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_005, 1),
+      receivedAt: 1_753_000_000_005,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        type: "Create",
+        actor: "https://remote.example/users/frank",
+        object: { type: "Note", content: "<p>unrelated</p>" },
+      },
+    };
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
+  });
+
+  // Regression tests for the Task 5 lesson: every field read off
+  // entry.activity is attacker-controlled remote AS2 JSON and must be
+  // individually type-guarded, never trusted as the "obviously right"
+  // type. These cover the two guards specific to notificationEntity:
+  // activity.object as a non-object, and activity.type as a non-string.
+
+  it("does not throw when a Create's object is a bare IRI reference, not an embedded object", () => {
+    // A realistic bare-IRI-Announce/reply-by-reference shape: some remote
+    // implementations send `object` as a plain string IRI rather than an
+    // embedded object, even on a Create. There is no `inReplyTo` to read
+    // off a string, so this must fall through to null, not crash.
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_006, 1),
+      receivedAt: 1_753_000_000_006,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/6",
+        type: "Create",
+        actor: "https://remote.example/users/grace",
+        object: "https://remote.example/objects/6",
+      },
+    };
+    expect(() => notificationEntity(entry, { baseUrl })).not.toThrow();
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
+  });
+
+  it("does not throw and returns null when activity.type is not a string", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_007, 1),
+      receivedAt: 1_753_000_000_007,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/7",
+        type: 12345,
+        actor: "https://remote.example/users/heidi",
+        object: `${baseUrl}/users/owner/outbox/1`,
+      },
+    };
+    expect(() => notificationEntity(entry, { baseUrl })).not.toThrow();
+    expect(notificationEntity(entry, { baseUrl })).toBeNull();
   });
 });
