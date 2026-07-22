@@ -15,7 +15,7 @@ was approved.
 - **`verify_state`** only ever takes `NULL` (direct), `'pending'`, or
   `'verified'` — a refuted relayed row is deleted outright
   (`#dropRelayedRow`), never marked `'failed'`. The design doc's `verify_state
-  = 'failed'` exclusion is defensive/belt-and-suspenders, not a real state
+= 'failed'` exclusion is defensive/belt-and-suspenders, not a real state
   the new routes need to branch on.
 - **`object_type` reflects the embedded object's AS2 `type`, not the
   activity's own `type`**, and is populated only when `activity.object` is an
@@ -35,9 +35,9 @@ was approved.
   as-is; no new gating is introduced by this phase.
 - **The adapter's data-fetch mechanism is `mcp-tools.ts`/`syndication.ts`'s
   pattern, not `createSolidPodWebdav`'s.** `createSolidPodWebdav` is the
-  right precedent for the *export shape* (a single `createX` factory in the
+  right precedent for the _export shape_ (a single `createX` factory in the
   DO-owning package), but its actual backend wiring is closures living
-  *inside* the DO class (`pod.ts`), which only works because `@dwk/webdav`'s
+  _inside_ the DO class (`pod.ts`), which only works because `@dwk/webdav`'s
   backend consumer is the DO itself. `@dwk/mastodon-api` is a separate
   package with no DO code, so `createActivitypubMastodonApi`'s
   `MastodonBackend` implementation must instead build a synthetic `Request`
@@ -67,12 +67,12 @@ a bare bound recovered from the snowflake's low bits alone:
   `max_received_at` / `since_received_at` / `min_received_at` (epoch ms) plus
   an optional `tie_seq` (the decoded `seq & 0x7FFF`) to break same-millisecond
   ordering — `ORDER BY received_at DESC, seq DESC`, `WHERE (received_at, seq)
-  < (max_received_at, tie_seq)` in the paginated direction actually queried.
+< (max_received_at, tie_seq)` in the paginated direction actually queried.
   In the overwhelmingly common case (no two inbox rows share a millisecond)
   the tiebreak is unused.
 - `__client/entry`: `GET <actor>/__client/entry?received_at=<ms>&seq_low=<n>`
   → `SELECT * FROM inbox WHERE received_at = ? AND (seq % 32768) = ? ORDER BY
-  seq LIMIT 1` — exact for any table size because `received_at` alone almost
+seq LIMIT 1` — exact for any table size because `received_at` alone almost
   always identifies the row; `seq_low` only disambiguates a same-millisecond
   collision.
 
@@ -85,6 +85,23 @@ before calling the internal route, and encoding a DO row's
 computes `received_at`/`seq` — it only ever handles opaque decimal snowflake
 strings, per the `MastodonBackend` seam's existing `maxId`/`sinceId`/`minId`
 shape.
+
+## Known gap: bare-IRI `Announce` objects render as empty statuses
+
+`statusEntity` (Task 5, `entities.ts`) reads `activity.object`'s fields
+(`content`, `summary`, `attachment`, …) assuming an embedded object. A
+plain (non-relayed) `Announce`'s `object` is, per ordinary ActivityPub
+practice, often just the boosted post's IRI as a **bare string** — indexing
+into a string primitive returns `undefined` for every field (safe, no
+crash, confirmed during Task 5's review), so such a row currently renders
+as a content-less `Status` rather than the actual boosted post. This does
+not block phase 2's acceptance bar (the pixelfed-qa step-4 like + reply are
+favourite/mention notifications, not a boost-rendering case), so it is
+left as a documented gap rather than fixed now — whoever owns the
+DO-to-adapter seam should confirm whether `Announce` rows are denormalized
+to an embedded shape before storage, or whether `statusEntity` needs a
+`Create`-vs-plain-`Announce` branch that dereferences the boosted post
+separately, before phase 3 relies on boosts rendering correctly.
 
 ## Scope decision: Follow notifications deferred to phase 3
 
