@@ -1451,7 +1451,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       const outbox = this.#sql
         .exec<{ seq: number; json: string; published_at: number }>(
           `SELECT seq, json, published_at FROM outbox WHERE ${outboxWhere}
-             ORDER BY published_at DESC, seq DESC LIMIT ?`,
+             ORDER BY published_at ${order}, seq ${order} LIMIT ?`,
           ...outboxParams,
           limit,
         )

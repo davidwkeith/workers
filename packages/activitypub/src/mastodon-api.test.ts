@@ -470,6 +470,39 @@ describe("buildMastodonBackend", () => {
     ]);
   });
 
+  it("timeline() minId selects the nearest unseen owner post before normalizing its order", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const publishedAt = Date.now();
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (const offset of [0, 1, 2]) {
+        state.storage.sql.exec(
+          `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+          `${config.iris.outbox}/local-min-${offset}`,
+          JSON.stringify({
+            id: `${config.iris.outbox}/local-min-${offset}`,
+            type: "Create",
+            actor: config.iris.id,
+            object: {
+              id: `${config.iris.outbox}/local-min-${offset}/object`,
+              type: "Note",
+              content: `local ${offset}`,
+            },
+          }),
+          publishedAt + offset,
+        );
+      }
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const all = await backend.timeline({ limit: 10 });
+    const oldest = all.entries[all.entries.length - 1]!;
+
+    const next = await backend.timeline({ limit: 1, minId: oldest.id });
+    expect(next.entries.map((entry) => entry.activity["id"])).toEqual([
+      `${config.iris.outbox}/local-min-1`,
+    ]);
+  });
+
   it("timeline() with an undecodable minId does NOT reverse the page (min_received_at never reached the DO request, so the DO's own default newest-first order must pass through unchanged)", async () => {
     const config = freshConfig();
     const first = createNote(config);
