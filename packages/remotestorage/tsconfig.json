@@ -12,7 +12,11 @@
       // `@dwk/store`'s `Store` interface references `@dwk/rdf`'s `StoredQuad`
       // (the `readQuads`/`writeQuads` RDF tier we don't call); map it so
       // `typecheck` resolves the transitive type before the workspace is built.
-      "@dwk/rdf": ["../rdf/src/index.ts"]
+      "@dwk/rdf": ["../rdf/src/index.ts"],
+      // `@dwk/webfinger`'s own source (path-mapped above) imports
+      // `@dwk/safe-fetch` for its shared timeout-signal helper, and that
+      // import resolves under THIS program's paths too.
+      "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [
       "@cloudflare/workers-types",

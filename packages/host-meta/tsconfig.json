@@ -7,7 +7,11 @@
     // rootDir-containment check. This config is `noEmit`, so rootDir is moot.
     "paths": {
       "@dwk/log": ["../log/src/index.ts"],
-      "@dwk/webfinger": ["../webfinger/src/index.ts"]
+      "@dwk/webfinger": ["../webfinger/src/index.ts"],
+      // `@dwk/webfinger`'s own source (path-mapped above) imports
+      // `@dwk/safe-fetch` for its shared timeout-signal helper, and that
+      // import resolves under THIS program's paths too.
+      "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": ["@cloudflare/workers-types"],
     "noEmit": true

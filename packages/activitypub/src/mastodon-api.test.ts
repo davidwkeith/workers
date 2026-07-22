@@ -557,6 +557,43 @@ describe("buildMastodonBackend", () => {
     );
   });
 
+  it("caps the inbox scan instead of exhausting a plain-post-dominated table", async () => {
+    const config = freshConfig();
+    const timestamp = Date.now();
+    // limit:1 => BATCH = max(1*4, 40) = 40; MAX_SCAN_BATCHES = 25, so the
+    // scan gives up after 1000 rows. Bury a real mention behind 1000 newer
+    // plain (non-notification) rows so it falls just past that cap.
+    const buriedMention = createMention(config);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, object_type)
+           VALUES (?, ?, ?, 'Note')`,
+        buriedMention["id"] as string,
+        JSON.stringify(buriedMention),
+        timestamp,
+      );
+      for (let i = 0; i < 1000; i++) {
+        const note = createNote(config);
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, object_type)
+             VALUES (?, ?, ?, 'Note')`,
+          note["id"] as string,
+          JSON.stringify(note),
+          timestamp + i + 1,
+        );
+      }
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.notifications({ limit: 1 });
+    expect(
+      page.entries.some(
+        (entry) => entry.activity["id"] === buriedMention["id"],
+      ),
+    ).toBe(false);
+  });
+
   it("timeline() maxId cursor translates to max_received_at/tie_seq and excludes newer rows", async () => {
     const config = freshConfig();
     const first = createNote(config);
