@@ -38,6 +38,7 @@ export type {
   ExtensionGroupsConfig,
   PostTypeConfig,
   MicropubContactStoreProvider,
+  AudienceConfig,
 } from "./config.js";
 
 export {
@@ -85,6 +86,8 @@ export {
   validateVocabulary,
   POST_STATUS_VALUES,
   VISIBILITY_VALUES,
+  LOCATION_VISIBILITY_VALUES,
+  normalizeProposedVocabulary,
   Mf2ParseError,
   type Mf2Object,
   type MicropubCommands,

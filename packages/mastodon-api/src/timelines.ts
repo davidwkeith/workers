@@ -2,6 +2,7 @@
 
 import { authenticateBearer } from "./auth.js";
 import { statusEntity } from "./entities.js";
+import { credentialAccountEntity } from "./entities.js";
 import { accountRequired, invalidToken } from "./errors.js";
 import type { RouteContext } from "./handler.js";
 import { buildLinkHeader } from "./pagination.js";
@@ -33,8 +34,15 @@ export async function handleHomeTimeline(ctx: RouteContext): Promise<Response> {
     sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
     minId: ctx.url.searchParams.get("min_id") ?? undefined,
   });
+  const hasOwnerPost = page.entries.some((entry) => entry.source === 1);
+  const ownerAccount = hasOwnerPost
+    ? credentialAccountEntity(
+        ctx.config,
+        (await ctx.config.backend.account()).counts,
+      )
+    : undefined;
   const statuses = page.entries.map((entry) =>
-    statusEntity(entry, { baseUrl: ctx.config.baseUrl }),
+    statusEntity(entry, { baseUrl: ctx.config.baseUrl, ownerAccount }),
   );
   const link = buildLinkHeader(ctx.url, {
     firstId: page.entries[0]?.id,

@@ -21,6 +21,7 @@ import {
   parseUpdateOperations,
   sourceView,
   sourceListView,
+  normalizeProposedVocabulary,
   validateVocabulary,
   Mf2ParseError,
   type Mf2Object,
@@ -533,6 +534,12 @@ async function handleQuery(
       ...(config.extensions.stable && config.postTypes
         ? { "post-types": config.postTypes }
         : {}),
+      ...(config.extensions.proposed
+        ? {
+            properties: ["audience", "location-visibility"],
+            audiences: config.audiences,
+          }
+        : {}),
       q: supportedQueries,
     });
   }
@@ -922,9 +929,28 @@ export async function publishPost(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const properties: Record<string, unknown[]> = {};
+  let properties: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(mf2.properties)) {
     properties[key] = [...values];
+  }
+
+  if (config.extensions.proposed) {
+    try {
+      properties = normalizeProposedVocabulary(properties, config.audienceIds);
+    } catch (err) {
+      if (err instanceof Mf2ParseError) {
+        emit(config, "warn", MicropubLogEvent.RequestRejected, {
+          reason: "invalid_vocabulary",
+        });
+        return {
+          ok: false,
+          error: "invalid_request",
+          description: err.message,
+          status: 400,
+        };
+      }
+      throw err;
+    }
   }
 
   // Resolve the configured URL policy, retrying on the rare slug collision.
@@ -1022,12 +1048,25 @@ async function doUpdate(
     }
     throw err;
   }
-  const next = applyUpdate(record.properties, ops);
+  let next = applyUpdate(record.properties, ops);
   // Validate the *merged* result so an update introducing a bad
   // `post-status`/`visibility` is rejected (stable group only).
   if (config.extensions.stable) {
     try {
       validateVocabulary(next);
+    } catch (err) {
+      if (err instanceof Mf2ParseError) {
+        emit(config, "warn", MicropubLogEvent.RequestRejected, {
+          reason: "invalid_vocabulary",
+        });
+        return error("invalid_request", err.message, 400);
+      }
+      throw err;
+    }
+  }
+  if (config.extensions.proposed) {
+    try {
+      next = normalizeProposedVocabulary(next, config.audienceIds);
     } catch (err) {
       if (err instanceof Mf2ParseError) {
         emit(config, "warn", MicropubLogEvent.RequestRejected, {

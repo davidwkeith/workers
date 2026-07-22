@@ -62,5 +62,8 @@ export async function handleGetAccount(
 
   const actorIri = decodeRemoteAccountId(id);
   if (!actorIri) return recordNotFound();
-  return Response.json(remoteAccountEntity(actorIri));
+  const profile = ctx.config.backend?.actorProfile
+    ? await ctx.config.backend.actorProfile(actorIri)
+    : null;
+  return Response.json(remoteAccountEntity(actorIri, profile));
 }

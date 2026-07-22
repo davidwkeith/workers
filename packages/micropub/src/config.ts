@@ -55,6 +55,19 @@ export interface PostTypeConfig {
   readonly name: string;
 }
 
+/**
+ * A named audience a client may assign to a private post when the proposed
+ * Audience extension is enabled. `uid` is the persisted mf2 `audience` value;
+ * `name` is display-only client metadata. The consuming site/WAC layer maps
+ * these stable IDs to its own access-control rules.
+ */
+export interface AudienceConfig {
+  /** Stable identifier a client stores in the `audience` mf2 property. */
+  readonly uid: string;
+  /** Human-readable label for the client's audience picker. */
+  readonly name: string;
+}
+
 /** A syndication target advertised by `q=config` / `q=syndicate-to`. */
 export interface SyndicationTarget {
   /** Stable identifier the client echoes back as `mp-syndicate-to`. */
@@ -114,6 +127,12 @@ export interface MicropubConfig {
    * `proposed` off.
    */
   readonly extensions?: ExtensionGroupsConfig;
+  /**
+   * Named audiences advertised to clients when `extensions.proposed` is on.
+   * They are publishing metadata only: this package does not resolve contacts
+   * or enforce access control for any audience.
+   */
+  readonly audiences?: readonly AudienceConfig[];
   /**
    * Private h-card store for the proposed Contacts extension. Contacts are
    * advertised only when this is set and the proposed group is enabled.
@@ -185,6 +204,11 @@ export interface ResolvedConfig {
   readonly scopesSupported: readonly string[];
   /** Resolved per-group enablement flags (every group present). */
   readonly extensions: Readonly<Record<ExtensionMaturity, boolean>>;
+  /** Named audience IDs accepted by the proposed Audience extension. */
+  readonly audiences: readonly AudienceConfig[];
+  /** Precomputed membership set for validating proposed audience IDs. */
+  readonly audienceIds: ReadonlySet<string>;
+  /** Normalized Contacts store provider, when the extension is configured. */
   readonly contacts?: MicropubContactStoreProvider;
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
@@ -285,6 +309,19 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
   const micropubEndpoint = config.micropubEndpoint ?? `${origin}/micropub`;
   const mediaEndpoint = config.mediaEndpoint ?? `${origin}/media`;
   const contactStore = normalizeContactStore(config.contacts);
+  const audiences = config.audiences ?? [];
+  const audienceIds = new Set<string>();
+  for (const audience of audiences) {
+    if (!audience.uid || !audience.name) {
+      throw new Error(
+        "@dwk/micropub: every audience requires non-empty `uid` and `name`",
+      );
+    }
+    if (audienceIds.has(audience.uid)) {
+      throw new Error("@dwk/micropub: audience `uid` values must be unique");
+    }
+    audienceIds.add(audience.uid);
+  }
 
   return {
     me,
@@ -304,6 +341,8 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       stable: config.extensions?.stable ?? true,
       proposed: config.extensions?.proposed ?? false,
     },
+    audiences,
+    audienceIds,
     ...(contactStore ? { contacts: contactStore } : {}),
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),

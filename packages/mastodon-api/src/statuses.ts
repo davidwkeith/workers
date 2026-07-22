@@ -1,7 +1,7 @@
 /** `GET /api/v1/statuses/:id`. */
 
 import { authenticateBearer } from "./auth.js";
-import { statusEntity } from "./entities.js";
+import { credentialAccountEntity, statusEntity } from "./entities.js";
 import { accountRequired, invalidToken, recordNotFound } from "./errors.js";
 import type { RouteContext } from "./handler.js";
 import { createMastodonStore } from "./store.js";
@@ -20,5 +20,14 @@ export async function handleGetStatus(
 
   const entry = await ctx.config.backend.entry(id);
   if (!entry) return recordNotFound();
-  return Response.json(statusEntity(entry, { baseUrl: ctx.config.baseUrl }));
+  const ownerAccount =
+    entry.source === 1
+      ? credentialAccountEntity(
+          ctx.config,
+          (await ctx.config.backend.account()).counts,
+        )
+      : undefined;
+  return Response.json(
+    statusEntity(entry, { baseUrl: ctx.config.baseUrl, ownerAccount }),
+  );
 }
