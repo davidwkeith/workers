@@ -38,11 +38,14 @@ const DEFAULT_ALLOWED_SCHEMES = ["http:", "https:"] as const;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
- * Create a request signal that is cancelled by either the caller or an
- * overall timeout. Unlike `AbortSignal.timeout()`, its timer can be released
- * as soon as the request completes.
+ * Create a request signal that is cancelled by either an optional caller
+ * signal or an overall timeout. Unlike `AbortSignal.timeout()`, its timer can
+ * be released as soon as the request completes, so it doesn't keep a Durable
+ * Object's event loop alive after a successful call. The shared primitive for
+ * every `@dwk` package that bounds an outbound request with a cancellable
+ * timeout, rather than each re-deriving its own copy.
  */
-function createTimeoutSignal(
+export function createTimeoutSignal(
   callerSignal: AbortSignal | null | undefined,
   timeoutMs: number,
 ): { readonly signal: AbortSignal; readonly cancel: () => void } {

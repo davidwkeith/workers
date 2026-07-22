@@ -72,6 +72,16 @@ const ACTOR_PROFILE_DEBOUNCE_MS = 1_000;
 /** Actor documents are optional display metadata; keep their cache well below a DO SQLite cell. */
 const ACTOR_PROFILE_MAX_BODY_BYTES = 128 * 1024;
 /**
+ * Hard cap on batches scanned per client-list page in `#serveClientList`,
+ * both for the inbox (notifications: favourite/reblog/mention) and for the
+ * outbox owner-post merge into the timeline. Without it, an inbox or outbox
+ * dominated by unwanted activity types (plain Create/Update rows for
+ * notifications; Like/Announce/etc. for the timeline merge) forces a
+ * near-full-table scan per request; past this cap the page simply returns
+ * fewer than `limit` matches rather than exhausting the table.
+ */
+const MAX_SCAN_BATCHES = 25;
+/**
  * Cardinality cap on the pending-metrics table: at most this many distinct
  * `(event, fields)` keys accumulate between drains. Delivery fields include
  * the target host and attempt number, so a large follower set could otherwise
@@ -1373,7 +1383,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Gating it on `matches.length > 0` instead (as a prior version did) lets
     // a zero-match first batch re-issue the exact same query forever.
     let isFirstBatch = true;
-    while (matches.length < limit && !exhausted) {
+    // Bounded for the same reason as the outbox merge below: a notifications
+    // page (favourite/reblog/mention) over an inbox dominated by plain
+    // Create/Update rows would otherwise scan the whole table.
+    let inboxBatches = 0;
+    while (
+      matches.length < limit &&
+      !exhausted &&
+      inboxBatches < MAX_SCAN_BATCHES
+    ) {
+      inboxBatches++;
       let batchWhere = where;
       const batchParams = [...params];
       if (cursorReceivedAt !== null && !isFirstBatch) {
@@ -1448,7 +1467,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       let outboxCursorSeq = tieSeq !== null ? Number(tieSeq) : null;
       let outboxExhausted = false;
       let isFirstOutboxBatch = true;
-      while (outboxMatches.length < limit && !outboxExhausted) {
+      // An owner outbox dominated by non-post activities (Like/Announce/etc.)
+      // would otherwise force a near-full-table scan per timeline request;
+      // cap the number of batches so a sparse outbox degrades to "found
+      // fewer than `limit` owner posts this page" instead of an unbounded scan.
+      let outboxBatches = 0;
+      while (
+        outboxMatches.length < limit &&
+        !outboxExhausted &&
+        outboxBatches < MAX_SCAN_BATCHES
+      ) {
+        outboxBatches++;
         let outboxWhere = initialOutbox.where;
         const outboxParams = [...initialOutbox.params];
         if (outboxCursorReceivedAt !== null && !isFirstOutboxBatch) {

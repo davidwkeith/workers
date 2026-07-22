@@ -420,6 +420,53 @@ describe("buildMastodonBackend", () => {
     ]);
   });
 
+  it("caps the outbox scan instead of exhausting a like-dominated table", async () => {
+    const config = freshConfig();
+    const timestamp = Date.now();
+    // limit:1 => BATCH = max(1*4, 40) = 40; MAX_OUTBOX_SCAN_BATCHES = 25, so
+    // the scan gives up after 1000 rows. Bury a real owner post behind 1000
+    // newer non-post rows so it falls just past that cap.
+    const buriedPost = {
+      id: `${config.iris.outbox}/buried-owner-post`,
+      type: "Create",
+      actor: config.iris.id,
+      object: {
+        id: `${config.iris.outbox}/buried-owner-post/object`,
+        type: "Note",
+        content: "buried owner post",
+      },
+    };
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        buriedPost.id,
+        JSON.stringify(buriedPost),
+        timestamp,
+      );
+      for (let i = 0; i < 1000; i++) {
+        const like = {
+          id: `${config.iris.outbox}/scan-cap-like-${i}`,
+          type: "Like",
+          actor: config.iris.id,
+          object: `https://remote.example/objects/${i}`,
+        };
+        state.storage.sql.exec(
+          `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+          like.id,
+          JSON.stringify(like),
+          timestamp + i + 1,
+        );
+      }
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.timeline({ limit: 1 });
+    expect(
+      page.entries.some((entry) => entry.activity["id"] === buriedPost.id),
+    ).toBe(false);
+  });
+
   it("serves cached actor profile fields without an outbound request", async () => {
     const config = freshConfig();
     const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
@@ -508,6 +555,43 @@ describe("buildMastodonBackend", () => {
     expect(page.entries.map((e) => e.activity["id"]).sort()).toEqual(
       [mention["id"], like["id"]].sort(),
     );
+  });
+
+  it("caps the inbox scan instead of exhausting a plain-post-dominated table", async () => {
+    const config = freshConfig();
+    const timestamp = Date.now();
+    // limit:1 => BATCH = max(1*4, 40) = 40; MAX_SCAN_BATCHES = 25, so the
+    // scan gives up after 1000 rows. Bury a real mention behind 1000 newer
+    // plain (non-notification) rows so it falls just past that cap.
+    const buriedMention = createMention(config);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, object_type)
+           VALUES (?, ?, ?, 'Note')`,
+        buriedMention["id"] as string,
+        JSON.stringify(buriedMention),
+        timestamp,
+      );
+      for (let i = 0; i < 1000; i++) {
+        const note = createNote(config);
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, object_type)
+             VALUES (?, ?, ?, 'Note')`,
+          note["id"] as string,
+          JSON.stringify(note),
+          timestamp + i + 1,
+        );
+      }
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.notifications({ limit: 1 });
+    expect(
+      page.entries.some(
+        (entry) => entry.activity["id"] === buriedMention["id"],
+      ),
+    ).toBe(false);
   });
 
   it("timeline() maxId cursor translates to max_received_at/tie_seq and excludes newer rows", async () => {

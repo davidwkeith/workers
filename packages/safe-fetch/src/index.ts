@@ -15,6 +15,7 @@ export {
   isPrivateOrReservedHost,
   assertPublicUrl,
   safeFetch,
+  createTimeoutSignal,
   SsrfError,
   DEFAULT_MAX_REDIRECTS,
   DEFAULT_TIMEOUT_MS,
