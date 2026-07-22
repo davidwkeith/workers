@@ -12,10 +12,13 @@
  * primitive; this module wires it to the network.
  */
 
-import { assertPublicUrl, SsrfError } from "@dwk/safe-fetch";
+import {
+  assertPublicUrl,
+  createTimeoutSignal,
+  SsrfError,
+} from "@dwk/safe-fetch";
 
 import { signRequest, type SignerKey } from "./signature.js";
-import { createTimeoutSignal } from "./timeout.js";
 
 /** Machine-readable cause of a blocked delivery target. */
 export type BlockedReason =
@@ -88,7 +91,7 @@ export async function deliverActivity(
   const signed = await signRequest(inboxUrl, body, signer, { now });
 
   let response: Response;
-  const timeout = createTimeoutSignal(timeoutMs);
+  const timeout = createTimeoutSignal(undefined, timeoutMs);
   try {
     response = await fetchImpl(inboxUrl, {
       method: "POST",

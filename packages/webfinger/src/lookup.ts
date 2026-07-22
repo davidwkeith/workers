@@ -14,6 +14,8 @@
  * @see spec/fediverse-interop.md §2.4 (community discovery)
  */
 
+import { createTimeoutSignal } from "@dwk/safe-fetch";
+
 /** A parsed `user@host` handle. `user` keeps its case; `host` is lowercased. */
 export interface ParsedHandle {
   readonly user: string;
@@ -113,19 +115,6 @@ export interface ResolveHandleOptions {
   readonly timeoutMs?: number;
 }
 
-/** Make a timeout signal whose timer is released when the lookup completes. */
-function createTimeoutSignal(timeoutMs: number): {
-  readonly signal: AbortSignal;
-  readonly cancel: () => void;
-} {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  return {
-    signal: controller.signal,
-    cancel: () => clearTimeout(timeout),
-  };
-}
-
 /**
  * Resolve a handle to its ActivityPub actor IRI: parse, query
  * `/.well-known/webfinger` on the handle's host, and select the `self` actor
@@ -139,7 +128,7 @@ export async function resolveHandle(
   const parsed = parseHandle(handle);
   if (!parsed) return null;
   let response: Response;
-  const timeout = createTimeoutSignal(options.timeoutMs ?? 10_000);
+  const timeout = createTimeoutSignal(undefined, options.timeoutMs ?? 10_000);
   try {
     response = await options.fetch(webfingerQueryUrl(parsed), {
       headers: { accept: "application/jrd+json, application/json" },
