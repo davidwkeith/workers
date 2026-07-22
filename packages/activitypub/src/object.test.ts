@@ -1067,9 +1067,10 @@ describe("inbox classification", () => {
       );
       expect(res.status).toBe(202);
       const row = state.storage.sql
-        .exec<{ object_type: string | null; audience: string | null }>(
-          `SELECT object_type, audience FROM inbox`,
-        )
+        .exec<{
+          object_type: string | null;
+          audience: string | null;
+        }>(`SELECT object_type, audience FROM inbox`)
         .one();
       expect(row.object_type).toBe("Page");
       expect(row.audience).toBe("https://lemmy.example/c/birding");
@@ -1097,9 +1098,10 @@ describe("inbox classification", () => {
       );
       expect(res.status).toBe(202);
       const row = state.storage.sql
-        .exec<{ object_type: string | null; audience: string | null }>(
-          `SELECT object_type, audience FROM inbox`,
-        )
+        .exec<{
+          object_type: string | null;
+          audience: string | null;
+        }>(`SELECT object_type, audience FROM inbox`)
         .one();
       expect(row.object_type).toBeNull();
       expect(row.audience).toBeNull();
@@ -1209,9 +1211,11 @@ describe("announce unwrapping (FEP-1b12)", () => {
       expect(inner?.audience).toBe(GROUP);
       // Content tier: the verify row is due immediately.
       const verify = state.storage.sql
-        .exec<{ target: string; expect: string; next_at: number }>(
-          `SELECT target, expect, next_at FROM verify_queue`,
-        )
+        .exec<{
+          target: string;
+          expect: string;
+          next_at: number;
+        }>(`SELECT target, expect, next_at FROM verify_queue`)
         .one();
       expect(verify.target).toBe(`${AUTHOR}/post/1`);
       expect(verify.expect).toBe("present");
@@ -1237,9 +1241,10 @@ describe("announce unwrapping (FEP-1b12)", () => {
       );
       expect(res.status).toBe(202);
       const verify = state.storage.sql
-        .exec<{ target: string; next_at: number }>(
-          `SELECT target, next_at FROM verify_queue`,
-        )
+        .exec<{
+          target: string;
+          next_at: number;
+        }>(`SELECT target, next_at FROM verify_queue`)
         .one();
       // Votes verify at the activity id, after the sweep delay.
       expect(verify.target).toBe(`${AUTHOR}/activities/like-1`);
@@ -1268,7 +1273,10 @@ describe("announce unwrapping (FEP-1b12)", () => {
         .one().n;
       expect(queued).toBe(0);
       const inner = state.storage.sql
-        .exec<{ relayed_by: string | null; verify_state: string | null }>(
+        .exec<{
+          relayed_by: string | null;
+          verify_state: string | null;
+        }>(
           `SELECT relayed_by, verify_state FROM inbox WHERE id = ?`,
           `${AUTHOR}/activities/2`,
         )
@@ -1326,10 +1334,9 @@ describe("announce unwrapping (FEP-1b12)", () => {
         ),
       );
       const copies = state.storage.sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE id = ?`, innerId)
         .one().n;
       expect(copies).toBe(1);
     });
@@ -1402,16 +1409,16 @@ describe("outbound relationship activities", () => {
       );
       expect(res.status).toBe(201);
       const following = state.storage.sql
-        .exec<{ state: string }>(
-          `SELECT state FROM following WHERE actor = ?`,
-          GROUP,
-        )
+        .exec<{
+          state: string;
+        }>(`SELECT state FROM following WHERE actor = ?`, GROUP)
         .one();
       expect(following.state).toBe("pending");
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1442,9 +1449,10 @@ describe("outbound relationship activities", () => {
         .one().n;
       expect(rows).toBe(0);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1522,9 +1530,10 @@ describe("outbound vote delivery (Like/Dislike audience)", () => {
       );
       expect(res.status).toBe(201);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1626,9 +1635,10 @@ describe("community post delivery", () => {
       );
       expect(res.status).toBe(201);
       const pending = state.storage.sql
-        .exec<{ kind: string; actor: string }>(
-          `SELECT kind, actor FROM pending_accept`,
-        )
+        .exec<{
+          kind: string;
+          actor: string;
+        }>(`SELECT kind, actor FROM pending_accept`)
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
@@ -1716,10 +1726,9 @@ describe("follow-target typing and backfill", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ actor_type: string | null }>(
-          `SELECT actor_type FROM following WHERE actor = ?`,
-          REMOTE,
-        )
+        .exec<{
+          actor_type: string | null;
+        }>(`SELECT actor_type FROM following WHERE actor = ?`, REMOTE)
         .one();
       expect(row.actor_type).toBe("Person");
       const deliveries = state.storage.sql
@@ -1778,10 +1787,9 @@ describe("relayed-object verification", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("verified");
       const queued = state.storage.sql
@@ -1806,10 +1814,9 @@ describe("relayed-object verification", () => {
         },
       );
       const copies = state.storage.sql
-        .exec<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM inbox WHERE id = ?`, innerId)
         .one().n;
       expect(copies).toBe(0);
       const queued = state.storage.sql
@@ -1839,10 +1846,9 @@ describe("relayed-object verification", () => {
       );
       // Row survives, still pending, and the verify row backs off.
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("pending");
       const verify = state.storage.sql
@@ -1882,10 +1888,9 @@ describe("relayed-object verification", () => {
       );
       // The vote row survives as provisional; verification simply stops.
       const copies = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          voteId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, voteId)
         .one();
       expect(copies.verify_state).toBe("pending");
       const queued = state.storage.sql
@@ -1910,16 +1915,16 @@ describe("relayed-object verification", () => {
         },
       );
       const row = state.storage.sql
-        .exec<{ verify_state: string | null }>(
-          `SELECT verify_state FROM inbox WHERE id = ?`,
-          innerId,
-        )
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
         .one();
       expect(row.verify_state).toBe("pending");
       const verify = state.storage.sql
-        .exec<{ attempts: number; next_at: number }>(
-          `SELECT attempts, next_at FROM verify_queue`,
-        )
+        .exec<{
+          attempts: number;
+          next_at: number;
+        }>(`SELECT attempts, next_at FROM verify_queue`)
         .one();
       expect(verify.attempts).toBe(1);
       expect(verify.next_at).toBeGreaterThan(Date.now());
@@ -2253,14 +2258,18 @@ describe("delivery outcome logging", () => {
           },
         );
         const overflow = state.storage.sql
-          .exec<{ n: number }>(
+          .exec<{
+            n: number;
+          }>(
             `SELECT n FROM pending_metrics WHERE event = ?`,
             ActivityPubLogEvent.MetricsOverflow,
           )
           .toArray();
         expect(overflow).toEqual([{ n: 1 }]);
         const succeeded = state.storage.sql
-          .exec<{ n: number }>(
+          .exec<{
+            n: number;
+          }>(
             `SELECT COUNT(*) AS n FROM pending_metrics WHERE event = ?`,
             ActivityPubLogEvent.DeliverySucceeded,
           )

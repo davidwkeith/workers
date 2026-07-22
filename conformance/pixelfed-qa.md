@@ -61,7 +61,7 @@ conformance runs on 2026-07-20 (owner-publish `Note` succeeded in the
    The Pixelfed account's actor IRI should appear in the collection.
 
 - [x] **Pass** — follower appears in the collection
-- [ ] **Fail** — note what happened: ________________________________
+- [ ] **Fail** — note what happened: **************\_\_\_\_**************
 
 Confirmed via `GET /users/conformance/followers?page=1`:
 `"orderedItems":["https://pixelfed.social/users/dwk", …]`.
@@ -92,7 +92,7 @@ Expected: `200`/`202` with the created activity's id. Record the response
 here: `201`, `id: https://conformance.dwk.io/users/conformance/outbox/107be5e2-099a-4de2-80b5-2f6ef91fec3a`
 
 - [x] **Pass** — request succeeded
-- [ ] **Fail** — status code / body: ________________________________
+- [ ] **Fail** — status code / body: **************\_\_\_\_**************
 
 ### Step 3 — Verify rendering on Pixelfed
 
@@ -122,7 +122,7 @@ target rather than a plain `curl`):
 
 - [x] **Pass** — `Like` activity recorded in the inbox
 - [x] **Pass** — reply (`Create`/`Note` with `inReplyTo`) recorded in the inbox
-- [ ] **Fail** — note what's missing: ________________________________
+- [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 **Marked passing on indirect evidence, not direct verification.** This
 deployment doesn't mount `@dwk/mcp`'s `activitypub_list_inbox` (the intended

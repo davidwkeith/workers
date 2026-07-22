@@ -1208,8 +1208,42 @@ describe("@dwk/micropub query and action edge cases", () => {
     );
   });
 
-  it("rejects q=source without a url", async () => {
+  it("returns list of posts for q=source without a url", async () => {
     const minted = await mintToken("create");
+    const res1 = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: { content: ["list-test-1"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res1.status).toBe(201);
+    const url1 = new URL(res1.headers.get("location") ?? "");
+    const res2 = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: { content: ["list-test-2"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res2.status).toBe(201);
+    const url2 = new URL(res2.headers.get("location") ?? "");
     const res = await handler(
       new Request(`${MICROPUB}?q=source`, {
         headers: await authHeaders(minted, "GET", MICROPUB),
@@ -1217,7 +1251,128 @@ describe("@dwk/micropub query and action edge cases", () => {
       harness,
       ctx,
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      items?: unknown[];
+    };
+    expect(data).toHaveProperty("items");
+    expect(Array.isArray(data.items)).toBe(true);
+    const urls = (data.items as Record<string, unknown>[]).map((item) => {
+      const props = item.properties as Record<string, unknown>;
+      const url = props.url as unknown[] | undefined;
+      return url?.[0];
+    });
+    expect(urls).toContain(url1.href);
+    expect(urls).toContain(url2.href);
+    const firstItem = data.items?.[0];
+    expect(firstItem).toHaveProperty("type");
+    expect(firstItem).toHaveProperty("properties");
+  });
+
+  it("respects limit parameter on q=source list", async () => {
+    const minted = await mintToken("create");
+    for (let i = 0; i < 5; i++) {
+      await handler(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: {
+            ...(await authHeaders(minted, "POST", MICROPUB)),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            type: ["h-entry"],
+            properties: { content: [`limit-test-${i}`] },
+          }),
+        }),
+        harness,
+        ctx,
+      );
+    }
+    const res = await handler(
+      new Request(`${MICROPUB}?q=source&limit=2`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { items?: unknown[] };
+    expect(data.items).toHaveLength(2);
+  });
+
+  it("respects offset parameter on q=source list", async () => {
+    const minted = await mintToken("create");
+    for (let i = 0; i < 5; i++) {
+      await handler(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: {
+            ...(await authHeaders(minted, "POST", MICROPUB)),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            type: ["h-entry"],
+            properties: { content: [`offset-test-${i}`] },
+          }),
+        }),
+        harness,
+        ctx,
+      );
+    }
+    const res1 = await handler(
+      new Request(`${MICROPUB}?q=source&limit=2&offset=0`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const data1 = (await res1.json()) as { items?: unknown[] };
+    const res2 = await handler(
+      new Request(`${MICROPUB}?q=source&limit=2&offset=2`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const data2 = (await res2.json()) as { items?: unknown[] };
+    expect((data2.items as unknown[]).length).toBeGreaterThan(0);
+    expect((data1.items as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("applies property filtering to q=source list items", async () => {
+    const minted = await mintToken("create");
+    await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: { content: ["filter-test"], name: ["title"] },
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    const res2 = await handler(
+      new Request(`${MICROPUB}?q=source&properties[]=content`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res2.status).toBe(200);
+    const data = (await res2.json()) as { items?: unknown[] };
+    const firstItem = (data.items as Record<string, unknown>[])?.[0];
+    expect(firstItem).toHaveProperty("properties");
+    expect(
+      (firstItem?.properties as Record<string, unknown>) || {},
+    ).toHaveProperty("content");
+    expect(
+      (firstItem?.properties as Record<string, unknown>) || {},
+    ).not.toHaveProperty("name");
   });
 
   it("returns 404 for q=source on a non-existent post", async () => {

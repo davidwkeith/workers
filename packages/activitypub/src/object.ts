@@ -631,7 +631,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const announcer = actorIri(activity.actor);
     if (!announcer) return;
     const group = this.#sql
-      .exec<{ actor_type: string | null }>(
+      .exec<{
+        actor_type: string | null;
+      }>(
         `SELECT actor_type FROM following WHERE actor = ? AND state = 'accepted'`,
         announcer,
       )
@@ -921,10 +923,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   #deliverToAudience(audience: string, body: string): void {
     if (!isSafeTarget(audience)) return;
     const known = this.#sql
-      .exec<{ inbox: string | null; shared_inbox: string | null }>(
-        `SELECT inbox, shared_inbox FROM following WHERE actor = ?`,
-        audience,
-      )
+      .exec<{
+        inbox: string | null;
+        shared_inbox: string | null;
+      }>(`SELECT inbox, shared_inbox FROM following WHERE actor = ?`, audience)
       .toArray()[0];
     const groupInbox = known?.shared_inbox ?? known?.inbox;
     if (groupInbox) {

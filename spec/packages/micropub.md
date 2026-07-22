@@ -13,8 +13,8 @@ Publishing endpoint. Consumes IndieAuth access tokens for authorization.
 - **Create / update / delete** actions.
 - Accept both `application/json` and **form-encoded** request bodies.
 - **Media endpoint** backed by **R2**.
-- Query support: `q=config`, `q=source`, and `q=category` (see
-  [Micropub extensions](#micropub-extensions)).
+- Query support: `q=config`, `q=source` (single post and list), and `q=category`
+  (see [Micropub extensions](#micropub-extensions) and [Query support](#query-support)).
 
 ## Event post type (`h=event`)
 
@@ -90,16 +90,35 @@ Currently implemented (all **stable**):
   parameters; `limit` is capped server-side. An absent or malformed `limit`
   returns the full (capped) list rather than a default page — autocomplete
   wants every tag — a deliberate difference from the post-list query's
-  paginated default (#351/#353). Nested non-string tags (e.g. `h-card` objects)
+  paginated default. Nested non-string tags (e.g. `h-card` objects)
   are excluded from the list.
 
-Not yet implemented / tracked separately:
+## Query support
 
-- **Query for Post List** (`q=source` with no `url`) with offset pagination is
-  handled independently (issue #351 / PR #353), not by this increment.
-- Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
-  `location-visibility`, and the richer query filters) are off by default and
-  unimplemented; they are the roadmap tracked in the extensions issue.
+### `q=source`
+
+The spec defines `q=source` with a required `url` parameter: fetch and return a
+single post. This endpoint extends that with a widely-implemented Micropub
+extension ([Micropub-extensions#Query-for-post-list][mp-ext-list]):
+
+- **Single post** (`?q=source&url=<URL>`): returns `{ "type": [...], "properties": {...} }`
+  (full mf2 object).
+- **List** (`?q=source` without `url`): returns `{ "items": [...] }` where each item is
+  a full mf2 object, ordered newest-first by creation time. Supports offset-based
+  pagination via the `limit` (default 10, max 100) and `offset` (default 0) parameters.
+
+Both forms support the `properties[]` parameter to filter which properties are
+returned per item (e.g., `?q=source&properties[]=content` returns only the
+`content` property, if present).
+
+Soft-deleted posts (those marked with `post-status: draft` or explicitly deleted)
+are **excluded** from the list and from single-post queries targeting them (404).
+
+[mp-ext-list]: https://indieweb.org/Micropub-extensions#Query_for_Post_List
+
+Proposed-group extensions (`q=geo`, `q=contact`, `audience`,
+`location-visibility`, and the richer query filters) are off by default and
+unimplemented; they are the roadmap tracked in the extensions issue.
 
 ## Auth / security
 

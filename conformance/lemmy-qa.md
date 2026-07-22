@@ -75,7 +75,7 @@ the target's `following` row for the community — it should reach `accepted`
 (after the community's `Accept` arrives) with `actor_type = 'Group'`.
 
 - [ ] **Pass** — `following` row exists, reaches `accepted`, `actor_type = 'Group'`
-- [ ] **Fail** — note what happened: ________________________________
+- [ ] **Fail** — note what happened: **************\_\_\_\_**************
 
 ### Step 2 — Receive and unwrap community activity
 
@@ -89,7 +89,7 @@ the two-tier pipeline — content on the next alarm tick, votes in batched
 sweeps).
 
 - [ ] **Pass** — inner activity present with correct `relayed_by`, `verify_state` reaches `verified`
-- [ ] **Fail** — note what's missing: ________________________________
+- [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ### Step 3 — Post into the community
 
@@ -113,7 +113,7 @@ Expected: `201`, and the post appears in the community (title intact) once
 the community `Announce`s it back out to its members.
 
 - [ ] **Pass** — post appears in the community with its title
-- [ ] **Fail** — status code / what appeared instead: ________________________________
+- [ ] **Fail** — status code / what appeared instead: **************\_\_\_\_**************
 
 ### Step 4 — Reply and vote
 
@@ -150,17 +150,17 @@ Swap `"type": "Like"` for `"Dislike"` to test a downvote instead/as well.
 - [ ] **Pass** — reply appears in the community, threaded under the original post
 - [ ] **Pass** — vote registers on Lemmy (post's score changes, or the vote
       shows in the target's `delivery` activity once resolved)
-- [ ] **Fail** — note what's missing: ________________________________
+- [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ## Result
 
-|                          |                                  |
-| ------------------------ | -------------------------------- |
-| Overall result           | ☐ Passing / ☐ Failing            |
-| Run date                 | ________________________________ |
-| Tester                   | ________________________________ |
-| Lemmy instance + version | ________________________________ |
-| Notes / follow-ups       | ________________________________ |
+|                          |                                      |
+| ------------------------ | ------------------------------------ |
+| Overall result           | ☐ Passing / ☐ Failing                |
+| Run date                 | **************\_\_\_\_************** |
+| Tester                   | **************\_\_\_\_************** |
+| Lemmy instance + version | **************\_\_\_\_************** |
+| Notes / follow-ups       | **************\_\_\_\_************** |
 
 ## Recording the result
 

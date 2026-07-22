@@ -8,11 +8,11 @@ Handles create/update/delete of posts via the Micropub protocol. Accepts both
 form-encoded and JSON request bodies, parses Microformats 2 (mf2) objects,
 and stores posts in D1. Includes an R2-backed media endpoint for file uploads.
 Requires IndieAuth access tokens with scope-based authorization — `create`,
-`update`, `delete`, `media` scopes. Supports `q=config`, `q=source`, and
-`q=category` queries.
-Also contributes a `@dwk/mcp` tool (`createMicropubMcpTools` →
-`micropub_publish`) so an authorized agent can publish through the same
-`publishPost` path the HTTP `create` action uses.
+`update`, `delete`, `media` scopes. Supports `q=config`, `q=source` (single-post
+and list with offset pagination), and `q=category` queries. Also contributes a
+`@dwk/mcp` tool (`createMicropubMcpTools` → `micropub_publish`) so an authorized
+agent can publish through the same `publishPost` path the HTTP `create` action
+uses.
 
 ## Micropub extensions
 
@@ -70,7 +70,8 @@ src/config.ts      # MicropubConfig type and Env fragment
 src/handler.ts     # createMicropub factory (create/update/delete/query/media routes); exports publishPost
 src/mcp-tools.ts   # createMicropubMcpTools — the `micropub_publish` @dwk/mcp tool
 src/store.ts       # createMicropubStore (D1-backed post persistence)
-src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view
+src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view, list view
+src/pagination.ts  # offset-based pagination parsing/validation (pure, reusable)
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
 src/event.ts       # h-event post type: markup rendering, h-event → CalendarEvent
 src/fediverse.ts   # h-entry → PostInput adapter + syndication to @dwk/activitypub's /publish (#278; wire-format contract, no AP import)
