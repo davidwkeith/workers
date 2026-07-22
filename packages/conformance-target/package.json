@@ -26,6 +26,7 @@
     "@dwk/atproto-pds": "workspace:*",
     "@dwk/host-meta": "workspace:*",
     "@dwk/indieauth": "workspace:*",
+    "@dwk/mastodon-api": "workspace:*",
     "@dwk/micropub": "workspace:*",
     "@dwk/microsub": "workspace:*",
     "@dwk/remotestorage": "workspace:*",

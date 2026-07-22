@@ -16,6 +16,7 @@ import type { ActivityPubConfig, ActivityPubEnv } from "@dwk/activitypub";
 import type { AtprotoPdsConfig, AtprotoPdsEnv } from "@dwk/atproto-pds";
 import type { HostMetaConfig, HostMetaEnv } from "@dwk/host-meta";
 import type { IndieAuthConfig, IndieAuthEnv } from "@dwk/indieauth";
+import type { MastodonApiConfig, MastodonApiEnv } from "@dwk/mastodon-api";
 import type { MicropubConfig, MicropubEnv } from "@dwk/micropub";
 import type { MicrosubConfig, MicrosubEnv } from "@dwk/microsub";
 import type { RemoteStorageConfig, RemoteStorageEnv } from "@dwk/remotestorage";
@@ -26,7 +27,10 @@ import type { WebfingerConfig, WebfingerEnv } from "@dwk/webfinger";
 import type { WebmentionConfig, WebmentionEnv } from "@dwk/webmention";
 import type { WebSubConfig, WebSubEnv } from "@dwk/websub";
 
-import { approveAuthorization } from "./approval.js";
+import {
+  approveAuthorization,
+  approveMastodonAuthorization,
+} from "./approval.js";
 import { timingSafeEqual } from "./timing-safe-equal.js";
 
 /** The local part of the test identity's `acct:` handle and AP username. */
@@ -40,6 +44,7 @@ export const USERNAME = "conformance";
 export interface ConformanceEnv
   extends
     IndieAuthEnv,
+    MastodonApiEnv,
     MicropubEnv,
     MicrosubEnv,
     WebmentionEnv,
@@ -110,6 +115,7 @@ export interface TargetConfigs {
   readonly webfinger: WebfingerConfig;
   readonly hostMeta: HostMetaConfig;
   readonly indieauth: IndieAuthConfig;
+  readonly mastodonApi: Omit<MastodonApiConfig, "backend">;
   readonly micropub: MicropubConfig;
   readonly microsub: MicrosubConfig;
   readonly webmention: WebmentionConfig;
@@ -151,6 +157,16 @@ export function configsFor(env: ConformanceEnv): TargetConfigs {
     indieauth: {
       baseUrl: base,
       approveAuthorization: approveAuthorization(env),
+    },
+    mastodonApi: {
+      baseUrl: base,
+      instance: {
+        title: "Conformance Target",
+        description:
+          "Deployed composition of the @dwk/workers packages; the target the hosted conformance suites run against.",
+      },
+      account: { username: USERNAME, displayName: "Conformance Target" },
+      approveAuthorization: approveMastodonAuthorization(env),
     },
     micropub: { baseUrl: base, me },
     microsub: { baseUrl: base, me },

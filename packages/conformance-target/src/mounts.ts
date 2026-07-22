@@ -4,7 +4,11 @@
  * URLs the packages advertise cannot drift apart. Tasks 3–5 fill the table.
  */
 
-import { createActivityPub } from "@dwk/activitypub";
+import {
+  createActivityPub,
+  createActivitypubMastodonApi,
+  resolveConfig,
+} from "@dwk/activitypub";
 import { createAtprotoPds } from "@dwk/atproto-pds";
 import { createHostMeta } from "@dwk/host-meta";
 import { createIndieAuth } from "@dwk/indieauth";
@@ -23,7 +27,7 @@ import { createWebmention } from "@dwk/webmention";
 import { createWebSub } from "@dwk/websub";
 
 import { createAdminInit } from "./admin.js";
-import { createConsent } from "./approval.js";
+import { createConsent, createMastodonConsent } from "./approval.js";
 import type { ConformanceEnv } from "./config.js";
 import { configsFor, USERNAME } from "./config.js";
 import { createHome } from "./home.js";
@@ -74,6 +78,15 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
       handler: createConsent(env),
     },
     {
+      // Deployer-owned consent submission for the Mastodon app OAuth
+      // consent form — mirrors "consent" above, kept separate because the
+      // Mastodon flow's authorization request has no PKCE code_challenge to
+      // sign over (see approval.ts).
+      name: "mastodon-consent",
+      matches: (u) => u.pathname === "/mastodon-consent",
+      handler: createMastodonConsent(env),
+    },
+    {
       name: "@dwk/indieauth",
       matches: (u) =>
         u.pathname === "/.well-known/oauth-authorization-server" ||
@@ -114,6 +127,24 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
         u.pathname === "/.well-known/nodeinfo" ||
         u.pathname.startsWith("/nodeinfo/"),
       handler: createActivityPub(c.activitypub),
+    },
+    {
+      // Mastodon-compatible client API, read-only over the same actor DO
+      // (@dwk/activitypub's createActivitypubMastodonApi adapter). Distinct
+      // paths from the @dwk/indieauth mount above (`/authorize`, `/token`,
+      // `/revocation`, no `/oauth/` prefix) — no collision.
+      name: "@dwk/mastodon-api",
+      matches: (u) =>
+        u.pathname.startsWith("/api/v1/") ||
+        u.pathname.startsWith("/api/v2/") ||
+        u.pathname === "/oauth/authorize" ||
+        u.pathname === "/oauth/token" ||
+        u.pathname === "/oauth/revoke",
+      handler: createActivitypubMastodonApi({
+        config: resolveConfig(c.activitypub),
+        actor: env.ACTOR,
+        mastodonConfig: c.mastodonApi,
+      }),
     },
     {
       name: "@dwk/remotestorage",

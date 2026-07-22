@@ -108,6 +108,9 @@ importers:
       '@dwk/indieauth':
         specifier: workspace:*
         version: link:../indieauth
+      '@dwk/mastodon-api':
+        specifier: workspace:*
+        version: link:../mastodon-api
       '@dwk/micropub':
         specifier: workspace:*
         version: link:../micropub
