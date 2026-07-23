@@ -287,6 +287,12 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20260718.1
         version: 5.20260718.1
+      '@dwk/activitypub':
+        specifier: workspace:*
+        version: link:../activitypub
+      '@dwk/atproto-pds':
+        specifier: workspace:*
+        version: link:../atproto-pds
       '@dwk/host-meta':
         specifier: workspace:*
         version: link:../host-meta
@@ -302,6 +308,9 @@ importers:
       '@dwk/microsub':
         specifier: workspace:*
         version: link:../microsub
+      '@dwk/remotestorage':
+        specifier: workspace:*
+        version: link:../remotestorage
       '@dwk/solid-pod':
         specifier: workspace:*
         version: link:../solid-pod
@@ -317,6 +326,9 @@ importers:
       '@dwk/webauthn':
         specifier: workspace:*
         version: link:../webauthn
+      '@dwk/webdav':
+        specifier: workspace:*
+        version: link:../webdav
       '@dwk/webfinger':
         specifier: workspace:*
         version: link:../webfinger

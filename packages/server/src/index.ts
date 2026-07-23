@@ -58,6 +58,8 @@ export { installRequestDuplex } from "./request-duplex.js";
 
 export { installWebSocketGlobals, WebSocketPair } from "./web-socket.js";
 
+export { installCryptoDigestStream } from "./crypto-digest-stream.js";
+
 export {
   acquireWriterLock,
   DataDirectoryLockedError,

@@ -7,14 +7,23 @@ Node.js/Express self-hosting host — private, never published to npm.
 Docker-deployable Express server that emulates Cloudflare Workers primitives on
 Node.js + SQLite + filesystem. Provides a `Fetch → Express` request adapter,
 Node-backed shims for D1 (SQLite), R2 (local filesystem), KV (in-memory),
-Durable Objects (per-pod SQLite files), queues (Node job scheduler), and cron
-(scheduled tasks), so any composed set of `@dwk` endpoint packages can be
-mounted behind one domain exactly as they would in a Worker. Its own devDeps
-currently exercise `indieauth`/`micropub`/`microsub`/`webmention`/`websub`/
-`webfinger`/`host-meta`/`webauthn`/`vc`/`solid-pod`/`store`/`wac`/`ldn` —
-`activitypub`/`remotestorage`/`atproto-pds`/`webdav` are not yet wired into
-this host's own composition/tests (nothing about the host prevents mounting
-them; it just hasn't been done here yet).
+Durable Objects (per-pod SQLite files, including alarms), queues (Node job
+scheduler), and cron (scheduled tasks), so any composed set of `@dwk` endpoint
+packages can be mounted behind one domain exactly as they would in a Worker.
+Its own devDeps exercise every endpoint package that ships a Durable Object —
+`indieauth`/`micropub`/`microsub`/`webmention`/`websub`/`webfinger`/
+`host-meta`/`webauthn`/`vc`/`solid-pod`/`activitypub`/`atproto-pds`/
+`remotestorage`/`webdav`/`store`/`wac`/`ldn` — each with a `phaseN`/`phase5-*`
+integration test driving a representative lifecycle through the real emulated
+DO (see `src/phase5-*.integration.test.ts`: inbound `Follow` + alarm-driven
+`Accept` delivery/retry for activitypub, a record commit + firehose frame for
+atproto-pds, a PUT/GET/DELETE + GC-cron lifecycle for remotestorage, and an
+app-password mint + PUT/LOCK/UNLOCK/COPY/MOVE lifecycle for webdav over
+solid-pod). Wiring webdav's `COPY`/`MOVE` (a streamed `store.putBlob` re-hash)
+surfaced one real host gap, since fixed: a `crypto.DigestStream` polyfill
+(`src/crypto-digest-stream.ts`, installed by `createServer`) — Cloudflare's
+non-standard streaming-hash `WritableStream` `@dwk/store` depends on
+(spec/portability.md §2.2).
 
 ## Spec
 
@@ -36,6 +45,8 @@ for Cloudflare bindings.
   packages that use Cloudflare's HTMLRewriter API.
 - **WebSocket polyfill.** `installWebSocketGlobals` + `WebSocketPair` provide
   the Cloudflare WebSocket API shape using the `ws` npm package.
+- **`crypto.DigestStream` polyfill.** `installCryptoDigestStream` patches the
+  global for `@dwk/store`'s streamed blob-hashing path (`node:crypto`-backed).
 - **All @dwk packages as devDeps.** The server imports all endpoint packages
   for composition but they're devDependencies since this is never published.
 
@@ -64,6 +75,7 @@ src/html-rewriter.ts             # installHTMLRewriter polyfill
 src/request-duplex.ts            # installRequestDuplex for streaming request bodies
 src/web-socket.ts                # installWebSocketGlobals, WebSocketPair
 src/web-socket-upgrade.ts        # bridges real HTTP Upgrade sockets to a mount's DO
+src/crypto-digest-stream.ts      # installCryptoDigestStream polyfill
 src/cloudflare-workers.ts        # cloudflare:workers module shim
 src/cloudflare-workers-loader.ts # registerCloudflareWorkers ESM loader hook
 src/shims/                       # Node-backed binding shims (D1, R2, KV, DO, queue, cron)

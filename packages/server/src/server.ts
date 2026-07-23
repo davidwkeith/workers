@@ -24,6 +24,7 @@ import helmet from "helmet";
 import { noopLogger, type Logger } from "@dwk/log";
 import { sendWebResponse, toWebRequest } from "./adapter.js";
 import { HostExecutionContext, WaitUntilTracker } from "./context.js";
+import { installCryptoDigestStream } from "./crypto-digest-stream.js";
 import { installHTMLRewriter } from "./html-rewriter.js";
 import { installRequestDuplex } from "./request-duplex.js";
 import { installWebSocketGlobals } from "./web-socket.js";
@@ -149,6 +150,7 @@ export function createServer(config: HostConfig): DwkServer {
   installHTMLRewriter();
   installRequestDuplex();
   installWebSocketGlobals();
+  installCryptoDigestStream();
 
   const release =
     (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;

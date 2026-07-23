@@ -41,7 +41,10 @@
   wire the not-yet-hosted DO packages (`activitypub`, `atproto-pds`,
   `remotestorage`, `webdav`) into the Node host. That single step makes
   "other providers" mean "anywhere a container runs," which covers most of
-  the audience in #369 without touching any endpoint package.
+  the audience in #369 without touching any endpoint package. **All of it is
+  done except the `@dwk/cf-shims` extraction** (#379, #380) — every DO
+  package now runs on the Node host, so the container path (§4.3–4.4) is the
+  documented, working answer for AWS/GCP/other-cloud users today.
 
 ## 2. What the investigation found in the codebase
 
@@ -111,8 +114,18 @@ Express and are re-exported from `shims/index.ts` — the planned
 - ~~No DO alarm shim~~ — **resolved** (#379): alarms are emulated (persisted
   in the per-object SQLite file, delivered through the per-id mutex, retried
   with bounded backoff, re-armed on startup).
-- `activitypub`, `atproto-pds`, `remotestorage`, `webdav` are not wired into
-  the host's composition/tests (documented in `packages/server/CLAUDE.md`).
+- ~~`activitypub`, `atproto-pds`, `remotestorage`, `webdav` are not wired into
+  the host's composition/tests~~ — **resolved** (#380): all four are now
+  devDeps of `@dwk/server` with a `phase5-*.integration.test.ts` per package
+  driving a representative lifecycle through the real emulated DO — inbound
+  `Follow` + alarm-driven `Accept` delivery/retry for activitypub, a record
+  commit + firehose (`subscribeRepos`) frame over a real WebSocket upgrade for
+  atproto-pds, a PUT/GET/DELETE + GC-cron lifecycle for remotestorage, and an
+  app-password mint + PUT/LOCK/UNLOCK/COPY/MOVE lifecycle for webdav over
+  solid-pod. Wiring webdav's `COPY`/`MOVE` surfaced one real gap, since fixed:
+  `@dwk/store`'s streamed blob-hashing path depends on Cloudflare's
+  non-standard `crypto.DigestStream`, now polyfilled
+  (`packages/server/src/crypto-digest-stream.ts`) on `node:crypto`.
 - Cron takes an interval in ms, not a cron expression.
 - Single-process, single-writer by design (lockfile) — no HA.
 
@@ -224,13 +237,15 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
 
 1. **Phase 0 — make the existing second runtime complete and reusable**
    (small/medium; no endpoint package changes):
-   - Implement the **DO alarm shim** in `@dwk/server`.
-   - Wire `activitypub`, `atproto-pds`, `remotestorage`, `webdav` into the
-     host's composition and tests.
-   - Extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md), and
-     write the **host contract** spec (§3) alongside it.
-   - Document "run the Docker image on ECS/GCE/a VPS" as the supported
-     answer for AWS/GCP/other-cloud users.
+   - ~~Implement the **DO alarm shim** in `@dwk/server`.~~ Done (#379).
+   - ~~Wire `activitypub`, `atproto-pds`, `remotestorage`, `webdav` into the
+     host's composition and tests.~~ Done (#380).
+   - ~~Document "run the Docker image on ECS/GCE/a VPS" as the supported
+     answer for AWS/GCP/other-cloud users.~~ Done (#380) —
+     `packages/server/README.md` §"Deploying to AWS, GCP, or any other
+     cloud".
+   - Remaining: extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md),
+     and write the **host contract** spec (§3) alongside it.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.
