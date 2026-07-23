@@ -34,11 +34,11 @@ has no credential blocker.
 
 ## Environment
 
-|                  |                                                             |
-| ---------------- | ------------------------------------------------------------- |
-| Receiver endpoint | `https://conformance.dwk.io/webmention`                      |
+|                   |                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Receiver endpoint | `https://conformance.dwk.io/webmention`                                                                                                                                                     |
 | Target host       | `conformance.dwk.io` (any path under it is accepted — the receiver only checks the target's **host**, not that the path resolves to a real page; see `packages/webmention/src/validate.ts`) |
-| Verification      | Async, via the `conformance-webmention` queue — allow a few seconds between sending a test mention and checking its stored/verified state |
+| Verification      | Async, via the `conformance-webmention` queue — allow a few seconds between sending a test mention and checking its stored/verified state                                                   |
 
 ## Prerequisites
 
@@ -72,15 +72,15 @@ has no credential blocker.
 Record the tally (exact test numbering is webmention.rocks' own and may
 change between runs — don't hardcode it into this doc):
 
-| Category                                  | Pass/Fail | Notes |
-| ------------------------------------------ | --------- | ----- |
-| Basic source/target discovery              |           |       |
-| `Link` header variants                     |           |       |
-| Relative/malformed URL handling            |           |       |
-| Redirect chains                            |           |       |
-| Update to a previously-sent source         |           |       |
-| Deletion of a previously-sent source       |           |       |
-| Non-HTML source content types              |           |       |
+| Category                             | Pass/Fail | Notes |
+| ------------------------------------ | --------- | ----- |
+| Basic source/target discovery        |           |       |
+| `Link` header variants               |           |       |
+| Relative/malformed URL handling      |           |       |
+| Redirect chains                      |           |       |
+| Update to a previously-sent source   |           |       |
+| Deletion of a previously-sent source |           |       |
+| Non-HTML source content types        |           |       |
 
 - [ ] **Pass** — every required receiver test passes
 - [ ] **Fail** — list which tests failed and why: **************\_\_\_\_**************
@@ -120,13 +120,13 @@ either:
 
 ## Result
 
-|                     |                                        |
-| ------------------- | -------------------------------------- |
-| Receiver result      | ☐ Passing / ☐ Failing                 |
-| Sender result        | ☐ Passing / ☐ Failing / ☐ Blocked (no send trigger) |
-| Run date             | **************\_\_\_\_************** |
-| Tester               | **************\_\_\_\_************** |
-| Notes / follow-ups   | **************\_\_\_\_************** |
+|                    |                                                     |
+| ------------------ | --------------------------------------------------- |
+| Receiver result    | ☐ Passing / ☐ Failing                               |
+| Sender result      | ☐ Passing / ☐ Failing / ☐ Blocked (no send trigger) |
+| Run date           | **************\_\_\_\_**************                |
+| Tester             | **************\_\_\_\_**************                |
+| Notes / follow-ups | **************\_\_\_\_**************                |
 
 ## Recording the result
 
@@ -161,7 +161,7 @@ Leave `webmention.rocks/sender` at `"pending"` until the send-trigger gap
 - **A previously-verified mention doesn't disappear after its source is
   deleted (410 or removed)** — confirm this is the re-verification path
   (async, on the next verification pass), not the sender's documented gap
-  (§3.1.5 "SHOULD re-send on delete" — that's about the *sending* side
+  (§3.1.5 "SHOULD re-send on delete" — that's about the _sending_ side
   proactively notifying, which `@dwk/webmention` intentionally doesn't do;
   see `spec/packages/webmention.md`'s Known gaps). The receiving side
   re-verifying and dropping the mention is the mechanism that's supposed to

@@ -28,15 +28,15 @@ paper-trailed.
 
 ## Environment
 
-|                        |                                                          |
-| ---------------------- | -------------------------------------------------------- |
-| Test identity ("Me")   | `https://conformance.dwk.io/`                             |
+|                        |                                                                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Test identity ("Me")   | `https://conformance.dwk.io/`                                                                                                          |
 | Discovery              | `rel="micropub"`, `authorization_endpoint`, `token_endpoint` link tags on the homepage (see `packages/conformance-target/src/home.ts`) |
-| Micropub endpoint      | `https://conformance.dwk.io/micropub`                     |
-| Media endpoint         | `https://conformance.dwk.io/media/`                       |
-| Authorization endpoint | `https://conformance.dwk.io/authorize`                    |
-| Token endpoint         | `https://conformance.dwk.io/token`                        |
-| Consent auth           | `CONFORMANCE_PASSWORD` (Cloudflare Worker secret)          |
+| Micropub endpoint      | `https://conformance.dwk.io/micropub`                                                                                                  |
+| Media endpoint         | `https://conformance.dwk.io/media/`                                                                                                    |
+| Authorization endpoint | `https://conformance.dwk.io/authorize`                                                                                                 |
+| Token endpoint         | `https://conformance.dwk.io/token`                                                                                                     |
+| Consent auth           | `CONFORMANCE_PASSWORD` (Cloudflare Worker secret)                                                                                      |
 
 Discovery is confirmed wired up — the homepage's `<link>` tags mean
 micropub.rocks (or any IndieAuth client) can go straight from the "Me" URL to
@@ -88,7 +88,7 @@ Record the overall tally here (fill in as run; exact test numbering/labels
 are micropub.rocks' own and may change between runs — don't hardcode them
 into this doc):
 
-| Category                              | Pass/Fail | Notes |
+| Category                               | Pass/Fail | Notes |
 | -------------------------------------- | --------- | ----- |
 | Form-encoded create                    |           |       |
 | JSON create                            |           |       |
@@ -110,13 +110,13 @@ that's what the field is for.
 
 ## Result
 
-|                        |                                        |
-| ---------------------- | -------------------------------------- |
-| Overall result         | ☐ Passing / ☐ Failing                  |
-| Run date                | **************\_\_\_\_************** |
-| Tester                  | **************\_\_\_\_************** |
-| Implementation report   | **************\_\_\_\_************** |
-| Notes / follow-ups      | **************\_\_\_\_************** |
+|                       |                                      |
+| --------------------- | ------------------------------------ |
+| Overall result        | ☐ Passing / ☐ Failing                |
+| Run date              | **************\_\_\_\_************** |
+| Tester                | **************\_\_\_\_************** |
+| Implementation report | **************\_\_\_\_************** |
+| Notes / follow-ups    | **************\_\_\_\_************** |
 
 ## Recording the result
 
@@ -147,7 +147,7 @@ follow-up issue referencing this run.
   (see `packages/conformance-target/README.md`).
 - **Consent form rejects the password** — confirm `CONFORMANCE_PASSWORD` is
   actually set as a Worker secret on this deployment (`wrangler secret
-  list`), not just assumed; an unset secret refuses unconditionally by
+list`), not just assumed; an unset secret refuses unconditionally by
   design (see `approval.ts`'s `createConsent`).
 - **Token exchange succeeds but every Micropub request 401s** — the token's
   scope may not cover `create`/`update`/`delete`; re-run the authorization

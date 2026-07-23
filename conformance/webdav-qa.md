@@ -29,18 +29,18 @@ runbook is mostly about the one-time-per-run credential setup that isn't
 
 ## Environment
 
-|                     |                                                          |
-| ------------------- | -------------------------------------------------------- |
-| WebDAV mount         | `https://conformance.dwk.io/dav/`                        |
-| Credential mint      | `POST https://conformance.dwk.io/dav-credentials`         |
-| Credential auth      | Bearer `CONFORMANCE_ADMIN_TOKEN` (Cloudflare Worker secret) |
-| Mount auth           | Basic, using the minted app password                     |
+|                 |                                                             |
+| --------------- | ----------------------------------------------------------- |
+| WebDAV mount    | `https://conformance.dwk.io/dav/`                           |
+| Credential mint | `POST https://conformance.dwk.io/dav-credentials`           |
+| Credential auth | Bearer `CONFORMANCE_ADMIN_TOKEN` (Cloudflare Worker secret) |
+| Mount auth      | Basic, using the minted app password                        |
 
 ## Prerequisites
 
 - [ ] The `CONFORMANCE_ADMIN_TOKEN` value for the deployed target.
 - [ ] Either `litmus` installed locally (`apt-get install litmus` / `brew
-      install litmus`) **or** the `WEBDAV_USERNAME`/`WEBDAV_PASSWORD` GitHub
+install litmus`) **or** the `WEBDAV_USERNAME`/`WEBDAV_PASSWORD` GitHub
       Actions repo secrets set, so the CI `hosted-suite` job can run it
       instead (Settings → Secrets and variables → Actions). Without either,
       neither invocation path below works — the CI job fails fast with
@@ -96,11 +96,11 @@ node scripts/conformance/run-suite.mjs webdav \
 **3b. Via CI** — dispatch the `Conformance` workflow (Actions → Conformance →
 Run workflow) with:
 
-| Input       | Value                             |
-| ----------- | ---------------------------------- |
-| `standard`  | `webdav`                           |
-| `target_url`| `https://conformance.dwk.io`       |
-| `target_id` | `cloudflare` (default)             |
+| Input        | Value                        |
+| ------------ | ---------------------------- |
+| `standard`   | `webdav`                     |
+| `target_url` | `https://conformance.dwk.io` |
+| `target_id`  | `cloudflare` (default)       |
 
 This only succeeds if the `WEBDAV_USERNAME`/`WEBDAV_PASSWORD` repo secrets
 are already set to the values from Step 1 — the workflow reads them from
@@ -113,11 +113,11 @@ pass/fail/skip summary at the end of its run — `basic`, `copymove`, `props`,
 `locks`):
 
 | litmus group | Pass/Fail/Skip | Notes |
-| ------------- | -------------- | ----- |
-| `basic`       |                |       |
-| `copymove`    |                |       |
-| `props`       |                |       |
-| `locks`       |                |       |
+| ------------ | -------------- | ----- |
+| `basic`      |                |       |
+| `copymove`   |                |       |
+| `props`      |                |       |
+| `locks`      |                |       |
 
 - [ ] **Pass** — every group passes (litmus exits `0`)
 - [ ] **Fail** — which group(s) and why: **************\_\_\_\_**************
@@ -137,13 +137,13 @@ curl -sS -X DELETE "https://conformance.dwk.io/dav-credentials?id=<credentialId>
 
 ## Result
 
-|                     |                                        |
-| ------------------- | -------------------------------------- |
-| Overall result       | ☐ Passing / ☐ Failing                 |
-| Run date             | **************\_\_\_\_************** |
-| Tester               | **************\_\_\_\_************** |
-| Invocation path      | ☐ Local / ☐ CI (link the run)          |
-| Notes / follow-ups   | **************\_\_\_\_************** |
+|                    |                                      |
+| ------------------ | ------------------------------------ |
+| Overall result     | ☐ Passing / ☐ Failing                |
+| Run date           | **************\_\_\_\_************** |
+| Tester             | **************\_\_\_\_************** |
+| Invocation path    | ☐ Local / ☐ CI (link the run)        |
+| Notes / follow-ups | **************\_\_\_\_************** |
 
 ## Recording the result
 
@@ -179,7 +179,7 @@ referencing this run.
   by the owner.
 - **Deploy is stale / results don't reflect a recent code change** — the CI
   `hosted-suite` job depends on `deploy-target`, which redeploys
-  `packages/conformance-target` from the dispatched ref first; a *local*
+  `packages/conformance-target` from the dispatched ref first; a _local_
   litmus run against `conformance.dwk.io` does not redeploy anything, so
   confirm the last deploy actually included your change (see
   `packages/conformance-target/README.md`'s Deploy section) before trusting
