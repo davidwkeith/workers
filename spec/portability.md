@@ -173,7 +173,7 @@ queues + cron.
 | Provider | F | S | A | W | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | Any Docker host (VPS, ECS/EC2, GCE, Fly.io…) via `@dwk/server` | ✅ | ✅ (local SQLite) | ✅ | ✅ | **Viable now** — finish Phase 0 |
-| Deno Deploy | ✅ native | ✅ (Deno KV) | ❌ no actor / no SQLite | ✅ | **Feasible with significant work** |
+| Deno Deploy | ✅ native | ✅ (Deno KV) | ❌ no actor / no SQLite / **no queues** | ✅ | **Feasible, larger than previously scoped — see [deno-deploy-design.md](deno-deploy-design.md)** |
 | Google Cloud (GCF gen2 / Cloud Run) | adapter needed | ⚠️ ephemeral FS; Firestore/Cloud SQL | ❌ | ⚠️ | **Native host infeasible without shim rewrite; use the container path on a VM** |
 | Fastly Compute | ~ (WASM SDK) | ❌ KV **eventually consistent** | ❌ | ❌ | **Not viable for stateful cohort** |
 | AWS Lambda@Edge | ❌ event-JSON shape | ❌ | ❌ | ❌ | **Not viable; wrong tier of the CDN** |
@@ -181,10 +181,22 @@ queues + cron.
 
 ### 4.1 Deno Deploy — the credible isolate target
 
+> **Re-verified 2026-07-23 (issue #383, Phase 1):** this section is the
+> original mid-2026 snapshot and is now **stale in one load-bearing way** —
+> the platform it describes, Deno Deploy Classic, shut down on 2026-07-20.
+> The successor platform kept `Deno.cron` and Deno KV's consistency model but
+> **dropped Deno Queues with no built-in replacement**, adding a third gap
+> (queues) to the two below (SQL, actor) that the original investigation
+> never had to price. See [deno-deploy-design.md](deno-deploy-design.md) for
+> the full re-verification, an updated design sketch for all four gaps
+> (including object storage, never scored below), and the resulting decision
+> — still a hold, now for a stronger reason than "no demand yet."
+
 Native fetch handlers, WebSockets, `Deno.cron`, Deno Queues, and Deno KV
 with external (strongest-form) consistency and atomic transactions; plus
 `node:` specifier compatibility, so parts of the existing shims could port.
-Two genuine gaps:
+Two genuine gaps **as of the original investigation — see the re-verification
+note above**:
 
 1. **No server-side SQLite.** The DO and D1 shims are built on
    `node:sqlite`; the packages issue raw SQL, so a KV re-implementation is
@@ -257,7 +269,12 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
      as its reference implementation.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
-   the SQLite question (likely libSQL) first.
+   the SQLite question (likely libSQL) first. **Re-verified 2026-07-23
+   (issue #383):** the target platform changed underneath this plan (Deno
+   Deploy Classic shut down, the successor dropped queues) — see
+   [deno-deploy-design.md](deno-deploy-design.md) for the updated gap list,
+   design sketch, and revised (larger) effort estimate. The demand-driven
+   gate still holds; still no work started.
 3. **Explicit non-goals for now:** Fastly Compute, Lambda@Edge, and Puter
    hosts for the stateful cohort, for the reasons in §4 — each with a
    documented re-evaluation trigger (a strongly-consistent store; a fetch
@@ -273,4 +290,6 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
   versions, and how are Cloudflare-side interface changes tracked?
 - If Phase 1 happens: is an external libSQL dependency acceptable for a
   project whose thesis is "data and keys live only on infrastructure the
-  user owns"?
+  user owns"? [deno-deploy-design.md §7](deno-deploy-design.md#7-open-questions)
+  widens this to a second (or third) external dependency once queue and
+  object-storage emulation are accounted for — still unresolved.
