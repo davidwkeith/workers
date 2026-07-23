@@ -60,8 +60,10 @@
   unused**: no `KVNamespace` in any production package (the KV-never rule
   held), no `caches.default`, no `request.cf`, no Email Workers, and —
   notably — **no production call to `ctx.waitUntil`** (it appears only as a
-  signature type). The only `cloudflare:workers` import anywhere is the
-  `DurableObject` base class in the five DO files.
+  signature type). The only `cloudflare:workers` import in production code is
+  the `DurableObject` base class in the five DO files (the Miniflare
+  `test-harness.ts` files in `@dwk/store` and `@dwk/webdav` also import it,
+  but those are excluded from the published builds).
 
 ### 2.2 The Cloudflare coupling, most-coupled first
 
