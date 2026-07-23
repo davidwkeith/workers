@@ -17,6 +17,27 @@ at the bottom.
 You never run `pnpm release` / `changeset publish` from a laptop — publishing
 happens only through the gated **Release** GitHub Actions workflow.
 
+## Pre-release conformance QA
+
+Before cutting a release that touches an endpoint package, re-run the hosted
+conformance suite(s) for any package that changed — not just once ever, but
+every time, since these suites exercise the real deployed target and a
+regression there won't show up in unit/integration tests. The mechanical
+release gate (`pnpm release:gate`) only enforces this for **stable**
+(`>=1.0.0`) versions today — everything is still prerelease, so nothing is
+gated yet — but treat it as required practice regardless of what the gate
+currently allows. See [`conformance/README.md`](./conformance/README.md) for
+the full suite list and:
+
+- [`conformance/micropub-qa.md`](./conformance/micropub-qa.md) — micropub.rocks
+- [`conformance/webmention-qa.md`](./conformance/webmention-qa.md) — webmention.rocks
+- [`conformance/webdav-qa.md`](./conformance/webdav-qa.md) — litmus
+- [`conformance/pixelfed-qa.md`](./conformance/pixelfed-qa.md) / [`conformance/lemmy-qa.md`](./conformance/lemmy-qa.md) — ActivityPub fediverse interop
+- [`conformance/mastodon-client-qa.md`](./conformance/mastodon-client-qa.md) — Mastodon-compatible client API
+
+Record each result in `conformance/status.json` per that runbook's last
+section before proceeding to the version bump below.
+
 ## The setup (what's already wired up)
 
 - **Changesets**, independent semver per package. Config in `.changeset/config.json`

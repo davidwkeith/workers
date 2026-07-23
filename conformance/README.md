@@ -103,6 +103,12 @@ including the published implementation-report URL for Micropub — by setting th
 relevant entry in `status.json` to `passing`. The next release gate run will
 then allow that package to go stable.
 
+**Micropub and Webmention are manual, hosted-web-app suites** — see
+[`micropub-qa.md`](./micropub-qa.md) and [`webmention-qa.md`](./webmention-qa.md)
+for the fillable, step-by-step QA runbooks (exact endpoints, a results
+checklist, and troubleshooting). Both are meant to be re-run before every
+release that touches the respective package, not just once.
+
 **WebDAV/litmus is executable, not just documented.** litmus is a real CLI, so
 the dispatcher actually runs it when given a target and Basic credentials (an app
 password minted via the owner-gated endpoint), exiting with litmus's status:
@@ -114,7 +120,9 @@ WEBDAV_USERNAME=… WEBDAV_PASSWORD=… \
 
 The `hosted-suite` workflow installs litmus and supplies the credentials from the
 `WEBDAV_USERNAME` / `WEBDAV_PASSWORD` repo secrets on manual dispatch or the
-weekly schedule.
+weekly schedule. See [`webdav-qa.md`](./webdav-qa.md) for the fillable,
+step-by-step QA runbook (credential minting, both invocation paths, a
+results checklist, and troubleshooting).
 
 **ActivityPub/Fedify is executable too.** The Fedify peer needs a public URL to
 receive callbacks for every case but the read-only `webfinger` one. The
