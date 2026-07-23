@@ -1,0 +1,49 @@
+{
+  "name": "@dwk/deno-host",
+  "version": "0.0.0",
+  "description": "Deno Deploy host building blocks for the @dwk packages — external libSQL/Turso presented behind the Cloudflare D1Database and SqlStorage (Durable Object SQLite) interfaces.",
+  "keywords": [
+    "deno-deploy",
+    "libsql",
+    "turso",
+    "cloudflare-workers",
+    "d1",
+    "durable-objects",
+    "shim"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/deno-host#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/deno-host"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/test-harness.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1"
+  }
+}

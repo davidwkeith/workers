@@ -12,10 +12,10 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **28 publishable packages** — the
+**Status: implemented, unreleased.** There are **29 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`) and the
+`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
@@ -79,6 +79,13 @@ cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
 `HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
 from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
 them — `@dwk/server` is its first consumer, not its owner.
+`@dwk/deno-host` is the newest — the first increment (#397) of the otherwise
+still demand-gated Deno Deploy host plan (#396): runtime-agnostic,
+dependency-free shims presenting an external libSQL/Turso database behind
+the host-contract `D1Database` (async remote client) and
+`SqlStorage`/`transactionSync` (synchronous embedded-replica client)
+surfaces, via injected structural client seams; the actor/alarm, queue, and
+object-storage gaps (#398–#400) are not implemented and remain gated.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
@@ -186,6 +193,11 @@ injected state.
   WebSockets) on Node, so `@dwk/server` — and any other Node host — can reuse
   them without copying source. Extracted from `@dwk/server`'s internal
   `./shims` (#381); see `spec/self-hosting.md` §16 and `spec/portability.md`.
+- **Deno-host lib** — `@dwk/deno-host` is Cloudflare-interface emulation in
+  the same deliberate sense, but for the (gated, #396) Deno Deploy host:
+  libSQL/Turso behind `D1Database`/`SqlStorage` (#397). Unlike `@dwk/cf-shims`
+  its code is runtime-agnostic — no `node:` imports, only injected client
+  seams — so it runs on Deno, Node, or anywhere the app supplies a client.
 
 ### Composition contract (`spec/composition-contract.md`)
 
@@ -279,7 +291,9 @@ when adding a package:
   Miniflare) but, unlike the pure libs above, are inherently Node-specific
   rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare
   binding interfaces on Node) and `@dwk/server` (composes those shims behind
-  Express).
+  Express). `@dwk/deno-host` also runs under `environment: "node"` — its
+  production code is runtime-agnostic, but its tests drive the client seams
+  with `node:sqlite`-backed fakes (`src/test-harness.ts`).
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.
