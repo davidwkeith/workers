@@ -268,7 +268,7 @@ does not apply; nothing is weakened.
 
 Used by: `solid-pod` (the per-pod Pod object) and `webauthn` (per-RP object).
 This is the only emulation with real subtlety, because Durable Objects provide
-**three** guarantees the packages lean on:
+**four** guarantees the packages lean on:
 
 1. **Single-threaded execution per object id.** `solid-pod`'s entire
    consistency/authz/notification model rests on "Cloudflare guarantees a single
@@ -279,6 +279,9 @@ This is the only emulation with real subtlety, because Durable Objects provide
    reads it directly too.
 3. **Hibernatable WebSockets** (`state.acceptWebSocket()`,
    `state.getWebSockets()`) for Solid notifications.
+4. **Alarms** (`storage.setAlarm()`/`getAlarm()`/`deleteAlarm()` + the class's
+   `alarm()` override) — `activitypub`'s delivery retries and `atproto-pds`'s
+   did:plc genesis retries are alarm-driven.
 
 The Node shim provides a `DurableObjectNamespace` whose `idFromName` mints a
 stable id from the name and whose `get(id).fetch(req)` **routes in-process** to a
@@ -303,6 +306,16 @@ the distributed original, because there is exactly one process.
 - **WebSocket hibernation.** `acceptWebSocket`/`getWebSockets` map onto a real
   `ws` server the Express server upgrades; "hibernation" is a no-op on Node
   (the object is always resident), which is behaviourally a superset.
+- **Alarms.** `storage.setAlarm`/`getAlarm`/`deleteAlarm` persist the (single)
+  scheduled time in the same per-object SQLite file, so alarms survive
+  restarts: the namespace re-arms every persisted alarm on construction, and a
+  past-due alarm fires immediately, constructing the instance without waiting
+  for a request. `alarm()` is delivered through the same per-id mutex as
+  `fetch`, the alarm is deleted before the handler runs (Cloudflare's
+  contract — re-arming is the handler's job), and a throwing handler is
+  retried with bounded exponential backoff (Cloudflare-style defaults: up to
+  6 retries starting at 2 s), unless the failed attempt itself set a new
+  alarm, which supersedes the retry.
 
 **The single-process constraint is the price.** It is acceptable for the
 self-host audience (one person, one box) and is exactly the model the DO design
