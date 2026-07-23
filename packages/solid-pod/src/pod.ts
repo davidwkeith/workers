@@ -1468,12 +1468,15 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
    * Class 2 semantics (RFC 4918 §7.3, §9.3.1) require `PUT`/`MKCOL` to fail
    * with `409 Conflict` when the parent doesn't already exist (litmus
    * `put_no_parent`/`mkcol_no_parent`) — so the WebDAV backend closures check
-   * this before writing, instead of calling `#ensureContainerChain` blind. The
-   * storage root is always implicitly present.
+   * this before writing, instead of calling `#ensureContainerChain` blind.
+   * This pod's own storage root (`this.#storageRoot` — `"/dav/"`, say, for a
+   * pod whose `baseUrl` has its own path component, not just the universal
+   * `"/"`) is always implicitly present; it's never stat-able as a resource
+   * a client wrote, unlike every other container.
    */
   #hasExistingParent(store: Store, path: string): boolean {
     const parent = parentContainer(path);
-    if (parent === null || parent === "/") return true;
+    if (parent === null || parent === this.#storageRoot) return true;
     return store.head(parent) !== null;
   }
 
