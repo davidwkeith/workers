@@ -28,6 +28,16 @@ export {
   type SyncSqliteStatementLike,
   type SyncSqliteDatabaseLike,
 } from "./client.js";
+export {
+  type KvKeyPart,
+  type KvKey,
+  type DenoKvEntryLike,
+  type DenoKvCheckLike,
+  type DenoKvCommitResultLike,
+  type DenoKvAtomicLike,
+  type DenoKvListSelectorLike,
+  type DenoKvLike,
+} from "./kv-client.js";
 export { createD1Database } from "./d1.js";
 export {
   createSqlStorage,
