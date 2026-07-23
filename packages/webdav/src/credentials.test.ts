@@ -5,6 +5,7 @@ import {
   isHttpsRequest,
   mintAppPassword,
   parseBasicAuthorization,
+  PBKDF2_ITERATION_CEILING,
   timingSafeEqual,
   verifyAppPassword,
   type AppPasswordScope,
@@ -119,6 +120,30 @@ describe("mintAppPassword / verifyAppPassword", () => {
       iterations: ITERATIONS,
     });
     expect(await verifyAppPassword(a.secret, b.record)).toBe(false);
+  });
+
+  // Real workerd, real default — no `iterations` override — so a regression
+  // that pushes DEFAULT_PBKDF2_ITERATIONS back above workerd's deriveBits
+  // ceiling fails here instead of only in production.
+  it("mints with the real default iteration count under the workerd runtime", async () => {
+    const minted = await mintAppPassword({
+      webid: "https://me.example/#me",
+      label: "default-iterations smoke test",
+      scope: SCOPE,
+    });
+    expect(minted.record.iterations).toBe(PBKDF2_ITERATION_CEILING);
+    expect(await verifyAppPassword(minted.secret, minted.record)).toBe(true);
+  });
+
+  it("fails loudly instead of throwing an opaque WebCrypto error when iterations exceed workerd's ceiling", async () => {
+    await expect(
+      mintAppPassword({
+        webid: "https://me.example/#me",
+        label: "misconfigured",
+        scope: SCOPE,
+        iterations: PBKDF2_ITERATION_CEILING + 1,
+      }),
+    ).rejects.toThrow(/exceeds workerd's PBKDF2 ceiling/);
   });
 });
 

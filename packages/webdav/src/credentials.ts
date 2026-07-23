@@ -70,12 +70,19 @@ export interface MintAppPasswordParams {
 }
 
 /**
- * PBKDF2-HMAC-SHA-256 iteration count. OWASP's 2023 guidance recommends
- * 600,000, but workerd's `crypto.subtle.deriveBits` hard-rejects anything
- * above 100,000 (`NotSupportedError`), so this is capped at that runtime
- * ceiling — still within OWASP's longstanding prior-generation minimum.
+ * workerd's `crypto.subtle.deriveBits` hard-rejects PBKDF2 iteration counts
+ * above this (`NotSupportedError`), regardless of what OWASP or a deployer's
+ * config asks for.
  */
-export const DEFAULT_PBKDF2_ITERATIONS = 100_000;
+export const PBKDF2_ITERATION_CEILING = 100_000;
+
+/**
+ * PBKDF2-HMAC-SHA-256 iteration count. OWASP's 2023 guidance recommends
+ * 600,000, but that exceeds {@link PBKDF2_ITERATION_CEILING}, so this is
+ * capped there instead — still within OWASP's longstanding prior-generation
+ * minimum.
+ */
+export const DEFAULT_PBKDF2_ITERATIONS = PBKDF2_ITERATION_CEILING;
 
 const HASH_BYTES = 32;
 const SALT_BYTES = 16;
@@ -169,6 +176,16 @@ export async function mintAppPassword(
   params: MintAppPasswordParams,
 ): Promise<MintedAppPassword> {
   const iterations = params.iterations ?? DEFAULT_PBKDF2_ITERATIONS;
+  if (iterations > PBKDF2_ITERATION_CEILING) {
+    // Fail loudly (spec/composition-contract.md) instead of letting a
+    // deployer-configured value above the ceiling surface as an opaque
+    // WebCrypto NotSupportedError deep inside deriveBits.
+    throw new Error(
+      `mintAppPassword: iterations (${iterations}) exceeds workerd's PBKDF2 ` +
+        `ceiling of ${PBKDF2_ITERATION_CEILING}; crypto.subtle.deriveBits ` +
+        `would throw NotSupportedError`,
+    );
+  }
   const now = params.now ?? Date.now;
   const credentialId = generateCredentialId();
   const secret = generateSecret();
