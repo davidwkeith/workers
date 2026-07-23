@@ -67,5 +67,6 @@ export {
   DurableObjectNamespaceLike,
   type DurableObjectClass,
   type DurableObjectNamespaceOptions,
+  type DenoDurableObjectStorage,
   type AlarmInvocationInfo,
 } from "./durable-object.js";

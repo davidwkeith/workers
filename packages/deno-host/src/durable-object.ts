@@ -17,6 +17,14 @@ import {
 } from "./lease.js";
 import { createDurableSqlite, type DurableSqlite } from "./sql-storage.js";
 import type { SyncSqliteDatabaseLike } from "./client.js";
+import {
+  setAlarm,
+  getAlarm,
+  deleteAlarm as deleteAlarmKv,
+  scheduleRetry,
+  listDueAlarms,
+  claimDueAlarm,
+} from "./alarms.js";
 
 /* ---------- id ---------- */
 
@@ -60,6 +68,42 @@ export class DenoDurableObjectId {
   equals(other: { toString(): string }): boolean {
     return other != null && other.toString() === this.#hex;
   }
+}
+
+/* ---------- storage ---------- */
+
+export interface DenoDurableObjectStorage extends DurableSqlite {
+  setAlarm(scheduledTime: number | Date): Promise<void>;
+  getAlarm(): Promise<number | null>;
+  deleteAlarm(): Promise<void>;
+}
+
+function createStorage(
+  db: SyncSqliteDatabaseLike,
+  kv: DenoKvLike,
+  className: string,
+  idHex: string,
+): DenoDurableObjectStorage {
+  const base = createDurableSqlite(db);
+  return {
+    ...base,
+    async setAlarm(scheduledTime: number | Date): Promise<void> {
+      const time =
+        typeof scheduledTime === "number"
+          ? scheduledTime
+          : scheduledTime.getTime();
+      if (!Number.isFinite(time)) {
+        throw new TypeError("setAlarm: scheduledTime must be a finite time");
+      }
+      await setAlarm(kv, className, idHex, time);
+    },
+    async getAlarm(): Promise<number | null> {
+      return getAlarm(kv, className, idHex);
+    },
+    async deleteAlarm(): Promise<void> {
+      await deleteAlarmKv(kv, className, idHex);
+    },
+  };
 }
 
 /* ---------- WebSockets ---------- */
@@ -128,11 +172,11 @@ class SocketSet {
 // this repo's unused-identifier convention (see CLAUDE.md "Conventions").
 export class DenoDurableObjectState<_Env = unknown> {
   readonly id: DenoDurableObjectId;
-  readonly storage: DurableSqlite;
+  readonly storage: DenoDurableObjectStorage;
   readonly #sockets = new SocketSet();
   #concurrencyGate: Promise<unknown> = Promise.resolve();
 
-  constructor(id: DenoDurableObjectId, storage: DurableSqlite) {
+  constructor(id: DenoDurableObjectId, storage: DenoDurableObjectStorage) {
     this.id = id;
     this.storage = storage;
   }
@@ -207,6 +251,9 @@ interface Instance<T> {
   chain: Promise<unknown>;
 }
 
+const ALARM_RETRY_BASE_MS = 2_000;
+const ALARM_RETRY_MAX = 6;
+
 /**
  * A `DurableObjectNamespace` that routes `get(id).fetch(req)` to a per-id
  * `DurableObject` instance, serialised behind a KV lease (cross-process,
@@ -259,7 +306,12 @@ export class DurableObjectNamespaceLike<
     let instance = this.#instances.get(idHex);
     if (instance === undefined) {
       const db = this.#options.getStorageClient(idHex);
-      const storage = createDurableSqlite(db);
+      const storage = createStorage(
+        db,
+        this.#options.kv,
+        this.#options.className,
+        idHex,
+      );
       const state = new DenoDurableObjectState(id, storage);
       const object = new this.#ctor(state as never, this.#options.env as never);
       state._setOwner(object as HibernationHandlers);
@@ -291,6 +343,97 @@ export class DurableObjectNamespaceLike<
       return await run;
     } finally {
       await releaseLease(this.#options.kv, lease);
+    }
+  }
+
+  /**
+   * One scan-and-fire pass over this namespace's due alarms. Wire this to
+   * whatever periodic trigger the composing app's runtime offers
+   * (`Deno.cron()` on Deno Deploy) — the package never starts its own
+   * timer.
+   */
+  async pollAlarms(
+    options: { now?: number; batchSize?: number } = {},
+  ): Promise<void> {
+    const now = options.now ?? Date.now();
+    const batchSize = options.batchSize ?? 100;
+    const due = await listDueAlarms(
+      this.#options.kv,
+      this.#options.className,
+      now,
+      batchSize,
+    );
+    for (const entry of due) {
+      const claimed = await claimDueAlarm(this.#options.kv, entry);
+      if (!claimed) continue;
+      await this.#fireAlarm(entry.idHex, entry.retryCount, now);
+    }
+  }
+
+  async #fireAlarm(
+    idHex: string,
+    retryCount: number,
+    now: number,
+  ): Promise<void> {
+    const id = new DenoDurableObjectId(idHex);
+    let lease: Lease | undefined;
+    try {
+      lease = await acquireLease(
+        this.#options.kv,
+        this.#leaseKey(idHex),
+        this.#leaseOptions,
+      );
+      // Firing consumes the alarm slot: `claimDueAlarm` only removed the
+      // due-index entry, so the by-id record (what `getAlarm`/`setAlarm`
+      // read/write) still holds the pre-fire schedule. Clear it before
+      // invoking the handler so the catch block's "did the handler set its
+      // own new alarm?" check below is meaningful instead of always seeing
+      // the stale pre-fire value.
+      await deleteAlarmKv(this.#options.kv, this.#options.className, idHex);
+      const instance = this.#materialize(id);
+      const run = instance.chain
+        .then(() => instance.state.concurrencyGate)
+        .then(async () => {
+          const handler = (
+            instance.object as {
+              alarm?: (info: AlarmInvocationInfo) => void | Promise<void>;
+            }
+          ).alarm;
+          if (typeof handler !== "function") return;
+          await handler.call(instance.object, {
+            retryCount,
+            isRetry: retryCount > 0,
+          });
+        });
+      instance.chain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      await run;
+    } catch {
+      // Exhausted retries are dropped; the handler owns its error
+      // reporting (same posture as @dwk/cf-shims' alarm shim).
+      if (retryCount < ALARM_RETRY_MAX) {
+        const stillPending = await getAlarm(
+          this.#options.kv,
+          this.#options.className,
+          idHex,
+        );
+        // A handler that set its own new alarm before throwing supersedes
+        // the auto-retry — only schedule one if nothing is pending.
+        if (stillPending === null) {
+          const backoff = ALARM_RETRY_BASE_MS * 2 ** retryCount;
+          await scheduleRetry(
+            this.#options.kv,
+            this.#options.className,
+            idHex,
+            now + backoff,
+            retryCount + 1,
+          );
+        }
+      }
+    } finally {
+      if (lease !== undefined) await releaseLease(this.#options.kv, lease);
     }
   }
 }
