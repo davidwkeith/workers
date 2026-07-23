@@ -29,8 +29,10 @@ has no credential blocker.
   send. Until that wiring exists (or a temporary trigger endpoint is added
   for this test), the sender suite cannot be run against `conformance.dwk.io`
   at all — this isn't a result to record as `"pending"`, it's a real gap to
-  fix first. See Step 2 below before assuming you can just start clicking
-  through webmention.rocks/sender.
+  fix first. Tracked in
+  [#405](https://github.com/davidwkeith/workers/issues/405). See Step 2
+  below before assuming you can just start clicking through
+  webmention.rocks/sender.
 
 ## Environment
 
@@ -94,11 +96,13 @@ actually send a webmention today. Before running webmention.rocks/sender,
 either:
 
 - confirm a publish → send hook (or a standalone trigger endpoint) has since
-  been wired into `packages/conformance-target` — check
-  `packages/conformance-target/src/mounts.ts` for a `sendWebmention(s)` call
-  that isn't there as of this doc's writing — or
-- treat this as blocked and stop here, filing/linking an issue for the
-  wiring gap instead of attempting the suite.
+  been wired into `packages/conformance-target` — check whether
+  [#405](https://github.com/davidwkeith/workers/issues/405) is closed, or
+  look for a `sendWebmention(s)` call in
+  `packages/conformance-target/src/mounts.ts` that isn't there as of this
+  doc's writing — or
+- treat this as blocked and stop here; #405 already tracks the wiring gap,
+  so there's no need to file a duplicate.
 
 - [ ] **Confirmed a send trigger exists on this deployment** (describe it):
       **************\_\_\_\_**************
