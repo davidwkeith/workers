@@ -38,6 +38,13 @@ export {
   type DenoKvListSelectorLike,
   type DenoKvLike,
 } from "./kv-client.js";
+export {
+  acquireLease,
+  releaseLease,
+  LeaseContendedError,
+  type Lease,
+  type LeaseOptions,
+} from "./lease.js";
 export { createD1Database } from "./d1.js";
 export {
   createSqlStorage,
