@@ -89,6 +89,15 @@ describe("buildActorDocument", () => {
     expect(bare.webfinger).toBeUndefined();
     expect(bare.showFeatured).toBeUndefined();
   });
+
+  it("emits type Group when the profile declares it (#376)", () => {
+    const doc = buildActorDocument(
+      IRIS,
+      { username: "birding", type: "Group" },
+      "PEM",
+    );
+    expect(doc.type).toBe("Group");
+  });
 });
 
 describe("collections", () => {

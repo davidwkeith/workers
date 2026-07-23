@@ -40,6 +40,13 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   for fediverse software discovery (software name, version, usage counts).
 - **No WAC leakage.** This is an ActivityPub package — WAC/Solid concepts must
   not leak in, even though both share `@dwk/ldn` for inbox primitives.
+- **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
+  community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
+  the Group actor itself rather than one of its owned events, is the same
+  `Follow`/`Undo(Follow)` path); a member's `Create` is wrapped in a
+  Group-authored `Announce` and fanned out to the membership; and a
+  `moderators` actor-IRI allowlist authorizes AS2 `Remove`-based moderation
+  (ban a member / un-announce a post — see `object.ts` `#onModerationRemove`).
 
 ## Test environment
 

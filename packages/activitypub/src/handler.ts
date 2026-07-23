@@ -93,9 +93,11 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
   return {
     iris: config.iris,
     actorName: config.actor.name ?? config.actor.username,
+    actorType: config.actor.type ?? "Person",
     manuallyApprovesFollowers: config.actor.manuallyApprovesFollowers ?? false,
     manuallyApprovesJoins: config.manuallyApprovesJoins,
     verifyRelayedObjects: config.verifyRelayedObjects,
+    moderators: config.moderators,
     pageSize: config.pageSize,
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,

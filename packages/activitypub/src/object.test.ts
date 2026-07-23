@@ -78,9 +78,11 @@ function cfgHeader(
   const config: ForwardedConfig = {
     iris,
     actorName: username,
+    actorType: "Person",
     manuallyApprovesFollowers: false,
     manuallyApprovesJoins: false,
     verifyRelayedObjects: "tiered",
+    moderators: [],
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
@@ -1642,6 +1644,439 @@ describe("community post delivery", () => {
         .one();
       expect(pending.kind).toBe("deliver");
       expect(pending.actor).toBe(GROUP);
+    });
+  });
+});
+
+const MODERATOR = "https://mod.example/users/zed";
+
+describe("Group actor hosting (#376)", () => {
+  it("treats a Join targeting the Group itself as a membership request, not an event RSVP", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/join-1`,
+            type: "Join",
+            actor: AUTHOR,
+            object: iris.id,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM followers WHERE actor = ?`,
+          AUTHOR,
+        )
+        .one().n;
+      expect(followers).toBe(1);
+      const attendees = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM attendees`)
+        .one().n;
+      expect(attendees).toBe(0);
+    });
+  });
+
+  it("still treats a Join targeting an owned event as a calendar RSVP when hosting a Group", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const event = `${iris.id}/events/1`;
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/join-2`,
+            type: "Join",
+            actor: AUTHOR,
+            object: event,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM followers`)
+        .one().n;
+      expect(followers).toBe(0);
+      const attendees = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM attendees WHERE event = ? AND actor = ?`,
+          event,
+          AUTHOR,
+        )
+        .one().n;
+      expect(attendees).toBe(1);
+    });
+  });
+
+  it("treats a Leave targeting the Group itself as an unfollow", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, NULL, ?)`,
+        AUTHOR,
+        1,
+      );
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/leave-1`,
+            type: "Leave",
+            actor: AUTHOR,
+            object: iris.id,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM followers`)
+        .one().n;
+      expect(followers).toBe(0);
+    });
+  });
+
+  it("wraps a member's Create in a Group-authored Announce and fans it out to the membership", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const innerId = `${AUTHOR}/activities/post-1`;
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: innerId,
+            type: "Create",
+            actor: AUTHOR,
+            object: {
+              id: `${innerId}/object`,
+              type: "Note",
+              attributedTo: AUTHOR,
+              content: "hi",
+            },
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const outboxRows = state.storage.sql
+        .exec<{ json: string }>(`SELECT json FROM outbox`)
+        .toArray();
+      expect(outboxRows).toHaveLength(1);
+      const announce = JSON.parse(outboxRows[0]!.json) as Record<
+        string,
+        unknown
+      >;
+      expect(announce.type).toBe("Announce");
+      expect(announce.actor).toBe(iris.id);
+      expect((announce.object as { id: string }).id).toBe(innerId);
+      const deliveries = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(deliveries).toBe(1);
+    });
+  });
+
+  it("does not announce a non-member's post", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/post-2`,
+            type: "Create",
+            actor: AUTHOR,
+            object: {
+              id: `${AUTHOR}/activities/post-2/object`,
+              type: "Note",
+              content: "hi",
+            },
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const outbox = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outbox).toBe(0);
+    });
+  });
+
+  it("rejects any activity from a banned actor", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO banned (actor, banned_at) VALUES (?, ?)`,
+        AUTHOR,
+        1,
+      );
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/f/banned-1`,
+            type: "Follow",
+            actor: AUTHOR,
+            object: iris.id,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it("bans a member via a moderator-signed Remove targeting followers", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, NULL, ?)`,
+        AUTHOR,
+        1,
+      );
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${MODERATOR}/activities/remove-1`,
+            type: "Remove",
+            actor: MODERATOR,
+            object: AUTHOR,
+            target: iris.followers,
+          },
+          MODERATOR,
+          { actorType: "Group", moderators: [MODERATOR] },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM followers`)
+        .one().n;
+      expect(followers).toBe(0);
+      const banned = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM banned WHERE actor = ?`,
+          AUTHOR,
+        )
+        .one().n;
+      expect(banned).toBe(1);
+    });
+  });
+
+  it("ignores a Remove from an actor not on the moderator list", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, NULL, ?)`,
+        AUTHOR,
+        1,
+      );
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${MODERATOR}/activities/remove-2`,
+            type: "Remove",
+            actor: MODERATOR,
+            object: AUTHOR,
+            target: iris.followers,
+          },
+          MODERATOR,
+          { actorType: "Group", moderators: [] },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM followers`)
+        .one().n;
+      expect(followers).toBe(1);
+    });
+  });
+
+  it("un-announces a member post via a moderator-signed Remove targeting the outbox", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const announceId = `${iris.outbox}/announce-1`;
+      const innerId = `${AUTHOR}/activities/post-3`;
+      const announce = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: announceId,
+        type: "Announce",
+        actor: iris.id,
+        object: {
+          id: innerId,
+          type: "Create",
+          actor: AUTHOR,
+          object: { id: `${innerId}/object`, type: "Note" },
+        },
+      };
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        announceId,
+        JSON.stringify(announce),
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at) VALUES (?, ?, ?)`,
+        innerId,
+        JSON.stringify(announce.object),
+        1,
+      );
+
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${MODERATOR}/activities/remove-3`,
+            type: "Remove",
+            actor: MODERATOR,
+            object: announceId,
+            target: iris.outbox,
+          },
+          MODERATOR,
+          { actorType: "Group", moderators: [MODERATOR] },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const outboxCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxCount).toBe(0);
+      const removedAt = state.storage.sql
+        .exec<{
+          removed_at: number | null;
+        }>(`SELECT removed_at FROM inbox WHERE id = ?`, innerId)
+        .one().removed_at;
+      expect(removedAt).not.toBeNull();
+      const deliveryRow = state.storage.sql
+        .exec<{ json: string }>(`SELECT json FROM delivery`)
+        .one();
+      const undo = JSON.parse(deliveryRow.json) as Record<string, unknown>;
+      expect(undo.type).toBe("Undo");
+      expect((undo.object as { id: string }).id).toBe(announceId);
+    });
+  });
+
+  it("records membership from a Join addressed via `target` alone, not just `object`", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/join-3`,
+            type: "Join",
+            actor: AUTHOR,
+            target: iris.id,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM followers WHERE actor = ?`, AUTHOR)
+        .one().n;
+      expect(followers).toBe(1);
+    });
+  });
+
+  it("excludes a moderator-removed post from __inbox and __client/timeline reads", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const innerId = `${AUTHOR}/activities/post-4`;
+      const create = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: innerId,
+            type: "Create",
+            actor: AUTHOR,
+            object: {
+              id: `${innerId}/object`,
+              type: "Note",
+              attributedTo: AUTHOR,
+              content: "hi",
+            },
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(create.status).toBe(202);
+
+      const announceId = state.storage.sql
+        .exec<{ id: string }>(`SELECT id FROM outbox`)
+        .one().id;
+
+      const removed = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${MODERATOR}/activities/remove-4`,
+            type: "Remove",
+            actor: MODERATOR,
+            object: announceId,
+            target: iris.outbox,
+          },
+          MODERATOR,
+          { actorType: "Group", moderators: [MODERATOR] },
+        ),
+      );
+      expect(removed.status).toBe(202);
+
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/__inbox`, {
+          headers: {
+            [INTERNAL_HEADERS.config]: cfgHeader(username),
+            [INTERNAL_HEADERS.internal]: "1",
+          },
+        }),
+      );
+      const listedBody = (await listed.json()) as {
+        total: number;
+        items: unknown[];
+      };
+      expect(listedBody.total).toBe(0);
+      expect(listedBody.items).toHaveLength(0);
+
+      const timeline = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      const timelineBody = (await timeline.json()) as { items: unknown[] };
+      expect(timelineBody.items).toHaveLength(0);
     });
   });
 });

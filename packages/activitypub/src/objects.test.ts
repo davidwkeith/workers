@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PUBLIC_AUDIENCE } from "./as2.js";
 import { deriveIris } from "./config.js";
 import {
+  buildAnnounceActivity,
   buildPostActivity,
   buildPostObject,
   classifyActivity,
@@ -241,6 +242,30 @@ describe("buildPostObject / buildPostActivity", () => {
     expect(object).not.toHaveProperty("attachment");
     expect(object).not.toHaveProperty("audience");
     expect(object).not.toHaveProperty("inReplyTo");
+  });
+});
+
+describe("buildAnnounceActivity (#376)", () => {
+  it("wraps a member's activity in a Group-authored Announce addressed to the membership", () => {
+    const memberCreate = {
+      id: "https://member.example/activities/1",
+      type: "Create",
+      actor: "https://member.example/users/alice",
+      object: { id: "https://member.example/activities/1/object" },
+    };
+    const announce = buildAnnounceActivity(
+      IRIS,
+      `${IRIS.outbox}/announce-1`,
+      IDS.published,
+      memberCreate,
+    );
+    expect(announce.type).toBe("Announce");
+    expect(announce.id).toBe(`${IRIS.outbox}/announce-1`);
+    expect(announce.actor).toBe(IRIS.id);
+    expect(announce.published).toBe(IDS.published);
+    expect(announce.to).toEqual([PUBLIC_AUDIENCE]);
+    expect(announce.cc).toEqual([IRIS.followers]);
+    expect(announce.object).toEqual(memberCreate);
   });
 });
 
