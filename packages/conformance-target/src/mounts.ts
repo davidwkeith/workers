@@ -31,6 +31,7 @@ import { createConsent, createMastodonConsent } from "./approval.js";
 import type { ConformanceEnv } from "./config.js";
 import { configsFor, USERNAME } from "./config.js";
 import { createHome } from "./home.js";
+import { createWebmentionSendTrigger } from "./webmention-send.js";
 
 export type Handler = (
   request: Request,
@@ -112,6 +113,13 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
       name: "@dwk/webmention",
       matches: (u) => u.pathname === "/webmention",
       handler: createWebmention(c.webmention),
+    },
+    {
+      // Owner-gated sender trigger — see webmention-send.ts. Distinct path
+      // from the receiver mount above (exact "/webmention"), no collision.
+      name: "@dwk/webmention (send trigger)",
+      matches: (u) => u.pathname === "/webmention/send",
+      handler: createWebmentionSendTrigger(env),
     },
     {
       name: "@dwk/websub",

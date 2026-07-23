@@ -220,6 +220,53 @@ describe("IndieWeb endpoints", () => {
     expect([201, 202]).toContain(res.status);
   });
 
+  it("webmention send trigger rejects an unauthenticated request", async () => {
+    const res = await call("/webmention/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: "https://sender.example/post",
+        target: "https://receiver.example/post",
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("webmention send trigger rejects a malformed body for the admin bearer", async () => {
+    const res = await call("/webmention/send", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer conformance-test-admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ source: "https://sender.example/post" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("webmention send trigger discovers no endpoint for an SSRF-blocked target", async () => {
+    const res = await call("/webmention/send", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer conformance-test-admin-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        source: "https://sender.example/post",
+        // A private/loopback target is rejected by @dwk/safe-fetch before any
+        // network call, so this is deterministic without a live receiver.
+        target: "http://127.0.0.1/blocked",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      endpoint: string | null;
+      delivered: boolean;
+    };
+    expect(body.endpoint).toBeNull();
+    expect(body.delivered).toBe(false);
+  });
+
   it("websub rejects a subscription for a foreign topic", async () => {
     const res = await call("/websub", {
       method: "POST",
