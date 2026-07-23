@@ -478,9 +478,12 @@ class ShimDurableObjectNamespace<
   }
 
   /**
-   * Cancel all pending alarm timers (host shutdown / test cleanup). Persisted
-   * alarm times survive in the objects' SQLite files and are re-armed by the
-   * next namespace construction over the same data directory.
+   * Cancel all pending alarm timers. Calling this is optional and is the
+   * composition root's job if it wants a quiescent shutdown — the host itself
+   * does not track namespaces, and every timer is `unref`'d, so process exit
+   * is never blocked either way (today only tests call this). Persisted alarm
+   * times survive in the objects' SQLite files and are re-armed by the next
+   * namespace construction over the same data directory.
    */
   dispose(): void {
     for (const entry of this.#alarms.values()) {
