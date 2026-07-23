@@ -130,6 +130,15 @@ export interface ActorIris {
 
 /** The human-facing profile fields of an actor. */
 export interface ActorProfile {
+  /**
+   * The actor's AS2 type. Defaults to `"Person"`. `"Group"` hosts a FEP-1b12
+   * community: members are recorded as `followers` exactly like a `Person`
+   * (an optional approval gate via {@link manuallyApprovesFollowers}), but
+   * inbound member posts are additionally wrapped in `Announce` and fanned
+   * out to the membership, and moderation activities from
+   * `ActivityPubConfig.moderators` are honored (see `object.ts`).
+   */
+  readonly type?: "Person" | "Group";
   /** `preferredUsername` — the local part of the `acct:` handle. */
   readonly username: string;
   /** Display name; defaults to {@link username}. */
@@ -186,7 +195,7 @@ export function buildActorDocument(
   const doc: Record<string, JsonValue> = {
     "@context": ACTOR_CONTEXT as JsonValue,
     id: iris.id,
-    type: "Person",
+    type: profile.type ?? "Person",
     preferredUsername: profile.username,
     name: profile.name ?? profile.username,
     inbox: iris.inbox,

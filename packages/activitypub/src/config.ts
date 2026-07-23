@@ -119,6 +119,17 @@ export interface ActivityPubConfig {
    */
   readonly verifyRelayedObjects?: RelayVerificationMode;
 
+  /**
+   * Actor IRIs authorized to moderate a `Group` actor (`actor.type ===
+   * "Group"`): a signed `Remove` targeting the `followers` collection bans
+   * the named member (drops them and rejects their future activities); a
+   * signed `Remove` targeting the `outbox` un-announces a member post (the
+   * FEP-1b12 producer side's moderation primitives, #376). Ignored for a
+   * `Person` actor. Checked against the HTTP-signature-verified signer, never
+   * the unverified `actor` field alone. Defaults to empty (no moderators).
+   */
+  readonly moderators?: readonly string[];
+
   /** Members served per `OrderedCollection` page. Defaults to 50. */
   readonly pageSize?: number;
 
@@ -172,6 +183,8 @@ export interface ResolvedConfig {
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
   readonly manuallyApprovesJoins: boolean;
   readonly verifyRelayedObjects: RelayVerificationMode;
+  /** Actor IRIs authorized to moderate a `Group` actor. Defaults to empty. */
+  readonly moderators: readonly string[];
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
   readonly publishToken?: string;
@@ -214,6 +227,8 @@ export const INTERNAL_HEADERS = {
 export interface ForwardedConfig {
   readonly iris: ActorIris;
   readonly actorName: string;
+  /** The actor's AS2 type; `"Group"` enables member-post `Announce` fan-out and moderation (#376). */
+  readonly actorType: "Person" | "Group";
   /** Shared inbox IRI the DO should also accept inbound `POST`s on, if served. */
   readonly sharedInbox?: string;
   readonly manuallyApprovesFollowers: boolean;
@@ -221,6 +236,8 @@ export interface ForwardedConfig {
   readonly manuallyApprovesJoins: boolean;
   /** Origin-verification mode for group-relayed activities (§2.2). */
   readonly verifyRelayedObjects: RelayVerificationMode;
+  /** Actor IRIs authorized to moderate this `Group` actor. Empty for a `Person`. */
+  readonly moderators: readonly string[];
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
   readonly deliveryBaseDelayMs: number;
@@ -370,6 +387,7 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     sharedInbox,
     manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
     verifyRelayedObjects: config.verifyRelayedObjects ?? "tiered",
+    moderators: config.moderators ?? [],
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
     publishToken: config.publishToken,

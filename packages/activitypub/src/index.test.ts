@@ -686,9 +686,11 @@ function forwardedHeader(
   const config: ForwardedConfig = {
     iris,
     actorName: username,
+    actorType: "Person",
     manuallyApprovesFollowers: false,
     manuallyApprovesJoins: overrides.manuallyApprovesJoins ?? false,
     verifyRelayedObjects: "tiered",
+    moderators: [],
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,

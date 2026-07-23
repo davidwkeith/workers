@@ -39,6 +39,7 @@ import {
 } from "./log.js";
 import { participationTarget } from "./events.js";
 import {
+  buildAnnounceActivity,
   buildPostActivity,
   classifyActivity,
   parsePostInput,
@@ -198,6 +199,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          event TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
          added_at INTEGER NOT NULL, PRIMARY KEY (event, actor))`,
     );
+    // `Group`-hosting moderation (#376): an actor banned here (by a
+    // moderator-signed `Remove` targeting `followers`) is dropped as a
+    // follower and every subsequent activity it sends is rejected outright —
+    // see `#isBanned` / `#onModerationRemove`. Meaningless for a `Person`
+    // actor (never populated).
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS banned (
+         actor TEXT PRIMARY KEY, banned_at INTEGER NOT NULL)`,
+    );
     // Async origin verification of group-relayed activities (§2.2): one row
     // per stored relayed activity awaiting verification. `target` is the IRI
     // fetched from its origin; `expect` is 'present' (2xx + id match),
@@ -251,6 +261,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#ensureColumn("inbox", "audience", "TEXT");
     this.#ensureColumn("inbox", "relayed_by", "TEXT");
     this.#ensureColumn("inbox", "verify_state", "TEXT");
+    // Set when a moderator un-announces a member post (#376 remove-post); a
+    // non-NULL value tombstones the row for reads without deleting history.
+    this.#ensureColumn("inbox", "removed_at", "INTEGER");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
     this.#ensureColumn("following", "actor_type", "TEXT");
     this.#ensureColumn("following", "inbox", "TEXT");
@@ -424,6 +437,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (signer && author && author !== signer) {
       return text(403, "Activity actor does not match the signing actor");
     }
+    // FEP-1b12 group moderation (#376): a banned member's activities are
+    // rejected outright, whether or not this particular one is a repeat
+    // offense — the ban itself is the enforcement point, not each activity.
+    if (config.actorType === "Group" && author && this.#isBanned(author)) {
+      return text(403, "Actor is banned from this group");
+    }
 
     const id = activity.id;
     if (typeof id === "string" && id.length > 0) {
@@ -450,10 +469,34 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         this.#onUndo(activity);
         break;
       case "Join":
-        await this.#onJoin(activity, config);
+        // FEP-1b12: a `Join` targeting the Group actor itself (not one of our
+        // owned events) is a membership request — the same auto-`Accept`
+        // shape as a `Follow` (#376). A `Join` targeting an event we own
+        // stays the existing calendar-RSVP path (#171).
+        if (
+          config.actorType === "Group" &&
+          participationTarget(activity) === config.iris.id
+        ) {
+          await this.#onFollow(activity, config);
+        } else {
+          await this.#onJoin(activity, config);
+        }
         break;
       case "Leave":
-        this.#onLeave(activity, config);
+        if (
+          config.actorType === "Group" &&
+          participationTarget(activity) === config.iris.id
+        ) {
+          const member = actorIri(activity.actor);
+          if (member) {
+            this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, member);
+          }
+        } else {
+          this.#onLeave(activity, config);
+        }
+        break;
+      case "Remove":
+        await this.#onModerationRemove(activity, config);
         break;
       case "Accept":
         this.#onAccept(activity);
@@ -477,6 +520,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         }
         await this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
+        // FEP-1b12 producer side (#376): a member's `Create` is additionally
+        // boosted to the whole membership. `Update` is never re-announced —
+        // followers who saw the original `Create`'s `Announce` already have
+        // the object's id and will fetch the edit through it.
+        if (type === "Create") {
+          await this.#maybeAnnounceMemberPost(activity, config);
+        }
         break;
       case "Like":
       case "Dislike":
@@ -671,6 +721,165 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   #onDelete(activity: ActivityObject): void {
     const gone = objectId(activity.object);
     if (gone) this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, gone);
+  }
+
+  /** Whether an actor is banned from this `Group` (#376). */
+  #isBanned(actor: string): boolean {
+    return (
+      this.#sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM banned WHERE actor = ?`, actor)
+        .one().n > 0
+    );
+  }
+
+  /**
+   * `Group` moderation (#376): a signed `Remove` from a listed
+   * `config.moderators` actor either bans a member (`target` names our
+   * `followers` collection, `object` names the member) or un-announces a
+   * member post (`target` names our `outbox`, `object` names the `Announce`
+   * id we authored for it). Ignored for a `Person` actor, or when the
+   * (HTTP-signature-verified — see the `signer === activity.actor` check in
+   * {@link #handleInbox}) requester is not a configured moderator.
+   */
+  async #onModerationRemove(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    if (config.actorType !== "Group") return;
+    const moderator = actorIri(activity.actor);
+    if (!moderator || !config.moderators.includes(moderator)) return;
+    const object = objectId(activity.object);
+    if (!object) return;
+    const target = objectId(activity.target);
+
+    if (target === config.iris.followers) {
+      this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, object);
+      this.#sql.exec(
+        `INSERT INTO banned (actor, banned_at) VALUES (?, ?)
+           ON CONFLICT(actor) DO UPDATE SET banned_at = excluded.banned_at`,
+        object,
+        Date.now(),
+      );
+      return;
+    }
+    if (target === config.iris.outbox) {
+      await this.#removeAnnouncedPost(object, config);
+    }
+  }
+
+  /**
+   * Un-announce a member post (#376 remove-post): delete the `Announce` we
+   * authored for it from our outbox, tombstone the relayed inbox copy so
+   * reads stop surfacing it, and fan out a self-signed `Undo(Announce)` to
+   * the membership so their servers retract the boost too — the same
+   * `followers`-inbox fan-out {@link #maybeAnnounceMemberPost} uses.
+   */
+  async #removeAnnouncedPost(
+    announceId: string,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const row = this.#sql
+      .exec<{
+        json: string;
+      }>(`SELECT json FROM outbox WHERE id = ?`, announceId)
+      .toArray()[0];
+    if (!row) return;
+    let announce: ActivityObject;
+    try {
+      announce = JSON.parse(row.json) as ActivityObject;
+    } catch {
+      return;
+    }
+    if (
+      announce.type !== "Announce" ||
+      actorIri(announce.actor) !== config.iris.id
+    ) {
+      return;
+    }
+    this.#sql.exec(`DELETE FROM outbox WHERE id = ?`, announceId);
+    const innerId = objectId(announce.object);
+    if (innerId) {
+      this.#sql.exec(
+        `UPDATE inbox SET removed_at = ? WHERE id = ?`,
+        Date.now(),
+        innerId,
+      );
+    }
+    const undo: Record<string, JsonValue> = {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: `${config.iris.id}#undos/${crypto.randomUUID()}`,
+      type: "Undo",
+      actor: config.iris.id,
+      to: [PUBLIC_AUDIENCE],
+      cc: [config.iris.followers],
+      object: announce as JsonValue,
+    };
+    const body = JSON.stringify(undo);
+    let any = false;
+    for (const row of this.#sql
+      .exec<{
+        inbox: string | null;
+      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+      .toArray()) {
+      if (row.inbox) {
+        this.#enqueueDelivery(row.inbox, body);
+        any = true;
+      }
+    }
+    if (any) await this.#armAlarm();
+  }
+
+  /**
+   * FEP-1b12 producer side (#376): a `Create` from a current member (a row in
+   * `followers` — "members = followers" per the design) is wrapped in a
+   * server-authored `Announce` and fanned out to the whole membership, the
+   * "boost everything a member posts" pattern Lemmy/Mastodon expect from a
+   * hosted community. A non-member's `Create` reaching this inbox is stored
+   * (by the caller, above) but never announced, so this actor cannot be used
+   * to amplify arbitrary content. Ignored for a `Person` actor.
+   */
+  async #maybeAnnounceMemberPost(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    if (config.actorType !== "Group") return;
+    const author = actorIri(activity.actor);
+    if (!author) return;
+    const member = this.#sql
+      .exec<{
+        actor: string;
+      }>(`SELECT actor FROM followers WHERE actor = ?`, author)
+      .toArray()[0];
+    if (!member) return;
+
+    const announceId = `${config.iris.outbox}/${crypto.randomUUID()}`;
+    const announce = buildAnnounceActivity(
+      config.iris,
+      announceId,
+      new Date().toISOString(),
+      activity,
+    );
+    this.#sql.exec(
+      `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+      announceId,
+      JSON.stringify(announce),
+      Date.now(),
+    );
+    const body = JSON.stringify(announce);
+    let any = false;
+    for (const row of this.#sql
+      .exec<{
+        inbox: string | null;
+      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+      .toArray()) {
+      if (row.inbox) {
+        this.#enqueueDelivery(row.inbox, body);
+        any = true;
+      }
+    }
+    if (any) await this.#armAlarm();
   }
 
   /**

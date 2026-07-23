@@ -259,6 +259,53 @@ the clients:
   plus `audience` listing folded into existing reads. Agent-operable posting
   to any platform falls out of the same shape.
 
+## Capability 4 — hosting `Group` actors (FEP-1b12 producer side, #376)
+
+The concrete use case for the "Non-goals" deferral below arrived (Anglesite V-5
+communities, Anglesite/Anglesite-app#339/#367): a hosted community is its own
+`@dwk/activitypub` actor configured as a `Group` rather than a `Person`. Members
+are followers — the same `followers` table, the same `manuallyApprovesFollowers`
+approval gate — so the whole federation/delivery machinery (auto-`Accept`,
+alarm-driven fan-out, SSRF-guarded delivery) is reused unchanged; only the actor
+type and a handful of new inbound activity branches are additive.
+
+- **`actor.type: "Group"`** (`ActorProfile.type`, default `"Person"`) is
+  serialized as the actor document's AS2 `type`. Nothing else about the actor
+  document changes.
+- **Membership = followers.** A `Follow` targeting the Group works exactly as
+  it does for a `Person`. FEP-1b12 senders (Lemmy) address membership as
+  `Join`/`Leave` instead: a `Join`/`Leave` whose `object`/`target` names the
+  Group actor itself (not one of its owned events — the existing calendar-RSVP
+  `Join`/`Leave` path, #171, is unambiguously distinguished by target) is
+  treated as `Follow`/`Undo(Follow)`, including the `manuallyApprovesFollowers`
+  gate and the queued (never inline) auto-`Accept`.
+- **Member-post → `Announce` fan-out.** A `Create` reaching the Group's inbox
+  from a current member (a `followers` row) is wrapped in a Group-authored
+  `Announce` (`to: [Public], cc: [followers]`) and fanned out to the whole
+  membership via the same `followers`-table delivery loop `#publish` and
+  `#maybeForward` already use. A non-member's `Create` is stored (as any
+  inbound activity is) but never announced, so the actor cannot be used to
+  amplify arbitrary content. `Update` is never re-announced — a member who
+  already received the `Announce` resolves the edit through the object's `id`.
+- **Moderation**, gated by a new `moderators: readonly string[]` config list
+  (actor IRIs; checked against the HTTP-signature-verified signer, never the
+  unverified `actor` field alone) and reusing the AS2 `Remove` activity,
+  disambiguated by `target`:
+  - `Remove { object: <member>, target: <followers collection> }` — **ban a
+    member**: drop them from `followers` and record them in a new `banned`
+    table; every subsequent activity from a banned actor is rejected (`403`)
+    before it reaches any handler.
+  - `Remove { object: <announce id>, target: <outbox collection> }` —
+    **un-announce a post**: delete the `Announce` this Group authored for it,
+    tombstone the relayed inbox copy (a nullable `removed_at` column, never a
+    hard delete — moderation history survives), and fan out a self-signed
+    `Undo(Announce)` to the membership so their servers retract the boost too.
+- Interop targets: **Lemmy** and **Mastodon** consuming a hosted group (join,
+  receive announced member posts, have a post/member moderated away). The
+  `activitypub-federation` suite's `lemmy` manual target (already `pending` in
+  `conformance/status.json` for the participant side) gains producer-side
+  cases; see "Storage & config deltas" below for the new columns/tables.
+
 ## Interop profiles (docs + conformance, not code)
 
 `spec/packages/activitypub.md` gains a short "interop profiles" appendix (or
@@ -278,10 +325,16 @@ and the fedify peer script grows announce-unwrap and Page cases.
   instance — a delivery optimization, recorded when the `Follow` is accepted.
 - `inbox`: + `object_type`, `audience`, `relayed_by`, `verify_state` (all
   nullable — classification and provenance; `relayed_by` marks group-relayed
-  content and `verify_state` tracks its async origin verification, see §2.2).
+  content and `verify_state` tracks its async origin verification, see §2.2),
+  + `removed_at` (nullable — set when a moderator un-announces the post, #376
+  Capability 4).
 - `seen`: also records unwrapped inner-activity `id`s.
+- `banned` (new table, #376): `actor` (primary key), `banned_at` — actors
+  banned from a hosted `Group`; empty and unused for a `Person` actor.
 - Config: + `verifyRelayedObjects?: "tiered" | "immediate" | "off"` (default
-  `"tiered"`, see §2.2). No new
+  `"tiered"`, see §2.2), + `moderators?: readonly string[]` (default empty,
+  #376 Capability 4) authorizing `Remove`-based moderation on a `Group` actor.
+  `ActorProfile` gains `type?: "Person" | "Group"` (default `"Person"`). No new
   bindings — attachments are **URL references**; media bytes live behind the
   micropub media endpoint / R2 as today, and the AP package still never
   buffers or hosts blobs itself.
@@ -291,11 +344,6 @@ Everything remains DO-SQLite authoritative state — never KV — per
 
 ## Non-goals
 
-- **Hosting `Group` actors** (being the Lemmy-style community server, FEP-1b12
-  producer side). The DO is keyed per-actor so this is architecturally
-  reachable, but it is a different product surface (moderation, membership,
-  relay fan-out amplification) — explicitly deferred, revisit only with a
-  concrete use case.
 - **Pixelfed `Story` objects** (bearcap-gated, Pixelfed-to-Pixelfed only) and
   the comment-control `capabilities` extension beyond tolerating them inbound.
 - **Video hosting** (PeerTube producer side). Consuming announced `Video`
@@ -322,6 +370,10 @@ Everything remains DO-SQLite authoritative state — never KV — per
 3. **Client wiring** (micropub adapter + syndication targets, MCP
    `activitypub_publish`) and the conformance-target additions.
    ([#276](https://github.com/davidwkeith/workers/issues/276))
+4. **Hosting `Group` actors** (Capability 4, the FEP-1b12 producer side) —
+   `actor.type: "Group"`, membership `Join`/`Leave` synonyms, member-post
+   `Announce` fan-out, and `Remove`-based moderation.
+   ([#376](https://github.com/davidwkeith/workers/issues/376))
 
 Each phase is independently shippable and changeset-recorded; nothing here
 alters published behavior for existing Mastodon federation.

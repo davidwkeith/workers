@@ -98,6 +98,25 @@ one record.
   `Accept`/`Reject` is a C2S concern (out of scope for v1, as with manual
   follower approval).
 
+### Group actors (communities, FEP-1b12 producer side, #376)
+
+`actor.type` (default `"Person"`) may be set to `"Group"` to host a FEP-1b12
+community — the concrete use case is Anglesite V-5 communities. See
+[fediverse-interop.md](../fediverse-interop.md) Capability 4 for the full
+design; summary:
+
+- **Members are followers.** A `Follow`, or a `Join`/`Leave` that targets the
+  Group actor itself (as opposed to one of its owned events — the existing
+  calendar-RSVP path, #171), is recorded exactly like `Follow`/`Undo(Follow)`,
+  including the `manuallyApprovesFollowers` approval gate.
+- **Member posts are boosted.** A `Create` from a current member is wrapped in
+  a Group-authored `Announce` and fanned out to the membership. A non-member's
+  post is stored but never announced.
+- **Moderation** is gated by a `moderators` actor-IRI allowlist and expressed
+  as AS2 `Remove`, disambiguated by `target`: banning a member (drops them and
+  rejects their future activities) or un-announcing a post (tombstones it and
+  broadcasts `Undo(Announce)`).
+
 ### NodeInfo
 
 - The `/.well-known/nodeinfo` discovery document advertises both the
@@ -125,6 +144,10 @@ one record.
 - Delivery retry / backoff policy.
 - `manuallyApprovesJoins` — hold inbound event RSVPs (`Join`) `pending` instead
   of auto-`Accept`ing them. Defaults to `false`.
+- `actor.type` — `"Person"` (default) or `"Group"` (#376); see "Group actors"
+  above.
+- `moderators` — actor IRIs authorized to moderate a `Group` actor via
+  `Remove`. Defaults to empty; ignored for a `Person` actor.
 
 ## Conformance
 
@@ -151,7 +174,8 @@ v1 interop targets Mastodon. The approved design for interoperating with
 **Pixelfed**, **Lemmy**, and other fediverse platforms from the same single
 actor — a typed object model (`Note`/`Article`/`Page` + attachments),
 FEP-1b12 group *participation* (follow `Group`s, `audience` targeting,
-`Announce` unwrapping, `Dislike`), and client publish shaping — lives in
+`Announce` unwrapping, `Dislike`) and now *hosting* (see "Group actors"
+above, #376), and client publish shaping — lives in
 [fediverse-interop.md](../fediverse-interop.md). It is additive; nothing in it
 changes the Mastodon-facing behavior specified above.
 

@@ -398,6 +398,30 @@ export function buildPostActivity(
   return activity;
 }
 
+/**
+ * Build a `Group`-authored `Announce` wrapping a member's activity (FEP-1b12
+ * producer side, #376): a hosted community boosts everything a validated
+ * member posts to its inbox, fanned out to the membership (`followers`) —
+ * the "member-post → Announce" half of hosting a `Group` actor.
+ */
+export function buildAnnounceActivity(
+  iris: ActorIris,
+  id: string,
+  published: string,
+  inner: ActivityObject,
+): Record<string, JsonValue> {
+  return {
+    "@context": AS2_NS,
+    id,
+    type: "Announce",
+    actor: iris.id,
+    published,
+    to: [PUBLIC_AUDIENCE] as JsonValue,
+    cc: [iris.followers] as JsonValue,
+    object: inner as JsonValue,
+  };
+}
+
 /** Classification of one stored inbound activity (nullable DO columns). */
 export interface ActivityClassification {
   /** The embedded object's AS2 `type` (`Note`, `Page`, `Video`, …), if any. */

@@ -19,7 +19,7 @@
       "host": "pixelfed"
     },
     "lemmy": {
-      "description": "Manual federation run against a live Lemmy instance (fediverse interop #273): follow a community and receive/unwrap its announced posts, publish a titled Page into it (handle-shaped audience), reply, and vote (Like/Dislike).",
+      "description": "Manual federation run against a live Lemmy instance (fediverse interop #273): follow a community and receive/unwrap its announced posts, publish a titled Page into it (handle-shaped audience), reply, and vote (Like/Dislike). Also covers hosting a Group actor (#376): a Lemmy peer follows/joins the hosted community, posts to it, and receives the Announce-wrapped boost.",
       "host": "lemmy"
     }
   },
@@ -246,7 +246,12 @@
           "owner publish fans a Create to the outbox",
           "shaped post published via POST <actor>/publish (note with attachments, titled Page)",
           "group Announce unwrapped with relayed_by provenance and inner-id dedup",
-          "relayed content origin-verified via the two-tier pipeline"
+          "relayed content origin-verified via the two-tier pipeline",
+          "hosted Group: signed Join/Follow targeting the actor itself records a member, distinct from an event RSVP (#376)",
+          "hosted Group: a member's Create is wrapped in a Group-authored Announce and fanned out to the membership (#376)",
+          "hosted Group: a non-member's post is stored but never announced (#376)",
+          "hosted Group: a moderator-signed Remove bans a member and rejects their subsequent activities (#376)",
+          "hosted Group: a moderator-signed Remove un-announces a post and broadcasts Undo(Announce) (#376)"
         ],
         "targets": {
           "node": {
