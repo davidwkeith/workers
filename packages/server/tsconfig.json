@@ -8,17 +8,23 @@
     // closure of the mounted packages' workspace deps (e.g. `@dwk/dpop` via
     // indieauth/micropub). This config is `noEmit`, so rootDir is moot.
     "paths": {
+      "@dwk/activitypub": ["../activitypub/src/index.ts"],
+      "@dwk/atproto-pds": ["../atproto-pds/src/index.ts"],
       "@dwk/calendar": ["../calendar/src/index.ts"],
       "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/host-meta": ["../host-meta/src/index.ts"],
+      "@dwk/http-signatures": ["../http-signatures/src/index.ts"],
       "@dwk/indieauth": ["../indieauth/src/index.ts"],
       "@dwk/ldn": ["../ldn/src/index.ts"],
       "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
       "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/mastodon-api": ["../mastodon-api/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
       "@dwk/micropub": ["../micropub/src/index.ts"],
       "@dwk/microsub": ["../microsub/src/index.ts"],
+      "@dwk/oauth": ["../oauth/src/index.ts"],
       "@dwk/rdf": ["../rdf/src/index.ts"],
+      "@dwk/remotestorage": ["../remotestorage/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"],
       "@dwk/solid-pod": ["../solid-pod/src/index.ts"],
       "@dwk/store": ["../store/src/index.ts"],

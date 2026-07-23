@@ -30,7 +30,7 @@ import {
   parseScopes,
   type RemoteStorageConfig,
 } from "@dwk/remotestorage";
-import { ensureGcSchema } from "@dwk/store";
+import { DEFAULT_MAX_INLINE_BYTES, ensureGcSchema } from "@dwk/store";
 
 import { createServer } from "./server.js";
 import { assembleBindings } from "./bindings.js";
@@ -169,9 +169,14 @@ describe("Phase 5 — remotestorage on the emulated Durable Object", () => {
       const account = `acct-${crypto.randomUUID()}`;
       const path = `/${account}/documents/note.txt`;
 
-      // A large-enough body to offload to R2 (small bodies would stay inline
-      // in the DO's SQLite cell and never orphan a blob key).
-      const big = "x".repeat(64 * 1024);
+      // Every remoteStorage document write goes through `store.putBlob` to
+      // R2 regardless of size — size only picks the *hashing* path: a
+      // declared Content-Length over `maxInlineBytes` streams straight to
+      // `putBlob` (hitting `stageAndHash`'s `crypto.DigestStream`, the
+      // polyfill this PR adds), while a smaller body is buffered and hashed
+      // directly. Exceed the ceiling here so this test exercises the
+      // streamed path, not just the buffered one.
+      const big = "x".repeat(DEFAULT_MAX_INLINE_BYTES + 1024);
       await vault.send("PUT", path, {
         headers: {
           authorization: "Bearer documents:rw",
