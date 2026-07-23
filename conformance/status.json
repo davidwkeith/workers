@@ -43,9 +43,9 @@
               "lastRun": null
             },
             "ice-cubes": {
-              "status": "pending",
+              "status": "passing",
               "report": null,
-              "lastRun": null
+              "lastRun": "2026-07-23T19:10:00Z"
             }
           }
         }
