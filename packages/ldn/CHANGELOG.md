@@ -1,5 +1,12 @@
 # @dwk/ldn
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- Updated dependencies [3e505be]
+  - @dwk/rdf@0.1.0-beta.3
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

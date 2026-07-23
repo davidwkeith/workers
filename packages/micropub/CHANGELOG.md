@@ -1,5 +1,164 @@
 # @dwk/micropub
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 48d56a4: Fediverse interop phase 3 (#276): client wiring.
+
+  `@dwk/micropub` (#278):
+
+  - `syndicateTo` config now also accepts an **async provider**, so target
+    lists can change at runtime (e.g. followed fediverse communities);
+    `q=config` / `q=syndicate-to` await it.
+  - New `fediverse.ts` adapter: `entryToFediversePost` maps an `h-entry` onto
+    the `POST <actor>/publish` wire shape (`photo`/`video`/`audio` → typed
+    attachments with alt text, `name`+`content` → `article`, plain `content` →
+    `note`, community target → titled `page` + `audience`), and `syndicateEntry`
+    delivers to `@dwk/activitypub`'s publish endpoint when `mp-syndicate-to`
+    names the reserved `fediverse` uid or an advertised community. Failures
+    are logged per target, never fatal to the post creation. No
+    `@dwk/activitypub` import — the JSON wire format is the contract.
+
+  `@dwk/activitypub` (#278/#279):
+
+  - `createCommunitySyndicationTargets` — an async `{uid, name}` provider of
+    accepted `Group` follows (display handles like `!birding@lemmy.ml`),
+    pluggable straight into micropub's `syndicateTo`; backed by a new
+    internal-only `__following` DO route.
+  - MCP tools (v3): `activitypub_publish` (write-scoped, `PostInput` in,
+    handle-shaped audiences resolved via the SSRF-guarded WebFinger lookup)
+    and the read-only `activitypub_resolve` (handle → actor IRI + type +
+    profile basics), beside the existing `activitypub_list_inbox`.
+  - New `discovery.ts` shared by the front door and the tools: guarded handle
+    resolution and actor-document dereferencing.
+
+- 04e16c2: Add `createMicropubMcpTools` (#240): a `@dwk/mcp` tool contribution exposing
+  `micropub_publish` — publish a new mf2 post (`h-entry`, `h-event`, or any
+  other type) through the same `publishPost` path (now exported from
+  `handler.ts`) the HTTP `create` action uses, so both share identical
+  slug-generation, collision-retry, and persistence behavior. The tool is
+  side-effecting (`readOnlyHint: false`) and supports a `dryRun` argument that
+  previews the URL a publish would allocate without persisting anything.
+  Defaults to requiring the `create` scope, matching the HTTP endpoint.
+- 8642346: Implement the proposed media-endpoint extensions (#363, roadmap #354), gated
+  behind `extensions.proposed`: media `q=source` (newest-first listing and
+  by-URL lookup, `media` scope required), the `{ "url": ... }` upload response
+  body, and recoverable `action=delete`/`action=undelete` via an R2 `.trash/`
+  prefix with scope-pair enforcement and strict URL ownership validation.
+  Upload metadata is now always recorded in a new `micropub_media` D1 table
+  (best-effort while the group is off, fail-closed when on); the new
+  `mediaTrashRetentionDays` config (default 30) drives trash-row pruning, with
+  blob purge delegated to an R2 lifecycle rule.
+- 193de8d: Add opt-in proposed Audience and Location Visibility metadata, including
+  configured named audiences, validation, source round-tripping, and capability
+  advertisement.
+- 2d594d1: Add the opt-in proposed Contacts (`q=contact`) extension with a private,
+  injectable h-card store, lifecycle actions, filtering, and pagination.
+- 31f95fd: Add the proposed Location/Venue (`q=geo`) extension: a read-only proximity
+  search over an injected, strongly-consistent venue store, independent from
+  post storage. Disabled by default — requires `extensions.proposed: true` and a
+  configured `venues` store (`createMicropubVenueStore` for the built-in
+  D1-backed implementation). Accepts a Geo URI or discrete `lat`/`lon`
+  coordinates plus an optional `u` radius (default 1,000m, max 50,000m), and
+  returns venues ordered by great-circle distance with `limit`/`offset`
+  pagination. `geo`'s location suggestion is currently a placeholder that echoes
+  the query coordinates back — no reverse-geocoding service is wired in yet.
+
+  Implements the design from #359 per
+  https://indieweb.org/Micropub-extensions#Location/Venue. Tracked by #354.
+
+- 96105d1: Add opt-in proposed filters for `q=source` post lists, including creation-time,
+  type, status, visibility, and exact property predicates with deterministic
+  keyset cursor pagination.
+- 3b55292: Add `q=source` list query extension: when no `url` parameter is provided, return
+  `{ items: [...] }` containing the authenticated caller's recent posts, ordered
+  newest-first by creation time. Supports offset-based pagination via `limit`
+  (default 10, max 100) and `offset` (default 0) parameters. Soft-deleted posts
+  are excluded. Property filtering via `properties[]` applies per-item, same as
+  single-post `q=source` queries.
+
+  Implements the widely-used Micropub post-list extension per
+  https://indieweb.org/Micropub-extensions#Query_for_Post_List. Required for
+  Anglesite iOS/Mac clients to browse draft posts for "resume editing" flows.
+
+- 99a2146: Implement the first tranche of IndieWeb Micropub extensions, toggled by maturity
+  group. A new `extensions` config (`{ official?, stable?, proposed? }`; defaults
+  `official`+`stable` on, `proposed` off) enables extensions a group at a time.
+
+  All new extensions are **stable**:
+
+  - **Post Status** (`post-status`) and **Visibility** (`visibility`) — their
+    values are validated on create and on the merged result of an update
+    (unrecognised values are rejected `400 invalid_request`; an absent property is
+    the documented default). The endpoint stores and advertises these; read-time
+    enforcement (hiding drafts, gating private posts) remains the serving layer's
+    responsibility.
+  - **Supported Vocabulary** — an optional `postTypes` config is advertised as
+    `post-types` in `q=config`.
+  - **Category/Tag List** (`q=category`) — returns the distinct string `category`
+    tags across live posts (soft-deleted excluded), alphabetised, for autocomplete;
+    narrowable via the stable **Limit** (`limit`) and **Filter** (`filter`)
+    parameters.
+
+  Exports `validateVocabulary`, `POST_STATUS_VALUES`, `VISIBILITY_VALUES`, and the
+  `ExtensionMaturity`, `ExtensionGroupsConfig`, and `PostTypeConfig` types.
+  Post-list (`q=source` with no `url`) is tracked separately (#351/#353).
+
+### Patch Changes
+
+- 36a3be1: Bind the DPoP proof's `htu` to the configured endpoint URL instead of
+  `request.url` (#300). Both resource servers verified the proof against
+  `request.url`, but a client signs the **public** endpoint it POSTs to — behind
+  the path-rewriting proxy the mountable-prefix composition targets, `request.url`
+  is the rewritten internal URL, so every DPoP proof failed with `htu_mismatch`, a
+  hard outage. `authorize` now takes the expected `htu` from the caller and each
+  call site passes the relevant configured endpoint (`micropubEndpoint` /
+  `mediaEndpoint` / `microsubEndpoint`), matching what `@dwk/indieauth`'s token
+  endpoint already does.
+- bde0341: Create D1 schema lazily so a fresh deploy no longer 500s (#291, #292). The
+  IndieAuth code/token store, the Micropub post store, and the Micropub/Microsub
+  DPoP replay stores previously created their tables only in an `init()` that no
+  handler ever called, so a consumer composing these packages against a brand-new
+  D1 hit `no such table` on the first authorization/token/publish request, and —
+  because DPoP replay-checking is on by default — every authenticated
+  create/update/delete `500`ed permanently.
+
+  Each store now materialises its schema lazily on first use (the same
+  `ensureSchema` pattern the webmention/websub/microsub stores already use), with
+  the cached init promise cleared on failure so a transient D1 error doesn't wedge
+  the store. The IndieAuth RFC 8707 `resource`-column migration now runs on that
+  lazy path too, so it actually reaches consumer databases. No separate migration
+  step is required.
+
+- 36a3be1: Stop a client-controlled `Content-Type` on a served blob from becoming stored
+  XSS (#299). Both packages serve public, unauthenticated blobs whose content type
+  comes from the (client-controlled) upload, so an uploaded `text/html` (or
+  `image/svg+xml`) would render as active content on the deployment's own origin —
+  `@dwk/micropub`'s `media`-scope-only endpoint could thereby escalate to
+  origin-level script execution. The serve paths now always send
+  `X-Content-Type-Options: nosniff`, and only serve a known safe media type
+  (image/video/audio) inline; anything else is served as an opaque
+  `application/octet-stream` with `Content-Disposition: attachment`, so it
+  downloads instead of executing. (Note that `nosniff` alone would not stop an
+  explicit `text/html`, hence the inline allow-list.)
+- bde0341: Authorize a `multipart/form-data` create before streaming its files to R2
+  (#290). Previously the Micropub endpoint parsed the multipart body — including
+  `env.MEDIA.put(...)` for every uploaded file — before the authorization check,
+  so an unauthenticated caller could write arbitrary blobs to R2 (and orphan
+  them) simply by POSTing multipart bodies, an unauthenticated storage-exhaustion
+  and cost-amplification vector. The handler now parses only the text fields
+  up front (memory is still capped by the existing `Content-Length` guard) and
+  defers every file upload until after `authorize` succeeds. The dedicated media
+  endpoint already authorized first and is unchanged.
+- Updated dependencies [36a3be1]
+- Updated dependencies [3e505be]
+- Updated dependencies [bde0341]
+- Updated dependencies [3e505be]
+  - @dwk/calendar@0.1.0-beta.2
+  - @dwk/indieauth@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Minor Changes

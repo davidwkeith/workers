@@ -1,5 +1,19 @@
 # @dwk/rdf
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- 3e505be: `parseJsonLd` now bounds node-value nesting depth (100 levels) during
+  expansion, rejecting a document nested deeper than that with a `JsonLdError`.
+  Previously a deeply nested `@dwk/rdf` input (mutually recursive
+  `processNode`/`valueToObject`) could overflow the call stack with an
+  uncatchable `RangeError`, escaping the package's `JsonLdError` contract. The
+  cap also now covers nested `@list` values (`buildList`/`valueToObject`'s own
+  mutual recursion for `{"@list": [{"@list": [...]}]}`-shaped input), which the
+  initial fix missed — a deeply `@list`-nested document could still overflow
+  the stack.
+
 ## 0.1.0-beta.2
 
 ### Patch Changes

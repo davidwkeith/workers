@@ -1,5 +1,236 @@
 # @dwk/activitypub
 
+## 0.1.0-beta.5
+
+### Minor Changes
+
+- d7f90d8: `@dwk/activitypub`'s inbox now verifies RFC 9421 (`Signature`/`Signature-Input`)
+  HTTP Message Signatures in addition to the legacy draft-cavage profile, auto-detected
+  per request. Delegates the RFC 9421 wire format and crypto to `@dwk/http-signatures`
+  (now a real dependency, per issue #59) while keeping the existing draft-cavage
+  path — and its exact `VerifyFailureReason` vocabulary — unchanged, so no caller
+  needs to change. Traced from a live conformance run against Fedify (issue #273):
+  Fedify signs `Follow` with draft-cavage but `Create`/other activities with RFC
+  9421, so a target that only understood draft-cavage rejected those deliveries
+  as `missing_signature`.
+- 2870b43: Typed post objects + shaped publish endpoint (fediverse interop phase 1, #274).
+
+  - New `objects.ts`: the canonical `PostInput` shape (`note` / `article` /
+    `page`, media attachments with alt text, `sensitive`, blurhash, `to`/`cc`
+    overrides) and pure builders producing correctly-addressed AS2
+    `Note`/`Article`/`Page` objects — the content shapes Pixelfed (media notes)
+    and Lemmy (titled `Page`s) render.
+  - New owner-gated `POST <actor>/publish` endpoint accepting a bare `PostInput`
+    body (same `publishToken` gate as the outbox seam); `POST <actor>/outbox`
+    stays purely AS2.
+  - Inbound activities are now stored with nullable `object_type` / `audience`
+    classification columns (annotation only — the liberal store-and-ignore
+    behavior for unknown shapes is unchanged).
+  - Follower rows now record the remote instance's `sharedInbox` alongside the
+    delivery inbox, enabling future per-instance fan-out batching.
+
+- 96cc2d3: FEP-1b12 group participation (fediverse interop phase 2, #275) and the
+  WebFinger client half (#277).
+
+  `@dwk/webfinger` gains `lookup.ts` — the pure client half of RFC 7033:
+  `parseHandle` (bare / `@user@host` / `!community@host` / `acct:` forms),
+  `webfingerQueryUrl`, `selectActorLink`, and `resolveHandle` with an injected
+  `fetch` (the package still makes no network calls of its own).
+
+  `@dwk/activitypub` participates in FEP-1b12 communities:
+
+  - **Follow-target typing (§2.1):** `following` rows record `actor_type`,
+    `inbox`, and `shared_inbox`, resolved from the actor document off the
+    critical path; pre-existing rows are lazily backfilled by the alarm tick
+    (permanent failures mark `Unknown`), so old Group follows qualify without
+    re-following. Owner-published `Follow` / `Undo(Follow)` now record the
+    relationship and deliver to the target actor instead of fanning out.
+  - **Announce unwrapping (§2.2):** an `Announce` from a followed `Group`
+    wrapping a member activity stores the inner activity attributed to its real
+    author — deduped by inner id, tagged `relayed_by` + group `audience`.
+  - **Async two-tier origin verification, on by default (§2.2):** relayed
+    content (`Create`/`Update`/`Delete`) verifies against its origin on the
+    next alarm tick; votes (`Like`/`Dislike`) verify in batched sweeps.
+    `verify_state` tracks `pending → verified`; a refuted row is deleted.
+    Config: `verifyRelayedObjects: "tiered" (default) | "immediate" | "off"`.
+  - **Community posting (§2.3):** a shaped post with an `audience` Group is
+    additionally delivered to the group's inbox (resolved from the alarm when
+    unknown); the group announces it to members per FEP-1b12.
+  - **Community discovery (§2.4):** a handle-shaped `audience`
+    (`!birding@lemmy.ml`) on `POST <actor>/publish` resolves to its Group actor
+    IRI at the stateless front door via the `@dwk/webfinger` helper behind the
+    SSRF guard.
+  - **`Dislike`** accepted inbound (stored like `Like`) and publishable
+    outbound (with `Undo`).
+
+- 48d56a4: Fediverse interop phase 3 (#276): client wiring.
+
+  `@dwk/micropub` (#278):
+
+  - `syndicateTo` config now also accepts an **async provider**, so target
+    lists can change at runtime (e.g. followed fediverse communities);
+    `q=config` / `q=syndicate-to` await it.
+  - New `fediverse.ts` adapter: `entryToFediversePost` maps an `h-entry` onto
+    the `POST <actor>/publish` wire shape (`photo`/`video`/`audio` → typed
+    attachments with alt text, `name`+`content` → `article`, plain `content` →
+    `note`, community target → titled `page` + `audience`), and `syndicateEntry`
+    delivers to `@dwk/activitypub`'s publish endpoint when `mp-syndicate-to`
+    names the reserved `fediverse` uid or an advertised community. Failures
+    are logged per target, never fatal to the post creation. No
+    `@dwk/activitypub` import — the JSON wire format is the contract.
+
+  `@dwk/activitypub` (#278/#279):
+
+  - `createCommunitySyndicationTargets` — an async `{uid, name}` provider of
+    accepted `Group` follows (display handles like `!birding@lemmy.ml`),
+    pluggable straight into micropub's `syndicateTo`; backed by a new
+    internal-only `__following` DO route.
+  - MCP tools (v3): `activitypub_publish` (write-scoped, `PostInput` in,
+    handle-shaped audiences resolved via the SSRF-guarded WebFinger lookup)
+    and the read-only `activitypub_resolve` (handle → actor IRI + type +
+    profile basics), beside the existing `activitypub_list_inbox`.
+  - New `discovery.ts` shared by the front door and the tools: guarded handle
+    resolution and actor-document dereferencing.
+
+- 90f1bc6: Phase 2 of the Mastodon-compatible client API (#349): the DO-backed read
+  surface. `@dwk/activitypub` gains additive internal routes
+  (`__client/timeline`, `__client/notifications`, `__client/entry`, extended
+  `__stats`) and one new export, `createActivitypubMastodonApi`, composing
+  `@dwk/mastodon-api`'s router over them (mirrors the `createSolidPodWebdav`
+  precedent). `@dwk/mastodon-api` gains `GET /api/v1/timelines/home`, `GET
+/api/v1/notifications`, `GET /api/v1/statuses/:id`, `GET
+/api/v1/accounts/:id`, Mastodon-shaped snowflake IDs, RFC 8288 `Link`
+  pagination, an allowlist HTML sanitizer for inbound status content, and the
+  AS2 → Mastodon entity mapping (including FEP-1b12 reblog provenance for
+  group-relayed posts). Remote account ids are a reversible encoding of the
+  actor IRI, so `accounts/:id` resolves them with no backend call and no
+  outbound fetch. Follow notifications are deferred to phase 3 (#350) —
+  inbound `Follow` activities aren't currently stored in a form this read
+  surface can classify; see the phase-2 implementation notes for why.
+- 1c179ac: Hydrate remote Mastodon client accounts from an alarm-driven ActivityPub actor
+  cache, include the owner's outbox posts in the home timeline, and expose
+  stored reply, favourite, and reblog counts on statuses. Outbox timeline IDs
+  use the snowflake source bit, preserving existing inbox IDs and marker
+  positions.
+- 3a60a5c: Add `createActivitypubMcpTools` (#262): a `@dwk/mcp` tool contribution
+  exposing the read-only `activitypub_list_inbox`, listing this actor's
+  received activities newest-first. The public `/inbox` route stays
+  write-only to peers (ActivityPub §7.1), so this reads through a new
+  internal-only Durable Object route (`__inbox`, parallel to the existing
+  `__stats`/`__resolve`/`__deliver` routes) rather than reusing any existing
+  HTTP surface. `forwardedConfig` is now exported from `handler.ts` so the
+  tool factory can build the same internal request shape the front door
+  sends, without duplicating it.
+
+### Patch Changes
+
+- e6fee8e: Consolidate the outbound-delivery SSRF guard onto `@dwk/safe-fetch`'s
+  `assertPublicUrl` instead of a second, hand-rolled IPv4/IPv6 check, closing a
+  bypass where a mapped, 6to4, or Teredo IPv6 address (e.g. `[::ffff:127.0.0.1]`)
+  was not recognized as private. The Durable Object's `#resolveInbox` and
+  `#processVerifications` fetches now route through `safeFetch` as well, so a
+  redirect on an already-validated target is re-validated hop by hop instead of
+  trusting the initial check alone.
+- a722a2e: Give alarm-driven delivery outcomes `Metrics` counter parity with their log
+  lines (issue #336). The Durable Object cannot call the injected `Metrics`
+  seam across the isolate boundary, and — unlike logging, where `console` is a
+  direct `wrangler tail`-visible escape hatch — there is no direct-to-metrics
+  equivalent. `activitypub.delivery.succeeded` / `.failed` / `.blocked` counter
+  deltas now accumulate durably in the DO's SQLite (coalesced by
+  `(event, fields)`, cardinality-capped with an explicit
+  `activitypub.metrics.overflow` counter) and are drained to the front door on
+  the next forwarded request via an internal `x-ap-metrics` response header;
+  the front door replays them into the injected `Metrics` and strips the
+  header. Drains are opt-in per request (`x-ap-metrics-drain`) so internal
+  callers that would not relay the header never consume deltas, and are
+  bounded per response so a backlog spreads across requests instead of
+  bursting.
+- 8e5ac84: Emit `activitypub.delivery.*` log events for alarm-driven outbound delivery
+  (and pending-accept inbox resolution) directly via `console.log`/
+  `console.error`, visible in `wrangler tail`. Previously these events were
+  defined in the log vocabulary but never emitted anywhere — an alarm-driven
+  delivery attempt has no HTTP response to hang the front door's
+  `x-ap-outcome` header off, so success, retryable failure, permanent failure,
+  and SSRF-blocked targets were completely unobservable in production. Each
+  line reports the target host, HTTP status, attempt count, and whether the
+  row was dropped — never activity bodies, keys, or tokens.
+- 3e505be: `#ensureColumn`'s migration-detection now checks `PRAGMA table_info` instead
+  of swallowing an `ALTER TABLE` error by matching `"duplicate column"` in its
+  message, matching `@dwk/store`'s existing pattern. The substring match was
+  fragile — a driver or SQLite version that phrases the error differently would
+  have silently swallowed a real failure instead of surfacing it.
+- 36a3be1: Gate the owner-only internal Durable Object routes (`__inbox`, `__following`)
+  behind an explicit internal marker header (#310). These routes have no public
+  front-door equivalent, but the DO served them on path match to any request
+  carrying the front-door config header — so a future front-door route that
+  forwarded such a path could expose the owner's inbox. The trusted callers (the
+  `@dwk/mcp` tool and the community-syndication provider) now set an
+  `x-ap-internal` marker, and the DO refuses those routes with `404` without it —
+  defense in depth, mirroring `@dwk/solid-pod`'s internal-route markers.
+- 0e65ce3: Cap the number of batches scanned per client-list page — both the outbox
+  owner-post merge into a Mastodon timeline and the inbox notifications scan —
+  so a like/announce-dominated outbox or a plain-post-dominated inbox can no
+  longer force a near-full-table scan per request. Also de-duplicate the
+  cancellable timeout-signal helper: `@dwk/safe-fetch` now exports
+  `createTimeoutSignal`, reused by `@dwk/activitypub` and `@dwk/webfinger`
+  instead of each carrying its own copy.
+- 35830e6: Fix: an owner-published `Like`/`Dislike` sent via `POST <actor>/outbox` (a
+  Lemmy vote) only ever reached the actor's own followers — it never reached
+  the community or post being voted on, since a vote's `object` names content,
+  not an actor, so there was no inbox to route to the way `Follow`'s `object`
+  (an actor) already gets single-target delivery. The raw outbox now also
+  delivers to a named `audience` Group's inbox, the same mechanism community
+  posts (`POST <actor>/publish`) already use. A vote must set `audience` to
+  reach the community; without it, delivery is unchanged (followers only).
+- bde0341: Close two critical identity-binding gaps found in the pre-1.0 code review, both
+  on unauthenticated / attacker-controlled paths:
+
+  - **`@dwk/activitypub`: actor impersonation via the default key resolver
+    (#287, #288).** Inbound HTTP-signature verification trusted the `owner`
+    field of whatever document the attacker-supplied `keyId` served, so a key
+    document hosted at `https://evil.example/key` could declare
+    `owner: https://victim.example/users/alice` and have signed activities
+    attributed to the victim. The default resolver now binds the resolved
+    `owner` to the origin that **actually served** the key — the final URL after
+    any redirects, not the requested `keyId`, so an open redirect on the
+    requested origin cannot smuggle attacker-served content in under it — and the
+    `keyId` fetch runs through `@dwk/safe-fetch`'s
+    `safeFetch` — `https:`-only, with private/loopback/link-local hosts blocked
+    and **every redirect hop re-validated** (so a public host cannot `302` the
+    fetch onto an internal address), plaintext `http:` no longer accepted, and a
+    bounded, size-capped body read — instead of an unguarded `fetch`.
+
+  - **`@dwk/vc`: credential forgery via unbound `verificationMethod` (#289).**
+    Proof verification never tied the proof's `verificationMethod` to the
+    credential's `issuer`, so a credential naming any `issuer` could be signed
+    with an attacker's own key and still verify. `verifySingleProof` now
+    requires the verification method's controller (its declared `controller`,
+    or the DID/URL portion of the method id) to equal the credential's issuer
+    before the key is trusted. A new optional `expectedController` on
+    `VerifyProofOptions` allows overriding the bound party for non-issuance
+    proof purposes (e.g. a presentation's `authentication` proof).
+
+- Updated dependencies [0e65ce3]
+- Updated dependencies [d7f90d8]
+- Updated dependencies [36a3be1]
+- Updated dependencies [96cc2d3]
+- Updated dependencies [bde0341]
+- Updated dependencies [3e505be]
+- Updated dependencies [3e505be]
+- Updated dependencies [7b4349c]
+- Updated dependencies [90f1bc6]
+- Updated dependencies [1c179ac]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/webfinger@0.1.0-beta.4
+  - @dwk/http-signatures@0.1.0-beta.3
+  - @dwk/calendar@0.1.0-beta.2
+  - @dwk/log@0.1.0-beta.4
+  - @dwk/mastodon-api@0.1.0-beta.0
+  - @dwk/ldn@0.1.0-beta.3
+
 ## 0.1.0-beta.4
 
 ### Minor Changes

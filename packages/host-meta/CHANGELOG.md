@@ -1,5 +1,15 @@
 # @dwk/host-meta
 
+## 0.1.0-beta.4
+
+### Patch Changes
+
+- Updated dependencies [0e65ce3]
+- Updated dependencies [96cc2d3]
+- Updated dependencies [3e505be]
+  - @dwk/webfinger@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Patch Changes

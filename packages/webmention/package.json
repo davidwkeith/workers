@@ -1,6 +1,6 @@
 {
   "name": "@dwk/webmention",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Webmention receiver (async verification queue) and sender.",
   "keywords": [
     "webmention",

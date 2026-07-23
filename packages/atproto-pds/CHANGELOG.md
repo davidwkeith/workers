@@ -1,5 +1,53 @@
 # @dwk/atproto-pds
 
+## 0.1.0-beta.2
+
+### Minor Changes
+
+- 39f6d61: Add a composer-injected local-dev SSRF allowlist (issue #257): `@dwk/safe-fetch` gains `allowedHosts` — exact `host[:port]` entries exempted from the private/loopback host block, with every use logged/counted as `safe_fetch.ssrf.allowed_host` — and the consuming packages expose it as `fetchAllowedHosts` in their options/config (webmention verify/discovery/send, websub verify/denial/distribute, microsub feed discovery/fetch, vc did:web resolution + status-list fetch, atproto-pds PLC directory + DID resolution). Deny-by-default is unchanged; scheme checks, redirect re-validation, timeouts, and body caps still apply to allowlisted hosts. This unblocks local `wrangler dev --local` debugging against the local dev site (Anglesite-app#708).
+
+### Patch Changes
+
+- 3e505be: The `subscribeRepos` `?cursor=` backfill replay now enforces a 16 MiB total
+  byte budget, closing the connection with a `BackfillOverflow` error frame if
+  exceeded, instead of queuing an unbounded burst (up to ~1 GiB in the worst
+  case) onto the socket with no flow control. Workers' `WebSocket` exposes no
+  `bufferedAmount` to gate on, and the replay must stay synchronous (no
+  `await`) to preserve its no-concurrent-commit-interleaving guarantee, so the
+  fix bounds the total instead of waiting for the client to drain. The matching
+  rows are now iterated directly off the SQL cursor rather than `.toArray()`'d
+  up front, so the byte budget also gates further reads from SQLite (not just
+  sends to the socket) — the initial fix only bounded what reached the wire,
+  still risking the DO's memory budget while building the full row set.
+- e06db4f: Stream `com.atproto.sync.getRepo` (and the `tooBig` firehose fallback it backs)
+  instead of buffering the whole repository CAR in the Durable Object, closing
+  #296. `#getRepo` previously decoded every record body up front via `#entries()`
+  and concatenated the entire CAR into one `Uint8Array` response body — a large
+  account could overrun the DO's 128 MB memory limit, and every Relay/AppView
+  full sync hit this path. `#getRepo` now builds its MST entries without decoding
+  record bodies (`#mstEntries()`), and `car.ts`'s new `writeCarStream` returns a
+  `ReadableStream` that encodes and enqueues one block at a time as the response
+  is read, decoding at most one record body from the SQL cursor per pull instead
+  of the whole repository at once.
+- 36a3be1: Stop a client-controlled `Content-Type` on a served blob from becoming stored
+  XSS (#299). Both packages serve public, unauthenticated blobs whose content type
+  comes from the (client-controlled) upload, so an uploaded `text/html` (or
+  `image/svg+xml`) would render as active content on the deployment's own origin —
+  `@dwk/micropub`'s `media`-scope-only endpoint could thereby escalate to
+  origin-level script execution. The serve paths now always send
+  `X-Content-Type-Options: nosniff`, and only serve a known safe media type
+  (image/video/audio) inline; anything else is served as an opaque
+  `application/octet-stream` with `Content-Disposition: attachment`, so it
+  downloads instead of executing. (Note that `nosniff` alone would not stop an
+  explicit `text/html`, hence the inline allow-list.)
+- Updated dependencies [0e65ce3]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.1
 
 ### Minor Changes

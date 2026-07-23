@@ -1,5 +1,63 @@
 # @dwk/remotestorage
 
+## 0.1.0-beta.4
+
+### Patch Changes
+
+- 36a3be1: Negative-cache a failed JWKS fetch so a token burst can't hammer the issuer
+  (#304). On a JWKS fetch failure (non-ok, malformed body, or thrown) with no
+  cached keys, `resolveJwks` returned without recording the failure, so every
+  presented-token request re-fetched the JWKS URI — an amplification/DoS vector
+  against the issuer's endpoint while it is down. A failed fetch is now recorded
+  with a short backoff (30s): within the window the last good keys are served if
+  available (else the request is rejected), but the issuer is not re-hit on every
+  request.
+- 3e505be: `@dwk/solid-pod`: dropped `readReplayWindowSeconds` from `SolidPodConfig` —
+  it was plumbed through to `ResolvedConfig` but never consulted anywhere (no
+  read-side DPoP replay-window check was ever wired to it), so the config
+  surface promised behavior nothing implemented. `listChildren`'s WebDAV
+  backend now defensively drops a child IRI that isn't actually same-origin
+  (relevant if a forged `ldp:contains` triple, see #337, ever reaches the quad
+  store) instead of slicing it into a bogus, non-`/`-rooted path — the
+  same-origin check requires an exact match or a `/` immediately following the
+  origin, not just a shared string prefix (`https://example.com.attacker.com/x`
+  also starts with `https://example.com`'s characters, so a plain `startsWith`
+  check was spoofable by a suffixed host).
+
+  `@dwk/solid-pod` and `@dwk/remotestorage`: documented the existing
+  `#getStore` per-isolate caching assumption (`maxInlineBytes` is taken from
+  whichever request builds the store first, for the DO's lifetime) — no
+  behavior change.
+
+- 9c3f652: Close two TOCTOU windows where a containment/conflict invariant was checked
+  outside the write transaction (#303). Because the Durable Object interleaves at
+  `await` points (streaming bodies), a concurrent write between the read and the
+  write could corrupt the invariant.
+
+  - `@dwk/store` gains a `preserveWhere` write option: quads matching the predicate
+    (e.g. a container's server-managed `ldp:contains`) are re-read **inside** the
+    write transaction and merged into the new quad set, so a replacing write can't
+    clobber a membership triple a concurrent child write committed since the caller
+    built its quad list.
+  - `@dwk/solid-pod` uses it for RDF `PUT` to an existing container instead of
+    reading `ldp:contains` outside the `putResource` transaction, so a concurrent
+    child `POST` no longer has its membership triple silently dropped by a stale
+    snapshot.
+  - `@dwk/remotestorage` re-runs its document↔folder collision check inside the
+    write transaction via the store `guard` (a `409` now rolls the write back
+    atomically), so two racing PUTs to related paths can't both commit into the
+    document-shadows-folder collision draft §6 forbids. The pre-write check is
+    kept as a cheap early reject.
+
+- Updated dependencies [0e65ce3]
+- Updated dependencies [96cc2d3]
+- Updated dependencies [3e505be]
+- Updated dependencies [9c3f652]
+- Updated dependencies [e6fee8e]
+  - @dwk/webfinger@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.4
+  - @dwk/store@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Patch Changes

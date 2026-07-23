@@ -1,5 +1,73 @@
 # @dwk/microsub
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 04e16c2: Add `createMicrosubMcpTools` (#240): read-only `@dwk/mcp` tool contributions
+  `microsub_list_channels` (channels + unread counts) and
+  `microsub_get_timeline` (a page of a channel's JF2 entries, newest first),
+  both thin wrappers over the same `MicrosubStore` the HTTP `channels`/
+  `timeline` `GET` actions use. Timeline entries originate from feeds the user
+  follows, so the tool description documents the prompt-injection surface —
+  an agent must treat entry content as untrusted data, never as instructions.
+  Defaults `requiredScope` to `""`, matching the HTTP `GET` actions, which
+  require no specific scope beyond a valid, authenticated caller. A
+  caller-supplied `limit` on `microsub_get_timeline` is clamped to a
+  configurable `maxLimit` (default 100) so an agent can't force an unbounded
+  D1 read.
+- 39f6d61: Add a composer-injected local-dev SSRF allowlist (issue #257): `@dwk/safe-fetch` gains `allowedHosts` — exact `host[:port]` entries exempted from the private/loopback host block, with every use logged/counted as `safe_fetch.ssrf.allowed_host` — and the consuming packages expose it as `fetchAllowedHosts` in their options/config (webmention verify/discovery/send, websub verify/denial/distribute, microsub feed discovery/fetch, vc did:web resolution + status-list fetch, atproto-pds PLC directory + DID resolution). Deny-by-default is unchanged; scheme checks, redirect re-validation, timeouts, and body caps still apply to allowlisted hosts. This unblocks local `wrangler dev --local` debugging against the local dev site (Anglesite-app#708).
+
+### Patch Changes
+
+- 36a3be1: Bind the DPoP proof's `htu` to the configured endpoint URL instead of
+  `request.url` (#300). Both resource servers verified the proof against
+  `request.url`, but a client signs the **public** endpoint it POSTs to — behind
+  the path-rewriting proxy the mountable-prefix composition targets, `request.url`
+  is the rewritten internal URL, so every DPoP proof failed with `htu_mismatch`, a
+  hard outage. `authorize` now takes the expected `htu` from the caller and each
+  call site passes the relevant configured endpoint (`micropubEndpoint` /
+  `mediaEndpoint` / `microsubEndpoint`), matching what `@dwk/indieauth`'s token
+  endpoint already does.
+- bde0341: Create D1 schema lazily so a fresh deploy no longer 500s (#291, #292). The
+  IndieAuth code/token store, the Micropub post store, and the Micropub/Microsub
+  DPoP replay stores previously created their tables only in an `init()` that no
+  handler ever called, so a consumer composing these packages against a brand-new
+  D1 hit `no such table` on the first authorization/token/publish request, and —
+  because DPoP replay-checking is on by default — every authenticated
+  create/update/delete `500`ed permanently.
+
+  Each store now materialises its schema lazily on first use (the same
+  `ensureSchema` pattern the webmention/websub/microsub stores already use), with
+  the cached init promise cleared on failure so a transient D1 error doesn't wedge
+  the store. The IndieAuth RFC 8707 `resource`-column migration now runs on that
+  lazy path too, so it actually reaches consumer databases. No separate migration
+  step is required.
+
+- 36a3be1: Persist a feed's conditional-fetch validators only after its entries are stored
+  (#302). The poll consumer wrote the `ETag`/`Last-Modified` cache before
+  `insertItems`, so a transient insert failure (which retries the message) meant
+  the retry re-fetched with the already-updated validators, got a `304`, and
+  permanently dropped the entries it never stored. The cache is now written after
+  a successful insert (which dedups by entry id, so the re-insert on retry is
+  idempotent), and a `304` that omits validators keeps the previously-cached ones
+  instead of nulling them.
+- 3e505be: Queue consumers now back off exponentially (30s base, doubling per attempt,
+  capped at 1h) when retrying a `message.retry()`, based on `message.attempts`.
+  Previously a bare `message.retry()` re-delivered at the queue's default
+  cadence indefinitely, hammering an unreachable source/feed/callback instead of
+  backing off.
+- Updated dependencies [0e65ce3]
+- Updated dependencies [3e505be]
+- Updated dependencies [bde0341]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/indieauth@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Patch Changes
