@@ -223,7 +223,12 @@ class SqliteD1Database implements Pick<
   async exec(query: string): Promise<D1ExecResult> {
     const start = performance.now();
     this.#conn.db.exec(query);
-    const count = query.split(";").filter((s) => s.trim().length > 0).length;
+    // Strip literals/comments first so a `;` inside a string doesn't inflate
+    // the reported statement count.
+    const count = query
+      .replace(SQL_STRIP_RE, "")
+      .split(";")
+      .filter((s) => s.trim().length > 0).length;
     return { count, duration: performance.now() - start };
   }
 }
