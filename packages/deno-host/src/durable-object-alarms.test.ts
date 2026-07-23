@@ -5,6 +5,7 @@ import {
   type AlarmInvocationInfo,
 } from "./durable-object.js";
 import { setAlarm, getAlarm } from "./alarms.js";
+import { acquireLease, releaseLease } from "./lease.js";
 import { FakeDenoKv, createStrictSyncSqlite } from "./test-harness.js";
 
 describe("pollAlarms (host-contract §3.3 rule 2)", () => {
@@ -112,5 +113,35 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
       ns2.pollAlarms({ now: 1000 }),
     ]);
     expect(fireLog).toHaveLength(1);
+  });
+
+  it("does not drop an alarm when the lease is contended during firing — reschedules immediately without consuming a retry", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    const ns = createDurableObjectNamespace(AlarmObject, {
+      kv,
+      className: "AlarmObject",
+      env: {},
+      getStorageClient: () => db,
+      leaseAcquireTimeoutMs: 100,
+    });
+    const id = ns.idFromName("alice");
+    const idHex = id.toString();
+    await setAlarm(kv, "AlarmObject", idHex, 1000);
+
+    // Simulate another process holding this id's lease during the fire attempt.
+    const contendingLease = await acquireLease(
+      kv,
+      ["dwk_lease", "AlarmObject", idHex],
+      { ttlMs: 10_000 },
+    );
+
+    await ns.pollAlarms({ now: 1000 });
+    expect(fireLog).toEqual([]); // handler never ran — lease was held elsewhere
+    expect(await getAlarm(kv, "AlarmObject", idHex)).toBe(1000); // NOT lost
+
+    await releaseLease(kv, contendingLease);
+    await ns.pollAlarms({ now: 1000 });
+    expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]); // now fires normally
   });
 });

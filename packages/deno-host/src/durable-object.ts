@@ -411,9 +411,23 @@ export class DurableObjectNamespaceLike<
       );
       await run;
     } catch {
-      // Exhausted retries are dropped; the handler owns its error
-      // reporting (same posture as @dwk/cf-shims' alarm shim).
-      if (retryCount < ALARM_RETRY_MAX) {
+      if (lease === undefined) {
+        // acquireLease itself threw (e.g. a concurrent fetch()/alarm() holds
+        // this id's lease) — the handler never ran, and `claimDueAlarm`
+        // already removed the due-index entry, so it must be restored or the
+        // alarm is lost. Not the handler's fault, so this doesn't count
+        // against the retry budget: re-post at `now` (immediately due) with
+        // the same retryCount, so the next poll simply retries acquisition.
+        await scheduleRetry(
+          this.#options.kv,
+          this.#options.className,
+          idHex,
+          now,
+          retryCount,
+        );
+      } else if (retryCount < ALARM_RETRY_MAX) {
+        // Exhausted retries are dropped; the handler owns its error
+        // reporting (same posture as @dwk/cf-shims' alarm shim).
         const stillPending = await getAlarm(
           this.#options.kv,
           this.#options.className,
