@@ -360,15 +360,40 @@ async function foldUploadedMedia(
   for (const [key, values] of Object.entries(parsed.mf2.properties)) {
     properties[key] = [...values];
   }
-  for (const [field, file] of files) {
-    if (file.size > config.maxMediaBytes) {
-      throw new Mf2ParseError(
-        `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
-      );
+  const storedUrls: string[] = [];
+  try {
+    for (const [field, file] of files) {
+      if (file.size > config.maxMediaBytes) {
+        throw new Mf2ParseError(
+          `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
+        );
+      }
+      const url = await storeMedia(file, env, config);
+      storedUrls.push(url);
+      const prop = field.endsWith("[]") ? field.slice(0, -2) : field;
+      (properties[prop] ??= []).push(url);
     }
-    const url = await storeMedia(file, env, config);
-    const prop = field.endsWith("[]") ? field.slice(0, -2) : field;
-    (properties[prop] ??= []).push(url);
+  } catch (err) {
+    // A later file failed after earlier ones committed. Their URLs were never
+    // returned to the client, so roll them back — otherwise a servable (and,
+    // with the proposed extensions on, `q=source`-listed) orphan blob would
+    // outlive a create that never happened. Best-effort: a blob that survives
+    // a failed rollback is at worst an unreferenced legacy blob.
+    const store = createMicropubMediaStore(env);
+    for (const url of storedUrls) {
+      const key = url.slice(config.mediaEndpoint.length + 1);
+      try {
+        await env.MEDIA.delete(key);
+      } catch {
+        // Best-effort.
+      }
+      try {
+        await store.remove(key);
+      } catch {
+        // Best-effort.
+      }
+    }
+    throw err;
   }
   return { ...parsed, mf2: { type: parsed.mf2.type, properties } };
 }

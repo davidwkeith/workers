@@ -205,6 +205,11 @@ export interface MicropubMediaStore {
    */
   setDeleted(key: string, deletedAt: number | null): Promise<boolean>;
   /**
+   * Hard-delete a row, for rolling an upload back before its URL was ever
+   * handed out (multi-file fold failure). Idempotent.
+   */
+  remove(key: string): Promise<void>;
+  /**
    * Remove rows soft-deleted before `cutoff` (seconds since the epoch). The
    * blob bytes under the trash prefix are purged by an R2 lifecycle rule, so
    * this is opportunistic row hygiene, not correctness.
@@ -308,6 +313,13 @@ export function createMicropubMediaStore(
         .bind(deletedAt, key)
         .run();
       return (result.meta.changes ?? 0) > 0;
+    },
+    async remove(key) {
+      await ensureSchema();
+      await db
+        .prepare("DELETE FROM micropub_media WHERE key = ?")
+        .bind(key)
+        .run();
     },
     async pruneExpired(cutoff) {
       await ensureSchema();

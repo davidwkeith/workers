@@ -178,6 +178,14 @@ describe("createMicropubMediaStore", () => {
     expect(await store.setDeleted("missing", 1)).toBe(false);
   });
 
+  it("removes a row outright for upload rollback", async () => {
+    await store.record({ key: "a", contentType: "t", sizeBytes: 1, now: 1 });
+    await store.remove("a");
+    expect(await store.get("a")).toBeNull();
+    // Idempotent: removing an unknown key is a no-op.
+    await store.remove("a");
+  });
+
   it("prunes only rows deleted before the cutoff", async () => {
     await store.record({ key: "old", contentType: "t", sizeBytes: 1, now: 1 });
     await store.record({

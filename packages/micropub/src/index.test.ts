@@ -2762,4 +2762,67 @@ describe("@dwk/micropub media-endpoint extensions", () => {
     await upload(mediaExt);
     expect(await mediaStore.get(key)).toBeNull();
   });
+
+  it("requires both undelete and media scopes for action=undelete", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    await mediaAction("delete media", "delete", url);
+    for (const scope of ["media", "undelete"]) {
+      const res = await mediaAction(scope, "undelete", url);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "insufficient_scope",
+      );
+    }
+  });
+
+  it("rolls back earlier files when a later fold's metadata insert fails", async () => {
+    // Sabotage: the `.png` key (first file) inserts fine, the `.jpg` key
+    // (second file) trips the CHECK — so the failure hits mid-loop with one
+    // blob and row already committed.
+    await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+    await harness.MICROPUB_DB.prepare(
+      `CREATE TABLE micropub_media (
+        key TEXT PRIMARY KEY CHECK (key NOT LIKE '%.jpg'),
+        content_type TEXT, size_bytes INTEGER, uploaded_at INTEGER,
+        deleted_at INTEGER
+      )`,
+    ).run();
+    try {
+      const minted = await mintToken("create");
+      const form = new FormData();
+      form.set("h", "entry");
+      form.set("content", "two photos");
+      form.append(
+        "photo[]",
+        new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+      );
+      form.append(
+        "photo[]",
+        new File([new Uint8Array([2])], "b.jpg", { type: "image/jpeg" }),
+      );
+      const res = await mediaExt(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: await authHeaders(minted, "POST", MICROPUB),
+          body: form,
+        }),
+        harness,
+        ctx,
+      );
+      // The create fails closed — and no blob or row from the failed request
+      // survives, so nothing servable/listed outlives a post never created.
+      expect(res.status).toBe(500);
+      expect((await harness.MEDIA.list()).objects.length).toBe(0);
+      const rows = await harness.MICROPUB_DB.prepare(
+        "SELECT COUNT(*) AS n FROM micropub_media",
+      ).first<{ n: number }>();
+      expect(rows?.n).toBe(0);
+    } finally {
+      await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+      // A fresh store instance: the shared one memoizes its schema-ready
+      // promise, so its init() would no-op against the dropped table.
+      await createMicropubMediaStore(harness).init();
+    }
+  });
 });
