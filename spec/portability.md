@@ -154,7 +154,9 @@ subset of their semantics the packages actually rely on (single-writer DOs,
 `transactionSync`, alarms, hibernatable WebSockets, streaming R2 bodies,
 read-your-writes D1, at-least-once queues, cron), plus the module alias for
 `cloudflare:workers` and polyfills for `crypto.DigestStream`/`HTMLRewriter`.
-The §2 inventory is effectively its first draft.
+The §2 inventory was effectively its first draft — **now written as the
+normative [host-contract.md](host-contract.md)** (#382), which supersedes §2
+where the two disagree.
 
 ## 4. Provider-by-provider feasibility
 
@@ -244,8 +246,10 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
      answer for AWS/GCP/other-cloud users.~~ Done (#380) —
      `packages/server/README.md` §"Deploying to AWS, GCP, or any other
      cloud".
-   - Remaining: extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md),
-     and write the **host contract** spec (§3) alongside it.
+   - Remaining: extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).
+     The **host contract** spec (§3) is written —
+     [host-contract.md](host-contract.md) (#382) — and the extraction is its
+     reference implementation.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.
