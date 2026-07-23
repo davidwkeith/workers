@@ -51,10 +51,13 @@ const env = {
 };
 ```
 
-`prepare`/`bind`/`first`/`all`/`run`/`batch`/`exec` are provided with D1's
-`{ results, success, meta }` envelope; `meta.changes` reports
-`rowsAffected`, and `batch` maps to `client.batch(stmts, "write")`, which
-libSQL executes atomically and in order inside one implicit transaction.
+`prepare`/`bind`/`first`/`all`/`run`/`batch`/`exec` (plus `raw`) are
+provided with D1's `{ results, success, meta }` envelope; `meta.changes`
+reports `rowsAffected`, and `batch` maps to `client.batch(stmts, "write")`,
+which libSQL executes atomically and in order inside one implicit
+transaction. `dump()` and `withSession()` are **not implemented** (they are
+host-contract §7 non-requirements no `@dwk` package may call) — both throw
+a clear "not implemented" error if invoked.
 
 ### `createDurableSqlite(db)` / `createSqlStorage(db)` — host-contract §3.2
 

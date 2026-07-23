@@ -27,6 +27,7 @@ import type {
 } from "@cloudflare/workers-types";
 import {
   normalizeBinding,
+  SQL_STRIP_RE,
   type LibsqlClientLike,
   type LibsqlResultSetLike,
   type LibsqlStatementLike,
@@ -172,8 +173,28 @@ class LibsqlD1Database implements Pick<
   async exec(query: string): Promise<D1ExecResult> {
     const start = performance.now();
     await this.#client.executeMultiple(query);
-    const count = query.split(";").filter((s) => s.trim().length > 0).length;
+    // Strip literals/comments first so a `;` inside a string doesn't inflate
+    // the reported statement count.
+    const count = query
+      .replace(SQL_STRIP_RE, "")
+      .split(";")
+      .filter((s) => s.trim().length > 0).length;
     return { count, duration: performance.now() - start };
+  }
+
+  // Host-contract §7 non-requirements: production packages MUST NOT call
+  // these. Present so a stray call fails with a clear error, not a crash on
+  // an undefined member.
+  dump(): Promise<ArrayBuffer> {
+    return Promise.reject(
+      new Error("D1Database.dump() is not implemented by @dwk/deno-host"),
+    );
+  }
+
+  withSession(): never {
+    throw new Error(
+      "D1Database.withSession() is not implemented by @dwk/deno-host",
+    );
   }
 }
 

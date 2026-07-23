@@ -19,21 +19,19 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import type {
-  LibsqlClientLike,
-  LibsqlResultSetLike,
-  LibsqlStatementLike,
-  LibsqlTransactionMode,
-  SqlValue,
-  SyncSqliteDatabaseLike,
-  SyncSqliteStatementLike,
+import {
+  SQL_STRIP_RE,
+  type LibsqlClientLike,
+  type LibsqlResultSetLike,
+  type LibsqlStatementLike,
+  type LibsqlTransactionMode,
+  type SqlValue,
+  type SyncSqliteDatabaseLike,
+  type SyncSqliteStatementLike,
 } from "./client.js";
 
 /** Matches SQLite's numbered placeholder form (`?1`, `?2`, ...). */
 const NUMBERED_PLACEHOLDER = /\?\d+/;
-
-/** Strips literals/comments so placeholder detection can't false-positive. */
-const SQL_STRIP_RE = /'(?:[^']|'')*'|"(?:[^"]|"")*"|--.*|\/\*[\s\S]*?\*\//g;
 
 /**
  * `node:sqlite` binds `?N` placeholders from an object keyed by placeholder

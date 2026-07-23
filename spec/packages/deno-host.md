@@ -84,7 +84,12 @@ database) per binding:
   each with its own `meta.changes`. Statements from a foreign `prepare()`
   are a `TypeError`.
 - `exec(sql)` maps to `client.executeMultiple`, reporting D1's
-  `{ count, duration }`.
+  `{ count, duration }`; the statement count strips string/comment literals
+  first so a `;` inside a literal is not counted.
+- Not implemented (host-contract §7 non-requirements production packages
+  MUST NOT call): `dump()` and `withSession()` — both are present but fail
+  loudly with a clear "not implemented" error rather than crashing on an
+  undefined member. `raw()` **is** implemented, as in `@dwk/cf-shims`.
 
 ### `createSqlStorage(db)` / `createDurableSqlite(db)` — host-contract §3.2
 

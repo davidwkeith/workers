@@ -157,6 +157,18 @@ describe("createD1Database (host-contract §3.5)", () => {
     ]);
   });
 
+  it("exec() does not count semicolons inside string literals", async () => {
+    await db.exec("CREATE TABLE lits (v TEXT)");
+    const out = await db.exec("INSERT INTO lits (v) VALUES ('a;b')");
+    expect(out.count).toBe(1);
+    expect(await db.prepare("SELECT v FROM lits").first("v")).toBe("a;b");
+  });
+
+  it("dump() and withSession() fail loudly as not implemented", async () => {
+    await expect(db.dump()).rejects.toThrow(/not implemented/);
+    expect(() => db.withSession()).toThrow(/not implemented/);
+  });
+
   it("supports the PRAGMA table_info migration idiom", async () => {
     const cols = await db
       .prepare("PRAGMA table_info(notes)")

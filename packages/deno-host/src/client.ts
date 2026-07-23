@@ -26,6 +26,14 @@
 export type SqlValue = null | number | bigint | string | Uint8Array;
 
 /**
+ * Strips SQL string/quoted-identifier literals and comments, so structural
+ * scans of a query (statement counting, placeholder detection) can't
+ * false-positive on `;` or `?N`-shaped content inside a literal.
+ */
+export const SQL_STRIP_RE =
+  /'(?:[^']|'')*'|"(?:[^"]|"")*"|--.*|\/\*[\s\S]*?\*\//g;
+
+/**
  * Coerce a caller-supplied bind value to a {@link SqlValue}, matching the
  * conversions Cloudflare's D1/DO-SQLite apply (booleans become 0/1,
  * `undefined` becomes NULL, `ArrayBuffer` becomes a byte blob).
