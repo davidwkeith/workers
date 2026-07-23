@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Type** | lib (Deno Deploy host building blocks, Cloudflare-interface emulation) |
-| **Ships a DO?** | no (will emulate one — #398, not yet implemented) |
+| **Ships a DO?** | no (emulates one in-process via `createDurableObjectNamespace` — #398) |
 | **Used by** | nothing yet (a future composed Deno Deploy app is the intended consumer) |
 
 Deno Deploy host building blocks for the `@dwk` packages: external
@@ -16,15 +16,15 @@ unlike it, the implementation is **runtime-agnostic** (no `node:` imports,
 no Deno globals) and reaches its backing store only through injected client
 seams.
 
-> **Status: exploratory/gated.** Implements the SQL gap (issue #397) of the
+> **Status: exploratory/gated.** Implements the SQL gap (issue #397) and the
+> single-writer actor + alarm emulation (issue #398, gate overridden on
+> demonstrated demand — see
+> [below](#design-single-writer-actor--alarm-emulation-issue-398)) of the
 > demand-gated `@dwk/deno-host` plan (#396;
-> [deno-deploy-design.md](../deno-deploy-design.md) §3.1). The single-writer
-> actor + alarm emulation (#398, gate overridden on demonstrated demand —
-> design finalized, see
-> [below](#design-single-writer-actor--alarm-emulation-issue-398), **not yet
-> implemented**), the KV-backed queue (#399), and the `R2Bucket`
-> object-storage adapter (#400) are **not** implemented, so no endpoint
-> package can mount on this host yet — per
+> [deno-deploy-design.md](../deno-deploy-design.md) §3.1, §3.2). The
+> KV-backed queue (#399) and the `R2Bucket` object-storage adapter (#400)
+> are **not** implemented, so no endpoint package can mount on this host
+> yet — per
 > [deno-deploy-design.md §6](../deno-deploy-design.md#6-decision-gate) even
 > Tier 1 ([host-contract.md §9](../host-contract.md#9-conformance-tiers-and-how-a-host-proves-compliance))
 > needs the queue gap closed first. #399/#400 stay demand-gated.
@@ -136,11 +136,11 @@ the "flag against the contract text" question the issue left open.
 
 ## Design: single-writer actor + alarm emulation (issue #398)
 
-> **Status: design finalized (this section), not yet implemented.** Approved
-> 2026-07-23 via the brainstorming process on a demonstrated demand signal
-> that overrode the demand gate for this increment only — #399 (queues) and
-> #400 (object storage) stay gated. See
-> [issue #398](https://github.com/davidwkeith/workers/issues/398) and
+> **Status: implemented.** Approved 2026-07-23 via the brainstorming
+> process on a demonstrated demand signal that overrode the demand gate for
+> this increment only — #399 (queues) and #400 (object storage) stay
+> gated. See [issue #398](https://github.com/davidwkeith/workers/issues/398)
+> and
 > [deno-deploy-design.md §3.2](../deno-deploy-design.md#32-single-writer-actor-durable-objects-host-contract-33).
 
 ### New client seam: `DenoKvLike`
@@ -416,8 +416,6 @@ transactional `batch`) and a strict better-sqlite3-style sync driver
 
 ## Non-goals (tracked separately)
 
-- Single-writer actor + alarm emulation via a Deno KV lease — #398. Design
-  finalized above; implementation not yet started.
 - Durable at-least-once queue emulation on Deno KV — #399.
 - `R2Bucket`-shaped adapter over an S3-compatible store — #400.
 - Any commitment to proceed with #399/#400: the decision gate in

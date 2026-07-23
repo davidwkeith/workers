@@ -79,13 +79,15 @@ cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
 `HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
 from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
 them — `@dwk/server` is its first consumer, not its owner.
-`@dwk/deno-host` is the newest — the first increment (#397) of the otherwise
-still demand-gated Deno Deploy host plan (#396): runtime-agnostic,
+`@dwk/deno-host` is the newest — two increments of the otherwise still
+demand-gated Deno Deploy host plan (#396): runtime-agnostic,
 dependency-free shims presenting an external libSQL/Turso database behind
 the host-contract `D1Database` (async remote client) and
 `SqlStorage`/`transactionSync` (synchronous embedded-replica client)
-surfaces, via injected structural client seams; the actor/alarm, queue, and
-object-storage gaps (#398–#400) are not implemented and remain gated.
+surfaces (#397), and `createDurableObjectNamespace`, a single-writer actor +
+alarm emulation over a per-id Deno KV atomic-CAS lease, with an in-memory
+WebSocket stub (#398, gate overridden on demonstrated demand). The queue and
+object-storage gaps (#399, #400) are not implemented and remain gated.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
