@@ -1,7 +1,7 @@
 /**
  * Declarative assembly of the Node-backed binding shims into an `Env`.
  *
- * `@dwk/server` is the composition root and `./shims` holds the raw
+ * `@dwk/server` is the composition root and `@dwk/cf-shims` holds the raw
  * Cloudflare-interface emulations; this module is the small glue between them.
  * Given a data directory and the binding *names* a set of mounted packages
  * declare, it instantiates one shim per binding under a deterministic on-disk
@@ -18,16 +18,18 @@
  * (the actual choice of what to mount lives in the deployer's composition root).
  * Secrets are injected the same way Worker secret bindings are — as plain `Env`
  * members. Queue/cron bindings are a lifecycle concern and come from the
- * {@link ./shims/queue.QueueBroker} / {@link ./shims/cron.CronScheduler}
+ * `QueueBroker` / `CronScheduler` (from `@dwk/cf-shims`)
  * directly, not from here.
  *
  * @see spec/self-hosting.md §7.1–§7.3, §9
  */
 
 import { join } from "node:path";
-import { createD1Database } from "./shims/d1.js";
-import { createR2Bucket } from "./shims/r2.js";
-import { createKVNamespace } from "./shims/kv.js";
+import {
+  createD1Database,
+  createR2Bucket,
+  createKVNamespace,
+} from "@dwk/cf-shims";
 
 /** A KV namespace binding that may opt out of on-disk persistence. */
 export interface KvBindingSpec {

@@ -2,8 +2,9 @@
  * The Node stand-in for the `cloudflare:workers` runtime module.
  *
  * The endpoint packages' only runtime import from `cloudflare:workers` is
- * `{ DurableObject }` (in `@dwk/solid-pod`, `@dwk/webauthn`, and
- * `@dwk/activitypub` — 3 files). Under Node the bare specifier is redirected
+ * `{ DurableObject }` (in `@dwk/solid-pod`, `@dwk/activitypub`,
+ * `@dwk/atproto-pds`, `@dwk/remotestorage`, and `@dwk/webauthn` — 5 files;
+ * see spec/host-contract.md §5). Under Node the bare specifier is redirected
  * here, so those packages run unchanged from their published dist:
  *
  * - in production, via a `module.register` loader hook (see
@@ -13,4 +14,4 @@
  * @see spec/self-hosting.md §7.4
  */
 
-export { DurableObject } from "./shims/durable-object.js";
+export { DurableObject } from "./durable-object.js";

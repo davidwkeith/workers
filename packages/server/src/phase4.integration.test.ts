@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { createWebAuthn, WebAuthnObject } from "@dwk/webauthn";
 
 import { createServer } from "./server.js";
-import { createDurableObjectNamespace } from "./shims/durable-object.js";
+import { createDurableObjectNamespace } from "@dwk/cf-shims";
 import type { FetchHandler } from "./config.js";
 
 const tempDirs: string[] = [];

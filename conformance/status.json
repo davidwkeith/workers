@@ -3,15 +3,15 @@
   "description": "Single source of truth for per-package conformance and integration status. The release gate (scripts/release-gate.mjs) refuses to publish any package at a stable (>=1.0.0) version until every suite listed here is \"passing\" and its integration lifecycle tests are \"passing\". See conformance/README.md.",
   "targets": {
     "cloudflare": {
-      "description": "Cloudflare Workers \u2014 the primary, recommended, conformance-certified target.",
+      "description": "Cloudflare Workers — the primary, recommended, conformance-certified target.",
       "host": "workerd"
     },
     "node": {
-      "description": "Self-hosted Node/Express host \u2014 the @dwk/server Docker image or dwk-serve bin.",
+      "description": "Self-hosted Node/Express host — the @dwk/server Docker image or dwk-serve bin.",
       "host": "@dwk/server"
     },
     "fedify": {
-      "description": "Fedify-based ActivityPub interop peer (scripts/conformance/fedify-peer.mjs) \u2014 a second, automatable federation implementation to test @dwk/activitypub against, alongside manual testing against Mastodon (issue #246).",
+      "description": "Fedify-based ActivityPub interop peer (scripts/conformance/fedify-peer.mjs) — a second, automatable federation implementation to test @dwk/activitypub against, alongside manual testing against Mastodon (issue #246).",
       "host": "node"
     },
     "pixelfed": {
@@ -419,7 +419,7 @@
       "integration": {
         "status": "pending",
         "cases": [
-          "app-password Basic auth (HTTPS-only) resolves to a WebID; scope \u2229 WAC narrows access",
+          "app-password Basic auth (HTTPS-only) resolves to a WebID; scope ∩ WAC narrows access",
           "Class 2 LOCK blocks an unkeyed write/DELETE/MOVE (423) and admits the keyed one",
           "PROPFIND Depth 0/1 projects live properties; .acl/.meta are 404 and omitted",
           "PUT/GET round-trip with extension-based content-type inference",
@@ -510,6 +510,14 @@
       }
     },
     "@dwk/log": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
+    "@dwk/cf-shims": {
       "standard": null,
       "suites": {},
       "integration": {

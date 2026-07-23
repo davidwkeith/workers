@@ -94,6 +94,19 @@ importers:
 
   packages/calendar: {}
 
+  packages/cf-shims:
+    dependencies:
+      '@worker-tools/html-rewriter':
+        specifier: 0.1.0-pre.19
+        version: 0.1.0-pre.19
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20260718.1
+        version: 5.20260718.1
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+
   packages/conformance-target:
     dependencies:
       '@dwk/activitypub':
@@ -268,12 +281,12 @@ importers:
 
   packages/server:
     dependencies:
+      '@dwk/cf-shims':
+        specifier: workspace:*
+        version: link:../cf-shims
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
-      '@worker-tools/html-rewriter':
-        specifier: 0.1.0-pre.19
-        version: 0.1.0-pre.19
       express:
         specifier: 5.2.1
         version: 5.2.1
@@ -1328,9 +1341,6 @@ packages:
 
   '@types/node@12.20.55':
     resolution: {integrity: sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ==}
-
-  '@types/node@25.9.1':
-    resolution: {integrity: sha512-xfrlY7UD5rMJk3ZVJP8BNzS28J36YJg+xp+LPXV1TdWxr8uMH5A860QNxYDGQe/ylDSgjxE52Q9VnO7p75tJxg==}
 
   '@types/node@26.1.1':
     resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
@@ -2530,9 +2540,6 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  undici-types@7.24.6:
-    resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
-
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
@@ -3591,13 +3598,9 @@ snapshots:
   '@types/n3@1.26.1':
     dependencies:
       '@rdfjs/types': 2.0.1
-      '@types/node': 25.9.1
+      '@types/node': 26.1.1
 
   '@types/node@12.20.55': {}
-
-  '@types/node@25.9.1':
-    dependencies:
-      undici-types: 7.24.6
 
   '@types/node@26.1.1':
     dependencies:
@@ -4848,8 +4851,6 @@ snapshots:
       - supports-color
 
   typescript@6.0.3: {}
-
-  undici-types@7.24.6: {}
 
   undici-types@8.3.0: {}
 

@@ -43,9 +43,12 @@ lifecycle hooks. `@dwk/server` closes that gap:
   Vitest alias (tests), so `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
 
 It mirrors how `@dwk/store` confines Cloudflare *storage*; this package confines
-the *Node runtime and the Cloudflare-interface emulation*. The shims live behind
-a clean, Express-free boundary (`@dwk/server` → `./shims`) so a later
-`@dwk/cf-shims` extraction is mechanical.
+the *Node runtime and the Cloudflare-interface emulation*. The binding shims
+themselves live in [`@dwk/cf-shims`](../cf-shims) (the reference implementation
+of [`spec/host-contract.md`](../../spec/host-contract.md), extracted per #381);
+this package consumes them via `workspace:*`, re-exports the same names for
+compatibility, and adds the Express adapter, composition, lifecycle, and
+single-writer locking on top.
 
 ## Correctness & the single-writer invariant
 

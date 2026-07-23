@@ -1,6 +1,6 @@
 {
   "$schema": "./catalog.schema.json",
-  "description": "Machine-readable manifest of every mountable @dwk worker, for composing apps (Anglesite/Anglesite-app#708). Worker ids are forever-stable; groups and componentIDs are coordinated with the consuming app. Validated in CI by scripts/catalog-gate.mjs; shape documented in spec/catalog.md. Provisional while this repo is pre-1.0 \u2014 breaking changes are paired-repo coordinated.",
+  "description": "Machine-readable manifest of every mountable @dwk worker, for composing apps (Anglesite/Anglesite-app#708). Worker ids are forever-stable; groups and componentIDs are coordinated with the consuming app. Validated in CI by scripts/catalog-gate.mjs; shape documented in spec/catalog.md. Provisional while this repo is pre-1.0 — breaking changes are paired-repo coordinated.",
   "workers": [
     {
       "id": "indieauth",
@@ -644,17 +644,18 @@
     }
   ],
   "libraries": {
-    "@dwk/calendar": "JSCalendar/iCalendar event model and serializers \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/dpop": "DPoP proof verification primitives \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/esi": "Streaming Edge Side Includes response processor \u2014 composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
-    "@dwk/http-signatures": "HTTP Message Signatures primitives \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/ldn": "Linked Data Notifications primitives \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/log": "Injectable structured-logging seam \u2014 consumed by every package, not mountable.",
-    "@dwk/mcp": "MCP server core the composed Worker embeds \u2014 its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
-    "@dwk/oauth": "OAuth 2.0 server building blocks \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive \u2014 consumed by endpoint packages, not mountable.",
-    "@dwk/store": "DO-SQLite + R2 storage library instantiated inside consuming packages' Durable Objects \u2014 not mountable.",
-    "@dwk/wac": "Web Access Control evaluation \u2014 consumed by @dwk/solid-pod, not mountable."
+    "@dwk/calendar": "JSCalendar/iCalendar event model and serializers — consumed by endpoint packages, not mountable.",
+    "@dwk/cf-shims": "Node implementations of the Cloudflare binding interfaces (host-contract reference) — consumed by alternative hosts such as @dwk/server, not a mountable worker.",
+    "@dwk/dpop": "DPoP proof verification primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/esi": "Streaming Edge Side Includes response processor — composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
+    "@dwk/http-signatures": "HTTP Message Signatures primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/ldn": "Linked Data Notifications primitives — consumed by endpoint packages, not mountable.",
+    "@dwk/log": "Injectable structured-logging seam — consumed by every package, not mountable.",
+    "@dwk/mcp": "MCP server core the composed Worker embeds — its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
+    "@dwk/oauth": "OAuth 2.0 server building blocks — consumed by endpoint packages, not mountable.",
+    "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js — consumed by endpoint packages, not mountable.",
+    "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive — consumed by endpoint packages, not mountable.",
+    "@dwk/store": "DO-SQLite + R2 storage library instantiated inside consuming packages' Durable Objects — not mountable.",
+    "@dwk/wac": "Web Access Control evaluation — consumed by @dwk/solid-pod, not mountable."
   }
 }

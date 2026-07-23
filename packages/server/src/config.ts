@@ -18,8 +18,7 @@
 import type { Logger } from "@dwk/log";
 import type { RequestHandler } from "express";
 import type { WaitUntilTracker } from "./context.js";
-import type { QueueBroker } from "./shims/queue.js";
-import type { CronScheduler } from "./shims/cron.js";
+import type { QueueBroker, CronScheduler } from "@dwk/cf-shims";
 
 /**
  * A runtime-neutral fetch handler. `env` is typed `never` so a handler written

@@ -24,10 +24,12 @@ import helmet from "helmet";
 import { noopLogger, type Logger } from "@dwk/log";
 import { sendWebResponse, toWebRequest } from "./adapter.js";
 import { HostExecutionContext, WaitUntilTracker } from "./context.js";
-import { installCryptoDigestStream } from "./crypto-digest-stream.js";
-import { installHTMLRewriter } from "./html-rewriter.js";
+import {
+  installCryptoDigestStream,
+  installHTMLRewriter,
+  installWebSocketGlobals,
+} from "@dwk/cf-shims";
 import { installRequestDuplex } from "./request-duplex.js";
-import { installWebSocketGlobals } from "./web-socket.js";
 import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
 import { acquireWriterLock, type ReleaseLock } from "./lock.js";
 import {
@@ -37,8 +39,7 @@ import {
   type HostConfig,
   type Mount,
 } from "./config.js";
-import type { QueueBroker } from "./shims/queue.js";
-import type { CronScheduler } from "./shims/cron.js";
+import type { QueueBroker, CronScheduler } from "@dwk/cf-shims";
 
 /** Internal wiring handed to {@link DwkServer}. */
 interface ServerParts {

@@ -26,7 +26,7 @@ import { createSolidPod, SolidPodObject } from "@dwk/solid-pod";
 
 import { createServer } from "./server.js";
 import { assembleBindings } from "./bindings.js";
-import { createDurableObjectNamespace } from "./shims/durable-object.js";
+import { createDurableObjectNamespace } from "@dwk/cf-shims";
 import type { FetchHandler } from "./config.js";
 
 const OWNER = "https://owner.example/profile#me";

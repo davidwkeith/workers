@@ -21,7 +21,7 @@
  * @see spec/self-hosting.md §7.4 (WebSocket hibernation)
  */
 
-const PATCHED = Symbol.for("dwk.server.webSocketGlobalsInstalled");
+const PATCHED = Symbol.for("dwk.cf-shims.webSocketGlobalsInstalled");
 
 /** A `data`-carrying event, avoiding reliance on Node's `MessageEvent` ctor. */
 function dataEvent(type: string, data: unknown): Event {

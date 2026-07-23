@@ -12,10 +12,10 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **27 publishable packages** — the
+**Status: implemented, unreleased.** There are **28 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`) and the
+`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
@@ -79,7 +79,7 @@ requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
-Run from the repo root (pnpm 10, Node >=22 — `@dwk/server`'s built-in `node:sqlite` shims need it):
+Run from the repo root (pnpm 10, Node >=22 — `@dwk/cf-shims`'s built-in `node:sqlite` shims need it):
 
 | Task                    | Command                                                           |
 | ----------------------- | ----------------------------------------------------------------- |
@@ -173,6 +173,11 @@ injected state.
   (#247); no `@dwk` endpoint package is a required consumer yet.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
+- **Host-side lib** — `@dwk/cf-shims`: Node implementations of the Cloudflare
+  binding interfaces (the reference implementation of `spec/host-contract.md`,
+  extracted from `@dwk/server`'s shim layer, #381). Consumed only by hosts
+  (`@dwk/server`), never by endpoint packages, and imports Node built-ins
+  only — the one publishable package that is deliberately Node-bound.
 
 ### Composition contract (`spec/composition-contract.md`)
 
@@ -256,6 +261,8 @@ when adding a package:
   `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
   `@dwk/calendar`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/safe-fetch`,
   `@dwk/esi`. They take plain-data inputs and need no Workers runtime.
+  `@dwk/cf-shims` and the private `@dwk/server` also run under Node — they
+  emulate the Workers runtime rather than run in it.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,

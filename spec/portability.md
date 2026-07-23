@@ -42,9 +42,10 @@
   `remotestorage`, `webdav`) into the Node host. That single step makes
   "other providers" mean "anywhere a container runs," which covers most of
   the audience in #369 without touching any endpoint package. **All of it is
-  done except the `@dwk/cf-shims` extraction** (#379, #380) — every DO
-  package now runs on the Node host, so the container path (§4.3–4.4) is the
-  documented, working answer for AWS/GCP/other-cloud users today.
+  done** (#379, #380, #381) — every DO package runs on the Node host, the
+  shims are extracted as [`@dwk/cf-shims`](packages/cf-shims.md), and the
+  container path (§4.3–4.4) is the documented, working answer for
+  AWS/GCP/other-cloud users today.
 
 ## 2. What the investigation found in the codebase
 
@@ -100,14 +101,16 @@ emulation strategy (§3) — the *interfaces* are the seam, not `@dwk/store`.
 ### 2.3 `@dwk/server` is the existence proof
 
 The Node host already re-implements the full binding surface behind an
-Express-free boundary (`packages/server/src/shims/`): D1 and DO-SQLite on
+Express-free boundary (now the extracted `@dwk/cf-shims`,
+`packages/cf-shims/src/`): D1 and DO-SQLite on
 `node:sqlite`, R2 on the filesystem (streaming, etag'd, metadata sidecars),
 KV, a durable SQLite-backed queue broker, a cron scheduler, `waitUntil`
 tracking, an `HTMLRewriter` polyfill, real hibernatable-WebSocket bridging,
 and a `cloudflare:workers` module alias. The shims import nothing from
-Express and are re-exported from `shims/index.ts` — the planned
-`@dwk/cf-shims` extraction is described as "mechanical" in
-[self-hosting.md](self-hosting.md).
+Express; they now live in the standalone
+[`@dwk/cf-shims`](packages/cf-shims.md) package (#381), which `@dwk/server`
+consumes via `workspace:*` — the extraction
+[self-hosting.md](self-hosting.md) §16 called "mechanical", done.
 
 **Known gaps in the Node host today** (they gate Phase 0):
 
@@ -246,10 +249,10 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
      answer for AWS/GCP/other-cloud users.~~ Done (#380) —
      `packages/server/README.md` §"Deploying to AWS, GCP, or any other
      cloud".
-   - Remaining: extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).
-     The **host contract** spec (§3) is written —
-     [host-contract.md](host-contract.md) (#382) — and the extraction is its
-     reference implementation.
+   - ~~Extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).~~ Done
+     (#381) — [`@dwk/cf-shims`](packages/cf-shims.md) is the reference
+     implementation of the **host contract** spec (§3), written as
+     [host-contract.md](host-contract.md) (#382). Phase 0 is complete.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.

@@ -27,7 +27,9 @@ await build({
   // The reason this bundle exists: replace the workerd `cloudflare:workers`
   // module with the Node shim, so the DO packages run with no loader hook.
   alias: {
-    "cloudflare:workers": resolve(pkgRoot, "dist/cloudflare-workers.js"),
+    "cloudflare:workers": fileURLToPath(
+      import.meta.resolve("@dwk/cf-shims/cloudflare-workers"),
+    ),
   },
   // `ws` loads these native accelerators optionally; keep them external so the
   // bundle runs on the pure-JS fallback when they are not installed.

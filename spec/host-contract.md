@@ -29,8 +29,8 @@ The contract binds **two audiences**:
 
 - **Host implementers.** A conforming host MUST provide everything in §§3–7 for
   the tier it claims (§9). The reference implementations are Cloudflare's
-  `workerd` (definitional) and the Node shims in `@dwk/server`
-  (`packages/server/src/shims/`, the future `@dwk/cf-shims`).
+  `workerd` (definitional) and [`@dwk/cf-shims`](packages/cf-shims.md)
+  (`packages/cf-shims/`, extracted from `@dwk/server`'s shim layer, #381).
 - **Package authors.** Production package code MUST NOT use a Cloudflare
   surface outside this contract. A PR that adds a new dependency on a binding
   member, module, or global MUST amend this spec **and** extend the reference
@@ -333,9 +333,8 @@ The contract stays small only if growth is deliberate:
   unused — background work belongs in queues or alarms, which are already in
   the contract.
 - A change that genuinely needs new surface MUST, in the same PR: (1) amend
-  this spec, (2) implement the surface in the reference Node host
-  (`@dwk/server` / `@dwk/cf-shims`), and (3) note the impact on any other
-  documented host.
+  this spec, (2) implement the surface in the reference Node shims
+  (`@dwk/cf-shims`), and (3) note the impact on any other documented host.
 - Reviewers SHOULD treat a new `@cloudflare/workers-types` member appearing in
   a package diff as a contract change, not an implementation detail.
 
@@ -357,8 +356,8 @@ inventory:
 A host claiming a tier proves compliance with, in increasing strength:
 
 1. **Shim-level parity tests** — unit tests against the host's binding
-   implementations asserting the semantics in §§3–4 (the Node host's
-   `packages/server/src/shims/*.test.ts` are the model: alarm durability and
+   implementations asserting the semantics in §§3–4 (`@dwk/cf-shims`'
+   `packages/cf-shims/src/*.test.ts` are the model: alarm durability and
    retry, mutex serialization, D1 result envelopes, R2 streaming and metadata
    round-trips, queue redelivery and `attempts`).
 2. **Composed integration lifecycles** — boot the host with real packages
@@ -386,11 +385,11 @@ A host that passes (1) and (2) for its tier MAY be documented as **supported**;
   formalizes; [self-hosting.md](self-hosting.md) — the first alternative host's
   design; [composition-contract.md](composition-contract.md);
   [non-functional-requirements.md](non-functional-requirements.md).
-- Reference host implementation: `packages/server/src/shims/` (the
-  `@dwk/cf-shims` extraction candidate), plus
-  `packages/server/src/cloudflare-workers-loader.ts` (§5),
-  `packages/server/src/html-rewriter.ts` and
-  `packages/server/src/crypto-digest-stream.ts` (§6).
+- Reference implementation: [`@dwk/cf-shims`](packages/cf-shims.md)
+  (`packages/cf-shims/src/` — the binding shims, the `cloudflare:workers`
+  loader hook (§5), and the `HTMLRewriter` / `crypto.DigestStream` /
+  `WebSocketPair` global installers (§6)); `@dwk/server` is its first
+  consuming host.
 - Cloudflare's documentation of the emulated originals:
   [D1 client API](https://developers.cloudflare.com/d1/worker-api/) ·
   [R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/) ·

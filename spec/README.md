@@ -32,6 +32,7 @@ built and what "done" means.
 | `@dwk/rdf` | [packages/rdf.md](packages/rdf.md) | lib |
 | `@dwk/log` | [packages/log.md](packages/log.md) | lib |
 | `@dwk/store` | [packages/store.md](packages/store.md) | lib |
+| `@dwk/cf-shims` | [packages/cf-shims.md](packages/cf-shims.md) | lib (host-side, implements [host-contract.md](host-contract.md)) |
 
 ## Proposed packages (next-standard candidates)
 

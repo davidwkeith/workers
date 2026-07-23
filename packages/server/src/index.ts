@@ -13,10 +13,11 @@
  *
  * It mirrors how `@dwk/store` confines Cloudflare *storage*: this package
  * confines the *Node runtime and the Cloudflare-interface emulation* so the 20+
- * endpoint packages run **unchanged**. The shims live behind a clean,
- * Express-free boundary (`./shims`) so a later `@dwk/cf-shims` extraction is
- * mechanical. Single-process / single-writer per data directory is a load-bearing
- * invariant, enforced by a startup lockfile.
+ * endpoint packages run **unchanged**. The binding shims themselves live in
+ * [`@dwk/cf-shims`](../cf-shims) (extracted from this package's `./shims`
+ * layer, issue #381) and are re-exported here for compatibility; this package
+ * adds the Express adapter, composition, lifecycle, and the single-process /
+ * single-writer-per-data-directory invariant, enforced by a startup lockfile.
  *
  * @see spec/self-hosting.md
  * @packageDocumentation
@@ -52,13 +53,7 @@ export {
   type ScheduledTaskHandler,
 } from "./lifecycle.js";
 
-export { installHTMLRewriter } from "./html-rewriter.js";
-
 export { installRequestDuplex } from "./request-duplex.js";
-
-export { installWebSocketGlobals, WebSocketPair } from "./web-socket.js";
-
-export { installCryptoDigestStream } from "./crypto-digest-stream.js";
 
 export {
   acquireWriterLock,
@@ -66,6 +61,8 @@ export {
   type ReleaseLock,
 } from "./lock.js";
 
+// Re-exported from @dwk/cf-shims (the extracted shim layer) so existing
+// `@dwk/server` consumers keep a stable import surface.
 export {
   createD1Database,
   createR2Bucket,
@@ -74,6 +71,12 @@ export {
   CronScheduler,
   DurableObject,
   createDurableObjectNamespace,
+  resolve,
+  registerCloudflareWorkers,
+  installHTMLRewriter,
+  installCryptoDigestStream,
+  installWebSocketGlobals,
+  WebSocketPair,
   type KVOptions,
   type QueueBrokerOptions,
   type ConsumerOptions,
@@ -85,9 +88,4 @@ export {
   type DurableObjectNamespaceOptions,
   type DurableObjectState,
   type SqlStorage,
-} from "./shims/index.js";
-
-export {
-  resolve,
-  registerCloudflareWorkers,
-} from "./cloudflare-workers-loader.js";
+} from "@dwk/cf-shims";

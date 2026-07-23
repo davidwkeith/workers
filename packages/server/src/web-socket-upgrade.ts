@@ -24,7 +24,7 @@ import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
 import type { Logger } from "@dwk/log";
 import { HostExecutionContext, type WaitUntilTracker } from "./context.js";
 import { isReservedPath, type Mount } from "./config.js";
-import { responseWebSocket, type EmulatedWebSocket } from "./web-socket.js";
+import { responseWebSocket, type EmulatedWebSocket } from "@dwk/cf-shims";
 
 /** Wiring the upgrade handler needs — a subset of the server's own state. */
 export interface UpgradeContext {

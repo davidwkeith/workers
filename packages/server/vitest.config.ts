@@ -6,10 +6,10 @@ export default defineConfig({
     alias: {
       // Redirect the workerd `cloudflare:workers` module to the Node shim so
       // packages that `import { DurableObject }` from it run under vitest. In
-      // production the host `bin` does this via a `module.register` loader hook
-      // (see src/cloudflare-workers-loader.ts).
+      // production the host `bin` does this via @dwk/cf-shims'
+      // `module.register` loader hook (cloudflare-workers-loader.ts).
       "cloudflare:workers": fileURLToPath(
-        new URL("./src/cloudflare-workers.ts", import.meta.url),
+        new URL("../cf-shims/src/cloudflare-workers.ts", import.meta.url),
       ),
     },
   },
