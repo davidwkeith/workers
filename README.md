@@ -6,6 +6,8 @@
 > their own box, self-host the same packages with the `@dwk/server` Docker image
 > or `dwk-serve` bin (see [Running it](#running-it)).
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/davidwkeith/workers/tree/main/examples/deploy-to-cloudflare)
+
 `@dwk` is an npm scope under which standards-implementing packages live. This
 repository contains the **IndieWeb + Solid cohort**: building blocks that give
 anyone a self-owned, standards-compliant web presence — IndieWeb
@@ -108,7 +110,19 @@ box. Pick one:
 
 ### On Cloudflare (primary)
 
-`npm install` the packages you want, compose them into one Worker (the
+**One-click.** The fastest path is the deploy button, which clones this repo
+into your own GitHub/GitLab account and deploys the
+[discovery starter](examples/deploy-to-cloudflare/) — `@dwk/webfinger` +
+`@dwk/host-meta` composed into one Worker — onto your own Cloudflare account:
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/davidwkeith/workers/tree/main/examples/deploy-to-cloudflare)
+
+Those two packages are stateless with **zero bindings**, so nothing is
+provisioned and the Worker answers on your `*.workers.dev` subdomain
+immediately, on the free plan. From there, grow it by composing more packages
+into the same Worker (below).
+
+**By hand.** `npm install` the packages you want, compose them into one Worker (the
 [composition above](#composition-model)), declare the union of each package's
 `Env` bindings in `wrangler.toml`, and deploy to your own account:
 
