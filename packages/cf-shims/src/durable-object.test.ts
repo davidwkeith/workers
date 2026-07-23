@@ -164,6 +164,42 @@ class Kitchen extends DurableObject {
           .toArray().length;
         return json({ message, leaked, after });
       }
+      case "/tx-nested-async": {
+        // transactionSync nested inside an in-flight async transaction().
+        let inner = "";
+        try {
+          await this.#state.storage.transaction(async () => {
+            sql.exec("INSERT INTO t (k, v) VALUES ('h', 8)");
+            this.#state.storage.transactionSync(() => {
+              sql.exec("INSERT INTO t (k, v) VALUES ('i', 9)");
+            });
+          });
+        } catch (e) {
+          inner = (e as Error).message;
+        }
+        // Two transaction() calls overlapping while the first is mid-await:
+        // the second is rejected by the shared guard, the first commits.
+        const results = await Promise.allSettled([
+          this.#state.storage.transaction(async () => {
+            await new Promise((r) => setTimeout(r, 5));
+            sql.exec("INSERT INTO t (k, v) VALUES ('j', 10)");
+          }),
+          this.#state.storage.transaction(async () => {
+            sql.exec("INSERT INTO t (k, v) VALUES ('overlap', 11)");
+          }),
+        ]);
+        const overlap =
+          results[1].status === "rejected"
+            ? String((results[1].reason as Error).message)
+            : "";
+        const leaked = sql
+          .exec("SELECT k FROM t WHERE k IN ('h', 'i', 'overlap')")
+          .toArray().length;
+        const committed = sql
+          .exec("SELECT k FROM t WHERE k = 'j'")
+          .toArray().length;
+        return json({ inner, overlap, leaked, committed });
+      }
       case "/cursor": {
         const cursor = sql.exec("SELECT k, v FROM t");
         let iterated = 0;
@@ -312,6 +348,23 @@ describe("Durable Object emulation", () => {
     expect(body.message).toMatch(/does not support nesting/);
     expect(body.leaked).toBe(0);
     expect(body.after).toBe(1);
+  });
+
+  it("guards the async transaction() path too (nested sync call, concurrent overlap)", async () => {
+    const ns = kitchenNs();
+    const res = await ns
+      .get(ns.idFromName("nest-async"))
+      .fetch(new Request("http://do/tx-nested-async"));
+    const body = (await res.json()) as {
+      inner: string;
+      overlap: string;
+      leaked: number;
+      committed: number;
+    };
+    expect(body.inner).toMatch(/does not support nesting/);
+    expect(body.overlap).toMatch(/does not support nesting/);
+    expect(body.leaked).toBe(0);
+    expect(body.committed).toBe(1);
   });
 
   it("supports the cursor surface (columnNames, iteration, databaseSize)", async () => {
