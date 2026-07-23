@@ -136,6 +136,52 @@ A reference `systemd` unit (`examples/dwk-serve.service`) hardens it and maps
 SIGTERM to a clean drain. On Node 22 `node:sqlite` prints an experimental
 warning; Node ≥ 24 runs it flag-free.
 
+## Deploying to AWS, GCP, or any other cloud
+
+There is no AWS- or GCP-native `@dwk` host, and none is planned — the Docker
+image above **is** the supported answer for every non-Cloudflare cloud. The
+[portability investigation](../../spec/portability.md) looked at native
+serverless options (Lambda, Cloud Functions/Run, Fastly Compute, Puter) and
+found the container path is the only one that works today without a shim
+rewrite: this host needs a **long-lived process** with a **persistent,
+single-writer filesystem** (the `acquireWriterLock` invariant above), and that
+rules out anything that scales horizontally or wipes local disk between
+invocations.
+
+**Works, with no code changes** — anywhere you can run a container with a
+mounted volume and keep exactly one instance writing to it:
+
+- **AWS**: ECS or Fargate with an attached EFS (or EBS, single-AZ) volume, or
+  plain EC2 running `docker run` directly. Lambda / Lambda@Edge do **not**
+  work — no persistent disk, and CloudFront/Lambda@Edge isn't even
+  fetch-shaped (spec/portability.md §4.3).
+- **GCP**: a GCE VM running the container (with a persistent disk), or a
+  single always-on Cloud Run **service with a mounted volume and
+  `minInstances`/`maxInstances` pinned to 1** so it never scales out from
+  under the SQLite files. Cloud Run's default autoscaling and GCF's ephemeral
+  filesystem otherwise break the single-writer invariant (spec/portability.md
+  §4.4) — don't use them without pinning to one instance.
+- **Anywhere else**: a VPS (DigitalOcean, Hetzner, Linode, …), Fly.io, a
+  homelab box, bare metal — same `docker run` + volume + reverse-proxy shape
+  as the Docker quickstart above.
+
+```sh
+# Same image, same invocation, on any of the above — only the volume and the
+# reverse-proxy/TLS setup are provider-specific:
+docker run -p 3000:3000 -v dwk-data:/data \
+  -e DWK_BASE_URL=https://pod.example dwk-server
+```
+
+Put a TLS-terminating reverse proxy or the platform's managed load balancer in
+front (identity is HTTPS-rooted — see Security below), and back up the data
+volume like any other stateful service: `docker cp`/`tar` the mounted
+directory, or a filesystem/volume snapshot. See
+[Data portability](#data-portability) below for what's actually inside it, and
+[spec/portability.md](../../spec/portability.md) for the full per-provider
+feasibility analysis (why Fastly Compute and Lambda@Edge are explicit
+non-goals for the stateful packages, and what a future isolate-class host
+like Deno Deploy would need).
+
 ## Security (you now own what Cloudflare provided)
 
 - **TLS**: identity is HTTPS-rooted, so the host **refuses a non-localhost
@@ -159,12 +205,15 @@ Moving between Cloudflare and self-hosted is export-then-import, no schema chang
 
 **Experimental, unreleased (`0.0.0`).** This package implements the host
 skeleton + adapter + static hosting, the D1/R2/KV storage shims, the
-queue/cron/`waitUntil` lifecycle shims, the Durable Object emulation
-(`SqlStorage`, per-id single-writer, WebSocket hibernation), and the packaging
-(the `dwk-serve` bin + the esbuild bundle + Dockerfile) — enough to run **every**
-`@dwk` package: the stateless and D1/R2-backed ones (IndieAuth, Micropub,
-Webmention, Microsub, WebSub, WebFinger, host-meta, VC) and the
-Durable-Object-backed ones (`@dwk/webauthn`, `@dwk/solid-pod`). Wiring a Node
+queue/cron/`waitUntil` lifecycle shims, and the Durable Object emulation
+(`SqlStorage`, per-id single-writer, **alarms**, WebSocket hibernation) — enough
+to run **every** `@dwk` package that ships a DO: `@dwk/solid-pod`,
+`@dwk/webauthn`, `@dwk/activitypub`, `@dwk/atproto-pds`, `@dwk/remotestorage`,
+and `@dwk/webdav` (mounted over solid-pod's DO), each exercised end-to-end
+against the host in `src/phase5-*.integration.test.ts` — plus the stateless and
+D1/R2-backed ones (IndieAuth, Micropub, Webmention, Microsub, WebSub,
+WebFinger, host-meta, VC), and the packaging (the `dwk-serve` bin + the esbuild
+bundle + Dockerfile). Wiring a Node
 conformance column into `conformance/status.json` and publishing versioned image
 tags are the remaining self-hosting tasks; the package stays experimental until
 its conformance column is green.
