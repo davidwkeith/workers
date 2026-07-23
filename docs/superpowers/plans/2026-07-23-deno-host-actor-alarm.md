@@ -63,10 +63,12 @@ pattern), a new hand-rolled `FakeDenoKv` test double.
 ## Task 1: `DenoKvLike` client seam
 
 **Files:**
+
 - Create: `packages/deno-host/src/kv-client.ts`
 - Modify: `packages/deno-host/src/index.ts`
 
 **Interfaces:**
+
 - Produces: `KvKeyPart`, `KvKey`, `DenoKvEntryLike<T>`, `DenoKvCheckLike`,
   `DenoKvCommitResultLike`, `DenoKvAtomicLike`, `DenoKvListSelectorLike`,
   `DenoKvLike` — consumed by every task below.
@@ -177,18 +179,20 @@ git commit -m "feat(deno-host): add the DenoKvLike injected client seam (#398)"
 ## Task 2: KV test harness + per-id lease (`lease.ts`)
 
 **Files:**
+
 - Modify: `packages/deno-host/src/test-harness.ts`
 - Create: `packages/deno-host/src/lease.ts`
 - Test: `packages/deno-host/src/lease.test.ts`
 - Modify: `packages/deno-host/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `DenoKvLike`, `KvKey`, `DenoKvEntryLike`, `DenoKvAtomicLike`,
   `DenoKvCommitResultLike` (Task 1).
 - Produces: `FakeDenoKv` (test-only), `acquireLease(kv, key, options?):
-  Promise<Lease>`, `releaseLease(kv, lease): Promise<void>`,
+Promise<Lease>`, `releaseLease(kv, lease): Promise<void>`,
   `LeaseContendedError`, `Lease { key, versionstamp }`, `LeaseOptions {
-  ttlMs?, acquireTimeoutMs? }` — consumed by Tasks 3–5.
+ttlMs?, acquireTimeoutMs? }` — consumed by Tasks 3–5.
 
 - [ ] **Step 1: Add `FakeDenoKv` to `test-harness.ts`**
 
@@ -273,7 +277,7 @@ function keyToId(key: KvKey): string {
         ? `bytes:${Buffer.from(part).toString("hex")}`
         : `${typeof part}:${String(part)}`,
     )
-    .join(" ");
+    .join("\u0000");
 }
 
 /**
@@ -299,7 +303,8 @@ export class FakeDenoKv implements DenoKvLike {
   #prune(): void {
     const now = Date.now();
     for (const [id, rec] of this.#store) {
-      if (rec.expiresAt !== null && rec.expiresAt <= now) this.#store.delete(id);
+      if (rec.expiresAt !== null && rec.expiresAt <= now)
+        this.#store.delete(id);
     }
   }
 
@@ -323,7 +328,8 @@ export class FakeDenoKv implements DenoKvLike {
       key,
       value,
       versionstamp,
-      expiresAt: options?.expireIn != null ? Date.now() + options.expireIn : null,
+      expiresAt:
+        options?.expireIn != null ? Date.now() + options.expireIn : null,
     });
     return { versionstamp };
   }
@@ -340,18 +346,29 @@ export class FakeDenoKv implements DenoKvLike {
     const matches: FakeKvRecord[] = [];
     for (const rec of this.#store.values()) {
       if (!hasPrefix(rec.key, selector.prefix)) continue;
-      if (selector.start !== undefined && compareKeys(rec.key, selector.start) < 0) {
+      if (
+        selector.start !== undefined &&
+        compareKeys(rec.key, selector.start) < 0
+      ) {
         continue;
       }
-      if (selector.end !== undefined && compareKeys(rec.key, selector.end) >= 0) {
+      if (
+        selector.end !== undefined &&
+        compareKeys(rec.key, selector.end) >= 0
+      ) {
         continue;
       }
       matches.push(rec);
     }
     matches.sort((a, b) => compareKeys(a.key, b.key));
-    const limited = options?.limit != null ? matches.slice(0, options.limit) : matches;
+    const limited =
+      options?.limit != null ? matches.slice(0, options.limit) : matches;
     for (const rec of limited) {
-      yield { key: rec.key, value: rec.value as T, versionstamp: rec.versionstamp };
+      yield {
+        key: rec.key,
+        value: rec.value as T,
+        versionstamp: rec.versionstamp,
+      };
     }
   }
 
@@ -379,7 +396,12 @@ export class FakeDenoKv implements DenoKvLike {
 }
 
 type FakeKvOp =
-  | { readonly type: "set"; readonly key: KvKey; readonly value: unknown; readonly expireIn?: number }
+  | {
+      readonly type: "set";
+      readonly key: KvKey;
+      readonly value: unknown;
+      readonly expireIn?: number;
+    }
   | { readonly type: "delete"; readonly key: KvKey };
 
 class FakeDenoKvAtomic implements DenoKvAtomicLike {
@@ -396,7 +418,11 @@ class FakeDenoKvAtomic implements DenoKvAtomicLike {
     return this;
   }
 
-  set(key: KvKey, value: unknown, options?: { expireIn?: number }): DenoKvAtomicLike {
+  set(
+    key: KvKey,
+    value: unknown,
+    options?: { expireIn?: number },
+  ): DenoKvAtomicLike {
     this.#ops.push({ type: "set", key, value, expireIn: options?.expireIn });
     return this;
   }
@@ -538,7 +564,8 @@ export async function acquireLease(
   options: LeaseOptions = {},
 ): Promise<Lease> {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
-  const acquireTimeoutMs = options.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS;
+  const acquireTimeoutMs =
+    options.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS;
   const deadline = Date.now() + acquireTimeoutMs;
   let attempt = 0;
   for (;;) {
@@ -564,7 +591,10 @@ export async function acquireLease(
  * the lease already expired and a different holder has since acquired it
  * (verified via the versionstamp captured at acquire time).
  */
-export async function releaseLease(kv: DenoKvLike, lease: Lease): Promise<void> {
+export async function releaseLease(
+  kv: DenoKvLike,
+  lease: Lease,
+): Promise<void> {
   await kv
     .atomic()
     .check({ key: lease.key, versionstamp: lease.versionstamp })
@@ -606,11 +636,13 @@ git commit -m "feat(deno-host): add the FakeDenoKv test harness and the KV-CAS l
 ## Task 3: KV-indexed alarm schedule (`alarms.ts`)
 
 **Files:**
+
 - Create: `packages/deno-host/src/alarms.ts`
 - Test: `packages/deno-host/src/alarms.test.ts`
 - Modify: `packages/deno-host/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `DenoKvLike`, `KvKey` (Task 1); `FakeDenoKv` (Task 2, test-only).
 - Produces: `setAlarm(kv, className, idHex, epochMs): Promise<void>`,
   `getAlarm(kv, className, idHex): Promise<number | null>`,
@@ -890,7 +922,12 @@ stay internal to the package (imported directly by `durable-object.ts` in
 Task 5, not re-exported):
 
 ```ts
-export { setAlarm, getAlarm, deleteAlarm, type DueAlarmEntry } from "./alarms.js";
+export {
+  setAlarm,
+  getAlarm,
+  deleteAlarm,
+  type DueAlarmEntry,
+} from "./alarms.js";
 ```
 
 - [ ] **Step 6: Typecheck and commit**
@@ -908,11 +945,13 @@ git commit -m "feat(deno-host): add the KV-indexed alarm schedule (#398)"
 ## Task 4: `createDurableObjectNamespace` — fetch dispatch + WebSockets
 
 **Files:**
+
 - Create: `packages/deno-host/src/durable-object.ts`
 - Test: `packages/deno-host/src/durable-object.test.ts`
 - Modify: `packages/deno-host/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `DenoKvLike`, `KvKey` (Task 1); `acquireLease`, `releaseLease`,
   `Lease`, `LeaseOptions`, `LeaseContendedError` (Task 2);
   `createDurableSqlite`, `DurableSqlite`, `SyncSqliteDatabaseLike` (#397,
@@ -920,13 +959,13 @@ git commit -m "feat(deno-host): add the KV-indexed alarm schedule (#398)"
 - Produces (this task — alarms are added on top in Task 5):
   `DenoDurableObjectId { toString(), equals(other), name? }`,
   `DenoDurableObjectState<Env> { id, storage, concurrencyGate,
-  blockConcurrencyWhile(fn), acceptWebSocket(ws), getWebSockets() }`,
+blockConcurrencyWhile(fn), acceptWebSocket(ws), getWebSockets() }`,
   `AlarmInvocationInfo { retryCount, isRetry }`, `DurableObject<Env> { ctx,
-  env, alarm? }`, `DurableObjectClass<T>`, `DurableObjectNamespaceOptions<Env>
-  { kv, className, env, getStorageClient, leaseTtlMs?,
-  leaseAcquireTimeoutMs? }`, `DurableObjectNamespaceLike<T> { idFromName,
-  idFromString, newUniqueId, get(id) }`, `createDurableObjectNamespace(ctor,
-  options): DurableObjectNamespaceLike<T>` — consumed by Task 5 (which
+env, alarm? }`, `DurableObjectClass<T>`, `DurableObjectNamespaceOptions<Env>
+{ kv, className, env, getStorageClient, leaseTtlMs?,
+leaseAcquireTimeoutMs? }`, `DurableObjectNamespaceLike<T> { idFromName,
+idFromString, newUniqueId, get(id) }`, `createDurableObjectNamespace(ctor,
+options): DurableObjectNamespaceLike<T>` — consumed by Task 5 (which
   extends this same file) and Task 6.
 
 - [ ] **Step 1: Write the failing test — `durable-object.test.ts`**
@@ -977,8 +1016,12 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
       env: {},
       getStorageClient: () => createStrictSyncSqlite(),
     });
-    expect(ns.idFromName("alice").toString()).toBe(ns.idFromName("alice").toString());
-    expect(ns.idFromName("alice").toString()).not.toBe(ns.idFromName("bob").toString());
+    expect(ns.idFromName("alice").toString()).toBe(
+      ns.idFromName("alice").toString(),
+    );
+    expect(ns.idFromName("alice").toString()).not.toBe(
+      ns.idFromName("bob").toString(),
+    );
   });
 
   it("enforces single-writer across two namespaces sharing one KV, and releases the lease after completion", async () => {
@@ -1014,7 +1057,9 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
     expect(await (await inFlight).text()).toBe("done");
     // The lease is now free — proves release() actually ran.
     expect(
-      await (await ns2.get(ns2.idFromName("shared")).fetch(new Request("http://x/"))).text(),
+      await (
+        await ns2.get(ns2.idFromName("shared")).fetch(new Request("http://x/"))
+      ).text(),
     ).toBe("done");
   });
 
@@ -1022,7 +1067,9 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
     const kv = new FakeDenoKv();
     const db = createStrictSyncSqlite();
     type Listener = (event: Event) => void;
-    function fakeWebSocket(): WebSocket & { fire(type: string, props?: Record<string, unknown>): void } {
+    function fakeWebSocket(): WebSocket & {
+      fire(type: string, props?: Record<string, unknown>): void;
+    } {
       const listeners = new Map<string, Listener[]>();
       return {
         addEventListener(type: string, cb: EventListenerOrEventListenerObject) {
@@ -1030,16 +1077,25 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
           list.push(cb as Listener);
           listeners.set(type, list);
         },
-        removeEventListener(type: string, cb: EventListenerOrEventListenerObject) {
+        removeEventListener(
+          type: string,
+          cb: EventListenerOrEventListenerObject,
+        ) {
           const list = listeners.get(type);
-          if (list) listeners.set(type, list.filter((x) => x !== (cb as Listener)));
+          if (list)
+            listeners.set(
+              type,
+              list.filter((x) => x !== (cb as Listener)),
+            );
         },
         fire(type: string, props: Record<string, unknown> = {}) {
           for (const cb of listeners.get(type) ?? []) {
             cb({ type, ...props } as unknown as Event);
           }
         },
-      } as unknown as WebSocket & { fire(type: string, props?: Record<string, unknown>): void };
+      } as unknown as WebSocket & {
+        fire(type: string, props?: Record<string, unknown>): void;
+      };
     }
 
     const received: string[] = [];
@@ -1066,7 +1122,9 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
       env: {},
       getStorageClient: () => db,
     });
-    const res = await ns.get(ns.idFromName("room")).fetch(new Request("http://x/ws"));
+    const res = await ns
+      .get(ns.idFromName("room"))
+      .fetch(new Request("http://x/ws"));
     expect(await res.json()).toEqual({ accepted: 1, afterClose: 0 });
     expect(received).toEqual(["hello"]);
   });
@@ -1353,7 +1411,10 @@ export class DurableObjectNamespaceLike<
     return instance;
   }
 
-  async #dispatch(id: DenoDurableObjectId, request: Request): Promise<Response> {
+  async #dispatch(
+    id: DenoDurableObjectId,
+    request: Request,
+  ): Promise<Response> {
     const idHex = id.toString();
     // Annotated (not just inferred) so the `type Lease` import is used —
     // this file has no other textual reference to `Lease` until Task 5
@@ -1429,17 +1490,19 @@ git commit -m "feat(deno-host): add createDurableObjectNamespace — fetch dispa
 ## Task 5: Alarm firing (`pollAlarms`) on the namespace
 
 **Files:**
+
 - Modify: `packages/deno-host/src/durable-object.ts` (created in Task 4)
 - Test: `packages/deno-host/src/durable-object-alarms.test.ts`
 - Modify: `packages/deno-host/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `setAlarm`, `getAlarm`, `scheduleRetry`, `listDueAlarms`,
   `claimDueAlarm`, `DueAlarmEntry` (Task 3); everything from Task 4.
 - Produces: `DenoDurableObjectStorage extends DurableSqlite { setAlarm,
-  getAlarm, deleteAlarm }` (replaces `DurableSqlite` as `ctx.storage`'s
+getAlarm, deleteAlarm }` (replaces `DurableSqlite` as `ctx.storage`'s
   type), `DurableObjectNamespaceLike.pollAlarms({ now?, batchSize? }):
-  Promise<void>` — consumed by Task 6 (README/spec status updates only; no
+Promise<void>` — consumed by Task 6 (README/spec status updates only; no
   further code depends on this).
 
 - [ ] **Step 1: Write the failing test — `durable-object-alarms.test.ts`**
@@ -1554,7 +1617,10 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
     const ns2 = makeNs(kv, db);
     const id = ns1.idFromName("alice");
     await setAlarm(kv, "AlarmObject", id.toString(), 1000);
-    await Promise.all([ns1.pollAlarms({ now: 1000 }), ns2.pollAlarms({ now: 1000 })]);
+    await Promise.all([
+      ns1.pollAlarms({ now: 1000 }),
+      ns2.pollAlarms({ now: 1000 }),
+    ]);
     expect(fireLog).toHaveLength(1);
   });
 });
@@ -1690,22 +1756,22 @@ export class DenoDurableObjectState<_Env = unknown> {
 Find:
 
 ```ts
-      const db = this.#options.getStorageClient(idHex);
-      const storage = createDurableSqlite(db);
-      const state = new DenoDurableObjectState(id, storage);
+const db = this.#options.getStorageClient(idHex);
+const storage = createDurableSqlite(db);
+const state = new DenoDurableObjectState(id, storage);
 ```
 
 Replace with:
 
 ```ts
-      const db = this.#options.getStorageClient(idHex);
-      const storage = createStorage(
-        db,
-        this.#options.kv,
-        this.#options.className,
-        idHex,
-      );
-      const state = new DenoDurableObjectState(id, storage);
+const db = this.#options.getStorageClient(idHex);
+const storage = createStorage(
+  db,
+  this.#options.kv,
+  this.#options.className,
+  idHex,
+);
+const state = new DenoDurableObjectState(id, storage);
 ```
 
 - [ ] **Step 7: Modify `durable-object.ts` — add `pollAlarms`/`#fireAlarm`**
@@ -1911,6 +1977,7 @@ git commit -m "feat(deno-host): add pollAlarms — alarm firing, retry, and supe
 ## Task 6: Package bookkeeping — README, spec status, changeset
 
 **Files:**
+
 - Modify: `packages/deno-host/README.md`
 - Modify: `spec/packages/deno-host.md`
 - Modify: `packages/deno-host/package.json` (`"Ships a DO?"` row is in the
@@ -2036,7 +2103,7 @@ Add after the existing "## Consistency (host-contract §4)"-equivalent
 content (i.e. right before "## What still needs live verification"), a new
 section summarizing the implemented actor/alarm surface:
 
-```markdown
+````markdown
 ## `createDurableObjectNamespace(ctor, options)` — host-contract §3.3
 
 Single-writer actor + alarm emulation over a per-id Deno KV lease (issue
@@ -2048,10 +2115,7 @@ client, and the composed `Env`.
 ```ts
 import { openKv } from "node:process"; // illustrative — use Deno.openKv() on Deno Deploy
 import Database from "libsql";
-import {
-  createDurableObjectNamespace,
-  DurableObject,
-} from "@dwk/deno-host";
+import { createDurableObjectNamespace, DurableObject } from "@dwk/deno-host";
 
 class PodObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
@@ -2079,6 +2143,7 @@ const POD = createDurableObjectNamespace(PodObject, {
 // Wire to Deno.cron() — the package never starts its own timer.
 Deno.cron("pod alarms", "* * * * *", () => POD.pollAlarms());
 ```
+````
 
 Per-id single-writer is enforced by a KV atomic-CAS lease, acquired once per
 `fetch()`/`alarm()` delivery and released after (no renewal loop) — a
@@ -2089,7 +2154,8 @@ one range scan. WebSockets (`ctx.acceptWebSocket`/`getWebSockets`) are an
 in-memory per-instance socket set, ported from `@dwk/cf-shims` — see
 [`spec/packages/deno-host.md`](../../spec/packages/deno-host.md) for the
 documented cross-process limitation on live sockets.
-```
+
+````
 
 Also update the top status blockquote in the README to match Step 2's spec
 change (same replacement text, adapted to the README's existing wording
@@ -2107,7 +2173,7 @@ the host-contract `D1Database` (async remote client) and
 `SqlStorage`/`transactionSync` (synchronous embedded replica client)
 surfaces, via injected structural client seams; the actor/alarm, queue, and
 object-storage gaps (#398–#400) are not implemented and remain gated.
-```
+````
 
 Replace with:
 
