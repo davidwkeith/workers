@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -206,6 +206,72 @@ function kitchenNs() {
   });
 }
 
+/** A DO exercising `setAlarm`/`getAlarm`/`deleteAlarm` and `alarm()`. Both
+ * `alarm()` and the `/inc` fetch route bump the same non-atomic counter, so a
+ * test can prove the two are never interleaved. */
+class Ticker extends DurableObject {
+  readonly #state: DurableObjectState;
+  alarmRuns = 0;
+
+  constructor(state: DurableObjectState, env: unknown) {
+    super(state, env);
+    this.#state = state;
+    state.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS t (k TEXT PRIMARY KEY, n INTEGER)",
+    );
+    state.storage.sql.exec(
+      "INSERT OR IGNORE INTO t (k, n) VALUES ('count', 0)",
+    );
+  }
+
+  async #bump(): Promise<void> {
+    const { n } = this.#state.storage.sql
+      .exec<{ n: number }>("SELECT n FROM t WHERE k = 'count'")
+      .one();
+    await new Promise((r) => setTimeout(r, 1)); // widen the race window
+    this.#state.storage.sql.exec("UPDATE t SET n = ? WHERE k = 'count'", n + 1);
+  }
+
+  async alarm(): Promise<void> {
+    this.alarmRuns += 1;
+    await this.#bump();
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    switch (url.pathname) {
+      case "/inc":
+        await this.#bump();
+        return new Response("ok");
+      case "/set-alarm":
+        await this.#state.storage.setAlarm(Number(url.searchParams.get("at")));
+        return new Response("ok");
+      case "/get-alarm":
+        return json({ alarm: await this.#state.storage.getAlarm() });
+      case "/delete-alarm":
+        await this.#state.storage.deleteAlarm();
+        return new Response("ok");
+      case "/count":
+        return json({
+          n: this.#state.storage.sql
+            .exec<{ n: number }>("SELECT n FROM t WHERE k = 'count'")
+            .one().n,
+          alarmRuns: this.alarmRuns,
+        });
+      default:
+        return new Response("ok");
+    }
+  }
+}
+
+function tickerNs(dir: string) {
+  return createDurableObjectNamespace(Ticker, {
+    dataDir: dir,
+    env: {},
+    className: "ticker",
+  });
+}
+
 describe("Durable Object emulation", () => {
   it("exposes SqlStorage with exec().one()/.toArray()", async () => {
     const ns = counterNs();
@@ -313,5 +379,116 @@ describe("Durable Object emulation", () => {
         errors: number;
       },
     ).toEqual({ accepted: 1, afterClose: 0, afterError: 1, errors: 1 });
+  });
+});
+
+describe("Durable Object alarms", () => {
+  it("getAlarm is null until set", async () => {
+    const ns = tickerNs(dataDir());
+    const res = await ns
+      .get(ns.idFromName("a"))
+      .fetch(new Request("http://do/get-alarm"));
+    expect((await res.json()) as { alarm: number | null }).toEqual({
+      alarm: null,
+    });
+  });
+
+  it("fires alarm() at the scheduled time", async () => {
+    const ns = tickerNs(dataDir());
+    const id = ns.idFromName("a");
+    await ns
+      .get(id)
+      .fetch(new Request(`http://do/set-alarm?at=${Date.now() + 30}`));
+    await vi.waitFor(async () => {
+      const res = await ns.get(id).fetch(new Request("http://do/count"));
+      expect(((await res.json()) as { alarmRuns: number }).alarmRuns).toBe(1);
+    });
+  });
+
+  it("fires promptly for an already-past scheduled time", async () => {
+    const ns = tickerNs(dataDir());
+    const id = ns.idFromName("past");
+    await ns
+      .get(id)
+      .fetch(new Request(`http://do/set-alarm?at=${Date.now() - 5_000}`));
+    await vi.waitFor(async () => {
+      const res = await ns.get(id).fetch(new Request("http://do/count"));
+      expect(((await res.json()) as { alarmRuns: number }).alarmRuns).toBe(1);
+    });
+  });
+
+  it("re-arming overwrites the previous alarm (last write wins)", async () => {
+    const ns = tickerNs(dataDir());
+    const id = ns.idFromName("rearm");
+    const far = Date.now() + 10_000;
+    const near = Date.now() + 20;
+    await ns.get(id).fetch(new Request(`http://do/set-alarm?at=${far}`));
+    await ns.get(id).fetch(new Request(`http://do/set-alarm?at=${near}`));
+    const armed = await ns.get(id).fetch(new Request("http://do/get-alarm"));
+    expect((await armed.json()) as { alarm: number }).toEqual({
+      alarm: near,
+    });
+    await vi.waitFor(async () => {
+      const res = await ns.get(id).fetch(new Request("http://do/count"));
+      expect(((await res.json()) as { alarmRuns: number }).alarmRuns).toBe(1);
+    });
+  });
+
+  it("deleteAlarm clears a pending alarm so it never fires", async () => {
+    const ns = tickerNs(dataDir());
+    const id = ns.idFromName("del");
+    await ns
+      .get(id)
+      .fetch(new Request(`http://do/set-alarm?at=${Date.now() + 30}`));
+    await ns.get(id).fetch(new Request("http://do/delete-alarm"));
+    const after = await ns.get(id).fetch(new Request("http://do/get-alarm"));
+    expect((await after.json()) as { alarm: number | null }).toEqual({
+      alarm: null,
+    });
+    // Give the (cleared) timer a chance to fire were it still armed.
+    await new Promise((r) => setTimeout(r, 60));
+    const count = await ns.get(id).fetch(new Request("http://do/count"));
+    expect((await count.json()) as { alarmRuns: number }).toEqual({
+      n: 0,
+      alarmRuns: 0,
+    });
+  });
+
+  it("serialises an alarm firing with concurrent fetches (single-writer guarantee)", async () => {
+    const ns = tickerNs(dataDir());
+    const id = ns.idFromName("race");
+    await ns
+      .get(id)
+      .fetch(new Request(`http://do/set-alarm?at=${Date.now() + 10}`));
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        ns.get(id).fetch(new Request("http://do/inc")),
+      ),
+    );
+    await vi.waitFor(async () => {
+      const res = await ns.get(id).fetch(new Request("http://do/count"));
+      const body = (await res.json()) as { n: number; alarmRuns: number };
+      expect(body.alarmRuns).toBe(1);
+      expect(body.n).toBe(11); // 10 fetches + 1 alarm, no lost updates
+    });
+  });
+
+  it("restart recovery: a persisted alarm fires with no request touching that id", async () => {
+    const dir = dataDir();
+    const ns1 = tickerNs(dir);
+    const id = ns1.idFromName("restart");
+    // "Crash" right after arming a past-due alarm: nothing else touches ns1.
+    await ns1
+      .get(id)
+      .fetch(new Request(`http://do/set-alarm?at=${Date.now() - 1_000}`));
+
+    // A fresh namespace over the same data dir simulates the next process
+    // start; the alarm must fire even though no request is sent to this id
+    // before we read back its result.
+    const ns2 = tickerNs(dir);
+    await vi.waitFor(async () => {
+      const res = await ns2.get(id).fetch(new Request("http://do/count"));
+      expect(((await res.json()) as { alarmRuns: number }).alarmRuns).toBe(1);
+    });
   });
 });

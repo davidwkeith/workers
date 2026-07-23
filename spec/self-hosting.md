@@ -266,9 +266,11 @@ does not apply; nothing is weakened.
 
 ### 7.4 Durable Objects (the hard part)
 
-Used by: `solid-pod` (the per-pod Pod object) and `webauthn` (per-RP object).
-This is the only emulation with real subtlety, because Durable Objects provide
-**three** guarantees the packages lean on:
+Used by: `solid-pod` (the per-pod Pod object), `webauthn` (per-RP object),
+`activitypub` (per-actor object), `atproto-pds` (per-account repository
+object), and `remotestorage` (per-account object; no alarm). This is the
+hardest emulation, because Durable Objects provide **four** guarantees the
+packages lean on:
 
 1. **Single-threaded execution per object id.** `solid-pod`'s entire
    consistency/authz/notification model rests on "Cloudflare guarantees a single
@@ -278,7 +280,13 @@ This is the only emulation with real subtlety, because Durable Objects provide
    `state.storage.sql` (the `SqlStorage` interface) for the quad store; the Pod
    reads it directly too.
 3. **Hibernatable WebSockets** (`state.acceptWebSocket()`,
-   `state.getWebSockets()`) for Solid notifications.
+   `state.getWebSockets()`) for Solid notifications and the `atproto-pds`
+   firehose (`subscribeRepos`).
+4. **Alarms** (`state.storage.setAlarm`/`getAlarm`/`deleteAlarm`, the class's
+   optional `alarm()` override). `activitypub`'s outbound delivery retry and
+   `atproto-pds`'s `did:plc` genesis-submission retry are both alarm-driven,
+   never queue/`waitUntil`-driven, and neither package ran on this host at all
+   until the shim implemented this guarantee (#379).
 
 The Node shim provides a `DurableObjectNamespace` whose `idFromName` mints a
 stable id from the name and whose `get(id).fetch(req)` **routes in-process** to a
@@ -303,6 +311,13 @@ the distributed original, because there is exactly one process.
 - **WebSocket hibernation.** `acceptWebSocket`/`getWebSockets` map onto a real
   `ws` server the Express server upgrades; "hibernation" is a no-op on Node
   (the object is always resident), which is behaviourally a superset.
+- **Alarms.** `setAlarm`/`getAlarm`/`deleteAlarm` persist the scheduled time in
+  the object's own SQLite file (so a pending alarm survives a process
+  restart), backed by a real, `unref`'d timer chained onto the same per-id
+  mutex as `fetch` — an alarm never runs concurrently with a request, or
+  another alarm, on the same object. A namespace scans its data directory for
+  previously-seen object ids on construction, so a pending alarm still fires
+  even if the process restarts before any request re-touches that id.
 
 **The single-process constraint is the price.** It is acceptable for the
 self-host audience (one person, one box) and is exactly the model the DO design
@@ -394,6 +409,40 @@ Worker entry does. Proposed model:
   experimental until the conformance suites pass against it
   ([§11](#11-testing--conformance)).
 
+### 10.1 Container deployment on AWS, GCP, and other clouds
+
+There is no dedicated AWS/GCP/other-cloud host package, and Phase 0 of the
+multi-provider portability plan ([portability.md](portability.md) §5)
+deliberately does not add one: **the Docker image described above is the
+supported answer.** `@dwk/server`'s Node/Express/SQLite/filesystem shims make
+no Cloudflare-specific assumption about *where* the container runs — only that
+exactly one instance writes a given data directory
+([§8](#8-consistency--correctness)) — so any environment that can run a
+container with a persistent volume works unchanged:
+
+- **AWS**: ECS (Fargate or EC2) or an EC2 VM, with the data directory on an
+  EBS volume (Fargate: an EFS mount, since Fargate tasks have no local
+  persistent disk) and a reverse proxy or ALB terminating TLS in front.
+  `Lambda@Edge`/plain Lambda are **not** a target — see
+  [portability.md §4.3](portability.md#43-aws--lambdaedge-is-the-wrong-target-containers-work-today):
+  the ephemeral, horizontally-scaled function model breaks the
+  single-writer/local-SQLite invariant this host relies on.
+- **Google Cloud**: a GCE VM (persistent disk) is the supported shape, for the
+  same reason Cloud Run / Cloud Functions are not — see
+  [portability.md §4.4](portability.md#44-google-cloud--same-shape-as-aws).
+- **Any other VPS or bare-metal host** that can run `docker run` (or the
+  bundled `dwk-serve` bin directly, per the `bin` note above) with a mounted
+  volume works identically — this is the same container, run the same way,
+  regardless of which cloud's marketing page it sits behind.
+
+In every case the deployment shape is: one container instance, one persistent
+volume for the data directory, a reverse proxy in front for TLS, and the
+`dwk.config` (or env vars) pointing at the mounted data directory — exactly the
+"one person, one box" model [§7.4](#74-durable-objects-the-hard-part) already
+assumes for the Durable Object shim, just running on a rented box instead of a
+local one. This is deliberately **not** a new host implementation: it is the
+existing `@dwk/server` Docker image, unmodified, documented as portable.
+
 ## 11. Testing & conformance
 
 The headline benefit: **the protocol logic is shared, so conformance transfers.**
@@ -455,11 +504,17 @@ Cloudflare provided several things for free that the self-hoster now owns:
 | `solid-pod` | **DO**, R2, D1(GC) | **high** | SqlStorage + per-id mutex + WS hibernation + GC cron. |
 | `webauthn` | **DO** | **high** | per-RP DO; challenge state + credential records. |
 | `remotestorage` | R2, D1(GC) | low–med | filesystem R2 + GC cron. |
-| `activitypub` | (http-sig, D1/R2) | med | server-to-server delivery via queue/`waitUntil`. |
+| `activitypub` | **DO** | **high** | per-actor DO; outbound delivery retry is **alarm**-driven, not queue/`waitUntil`. |
+| `atproto-pds` | **DO**, R2 | **high** | per-account DO; MST/CAR/commit signing is self-contained; `did:plc` genesis registration is **alarm**-driven. |
+| `webdav` | (shares solid-pod's **DO**, R2) | **high** | no DO of its own — a façade over `SolidPodObject`, so it rides solid-pod's shim entry above. |
 
-The IndieWeb trio + the stateless discovery packages are a **low-risk MVP**; the
-two Durable Object packages are the deep end and should land behind the DO shim
-in [§7.4](#74-durable-objects-the-hard-part).
+All twelve endpoint packages above are now wired into `@dwk/server`'s own
+composed test app (`packages/server/src/phase2`–`phase5*.integration.test.ts`);
+`activitypub` and `atproto-pds` were blocked on the DO **alarm** shim
+([§7.4](#74-durable-objects-the-hard-part)) landing first (#379), closed
+alongside this wiring (#380). The IndieWeb trio + the stateless discovery
+packages are a **low-risk MVP**; the Durable Object packages are the deep end
+and run behind the DO shim in [§7.4](#74-durable-objects-the-hard-part).
 
 ## 14. Data portability
 

@@ -1,11 +1,11 @@
 /**
  * Durable Object emulation over `node:sqlite` + an in-process per-id mutex.
  *
- * Durable Objects give the packages three guarantees (`solid-pod`'s entire
+ * Durable Objects give the packages four guarantees (`solid-pod`'s entire
  * consistency/authz/notification model and `webauthn`'s per-RP state rest on
  * them): single-threaded execution per object id, DO-SQLite
- * (`state.storage.sql`), and hibernatable WebSockets. In a single Node process
- * the first two are reproduced faithfully — arguably more simply than the
+ * (`state.storage.sql`), hibernatable WebSockets, and alarms. In a single Node
+ * process all four are reproduced faithfully — arguably more simply than the
  * distributed original, because there is exactly one process:
  *
  * - **`SqlStorage`** is a `node:sqlite` database, one file per object id under
@@ -19,6 +19,16 @@
  *   memory here; wiring it to a real upgrade through the Express server (Solid
  *   notifications) is a follow-up — the LDP/WAC/patch and webauthn paths do not
  *   touch it.
+ * - **Alarms** (`storage.setAlarm`/`getAlarm`/`deleteAlarm`, the class's
+ *   optional `alarm()` override) persist the scheduled time in the object's own
+ *   SQLite file (so they survive a process restart) and fire through a real,
+ *   `unref`'d timer that is chained onto the same per-id promise as `fetch` —
+ *   an alarm never runs concurrently with a request, or another alarm, on the
+ *   same object. A namespace scans its data directory for previously-seen
+ *   object ids on construction so a pending alarm fires even if the process
+ *   restarts before any request re-touches that id (`activitypub`'s delivery
+ *   retry and `atproto-pds`'s did:plc genesis-submission retry both depend on
+ *   this — see #379).
  *
  * The `cloudflare:workers` bare specifier (the only runtime import the packages
  * make, `{ DurableObject }`) resolves to {@link ./cloudflare-workers} via a
@@ -30,8 +40,16 @@
 
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+
+/** Bounded backoff for an `alarm()` override that throws, approximating the
+ * platform's own retry-on-exception behaviour. Neither `activitypub` nor
+ * `atproto-pds` currently relies on this (both catch internally and re-arm via
+ * `setAlarm`), but it keeps the shim faithful for future alarm consumers. */
+const ALARM_RETRY_BASE_MS = 2_000;
+const ALARM_RETRY_MAX_MS = 30 * 60_000;
+const ALARM_RETRY_MAX_ATTEMPTS = 6;
 
 /** Value types `node:sqlite` accepts as a positional `?` binding. */
 type SqlValue = null | number | bigint | string | Uint8Array;
@@ -114,10 +132,50 @@ class ShimSqlStorage {
 class ShimDurableObjectStorage {
   readonly sql: ShimSqlStorage;
   readonly #db: DatabaseSync;
+  #onAlarmChange?: (scheduledTime: number | null) => void;
 
   constructor(db: DatabaseSync) {
     this.#db = db;
     this.sql = new ShimSqlStorage(db);
+    this.#db.exec(
+      "CREATE TABLE IF NOT EXISTS _shim_alarm (id INTEGER PRIMARY KEY CHECK (id = 0), scheduled_at INTEGER NOT NULL)",
+    );
+  }
+
+  /**
+   * Wired by the namespace right after construction so a `setAlarm`/
+   * `deleteAlarm` call (re)arms — or clears — the real timer that fires this
+   * instance's `alarm()` override.
+   */
+  _onAlarmChange(callback: (scheduledTime: number | null) => void): void {
+    this.#onAlarmChange = callback;
+  }
+
+  /** Persist the scheduled alarm time; overwrites any previously-set alarm. */
+  async setAlarm(scheduledTime: number | Date): Promise<void> {
+    const time =
+      scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
+    this.#db
+      .prepare(
+        "INSERT INTO _shim_alarm (id, scheduled_at) VALUES (0, ?) " +
+          "ON CONFLICT(id) DO UPDATE SET scheduled_at = excluded.scheduled_at",
+      )
+      .run(time);
+    this.#onAlarmChange?.(time);
+  }
+
+  /** The currently-armed epoch-ms alarm time, or `null` if none is set. */
+  async getAlarm(): Promise<number | null> {
+    const row = this.#db
+      .prepare("SELECT scheduled_at FROM _shim_alarm WHERE id = 0")
+      .get() as { scheduled_at: number } | undefined;
+    return row?.scheduled_at ?? null;
+  }
+
+  /** Clear the alarm, if any. A no-op if none is set. */
+  async deleteAlarm(): Promise<void> {
+    this.#db.prepare("DELETE FROM _shim_alarm WHERE id = 0").run();
+    this.#onAlarmChange?.(null);
   }
 
   /** Synchronous transaction; rolls back if `fn` throws. No nesting needed. */
@@ -294,11 +352,23 @@ interface ShimStub {
   fetch(request: Request): Promise<Response>;
 }
 
+/** The `alarm()` override a DO class may implement (optional). */
+interface AlarmHandler {
+  alarm?(): Promise<void>;
+}
+
 interface Instance {
-  readonly object: { fetch(request: Request): Promise<Response> };
+  readonly object: {
+    fetch(request: Request): Promise<Response>;
+  } & AlarmHandler;
   readonly state: ShimDurableObjectState;
-  /** Per-id serialisation: each fetch chains after the previous settles. */
+  /** Per-id serialisation: each fetch (and alarm firing) chains after the
+   * previous settles. */
   chain: Promise<unknown>;
+  /** The live timer for this instance's next alarm, if one is armed. */
+  alarmTimer?: NodeJS.Timeout;
+  /** Consecutive `alarm()` failures, for the bounded retry backoff. */
+  alarmAttempts: number;
 }
 
 /**
@@ -332,6 +402,7 @@ class ShimDurableObjectNamespace<
   ) {
     this.#ctor = ctor;
     this.#options = options;
+    this.#restorePendingAlarms();
   }
 
   idFromName(name: string): ShimDurableObjectId {
@@ -353,31 +424,122 @@ class ShimDurableObjectNamespace<
     };
   }
 
-  #dispatch(id: ShimDurableObjectId, request: Request): Promise<Response> {
+  /**
+   * Get or lazily construct the singleton instance for `id`. Wires the
+   * instance's alarm hook and, on first construction, checks for an alarm
+   * persisted by a previous run so it still fires.
+   */
+  #ensureInstance(id: ShimDurableObjectId): Instance {
     const key = id.toString();
-    let instance = this.#instances.get(key);
-    if (instance === undefined) {
-      const sqlitePath = join(
-        this.#options.dataDir,
-        "do",
-        this.#options.className,
-        `${key}.sqlite`,
-      );
-      const state = new ShimDurableObjectState(id, sqlitePath);
-      const object = new this.#ctor(state as never, this.#options.env as never);
-      // Let accepted WebSockets reach the instance's hibernation overrides.
-      state._setOwner(object as HibernationHandlers);
-      instance = { object, state, chain: Promise.resolve() };
-      this.#instances.set(key, instance);
+    const existing = this.#instances.get(key);
+    if (existing !== undefined) return existing;
+
+    const sqlitePath = join(
+      this.#options.dataDir,
+      "do",
+      this.#options.className,
+      `${key}.sqlite`,
+    );
+    const state = new ShimDurableObjectState(id, sqlitePath);
+    const object = new this.#ctor(state as never, this.#options.env as never);
+    // Let accepted WebSockets reach the instance's hibernation overrides.
+    state._setOwner(object as HibernationHandlers);
+
+    const instance: Instance = {
+      object: object as Instance["object"],
+      state,
+      chain: Promise.resolve(),
+      alarmAttempts: 0,
+    };
+    this.#instances.set(key, instance);
+    state.storage._onAlarmChange((scheduledTime) => {
+      if (scheduledTime === null) {
+        if (instance.alarmTimer) clearTimeout(instance.alarmTimer);
+        instance.alarmTimer = undefined;
+        return;
+      }
+      this.#armAlarm(instance, scheduledTime);
+    });
+    // A restart may leave a pending alarm from a previous run; arm it.
+    void state.storage.getAlarm().then((scheduledTime) => {
+      if (scheduledTime !== null) this.#armAlarm(instance, scheduledTime);
+    });
+    return instance;
+  }
+
+  /** Discover object ids left over from a previous run so their persisted
+   * alarms still fire, even if no request re-touches that id first. */
+  #restorePendingAlarms(): void {
+    const dir = join(this.#options.dataDir, "do", this.#options.className);
+    if (!existsSync(dir)) return;
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".sqlite")) continue;
+      this.#ensureInstance(new ShimDurableObjectId(file.slice(0, -7)));
     }
-    const current = instance;
+  }
+
+  /** (Re-)arm the real timer that fires `instance`'s alarm at `scheduledTime`,
+   * clearing any previously-armed timer. A time already in the past fires
+   * promptly (zero delay), matching an at-least-once restart recovery. */
+  #armAlarm(instance: Instance, scheduledTime: number): void {
+    if (instance.alarmTimer) clearTimeout(instance.alarmTimer);
+    const delay = Math.max(0, scheduledTime - Date.now());
+    const timer = setTimeout(() => void this.#fireAlarm(instance), delay);
+    timer.unref?.();
+    instance.alarmTimer = timer;
+  }
+
+  /** Fire `instance`'s alarm, serialised through its per-id chain so it never
+   * runs concurrently with a `fetch` (or another alarm) on the same object. */
+  #fireAlarm(instance: Instance): Promise<unknown> {
+    instance.alarmTimer = undefined;
+    if (typeof instance.object.alarm !== "function") return Promise.resolve();
+    const result = instance.chain
+      .then(() => instance.state.concurrencyGate)
+      .then(() => this.#runAlarm(instance));
+    instance.chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  /** Invoke the alarm override; on failure, retry with bounded exponential
+   * backoff (neither current alarm consumer relies on this — both catch
+   * internally and re-arm — but it keeps the shim faithful to the platform). */
+  async #runAlarm(instance: Instance): Promise<void> {
+    // Consumed like the platform's: if the handler doesn't call `setAlarm`
+    // again while it runs, nothing fires again.
+    await instance.state.storage.deleteAlarm();
+    try {
+      await instance.object.alarm?.();
+      instance.alarmAttempts = 0;
+    } catch (err) {
+      instance.alarmAttempts += 1;
+      if (instance.alarmAttempts > ALARM_RETRY_MAX_ATTEMPTS) {
+        console.error(
+          `@dwk/server: alarm() failed after ${instance.alarmAttempts} attempts, giving up:`,
+          err,
+        );
+        return;
+      }
+      const backoff = Math.min(
+        ALARM_RETRY_BASE_MS * 2 ** (instance.alarmAttempts - 1),
+        ALARM_RETRY_MAX_MS,
+      );
+      this.#armAlarm(instance, Date.now() + backoff);
+    }
+  }
+
+  #dispatch(id: ShimDurableObjectId, request: Request): Promise<Response> {
+    const instance = this.#ensureInstance(id);
     // Serialise: this fetch runs only after the previous one for this id has
     // settled (single-thread-per-object), and after any in-flight
     // `blockConcurrencyWhile` work (e.g. async constructor init) completes.
-    const result = current.chain
-      .then(() => current.state.concurrencyGate)
-      .then(() => current.object.fetch(request));
-    current.chain = result.then(
+    const result = instance.chain
+      .then(() => instance.state.concurrencyGate)
+      .then(() => instance.object.fetch(request));
+    instance.chain = result.then(
       () => undefined,
       () => undefined,
     );

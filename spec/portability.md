@@ -106,12 +106,18 @@ Express and are re-exported from `shims/index.ts` — the planned
 `@dwk/cf-shims` extraction is described as "mechanical" in
 [self-hosting.md](self-hosting.md).
 
-**Known gaps in the Node host today** (they gate Phase 0):
+**Known gaps in the Node host today** (they gated Phase 0; the first two
+closed with #379/#380):
 
-- **No DO alarm shim** (`setAlarm`/`alarm()` unimplemented) — so
-  `activitypub` and `atproto-pds` cannot run on it yet.
-- `activitypub`, `atproto-pds`, `remotestorage`, `webdav` are not wired into
-  the host's composition/tests (documented in `packages/server/CLAUDE.md`).
+- ~~No DO alarm shim~~ — closed (#379): `setAlarm`/`getAlarm`/`deleteAlarm`
+  and a real, restart-surviving alarm timer are implemented
+  (`packages/server/src/shims/durable-object.ts`), chained onto the same
+  per-id single-writer mutex as `fetch`.
+- ~~`activitypub`, `atproto-pds`, `remotestorage`, `webdav` are not wired into
+  the host's composition/tests~~ — closed (#380): all four are now mounted in
+  `packages/server/src/phase5-*.integration.test.ts`, including a real
+  (not manually-driven) alarm-timer delivery retry for `activitypub` and a
+  real `did:plc` genesis-retry for `atproto-pds`.
 - Cron takes an interval in ms, not a cron expression.
 - Single-process, single-writer by design (lockfile) — no HA.
 
@@ -223,13 +229,14 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
 
 1. **Phase 0 — make the existing second runtime complete and reusable**
    (small/medium; no endpoint package changes):
-   - Implement the **DO alarm shim** in `@dwk/server`.
-   - Wire `activitypub`, `atproto-pds`, `remotestorage`, `webdav` into the
-     host's composition and tests.
+   - ~~Implement the **DO alarm shim** in `@dwk/server`.~~ Done (#379).
+   - ~~Wire `activitypub`, `atproto-pds`, `remotestorage`, `webdav` into the
+     host's composition and tests.~~ Done (#380).
    - Extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md), and
      write the **host contract** spec (§3) alongside it.
-   - Document "run the Docker image on ECS/GCE/a VPS" as the supported
-     answer for AWS/GCP/other-cloud users.
+   - ~~Document "run the Docker image on ECS/GCE/a VPS" as the supported
+     answer for AWS/GCP/other-cloud users.~~ Done (#380) — see
+     [self-hosting.md §10.1](self-hosting.md#101-container-deployment-on-aws-gcp-and-other-clouds).
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.
