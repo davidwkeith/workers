@@ -11,9 +11,11 @@
  * embedded-replica client), so the same code runs on Deno Deploy, Node, or
  * anywhere else the composing app can supply a client.
  *
- * **Status: exploratory/gated.** This is the SQL gap (issue #397) of the
- * demand-gated `@dwk/deno-host` plan (#396); the actor/alarm (#398), queue
- * (#399), and object-storage (#400) gaps are not implemented here yet.
+ * **Status: exploratory/gated.** This is the SQL gap (issue #397) and the
+ * single-writer actor + alarm emulation (issue #398, gate overridden on
+ * demonstrated demand) of the demand-gated `@dwk/deno-host` plan (#396);
+ * the queue (#399) and object-storage (#400) gaps are not implemented
+ * here yet.
  *
  * @see spec/packages/deno-host.md
  */
