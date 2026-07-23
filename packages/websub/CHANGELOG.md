@@ -1,5 +1,46 @@
 # @dwk/websub
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 39f6d61: Add a composer-injected local-dev SSRF allowlist (issue #257): `@dwk/safe-fetch` gains `allowedHosts` — exact `host[:port]` entries exempted from the private/loopback host block, with every use logged/counted as `safe_fetch.ssrf.allowed_host` — and the consuming packages expose it as `fetchAllowedHosts` in their options/config (webmention verify/discovery/send, websub verify/denial/distribute, microsub feed discovery/fetch, vc did:web resolution + status-list fetch, atproto-pds PLC directory + DID resolution). Deny-by-default is unchanged; scheme checks, redirect re-validation, timeouts, and body caps still apply to allowlisted hosts. This unblocks local `wrangler dev --local` debugging against the local dev site (Anglesite-app#708).
+- 2de1ea6: Distribute content per-subscriber instead of in one unbounded fan-out. A
+  publish now enqueues a `distribute` job that fetches the topic snapshot once and
+  plans the fan-out: it enqueues one `deliver` job per active subscriber, each of
+  which POSTs to a single callback and retries on its own queue checkpoint. This
+  fixes three problems with the previous once-only `Promise.all` fan-out: a
+  subscriber down during a publish no longer silently misses the update; a large
+  subscriber set no longer exceeds a single invocation's subrequest ceiling; and a
+  transient failure no longer re-delivers to every subscriber (duplicates).
+
+  Small snapshots ride inline in each `deliver` message, **base64-encoded** (a raw
+  `Uint8Array` would be JSON-serialized by Cloudflare Queues into a ~10×-larger
+  `{"0":…}` byte map and not round-trip as bytes). A body too large to inline
+  (> `MAX_INLINE_BODY_BYTES`, 64 KB raw) is staged once in a new optional
+  `WEBSUB_CONTENT` R2 bucket and referenced by key. When a snapshot exceeds the
+  inline limit and no bucket is configured, the fan-out fails loudly rather than
+  truncating the push. Delivery is at-least-once: a `distribute` retry after a
+  partial `sendBatch` fan-out can re-enqueue deliver jobs for subscribers already
+  reached (WebSub §7 requires subscribers to tolerate duplicates).
+  `deliverToSubscriber` now accepts the narrower `DeliveryTarget` shape
+  (`Subscription` remains assignable).
+
+### Patch Changes
+
+- 3e505be: Queue consumers now back off exponentially (30s base, doubling per attempt,
+  capped at 1h) when retrying a `message.retry()`, based on `message.attempts`.
+  Previously a bare `message.retry()` re-delivered at the queue's default
+  cadence indefinitely, hammering an unreachable source/feed/callback instead of
+  backing off.
+- Updated dependencies [0e65ce3]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Patch Changes

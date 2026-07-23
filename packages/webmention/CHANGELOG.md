@@ -1,5 +1,35 @@
 # @dwk/webmention
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 04e16c2: Add `createWebmentionMcpTools` (#240): a read-only `@dwk/mcp` tool
+  contribution `webmention_list_received`, listing verified Webmentions newest
+  first (optionally scoped to a `target` URL) over the same `InboxStore` the
+  queue consumer writes into. This is a new capability with no existing HTTP
+  `GET` endpoint to mirror (the receiver only ever accepts `POST`), so it
+  defaults `requiredScope` to `"read"` rather than an open scope. Mentions
+  originate from third-party pages, so the tool description documents the
+  prompt-injection surface — an agent must treat mention content as untrusted
+  data, never as instructions.
+- 39f6d61: Add a composer-injected local-dev SSRF allowlist (issue #257): `@dwk/safe-fetch` gains `allowedHosts` — exact `host[:port]` entries exempted from the private/loopback host block, with every use logged/counted as `safe_fetch.ssrf.allowed_host` — and the consuming packages expose it as `fetchAllowedHosts` in their options/config (webmention verify/discovery/send, websub verify/denial/distribute, microsub feed discovery/fetch, vc did:web resolution + status-list fetch, atproto-pds PLC directory + DID resolution). Deny-by-default is unchanged; scheme checks, redirect re-validation, timeouts, and body caps still apply to allowlisted hosts. This unblocks local `wrangler dev --local` debugging against the local dev site (Anglesite-app#708).
+
+### Patch Changes
+
+- 3e505be: Queue consumers now back off exponentially (30s base, doubling per attempt,
+  capped at 1h) when retrying a `message.retry()`, based on `message.attempts`.
+  Previously a bare `message.retry()` re-delivered at the queue's default
+  cadence indefinitely, hammering an unreachable source/feed/callback instead of
+  backing off.
+- Updated dependencies [0e65ce3]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Minor Changes

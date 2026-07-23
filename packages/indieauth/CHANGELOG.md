@@ -1,5 +1,34 @@
 # @dwk/indieauth
 
+## 0.1.0-beta.4
+
+### Patch Changes
+
+- 3e505be: `authorization_codes` and `access_tokens` are now opportunistically reaped of
+  expired rows on every new authorization-code save / token issuance, since
+  this package has no cron entrypoint of its own to schedule the cleanup.
+  Previously neither table was ever pruned, so both grew unbounded over a
+  deployment's lifetime and slowed `isTokenActive`'s scan. Both tables now also
+  have a supporting index on `expires_at`, so the new per-write prune is an
+  index-range delete rather than a full-table scan on every save/issuance.
+- bde0341: Create D1 schema lazily so a fresh deploy no longer 500s (#291, #292). The
+  IndieAuth code/token store, the Micropub post store, and the Micropub/Microsub
+  DPoP replay stores previously created their tables only in an `init()` that no
+  handler ever called, so a consumer composing these packages against a brand-new
+  D1 hit `no such table` on the first authorization/token/publish request, and —
+  because DPoP replay-checking is on by default — every authenticated
+  create/update/delete `500`ed permanently.
+
+  Each store now materialises its schema lazily on first use (the same
+  `ensureSchema` pattern the webmention/websub/microsub stores already use), with
+  the cached init promise cleared on failure so a transient D1 error doesn't wedge
+  the store. The IndieAuth RFC 8707 `resource`-column migration now runs on that
+  lazy path too, so it actually reaches consumer databases. No separate migration
+  step is required.
+
+- Updated dependencies [3e505be]
+  - @dwk/log@0.1.0-beta.4
+
 ## 0.1.0-beta.3
 
 ### Patch Changes

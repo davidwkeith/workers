@@ -1,5 +1,69 @@
 # @dwk/conformance-target
 
+## 0.0.1-beta.1
+
+### Patch Changes
+
+- Updated dependencies [e6fee8e]
+- Updated dependencies [a722a2e]
+- Updated dependencies [8e5ac84]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [0e65ce3]
+- Updated dependencies [35830e6]
+- Updated dependencies [d7f90d8]
+- Updated dependencies [3e505be]
+- Updated dependencies [e06db4f]
+- Updated dependencies [bde0341]
+- Updated dependencies [36a3be1]
+- Updated dependencies [2870b43]
+- Updated dependencies [96cc2d3]
+- Updated dependencies [48d56a4]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [bde0341]
+- Updated dependencies [7b4349c]
+- Updated dependencies [90f1bc6]
+- Updated dependencies [1c179ac]
+- Updated dependencies [3a60a5c]
+- Updated dependencies [04e16c2]
+- Updated dependencies [04e16c2]
+- Updated dependencies [3a60a5c]
+- Updated dependencies [04e16c2]
+- Updated dependencies [8642346]
+- Updated dependencies [36a3be1]
+- Updated dependencies [193de8d]
+- Updated dependencies [bde0341]
+- Updated dependencies [2d594d1]
+- Updated dependencies [31f95fd]
+- Updated dependencies [96105d1]
+- Updated dependencies [3b55292]
+- Updated dependencies [99a2146]
+- Updated dependencies [36a3be1]
+- Updated dependencies [3e505be]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+- Updated dependencies [52c3f4f]
+- Updated dependencies [9c3f652]
+- Updated dependencies [3e505be]
+- Updated dependencies [bde0341]
+- Updated dependencies [3e505be]
+- Updated dependencies [2de1ea6]
+  - @dwk/activitypub@0.1.0-beta.5
+  - @dwk/webfinger@0.1.0-beta.4
+  - @dwk/atproto-pds@0.1.0-beta.2
+  - @dwk/vc@0.1.0-beta.4
+  - @dwk/micropub@0.1.0-beta.4
+  - @dwk/microsub@0.1.0-beta.4
+  - @dwk/indieauth@0.1.0-beta.4
+  - @dwk/solid-pod@0.1.0-beta.4
+  - @dwk/remotestorage@0.1.0-beta.4
+  - @dwk/mastodon-api@0.1.0-beta.0
+  - @dwk/webmention@0.1.0-beta.4
+  - @dwk/websub@0.1.0-beta.4
+  - @dwk/webauthn@0.1.0-beta.4
+  - @dwk/host-meta@0.1.0-beta.4
+
 ## 0.0.1-beta.0
 
 ### Patch Changes

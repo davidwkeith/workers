@@ -1,6 +1,6 @@
 {
   "name": "@dwk/micropub",
-  "version": "0.1.0-beta.3",
+  "version": "0.1.0-beta.4",
   "description": "Micropub create/update/delete endpoint with R2 media endpoint. Consumes IndieAuth tokens.",
   "keywords": [
     "micropub",

@@ -1,5 +1,126 @@
 # @dwk/solid-pod
 
+## 0.1.0-beta.4
+
+### Minor Changes
+
+- 3a60a5c: Add `createSolidPodMcpTools` (#262): a `@dwk/mcp` tool contribution exposing
+  `solid_pod_read` and `solid_pod_write`. Both dispatch through the same
+  internal `Request` shape `createSolidPod`'s HTTP door sends to the per-pod
+  `SolidPodObject` Durable Object, so the pod's existing WAC evaluation is a
+  second, resource-level gate beneath the MCP scope check — a caller's WebID
+  (the MCP token's resolved `subject`) still has to be granted access under
+  the pod's `.acl`s. `solid_pod_write` supports a `dryRun` preview and refuses
+  outright when the caller has no resolved subject, since the pod's write
+  path requires proof of an authenticated identity. `forwardedConfig` is now
+  exported from `handler.ts`, and `resolveConfig`/`ResolvedConfig` from
+  `index.ts`, so the tool factory can build the same wire format without
+  duplicating it. `solid_pod_read` rejects a protocol-relative path (a
+  leading `//`, which `new URL` would otherwise resolve off-origin) and caps
+  the response body via `@dwk/safe-fetch`'s `readBodyCapped` (2 MB) so a
+  large pod resource can't be read into unbounded Worker memory through an
+  LLM-bound tool call.
+
+### Patch Changes
+
+- 36a3be1: Negative-cache a failed JWKS fetch so a token burst can't hammer the issuer
+  (#304). On a JWKS fetch failure (non-ok, malformed body, or thrown) with no
+  cached keys, `resolveJwks` returned without recording the failure, so every
+  presented-token request re-fetched the JWKS URI — an amplification/DoS vector
+  against the issuer's endpoint while it is down. A failed fetch is now recorded
+  with a short backoff (30s): within the window the last good keys are served if
+  available (else the request is rejected), but the issuer is not re-hit on every
+  request.
+- 3e505be: `@dwk/solid-pod`: dropped `readReplayWindowSeconds` from `SolidPodConfig` —
+  it was plumbed through to `ResolvedConfig` but never consulted anywhere (no
+  read-side DPoP replay-window check was ever wired to it), so the config
+  surface promised behavior nothing implemented. `listChildren`'s WebDAV
+  backend now defensively drops a child IRI that isn't actually same-origin
+  (relevant if a forged `ldp:contains` triple, see #337, ever reaches the quad
+  store) instead of slicing it into a bogus, non-`/`-rooted path — the
+  same-origin check requires an exact match or a `/` immediately following the
+  origin, not just a shared string prefix (`https://example.com.attacker.com/x`
+  also starts with `https://example.com`'s characters, so a plain `startsWith`
+  check was spoofable by a suffixed host).
+
+  `@dwk/solid-pod` and `@dwk/remotestorage`: documented the existing
+  `#getStore` per-isolate caching assumption (`maxInlineBytes` is taken from
+  whichever request builds the store first, for the DO's lifetime) — no
+  behavior change.
+
+- 52c3f4f: Fix a container `PUT` persisting a client-forged `ldp:contains` triple. A
+  container's containment listing is entirely server-managed — clients never
+  legitimately send it — but `#putRdf` wrote every parsed body quad verbatim, so
+  a Turtle/JSON-LD container `PUT` that included a forged `ldp:contains` triple
+  had it persisted alongside the genuine, atomically-preserved containment. A
+  forged triple pointing at a resource that exists (or is later created)
+  elsewhere would then surface as a phantom membership in the container
+  listing. The container branch of `#putRdf` now strips any `ldp:contains`
+  quad whose subject is the container IRI from the client-supplied quads before
+  writing, since real containment is already preserved via `preserveWhere`.
+- 9c3f652: Close two TOCTOU windows where a containment/conflict invariant was checked
+  outside the write transaction (#303). Because the Durable Object interleaves at
+  `await` points (streaming bodies), a concurrent write between the read and the
+  write could corrupt the invariant.
+
+  - `@dwk/store` gains a `preserveWhere` write option: quads matching the predicate
+    (e.g. a container's server-managed `ldp:contains`) are re-read **inside** the
+    write transaction and merged into the new quad set, so a replacing write can't
+    clobber a membership triple a concurrent child write committed since the caller
+    built its quad list.
+  - `@dwk/solid-pod` uses it for RDF `PUT` to an existing container instead of
+    reading `ldp:contains` outside the `putResource` transaction, so a concurrent
+    child `POST` no longer has its membership triple silently dropped by a stale
+    snapshot.
+  - `@dwk/remotestorage` re-runs its document↔folder collision check inside the
+    write transaction via the store `guard` (a `409` now rolls the write back
+    atomically), so two racing PUTs to related paths can't both commit into the
+    document-shadows-folder collision draft §6 forbids. The pre-write check is
+    kept as a cheap early reject.
+
+- 3e505be: `evaluateAccess`'s second parameter is now a single `AclResource` (the
+  effective ACL) instead of an `AclResource[]` chain of which only the first
+  entry was ever consulted — the array shape implied a multi-entry walk that
+  never happened. Callers passing `[acl]` now pass `acl` directly.
+
+  Also documents (with a regression test) that a subject granting
+  `acl:mode`/`acl:agent`/etc. without an explicit `rdf:type acl:Authorization`
+  triple is not treated as an authorization — a conscious, fail-closed choice,
+  not an oversight.
+
+- 3e505be: `WEBDAV_PEPPER` is now actually mixed into the app-password hash (previously
+  declared as a binding but never read, so it did nothing). `@dwk/solid-pod`
+  now forwards it from its own `Env` into the `CredentialStore` it builds.
+
+  Also fixed: a MKCOL request body sent without a `Content-Length` header
+  (chunked transfer-encoding, whose length is unknown up front) previously
+  defaulted to "length 0" and slipped past the RFC 4918 §9.3 unsupported-media
+  check. The fix now reads (and discards) the first chunk of the body to check
+  for actual bytes rather than inferring emptiness from headers alone, so a
+  legitimate empty chunked-encoded MKCOL (a non-null body stream that simply
+  yields no bytes) is no longer rejected alongside a real one.
+
+- Updated dependencies [0e65ce3]
+- Updated dependencies [36a3be1]
+- Updated dependencies [3e505be]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [39f6d61]
+- Updated dependencies [3e505be]
+- Updated dependencies [9c3f652]
+- Updated dependencies [e6fee8e]
+- Updated dependencies [3e505be]
+- Updated dependencies [36a3be1]
+- Updated dependencies [3e505be]
+  - @dwk/safe-fetch@0.1.0-beta.3
+  - @dwk/calendar@0.1.0-beta.2
+  - @dwk/log@0.1.0-beta.4
+  - @dwk/rdf@0.1.0-beta.3
+  - @dwk/store@0.1.0-beta.4
+  - @dwk/wac@0.1.0-beta.3
+  - @dwk/webdav@0.1.0-beta.1
+  - @dwk/ldn@0.1.0-beta.3
+
 ## 0.1.0-beta.3
 
 ### Minor Changes
