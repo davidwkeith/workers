@@ -14,9 +14,7 @@ import type {
   MicropubContactStore,
   MicropubContactStoreEnv,
 } from "./contacts.js";
-import {
-  type MicropubVenueStore,
-} from ".\/venues.js";
+import type { MicropubVenueStore } from "./venues.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /**
@@ -146,7 +144,7 @@ export interface MicropubConfig {
    * are queried via proximity search and are independent from post storage.
    * The store enables `q=geo` when configured and the proposed group is enabled.
    */
-  readonly venues?: MicropubVenueStore | MicropubVenueStore;
+  readonly venues?: MicropubVenueStore;
   /**
    * Post types advertised as `post-types` in `q=config` (the stable Supported
    * Vocabulary extension). Omitted from the response when unset, or when the

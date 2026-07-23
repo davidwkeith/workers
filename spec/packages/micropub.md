@@ -230,9 +230,6 @@ ordering, and is exclusive over the `(created_at, url)` tuple. `cursor` and
 property predicates remain safe exact JSON predicates rather than full-text
 search.
 
-The proposed-group `q=geo` extension remains unimplemented and is tracked
-separately.
-
 ### Location/Venue (`q=geo`) extension
 
 This is the implementation for issue #359. The feature is **implemented** but
@@ -253,12 +250,12 @@ on **`venues`**, the name used by the proposal issue, and emits no alias.
 
 #### Enablement, request, and validation
 
-A future implementation MUST advertise `"geo"` in `q=config` and route
-`q=geo` only when `extensions.proposed` is `true` *and* a venue-store seam is
-configured. The default remains unchanged: `q=geo` is not advertised and is an
-unsupported-query `400 invalid_request`. Enabling proposed extensions without
-a venue store MUST fail loudly during handler configuration; it must not expose
-an empty, partial, or ephemeral lookup service.
+The handler advertises `"geo"` in `q=config` and routes `q=geo` only when
+`extensions.proposed` is `true` *and* a venue-store seam is configured. The
+default remains unchanged: `q=geo` is not advertised and is an
+unsupported-query `400 invalid_request`. The built-in `createMicropubVenueStore`
+fails loudly at construction when its required `MICROPUB_DB` binding is
+missing; it must not expose an empty, partial, or ephemeral lookup service.
 
 Exactly one positional form is accepted:
 
@@ -294,8 +291,11 @@ saved places beyond the precision a client intended.
 #### Response, ordering, and pagination
 
 The JSON response always has `venues` (possibly empty); `geo` appears only when
-the venue system has a reverse-geocoded suggestion. These are the proposal's
-h-adr/h-card-shaped properties, not a complete mf2 document:
+the venue system has a location suggestion. These are the proposal's
+h-adr/h-card-shaped properties, not a complete mf2 document. **This first
+implementation has no real reverse-geocoding service wired in** — `geo` always
+echoes the query coordinates back as `label` rather than resolving a place
+name; a future increment may replace this with an actual lookup.
 
 ```json
 {
@@ -344,8 +344,10 @@ undocumented Micropub action must not create venues. This avoids contaminating
 `q=source` post listings and reserves explicit write scopes/concurrency for a
 future separately designed venue-write extension.
 
-When implemented, `MicropubConfig` requires this injected,
-strongly-consistent seam whenever `extensions.proposed` is true:
+`MicropubConfig`'s optional `venues` seam is a strongly-consistent store
+matching this shape (`createMicropubVenueStore` is the built-in D1
+implementation); `q=geo` stays unadvertised until both it and
+`extensions.proposed` are set:
 
 ```ts
 interface GeoPoint {

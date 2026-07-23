@@ -50,6 +50,13 @@ import {
   contactWrite,
   type MicropubContactStore,
 } from "./contacts.js";
+import {
+  parseVenueSearchParams,
+  VenueValidationError,
+  type GeoSuggestion,
+  type MicropubVenueStore,
+  type Venue,
+} from "./venues.js";
 import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
 import { syndicateEntry } from "./fediverse.js";
 
@@ -186,6 +193,10 @@ function parseLimitParam(raw: string | null): number | undefined {
 
 function contactsEnabled(config: ResolvedConfig): boolean {
   return config.extensions.proposed && config.contacts !== undefined;
+}
+
+function venuesEnabled(config: ResolvedConfig): boolean {
+  return config.extensions.proposed && config.venues !== undefined;
 }
 
 function contactInternalUrl(config: ResolvedConfig, id: string): string {
@@ -512,6 +523,44 @@ async function handleContactQuery(
   }
 }
 
+/** Format a venue's coordinates as decimal strings, per common mf2 JSON. */
+function venueView(venue: Venue): Record<string, unknown> {
+  return {
+    name: venue.name,
+    latitude: venue.latitude.toFixed(6),
+    longitude: venue.longitude.toFixed(6),
+    url: venue.url,
+    ...(venue.description ? { description: venue.description } : {}),
+    ...(venue.category ? { category: venue.category } : {}),
+  };
+}
+
+function geoSuggestionView(geo: GeoSuggestion): Record<string, unknown> {
+  return {
+    label: geo.label,
+    latitude: geo.latitude.toFixed(6),
+    longitude: geo.longitude.toFixed(6),
+  };
+}
+
+async function handleVenueQuery(
+  params: URLSearchParams,
+  store: MicropubVenueStore,
+): Promise<Response> {
+  try {
+    const query = parseVenueSearchParams(params);
+    const result = await store.searchNearby(query);
+    return json({
+      ...(result.geo ? { geo: geoSuggestionView(result.geo) } : {}),
+      venues: result.venues.map(venueView),
+    });
+  } catch (err) {
+    if (err instanceof VenueValidationError)
+      return error("invalid_request", err.message, 400);
+    throw err;
+  }
+}
+
 /** Handle `GET` to the Micropub endpoint: `q=config`/`source`/`syndicate-to`. */
 async function handleQuery(
   request: Request,
@@ -546,7 +595,7 @@ async function handleQuery(
     const supportedQueries = ["source", "config", "syndicate-to"];
     if (config.extensions.stable) supportedQueries.push("category");
     if (contactsEnabled(config)) supportedQueries.push("contact");
-  if (config.venues) supportedQueries.push("geo");
+    if (venuesEnabled(config)) supportedQueries.push("geo");
     return json({
       "media-endpoint": config.mediaEndpoint,
       "syndicate-to": await config.syndicateTo(),
@@ -591,6 +640,9 @@ async function handleQuery(
   }
   if (q === "contact" && config.extensions.proposed && config.contacts) {
     return handleContactQuery(params, config, config.contacts(env));
+  }
+  if (q === "geo" && config.extensions.proposed && config.venues) {
+    return handleVenueQuery(params, config.venues);
   }
   if (q === "source") {
     const filter = [
