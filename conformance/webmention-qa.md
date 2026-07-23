@@ -19,20 +19,17 @@ has no credential blocker.
   parameter validation (`source`/`target` present and well-formed, `target`
   under this receiver's control), async verification via the queue, and
   storage to the inbox.
-- **Sender — currently blocked, not just untested.** `@dwk/webmention`
-  ships a `sendWebmention`/`sendWebmentions` library (discover the target's
-  endpoint, notify on publish), but **the conformance target doesn't wire it
-  to anything** — `packages/conformance-target/src/mounts.ts` only mounts the
-  receiver route (`/webmention`) and the verification queue consumer; there
-  is no on-publish hook and no standalone "send a webmention" HTTP endpoint
-  on this deployment. Publishing a post via Micropub does **not** trigger a
-  send. Until that wiring exists (or a temporary trigger endpoint is added
-  for this test), the sender suite cannot be run against `conformance.dwk.io`
-  at all — this isn't a result to record as `"pending"`, it's a real gap to
-  fix first. Tracked in
-  [#405](https://github.com/davidwkeith/workers/issues/405). See Step 2
-  below before assuming you can just start clicking through
-  webmention.rocks/sender.
+- **Sender — now runnable.** `@dwk/webmention` ships a
+  `sendWebmention`/`sendWebmentions` library (discover the target's endpoint,
+  notify on publish). `packages/conformance-target` wires it to an
+  owner-gated trigger, `POST /webmention/send` (`src/webmention-send.ts`,
+  mounted in `src/mounts.ts`) — mirroring the ActivityPub `/publish` pattern
+  rather than an on-publish Micropub hook, because webmention.rocks/sender
+  hands back an arbitrary source-page URL per discovery edge case that this
+  deployment never actually published, so a standalone
+  `{source, target}` trigger is what the suite's own procedure needs (see
+  Step 2 below). Closed by
+  [#405](https://github.com/davidwkeith/workers/issues/405).
 
 ## Environment
 
@@ -89,33 +86,32 @@ change between runs — don't hardcode it into this doc):
 
 ## Procedure — Sender
 
-### Step 2 — Confirm (or add) a send trigger before attempting this suite
+### Step 2 — The send trigger
 
-As documented in Scope, this deployment has no way to make the target
-actually send a webmention today. Before running webmention.rocks/sender,
-either:
+`POST /webmention/send` (owner-gated, `CONFORMANCE_ADMIN_TOKEN`) drives the
+sender against an arbitrary `{source, target}` pair — see
+`packages/conformance-target/README.md`'s "Running webmention.rocks/sender"
+section for the exact `curl` invocation. Confirm it's live before starting
+the suite:
 
-- confirm a publish → send hook (or a standalone trigger endpoint) has since
-  been wired into `packages/conformance-target` — check whether
-  [#405](https://github.com/davidwkeith/workers/issues/405) is closed, or
-  look for a `sendWebmention(s)` call in
-  `packages/conformance-target/src/mounts.ts` that isn't there as of this
-  doc's writing — or
-- treat this as blocked and stop here; #405 already tracks the wiring gap,
-  so there's no need to file a duplicate.
+```bash
+curl -sS -X POST https://conformance.dwk.io/webmention/send \
+  -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"https://example.com/","target":"https://example.com/"}'
+```
 
-- [ ] **Confirmed a send trigger exists on this deployment** (describe it):
-      **************\_\_\_\_**************
-- [ ] **Still blocked** — no trigger exists; sender suite not attempted this run
+should return `200` with a JSON `SendResult` body (not `404`).
 
-### Step 3 — Run the sender test suite (only once Step 2 is unblocked)
+- [ ] **Confirmed the send trigger responds on this deployment**
+
+### Step 3 — Run the sender test suite
 
 1. Go to https://webmention.rocks/, start the sender tests. It gives you a
    series of source-page URLs on webmention.rocks representing discovery
    edge cases (link position in HTML, `Link` header, relative URLs, etc.).
-2. For each, trigger the target's sender against that URL as source (however
-   the trigger from Step 2 works) with a target on webmention.rocks that
-   points back at the test.
+2. For each, `POST /webmention/send` with that URL as `source` and a target
+   on webmention.rocks that points back at the test (see Step 2).
 3. webmention.rocks reports whether it received a correctly-formed mention
    for each case.
 
@@ -124,13 +120,13 @@ either:
 
 ## Result
 
-|                    |                                                     |
-| ------------------ | --------------------------------------------------- |
-| Receiver result    | ☐ Passing / ☐ Failing                               |
-| Sender result      | ☐ Passing / ☐ Failing / ☐ Blocked (no send trigger) |
-| Run date           | **************\_\_\_\_**************                |
-| Tester             | **************\_\_\_\_**************                |
-| Notes / follow-ups | **************\_\_\_\_**************                |
+|                    |                                      |
+| ------------------ | ------------------------------------ |
+| Receiver result    | ☐ Passing / ☐ Failing                |
+| Sender result      | ☐ Passing / ☐ Failing                |
+| Run date           | **************\_\_\_\_************** |
+| Tester             | **************\_\_\_\_************** |
+| Notes / follow-ups | **************\_\_\_\_************** |
 
 ## Recording the result
 
@@ -145,10 +141,18 @@ packages["@dwk/webmention"].suites["webmention.rocks/receiver"]
   = { "status": "passing", "report": null, "lastRun": "<ISO-8601 timestamp>" }
 ```
 
-Leave `webmention.rocks/sender` at `"pending"` until the send-trigger gap
-(Scope, above) is closed and the suite has actually been run — don't mark it
-`"passing"` on the strength of the receiver alone, and don't mark it
-`"failing"` for a suite that was never runnable in the first place.
+Once the sender matrix has actually been run through `POST /webmention/send`
+(Step 2/3, above), record it too:
+
+```
+packages["@dwk/webmention"].suites["webmention.rocks/sender"]
+  = { "status": "passing", "report": null, "lastRun": "<ISO-8601 timestamp>" }
+```
+
+Leave `webmention.rocks/sender` at `"pending"` until this run has actually
+happened — the trigger existing is not the same as the suite having been
+run; don't mark it `"passing"` or `"failing"` on the strength of the trigger
+alone.
 
 ## Troubleshooting
 

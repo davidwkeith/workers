@@ -18,6 +18,7 @@ Worker".
 | `/micropub`, `/media/*`                                                          | `@dwk/micropub`                                                |
 | `/microsub`                                                                      | `@dwk/microsub`                                                |
 | `/webmention`                                                                    | `@dwk/webmention`                                              |
+| `/webmention/send`                                                               | webmention sender trigger (owner-gated, see below)              |
 | `/websub`                                                                        | `@dwk/websub`                                                  |
 | `/users/conformance*`, `/inbox`, `/.well-known/nodeinfo`, `/nodeinfo/*`          | `@dwk/activitypub`                                             |
 | `/storage/<account>/*`                                                           | `@dwk/remotestorage`                                           |
@@ -161,6 +162,27 @@ safe to rerun. `@dwk/websub` and `@dwk/webmention` create their schema lazily
 on first use and have no public init API to call, so the response lists them
 as `"unavailable"` rather than reaching into their internals. Run this
 **before** any suite run below.
+
+## Running webmention.rocks/sender
+
+`@dwk/webmention` ships a `sendWebmention`/`sendWebmentions` sender library,
+but nothing on this deployment called it until `POST /webmention/send` was
+added (issue #405) — without a trigger, the sender half of
+[webmention.rocks](https://webmention.rocks/) has nothing to drive. See
+`conformance/webmention-qa.md` for the full runbook; the trigger itself:
+
+```bash
+curl -sS -X POST https://conformance.dwk.io/webmention/send \
+  -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"<webmention.rocks source-page URL>","target":"<webmention.rocks target URL>"}'
+```
+
+Response is the library's `SendResult` as JSON (`{target, endpoint,
+delivered, status}`). webmention.rocks/sender hands you a source-page URL per
+discovery edge case and a target to notify — pass those straight through; the
+`source` need not be a page this deployment actually published, since the
+suite is testing discovery + notification, not authorship.
 
 ## Running litmus (WebDAV conformance)
 
