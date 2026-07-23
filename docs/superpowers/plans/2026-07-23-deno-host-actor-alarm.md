@@ -1205,7 +1205,12 @@ class SocketSet {
 
 /* ---------- state ---------- */
 
-export class DenoDurableObjectState<Env = unknown> {
+// `_Env` is retained (unused in this class's own body — `DurableObject<Env>`
+// below is what actually reads it) so `DenoDurableObjectState<Env>` keeps
+// matching `DurableObject`'s `ctx` field type; underscore-prefixed per this
+// repo's unused-identifier convention (CLAUDE.md "Conventions"), since
+// `noUnusedLocals` flags an unused generic type parameter (TS6133).
+export class DenoDurableObjectState<_Env = unknown> {
   readonly id: DenoDurableObjectId;
   readonly storage: DurableSqlite;
   readonly #sockets = new SocketSet();
@@ -1350,7 +1355,11 @@ export class DurableObjectNamespaceLike<
 
   async #dispatch(id: DenoDurableObjectId, request: Request): Promise<Response> {
     const idHex = id.toString();
-    const lease = await acquireLease(
+    // Annotated (not just inferred) so the `type Lease` import is used —
+    // this file has no other textual reference to `Lease` until Task 5
+    // adds `#fireAlarm`'s `let lease: Lease | undefined`, so `noUnusedLocals`
+    // flags the import otherwise (TS6133).
+    const lease: Lease = await acquireLease(
       this.#options.kv,
       this.#leaseKey(idHex),
       this.#leaseOptions,
@@ -1648,10 +1657,14 @@ in Step 3.)
 
 - [ ] **Step 5: Modify `durable-object.ts` — change the state's storage type**
 
-Find:
+Find (note: Task 4's actual committed code uses `_Env`, not `Env` — its
+type parameter is unused within the class body and TypeScript's
+`noUnusedLocals` flags an unused generic type parameter, so Task 4's
+implementer underscore-prefixed it; match whatever Task 4 actually
+committed):
 
 ```ts
-export class DenoDurableObjectState<Env = unknown> {
+export class DenoDurableObjectState<_Env = unknown> {
   readonly id: DenoDurableObjectId;
   readonly storage: DurableSqlite;
   readonly #sockets = new SocketSet();
@@ -1663,7 +1676,7 @@ export class DenoDurableObjectState<Env = unknown> {
 Replace with:
 
 ```ts
-export class DenoDurableObjectState<Env = unknown> {
+export class DenoDurableObjectState<_Env = unknown> {
   readonly id: DenoDurableObjectId;
   readonly storage: DenoDurableObjectStorage;
   readonly #sockets = new SocketSet();
