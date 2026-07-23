@@ -69,8 +69,13 @@ export interface MintAppPasswordParams {
   readonly pepper?: string;
 }
 
-/** OWASP-recommended PBKDF2-HMAC-SHA-256 iteration count (2023). */
-export const DEFAULT_PBKDF2_ITERATIONS = 600_000;
+/**
+ * PBKDF2-HMAC-SHA-256 iteration count. OWASP's 2023 guidance recommends
+ * 600,000, but workerd's `crypto.subtle.deriveBits` hard-rejects anything
+ * above 100,000 (`NotSupportedError`), so this is capped at that runtime
+ * ceiling — still within OWASP's longstanding prior-generation minimum.
+ */
+export const DEFAULT_PBKDF2_ITERATIONS = 100_000;
 
 const HASH_BYTES = 32;
 const SALT_BYTES = 16;
