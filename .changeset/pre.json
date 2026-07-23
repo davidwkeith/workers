@@ -5,6 +5,7 @@
     "@dwk/activitypub": "0.0.0",
     "@dwk/atproto-pds": "0.0.0",
     "@dwk/calendar": "0.0.0",
+    "@dwk/cf-shims": "0.0.0",
     "@dwk/dpop": "0.0.0",
     "@dwk/host-meta": "0.0.0",
     "@dwk/http-signatures": "0.0.0",

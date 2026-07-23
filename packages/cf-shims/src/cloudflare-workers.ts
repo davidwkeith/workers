@@ -13,4 +13,4 @@
  * @see spec/self-hosting.md §7.4
  */
 
-export { DurableObject } from "./shims/durable-object.js";
+export { DurableObject } from "./durable-object.js";

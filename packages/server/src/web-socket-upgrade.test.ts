@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import { WebSocket as WsClient } from "ws";
 import { noopLogger } from "@dwk/log";
 
-import { installWebSocketGlobals } from "./web-socket.js";
+import { installWebSocketGlobals } from "@dwk/cf-shims";
 import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
 import { WaitUntilTracker } from "./context.js";
 import type { Mount } from "./config.js";

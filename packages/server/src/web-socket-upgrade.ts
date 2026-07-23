@@ -22,9 +22,9 @@ import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket as WsWebSocket } from "ws";
 import type { Logger } from "@dwk/log";
+import { responseWebSocket, type EmulatedWebSocket } from "@dwk/cf-shims";
 import { HostExecutionContext, type WaitUntilTracker } from "./context.js";
 import { isReservedPath, type Mount } from "./config.js";
-import { responseWebSocket, type EmulatedWebSocket } from "./web-socket.js";
 
 /** Wiring the upgrade handler needs — a subset of the server's own state. */
 export interface UpgradeContext {

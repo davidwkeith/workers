@@ -12,10 +12,10 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **27 publishable packages** — the
+**Status: implemented, unreleased.** There are **28 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`) and the
+`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
@@ -73,7 +73,12 @@ with opaque hashed bearer tokens — the documented DPoP exception — instance
 documents, `verify_credentials`, markers, stub roster; #348); the DO-backed
 read surface (timelines/notifications via the `MastodonBackend` seam and
 `@dwk/activitypub`'s `createActivitypubMastodonApi` adapter) is phase 2 (#349),
-fidelity is phase 3 (#350).
+fidelity is phase 3 (#350). `@dwk/cf-shims` is the latest — Node-backed
+implementations of the Cloudflare Workers binding interfaces (D1/R2/KV/Queue/
+cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
+`HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
+from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
+them — `@dwk/server` is its first consumer, not its owner.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
@@ -173,6 +178,14 @@ injected state.
   (#247); no `@dwk` endpoint package is a required consumer yet.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
+- **Cloudflare-runtime-emulation lib** — `@dwk/cf-shims` is the one package
+  that is deliberately Cloudflare-specific in the same way `@dwk/store` and
+  the endpoint packages are: it implements the Cloudflare binding interfaces
+  (D1/R2/KV/Queue/cron/Durable Objects) and runtime-global seams
+  (`cloudflare:workers`, `HTMLRewriter`, `crypto.DigestStream`, hibernatable
+  WebSockets) on Node, so `@dwk/server` — and any other Node host — can reuse
+  them without copying source. Extracted from `@dwk/server`'s internal
+  `./shims` (#381); see `spec/self-hosting.md` §16 and `spec/portability.md`.
 
 ### Composition contract (`spec/composition-contract.md`)
 
@@ -262,6 +275,11 @@ when adding a package:
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
   `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`.
+- **Node-native packages** also run under `environment: "node"` (no
+  Miniflare) but, unlike the pure libs above, are inherently Node-specific
+  rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare
+  binding interfaces on Node) and `@dwk/server` (composes those shims behind
+  Express).
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.

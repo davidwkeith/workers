@@ -55,8 +55,8 @@
     "clean": "rm -rf dist dist-bundle"
   },
   "dependencies": {
+    "@dwk/cf-shims": "workspace:*",
     "@dwk/log": "workspace:*",
-    "@worker-tools/html-rewriter": "0.1.0-pre.19",
     "express": "5.2.1",
     "helmet": "8.3.0",
     "ws": "8.21.1"

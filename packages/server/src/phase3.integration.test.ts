@@ -46,8 +46,7 @@ import { createServer } from "./server.js";
 import { assembleBindings } from "./bindings.js";
 import { bindQueueConsumer, bindScheduledTask } from "./lifecycle.js";
 import { WaitUntilTracker } from "./context.js";
-import { QueueBroker } from "./shims/queue.js";
-import { CronScheduler } from "./shims/cron.js";
+import { QueueBroker, CronScheduler } from "@dwk/cf-shims";
 import type { FetchHandler } from "./config.js";
 
 const tempDirs: string[] = [];

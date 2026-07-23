@@ -480,6 +480,14 @@
         "cases": []
       }
     },
+    "@dwk/cf-shims": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/dpop": {
       "standard": null,
       "suites": {},

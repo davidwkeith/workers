@@ -36,8 +36,7 @@ import { createServer } from "./server.js";
 import { assembleBindings } from "./bindings.js";
 import { bindScheduledTask } from "./lifecycle.js";
 import { WaitUntilTracker } from "./context.js";
-import { CronScheduler } from "./shims/cron.js";
-import { createDurableObjectNamespace } from "./shims/durable-object.js";
+import { CronScheduler, createDurableObjectNamespace } from "@dwk/cf-shims";
 import type { FetchHandler } from "./config.js";
 
 const BASE = "https://storage.example";
