@@ -124,9 +124,17 @@ export function createSqlStorage(db: SyncSqliteDatabaseLike): SyncSqlStorage {
  * nesting (matching the packages' usage and `@dwk/cf-shims`).
  */
 export function createDurableSqlite(db: SyncSqliteDatabaseLike): DurableSqlite {
+  let inTransaction = false;
   return {
     sql: new SyncSqlStorage(db),
     transactionSync<T>(fn: () => T): T {
+      // Guard against nesting explicitly: without it the inner BEGIN throws,
+      // the inner ROLLBACK discards the outer transaction's writes, and the
+      // outer rollback then throws again, obscuring the original error.
+      if (inTransaction) {
+        throw new Error("transactionSync does not support nesting");
+      }
+      inTransaction = true;
       db.exec("BEGIN");
       try {
         const result = fn();
@@ -135,6 +143,8 @@ export function createDurableSqlite(db: SyncSqliteDatabaseLike): DurableSqlite {
       } catch (err) {
         db.exec("ROLLBACK");
         throw err;
+      } finally {
+        inTransaction = false;
       }
     },
   };

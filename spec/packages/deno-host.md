@@ -93,13 +93,19 @@ The synchronous DO-SQLite surface over the sync seam:
 - `sql.exec<T>(query, ...bindings)` executes one statement synchronously
   and returns a one-shot cursor: `.one()` (throws unless exactly one row),
   `.toArray()` (drains remaining rows), `.next()` / `for…of` iteration,
-  `columnNames`. Prepared statements are cached per query string.
+  `columnNames`. Prepared statements are cached per query string. Known
+  fidelity gap (shared with `@dwk/cf-shims`, harmless — no production
+  package reads `columnNames`): the seam carries no column metadata
+  independent of rows, so a zero-row result reports `columnNames: []`
+  where Cloudflare's real cursor still knows the query's columns.
 - `createDurableSqlite(db)` returns the `{ sql, transactionSync }` slice of
   `DurableObjectStorage`: `transactionSync(fn)` commits on return and rolls
   back **entirely** when `fn` throws (the atomicity `@dwk/store`,
-  `solid-pod`, and `atproto-pds` depend on). No nesting, matching
-  `@dwk/cf-shims`. The full `DurableObjectState` (alarms, WebSockets,
-  per-id lease) is #398's job and will embed this.
+  `solid-pod`, and `atproto-pds` depend on). Nesting is unsupported
+  (matching Cloudflare and `@dwk/cf-shims`) and MUST fail loudly: a nested
+  call throws a clear error instead of letting the inner `BEGIN`/`ROLLBACK`
+  corrupt the outer transaction. The full `DurableObjectState` (alarms,
+  WebSockets, per-id lease) is #398's job and will embed this.
 - `createSqlStorage(db)` returns just the `sql` member, for consumers that
   take an injected `SqlStorage` (`@dwk/webdav`'s `LockStore` /
   `CredentialStore`).

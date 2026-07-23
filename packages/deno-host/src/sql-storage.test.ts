@@ -152,6 +152,30 @@ describe("createDurableSqlite (host-contract §3.2)", () => {
     expect(rows).toEqual([{ path: "/keep" }]);
   });
 
+  it("transactionSync rejects nesting with a clear error, keeping the outer transaction intact", () => {
+    expect(() =>
+      storage.transactionSync(() => {
+        storage.sql.exec("INSERT INTO resources (path) VALUES ('/outer')");
+        storage.transactionSync(() => {
+          storage.sql.exec("INSERT INTO resources (path) VALUES ('/inner')");
+        });
+      }),
+    ).toThrow(/does not support nesting/);
+    // The outer transaction rolled back cleanly — nothing committed, and the
+    // connection is usable again.
+    expect(
+      storage.sql
+        .exec<{ n: number }>("SELECT COUNT(*) AS n FROM resources")
+        .one().n,
+    ).toBe(0);
+    storage.transactionSync(() => {
+      storage.sql.exec("INSERT INTO resources (path) VALUES ('/after')");
+    });
+    expect(
+      storage.sql.exec<{ path: string }>("SELECT path FROM resources").one(),
+    ).toEqual({ path: "/after" });
+  });
+
   it("reuses cached prepared statements across exec() calls", () => {
     const insert = "INSERT INTO resources (path) VALUES (?)";
     storage.sql.exec(insert, "/a");
