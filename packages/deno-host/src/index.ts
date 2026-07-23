@@ -47,6 +47,12 @@ export {
 } from "./lease.js";
 export { createD1Database } from "./d1.js";
 export {
+  setAlarm,
+  getAlarm,
+  deleteAlarm,
+  type DueAlarmEntry,
+} from "./alarms.js";
+export {
   createSqlStorage,
   createDurableSqlite,
   SyncSqlStorage,
