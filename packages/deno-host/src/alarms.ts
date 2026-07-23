@@ -32,6 +32,7 @@ async function writeAlarm(
   className: string,
   idHex: string,
   record: AlarmRecord,
+  caller: string,
 ): Promise<void> {
   const existing = await kv.get<AlarmRecord>(byIdKey(className, idHex));
   const atomic = kv.atomic();
@@ -43,7 +44,7 @@ async function writeAlarm(
     .set(byIdKey(className, idHex), record);
   const result = await atomic.commit();
   if (!result.ok) {
-    throw new Error(`setAlarm: failed to write alarm for ${idHex}`);
+    throw new Error(`${caller}: failed to write alarm for ${idHex}`);
   }
 }
 
@@ -58,7 +59,13 @@ export async function setAlarm(
   idHex: string,
   epochMs: number,
 ): Promise<void> {
-  await writeAlarm(kv, className, idHex, { epochMs, retryCount: 0 });
+  await writeAlarm(
+    kv,
+    className,
+    idHex,
+    { epochMs, retryCount: 0 },
+    "setAlarm",
+  );
 }
 
 /**
@@ -74,7 +81,13 @@ export async function scheduleRetry(
   epochMs: number,
   retryCount: number,
 ): Promise<void> {
-  await writeAlarm(kv, className, idHex, { epochMs, retryCount });
+  await writeAlarm(
+    kv,
+    className,
+    idHex,
+    { epochMs, retryCount },
+    "scheduleRetry",
+  );
 }
 
 /** The currently scheduled time for `idHex`, or null if none is set. */

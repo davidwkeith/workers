@@ -11,7 +11,12 @@ import type { DenoKvLike, KvKey } from "./kv-client.js";
 
 export class LeaseContendedError extends Error {
   constructor(key: KvKey) {
-    super(`lease contended: ${JSON.stringify(key)}`);
+    const formatted = key
+      .map((part) =>
+        typeof part === "bigint" ? `${part}n` : JSON.stringify(part),
+      )
+      .join(", ");
+    super(`lease contended: [${formatted}]`);
     this.name = "LeaseContendedError";
   }
 }
