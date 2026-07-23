@@ -1573,6 +1573,7 @@ import type { SyncSqliteDatabaseLike } from "./client.js";
 import {
   setAlarm,
   getAlarm,
+  deleteAlarm as deleteAlarmKv,
   scheduleRetry,
   listDueAlarms,
   claimDueAlarm,
@@ -1632,8 +1633,7 @@ function createStorage(
       return getAlarm(kv, className, idHex);
     },
     async deleteAlarm(): Promise<void> {
-      const { deleteAlarm } = await import("./alarms.js");
-      await deleteAlarm(kv, className, idHex);
+      await deleteAlarmKv(kv, className, idHex);
     },
   };
 }
@@ -1641,13 +1641,10 @@ function createStorage(
 /* ---------- WebSockets ---------- */
 ```
 
-(The dynamic `await import("./alarms.js")` inside `deleteAlarm` avoids a
-naming collision with the outer `deleteAlarm` method key — `alarms.ts`'s
-`deleteAlarm` isn't otherwise imported at the top of this file. Simpler
-alternative, if preferred during implementation: import it at the top as
-`deleteAlarm as deleteAlarmKv` alongside the other alarm imports in Step 3
-and call `deleteAlarmKv(...)` here instead — either works; pick one and
-keep it consistent.)
+(The storage wrapper's `deleteAlarm` method key does not collide with the
+top-level `deleteAlarmKv` import — object literal method names are not
+lexical bindings, so this is unambiguous. `deleteAlarmKv` is imported once,
+in Step 3.)
 
 - [ ] **Step 5: Modify `durable-object.ts` — change the state's storage type**
 
