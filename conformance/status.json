@@ -409,9 +409,9 @@
       "standard": "WebDAV (RFC 4918)",
       "suites": {
         "litmus": {
-          "status": "pending",
-          "report": null,
-          "lastRun": null,
+          "status": "failing",
+          "report": "https://github.com/davidwkeith/workers/actions/runs/30052950880",
+          "lastRun": "2026-07-23T23:21:37Z",
           "targets": {
             "node": {
               "status": "pending",
