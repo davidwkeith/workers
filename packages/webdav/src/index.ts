@@ -56,6 +56,7 @@ export {
 
 export {
   DEFAULT_PBKDF2_ITERATIONS,
+  PBKDF2_ITERATION_CEILING,
   generateCredentialId,
   generateSecret,
   mintAppPassword,
