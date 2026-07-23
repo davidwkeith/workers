@@ -281,6 +281,7 @@ the binding acceptance test is real clients (see Conformance).
 | `GET`/`POST /api/v1/markers` | D1 `mastodon_markers` (two rows: `home` + `notifications` read positions) |
 | `GET /api/v1/notifications` | `__client/notifications` |
 | `GET /api/v1/statuses/:id` | `entry(id)` |
+| `GET /api/v1/accounts/:id/statuses` | `__client/timeline?source=1` via the `ownStatuses` seam (owner id → own outbox posts; remote ids → valid-but-empty, no remote history is stored). Added for the 2026-07-23 client-QA run — Ice Cubes' profile view hard-errors on a `404` here. |
 
 Both instance documents ship v1 (clients still call v1 first; the WordPress
 precedent found v1 alone sufficient, but v2 is cheap from the same data).
@@ -294,7 +295,11 @@ hard-error on `404`/`500`, so each returns `200` with an empty-but-valid
 body: `/api/v1/filters`, `/api/v2/filters`, `/api/v1/lists`,
 `/api/v1/custom_emojis`, `/api/v1/announcements`, `/api/v1/follow_requests`,
 `/api/v1/conversations`, `/api/v1/favourites`, `/api/v1/bookmarks`,
-and `/api/v1/preferences` (defaults object). The stub roster is data-driven
+`/api/v1/preferences` (defaults object), and — added by the 2026-07-23
+client-QA run — `/api/v1/accounts/relationships` (exact route, so the id is
+never misread by the dynamic `accounts/:id` pattern) plus the dynamic
+profile companions `accounts/:id/{followers,following,featured_tags}`. The
+stub roster is data-driven
 in the router so conformance
 runs can grow it without new code paths. Everything else under `/api/`
 returns Mastodon's error shape (`404` + `{"error": "..."}`).
@@ -441,16 +446,21 @@ The suite is "real clients log in and render", not a rocks-style harness:
 
 - New manual runbook `conformance/mastodon-client-qa.md` (companion to
   `pixelfed-qa.md`): against the deployed conformance target, for each
-  client in the matrix — **Pixelfed's own app** (the platform this gap was
-  discovered against) and **Tusky** (generic Mastodon client), with web
+  client in the matrix — **Tusky** (generic Mastodon client), with web
   clients (Elk/Phanpy/Pinafore) as a stretch row — record: app registration
   succeeds; OAuth round-trip completes; `verify_credentials` renders the
   owner profile; home timeline renders (media, CW, alt text); notifications
-  render the pixelfed-qa step-4 like + reply.
+  render the pixelfed-qa step-4 like + reply. **Pixelfed's own app** (the
+  platform this gap was discovered against) was the original first matrix
+  row but is descoped as of the 2026-07-23 run: its login preflight fetches
+  the Pixelfed-proprietary `/api/nodeinfo/2.0.json` path and hard-requires
+  `software.name === "pixelfed"` (≥ 0.12.3), so it refuses any non-Pixelfed
+  server by design before ever touching the Mastodon-API surface — see the
+  runbook's Scope section for the full finding.
 - `conformance/status.json` gains a `mastodon-client-api` suite for
   `@dwk/mastodon-api` with per-client manual targets (`pixelfed-app`,
-  `tusky`), `pending` until a hosted run passes — release-gated like every
-  other suite.
+  recorded `not-applicable` per the descope above, and `tusky`), `pending`
+  until a hosted run passes — release-gated like every other suite.
 - Colocated tests: entity mapping against captured AS2 fixtures (Node);
   OAuth flow + store + router under workerd (Miniflare D1), matching the
   webdav test split.

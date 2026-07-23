@@ -325,6 +325,67 @@ describe("buildMastodonBackend", () => {
     expect(decodeSnowflake(local!.id)?.source).toBe(1);
   });
 
+  it("ownStatuses() lists only the owner's outbox posts, excluding inbox rows", async () => {
+    const config = freshConfig();
+    await seedActivity(config, createNote(config));
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const publishedAt = Date.now() + 1;
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (const [suffix, offset] of [
+        ["own-1", 0],
+        ["own-2", 1],
+      ] as const) {
+        state.storage.sql.exec(
+          `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+          `${config.iris.outbox}/${suffix}`,
+          JSON.stringify({
+            id: `${config.iris.outbox}/${suffix}`,
+            type: "Create",
+            actor: config.iris.id,
+            object: {
+              id: `${config.iris.outbox}/${suffix}/object`,
+              type: "Note",
+              content: suffix,
+            },
+          }),
+          publishedAt + offset,
+        );
+      }
+      // A non-post outbox activity (a Like) must not surface as a status.
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${config.iris.outbox}/own-like`,
+        JSON.stringify({
+          id: `${config.iris.outbox}/own-like`,
+          type: "Like",
+          actor: config.iris.id,
+          object: "https://remote.example/notes/1",
+        }),
+        publishedAt + 2,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    expect(backend.ownStatuses).toBeDefined();
+    const page = await backend.ownStatuses!({ limit: 10 });
+    expect(page.entries.map((entry) => entry.activity["id"])).toEqual([
+      `${config.iris.outbox}/own-2`,
+      `${config.iris.outbox}/own-1`,
+    ]);
+    for (const entry of page.entries) {
+      expect(entry.source).toBe(1);
+      expect(decodeSnowflake(entry.id)?.source).toBe(1);
+    }
+
+    const next = await backend.ownStatuses!({
+      limit: 10,
+      maxId: page.entries[0]!.id,
+    });
+    expect(next.entries.map((entry) => entry.activity["id"])).toEqual([
+      `${config.iris.outbox}/own-1`,
+    ]);
+  });
+
   it("pages from an owner-post cursor to same-millisecond inbox entries", async () => {
     const config = freshConfig();
     const timestamp = Date.now();

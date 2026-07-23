@@ -6,6 +6,8 @@
  */
 
 import {
+  handleAccountCompanionStub,
+  handleAccountStatuses,
   handleGetAccount,
   handleVerifyAccountCredentials,
 } from "./accounts.js";
@@ -62,6 +64,16 @@ const DYNAMIC_ROUTES: readonly [string, RegExp, DynamicRouteHandler][] = [
     "GET",
     /^\/api\/v1\/accounts\/([^/]+)$/,
     (ctx, id) => handleGetAccount(ctx, id),
+  ],
+  [
+    "GET",
+    /^\/api\/v1\/accounts\/([^/]+)\/statuses$/,
+    (ctx, id) => handleAccountStatuses(ctx, id),
+  ],
+  [
+    "GET",
+    /^\/api\/v1\/accounts\/([^/]+)\/(?:followers|following|featured_tags)$/,
+    (ctx, id) => handleAccountCompanionStub(ctx, id),
   ],
 ];
 

@@ -165,7 +165,14 @@ export function configsFor(env: ConformanceEnv): TargetConfigs {
         description:
           "Deployed composition of the @dwk/workers packages; the target the hosted conformance suites run against.",
       },
-      account: { username: USERNAME, displayName: "Conformance Target" },
+      account: {
+        username: USERNAME,
+        displayName: "Conformance Target",
+        // The target's first deploy (#227). Without this, clients render the
+        // entity fallback epoch as "Joined December 31, 1969" (client-QA run
+        // 2026-07-23, conformance/mastodon-client-qa.md).
+        createdAt: "2026-07-05T18:30:44.000Z",
+      },
       approveAuthorization: approveMastodonAuthorization(env),
     },
     micropub: { baseUrl: base, me },

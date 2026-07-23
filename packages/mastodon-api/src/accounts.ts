@@ -12,10 +12,15 @@ import {
   credentialAccountEntity,
   decodeRemoteAccountId,
   remoteAccountEntity,
+  statusEntity,
 } from "./entities.js";
 import { accountRequired, invalidToken, recordNotFound } from "./errors.js";
 import type { RouteContext } from "./handler.js";
+import { buildLinkHeader } from "./pagination.js";
 import { createMastodonStore } from "./store.js";
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 40;
 
 /** `GET /api/v1/accounts/verify_credentials`. */
 export async function handleVerifyAccountCredentials(
@@ -66,4 +71,78 @@ export async function handleGetAccount(
     ? await ctx.config.backend.actorProfile(actorIri)
     : null;
   return Response.json(remoteAccountEntity(actorIri, profile));
+}
+
+/**
+ * `GET /api/v1/accounts/:id/statuses` — the owner's own posts (the outbox
+ * rows the home timeline already merges), newest-first with the standard
+ * `Link` pagination. Remote account ids answer a valid-but-empty page: this
+ * deployment stores remote actors' profiles, never their status history
+ * (spec/mastodon-client-api.md: "no enumeration... no outbound fetches").
+ */
+export async function handleAccountStatuses(
+  ctx: RouteContext,
+  id: string,
+): Promise<Response> {
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
+  if (!token) return invalidToken();
+
+  if (id !== OWNER_ACCOUNT_ID) {
+    if (!decodeRemoteAccountId(id)) return recordNotFound();
+    return Response.json([]);
+  }
+  const backend = ctx.config.backend;
+  if (!backend?.ownStatuses) return Response.json([]);
+
+  const limit = Math.min(
+    Math.max(
+      1,
+      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
+        DEFAULT_LIMIT,
+    ),
+    ctx.config.pageSize?.max ?? MAX_LIMIT,
+  );
+  const page = await backend.ownStatuses({
+    limit,
+    maxId: ctx.url.searchParams.get("max_id") ?? undefined,
+    sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
+    minId: ctx.url.searchParams.get("min_id") ?? undefined,
+  });
+  const ownerAccount = credentialAccountEntity(
+    ctx.config,
+    (await backend.account()).counts,
+  );
+  const statuses = page.entries.map((entry) =>
+    statusEntity(entry, { baseUrl: ctx.config.baseUrl, ownerAccount }),
+  );
+  const link = buildLinkHeader(ctx.url, {
+    firstId: page.entries[0]?.id,
+    lastId: page.entries[page.entries.length - 1]?.id,
+  });
+  const response = Response.json(statuses);
+  if (link) response.headers.set("link", link);
+  return response;
+}
+
+/**
+ * `GET /api/v1/accounts/:id/{followers,following,featured_tags}` — the
+ * valid-but-empty answer (Decision 3): clients render an empty list, and the
+ * follower/following IRIs are not exposed through the client API in v1.
+ */
+export async function handleAccountCompanionStub(
+  ctx: RouteContext,
+  id: string,
+): Promise<Response> {
+  const token = await authenticateBearer(
+    ctx.request,
+    createMastodonStore(ctx.env),
+  );
+  if (!token) return invalidToken();
+  if (id !== OWNER_ACCOUNT_ID && !decodeRemoteAccountId(id)) {
+    return recordNotFound();
+  }
+  return Response.json([]);
 }

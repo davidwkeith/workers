@@ -1304,6 +1304,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const minReceivedAt = url.searchParams.get("min_received_at");
     const tieSeq = url.searchParams.get("tie_seq");
     const tieSource: 0 | 1 = url.searchParams.get("tie_source") === "1" ? 1 : 0;
+    // `source=1` restricts a timeline read to the owner's outbox posts only
+    // (`GET /api/v1/accounts/:id/statuses` via the `ownStatuses` seam); the
+    // inbox scan is skipped entirely.
+    const ownerOnly =
+      kind === "timeline" && url.searchParams.get("source") === "1";
 
     const oldestFirst = minReceivedAt !== null;
     /**
@@ -1388,6 +1393,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Create/Update rows would otherwise scan the whole table.
     let inboxBatches = 0;
     while (
+      !ownerOnly &&
       matches.length < limit &&
       !exhausted &&
       inboxBatches < MAX_SCAN_BATCHES

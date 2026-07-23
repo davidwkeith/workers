@@ -29,6 +29,10 @@ export interface StubRoute {
 
 /** The v1 roster (design's "valid-but-empty stubs" list, verbatim). */
 export const STUB_ROUTES: readonly StubRoute[] = [
+  // Exact routes match before the dynamic `accounts/:id` pattern, so this
+  // keeps `relationships` from being misread as an account id (a real 404
+  // Ice Cubes hit in the 2026-07-23 client-QA run).
+  { path: "/api/v1/accounts/relationships", auth: true, body: [] },
   { path: "/api/v1/filters", auth: true, body: [] },
   { path: "/api/v2/filters", auth: true, body: [] },
   { path: "/api/v1/lists", auth: true, body: [] },
