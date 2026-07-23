@@ -22,7 +22,7 @@ project is; this document covers how to work on it.
 
 ## Prerequisites
 
-- **Node.js >= 22** (`@dwk/server`'s built-in `node:sqlite` shims need it; CI
+- **Node.js >= 22** (`@dwk/cf-shims`' built-in `node:sqlite` shims need it; CI
   pins Node 24)
 - **pnpm 10** (the exact version is pinned via `packageManager` in
   `package.json`; `corepack enable` will pick it up)
