@@ -73,13 +73,18 @@ with opaque hashed bearer tokens — the documented DPoP exception — instance
 documents, `verify_credentials`, markers, stub roster; #348); the DO-backed
 read surface (timelines/notifications via the `MastodonBackend` seam and
 `@dwk/activitypub`'s `createActivitypubMastodonApi` adapter) is phase 2 (#349),
-fidelity is phase 3 (#350).
+fidelity is phase 3 (#350). `@dwk/cf-shims` is the latest — Node-backed
+implementations of the Cloudflare Workers binding interfaces (D1/R2/KV/Queue/
+cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
+`HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
+from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
+them — `@dwk/server` is its first consumer, not its owner.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
-Run from the repo root (pnpm 10, Node >=22 — `@dwk/cf-shims`'s built-in `node:sqlite` shims need it):
+Run from the repo root (pnpm 10, Node >=22 — `@dwk/server`'s built-in `node:sqlite` shims need it):
 
 | Task                    | Command                                                           |
 | ----------------------- | ----------------------------------------------------------------- |
@@ -173,11 +178,14 @@ injected state.
   (#247); no `@dwk` endpoint package is a required consumer yet.
 - **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
-- **Host-side lib** — `@dwk/cf-shims`: Node implementations of the Cloudflare
-  binding interfaces (the reference implementation of `spec/host-contract.md`,
-  extracted from `@dwk/server`'s shim layer, #381). Consumed only by hosts
-  (`@dwk/server`), never by endpoint packages, and imports Node built-ins
-  only — the one publishable package that is deliberately Node-bound.
+- **Cloudflare-runtime-emulation lib** — `@dwk/cf-shims` is the one package
+  that is deliberately Cloudflare-specific in the same way `@dwk/store` and
+  the endpoint packages are: it implements the Cloudflare binding interfaces
+  (D1/R2/KV/Queue/cron/Durable Objects) and runtime-global seams
+  (`cloudflare:workers`, `HTMLRewriter`, `crypto.DigestStream`, hibernatable
+  WebSockets) on Node, so `@dwk/server` — and any other Node host — can reuse
+  them without copying source. Extracted from `@dwk/server`'s internal
+  `./shims` (#381); see `spec/self-hosting.md` §16 and `spec/portability.md`.
 
 ### Composition contract (`spec/composition-contract.md`)
 
@@ -261,14 +269,17 @@ when adding a package:
   `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
   `@dwk/calendar`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/safe-fetch`,
   `@dwk/esi`. They take plain-data inputs and need no Workers runtime.
-  `@dwk/cf-shims` and the private `@dwk/server` also run under Node — they
-  emulate the Workers runtime rather than run in it.
 - **Runtime/binding-bound packages run under `workerd`** via
   `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
   `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`.
+- **Node-native packages** also run under `environment: "node"` (no
+  Miniflare) but, unlike the pure libs above, are inherently Node-specific
+  rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare
+  binding interfaces on Node) and `@dwk/server` (composes those shims behind
+  Express).
 
 The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
 both groups in one pass.

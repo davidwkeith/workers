@@ -1,73 +1,98 @@
-# `@dwk/cf-shims` — Node implementations of the Cloudflare binding interfaces
+# `@dwk/cf-shims`
 
-> **Status: implemented.** Extracted from `@dwk/server`'s shim layer
-> ([#381](https://github.com/davidwkeith/workers/issues/381), per
-> [self-hosting.md §16](../self-hosting.md) decision 6). This package is the
-> **reference implementation of [host-contract.md](../host-contract.md)**; that
-> document is normative for every behaviour here, and this spec covers only
-> what is specific to the package itself.
+| | |
+|---|---|
+| **Type** | lib (Cloudflare-interface emulation, extracted from `@dwk/server`) |
+| **Ships a DO?** | no (emulates one) |
+| **Used by** | [`@dwk/server`](../self-hosting.md) (first and, today, only consumer) |
 
-## 1. Role
+Node-backed implementations of the Cloudflare Workers binding interfaces —
+`D1Database`, `R2Bucket`, `KVNamespace`, `Queue`, cron/`scheduled`, and Durable
+Objects — plus the runtime-global seams a Worker gets for free and Node does
+not (`cloudflare:workers`'s `DurableObject` base class and its
+`module.register` resolution hook, `HTMLRewriter`, `crypto.DigestStream`, and
+hibernatable `WebSocket` globals). Extracted from `@dwk/server`'s internal
+`./shims` (issue #381; see [self-hosting.md §16](../self-hosting.md#16-resolved-decisions)
+decision 6 and [portability.md §2.3](../portability.md#23-dwkserver-is-the-existence-proof)),
+so any Node host — `@dwk/server`, a bare `node:http` server, a test harness, a
+future Deno-compat host — can reuse them without copying source.
 
-A host-side library: Node-backed implementations of the portable subset of the
-Cloudflare binding interfaces, so that any Node-shaped host — `@dwk/server`
-(the first consumer), a bare `node:http` server, a test harness, a future Deno
-host via `node:` compat — can run the `@dwk` endpoint packages unchanged.
-It is **not** a mountable worker (a `catalog.json` `libraries` exclusion) and
-is **not** consumed by any endpoint package — the dependency arrow points only
-from hosts to this package.
+This is the one package in the taxonomy that is **not** a cross-standard
+reusable lib in the `@dwk/rdf`/`@dwk/dpop` sense: its entire purpose is
+Cloudflare-interface emulation, so it is exactly as Cloudflare-specific as
+`@dwk/store` and the endpoint packages — see
+[composition-contract.md](../composition-contract.md#confinement).
 
-## 2. Public surface
+## Functional requirements
 
-| Export | Implements | Host contract |
-| --- | --- | --- |
-| `createD1Database(location)` | `D1Database` on `node:sqlite` | §3.5 |
-| `createR2Bucket(root)` | `R2Bucket` on the filesystem (streaming bodies, etag'd, HTTP-metadata sidecars) | §3.4 |
-| `createKVNamespace(options?)` | `KVNamespace` on SQLite or in-memory | §7 (courtesy — KV is a non-requirement) |
-| `QueueBroker` | durable SQLite-backed producer + batch-consumer loop with `ack`/`retry`/`attempts` | §3.6 |
-| `CronScheduler` | interval-driven `scheduled` handler runner | §3.7 |
-| `createDurableObjectNamespace(...)`, `DurableObject`, `DurableObjectState`, `SqlStorage` | the Durable Object lifecycle: per-id single-writer mutex, per-object SQLite `SqlStorage` + `transactionSync`, durable alarms with bounded-backoff retry, hibernation-style WebSockets | §3.2–3.3 |
-| `registerCloudflareWorkers()`, `resolve` | `module.register` loader hook resolving the bare `cloudflare:workers` specifier to the module stand-in (also exported as the `@dwk/cf-shims/cloudflare-workers` subpath, for bundler aliases) | §5 |
-| `installHTMLRewriter()` | WASM `lol-html` as the `HTMLRewriter` global | §6 |
-| `installCryptoDigestStream()` | `crypto.DigestStream` on `node:crypto` | §6 |
-| `installWebSocketGlobals()`, `WebSocketPair`, `EmulatedWebSocket`, `responseWebSocket` | `WebSocketPair` + the 101-`webSocket` `Response` | §6 |
+- **`createD1Database(path)`** — `D1Database` over `node:sqlite`:
+  `prepare(sql).bind(...).all()/.first()/.run()`, `batch()`, `exec()`, matching
+  D1's `{ results, success, meta }` envelope exactly.
+- **`createR2Bucket(dir)`** — `R2Bucket` over the filesystem: `get`/`put`/
+  `delete`/`list`/`head`, streaming bodies to/from disk (never buffering a full
+  object), with an HTTP-metadata sidecar and a computed ETag.
+- **`createKVNamespace(options)`** — `KVNamespace` over SQLite (or an in-memory
+  `Map`), with TTL/expiration support. KV here is strongly consistent (no
+  "≈60 s eventual" caveat), but callers MUST still treat it as
+  safe-to-be-stale-cache-only, matching the non-functional consistency rule.
+- **`QueueBroker`** — an in-process, SQLite-backed durable queue: `send`/
+  `sendBatch` producers, a worker loop delivering `MessageBatch`-shaped batches
+  to a registered consumer with `ack`/`retry`/`ackAll`/`retryAll`, a visibility
+  lease, exponential backoff, and a dead-letter cap.
+- **`CronScheduler`** — runs a registered `scheduled` handler on a timer,
+  passing a `ScheduledController`-shaped argument; cadence is milliseconds, no
+  cron-expression parser.
+- **`createDurableObjectNamespace` / `DurableObject`** — Durable Object
+  emulation: `SqlStorage` over `node:sqlite`, `idFromName`/`get(id).fetch`
+  routed in-process to a per-id singleton serialised behind a per-id mutex
+  (the single-writer guarantee), `blockConcurrencyWhile`, persisted alarms
+  (survive a restart, retried with bounded backoff), and WebSocket
+  hibernation (`acceptWebSocket`/`getWebSockets`) dispatching to a subclass's
+  `webSocketMessage`/`webSocketClose`/`webSocketError` overrides.
+- **`registerCloudflareWorkers()` / `resolve()`** — a `module.register` ESM
+  loader hook redirecting the bare `cloudflare:workers` specifier to this
+  package's `DurableObject` stand-in, so the endpoint packages' unmodified
+  `import { DurableObject } from "cloudflare:workers"` resolves under Node.
+- **`installHTMLRewriter()`** — installs a WASM-backed, workerd-compatible
+  `HTMLRewriter` global if none exists (idempotent, no-op if already present).
+- **`installCryptoDigestStream()`** — installs a `node:crypto`-backed
+  `crypto.DigestStream` global (Cloudflare's non-standard streaming-hash
+  `WritableStream`) if none exists.
+- **`installWebSocketGlobals()` / `WebSocketPair` / `EmulatedWebSocket` /
+  `responseWebSocket()`** — an in-memory `WebSocketPair` and a `Response`
+  patched to carry a `webSocket` + status `101` (which Node's own `Response`
+  rejects), so a Durable Object can answer an upgrade
+  (`new Response(null, { status: 101, webSocket })`) the same way it would on
+  workerd. Bridging the emulated socket to a *real* network connection (an
+  actual HTTP `Upgrade`) is host-specific and stays in `@dwk/server`
+  (`web-socket-upgrade.ts`), since it depends on the `ws` package and a real
+  `node:http` server — not something every consumer of this package needs.
 
-All `install*` functions MUST be idempotent and MUST be no-ops where a native
-global already exists (so importing the package under `workerd` is harmless).
+## Design constraints
 
-## 3. Boundary rules (load-bearing)
+- **Host-framework-free.** Every module imports only Node built-ins
+  (`node:sqlite`, `node:fs`, `node:crypto`, `node:stream`, `node:module`) plus
+  `@worker-tools/html-rewriter`. No Express, no other host framework — that is
+  the boundary that keeps this package reusable outside `@dwk/server`.
+- **Interface fidelity.** Each shim implements the exact TypeScript interface
+  (`@cloudflare/workers-types`) the endpoint packages already program against,
+  so a package composed over these shims runs **unchanged**.
+- **`node:sqlite` floor.** D1, KV, and the Durable Object shim require Node
+  ≥ 22 (≥ 24 for flagless stable use); the driver is confined to each shim
+  module so it stays swappable.
+- **Single-process, single-writer.** The Durable Object namespace's per-id
+  mutex reproduces the single-writer guarantee within one process; a host
+  composing multiple processes over the same data directory is out of scope
+  here (the host's job — see `@dwk/server`'s startup lockfile).
 
-- The package MUST import **Node built-ins only** (`node:sqlite`, `node:fs`,
-  `node:crypto`, `node:stream`, `node:path`, `node:module`) plus the
-  `@worker-tools/html-rewriter` WASM build. No Express, no `ws`, no
-  host-runtime imports — network concerns (HTTP upgrade bridging of the
-  emulated WebSocket pairs) belong to the consuming host
-  (`@dwk/server`'s `web-socket-upgrade`).
-- No endpoint package may depend on `@dwk/cf-shims`; endpoint packages program
-  against the Cloudflare interfaces and stay host-agnostic
-  ([composition-contract.md](../composition-contract.md)).
-- **Single writer per data directory.** The per-id mutex reproduces the
-  Durable Object single-writer guarantee only within one process. Enforcing
-  the one-process invariant (lockfile, deployment discipline) is the consuming
-  host's responsibility and MUST be documented by every consumer
-  ([self-hosting.md §8](../self-hosting.md)).
-- Node ≥ 22 (`node:sqlite`; ≥ 24 for flagless stable use), same floor as
-  `@dwk/server`.
+## Testing
 
-## 4. Contract-growth coupling
-
-[host-contract.md §8](../host-contract.md) binds this package from the other
-side: when an endpoint package legitimately needs new Cloudflare surface, the
-same PR MUST amend the host contract **and** implement the surface here. A gap
-between the contract and this package is a release-blocking documentation bug.
-
-## 5. Testing
-
-Colocated unit tests (`src/*.test.ts`, Node environment) are the
-**shim-parity suite** of host-contract §9 step 1: alarm durability across
-restarts and retry-on-throw, per-id mutex serialization, D1 result envelopes
-(`meta.changes`, batch atomicity), R2 streaming and metadata round-trips,
-queue redelivery/`attempts`/`delaySeconds`, loader-hook resolution, and the
-idempotence of every `install*`. The composed end-to-end coverage (step 2)
-lives in `@dwk/server`'s `phase*.integration.test.ts` suites, which exercise
-these shims through real package lifecycles.
+- Unit tests under Node (no Miniflare): each shim against the Cloudflare
+  interface shape it stands in for (D1's result envelope, R2's streaming
+  get/put/list, KV's TTL expiry, the Durable Object namespace's per-id
+  serialisation/alarm persistence/retry, the loader hook's specifier
+  redirection, the `HTMLRewriter`/`DigestStream`/`WebSocketPair` polyfills'
+  idempotency and shape).
+- `@dwk/server`'s own `phase*.integration.test.ts` suite is this package's de
+  facto integration test: every endpoint package that ships a Durable Object
+  runs its full lifecycle against these shims through the host.

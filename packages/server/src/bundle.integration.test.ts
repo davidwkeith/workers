@@ -21,6 +21,9 @@ import { fileURLToPath } from "node:url";
 const execFileP = promisify(execFile);
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distEntry = join(pkgRoot, "dist", "index.js");
+// The shim moved to @dwk/cf-shims (#381): guard on ITS dist, not this
+// package's — a stale `dist/cloudflare-workers.js` path here would make this
+// suite skip silently forever.
 const distShim = join(
   pkgRoot,
   "..",

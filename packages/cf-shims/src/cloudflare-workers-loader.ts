@@ -4,12 +4,11 @@
  *
  * Node's `imports` field can't be used here — it only remaps `#`-prefixed
  * specifiers — and editing the packages' source imports is off the table (they
- * must run unchanged from published dist). A resolve hook is the seam: the
- * consuming host (e.g. `@dwk/server`'s `bin`) calls
- * {@link registerCloudflareWorkers} before importing any package that extends
- * `DurableObject`. Tests use a Vitest `resolve.alias` instead, so this hook is
- * not on the test path; a bundling host may use a build-time alias to
- * `@dwk/cf-shims/cloudflare-workers` instead.
+ * must run unchanged from published dist). A resolve hook is the seam: the host
+ * `bin` calls {@link registerCloudflareWorkers} (or runs with
+ * `--import @dwk/server/register-cloudflare-workers`) before importing any
+ * package that extends `DurableObject`. Tests use a Vitest `resolve.alias`
+ * instead, so this hook is not on the test path.
  *
  * @see spec/self-hosting.md §7.4 (decision 1)
  */

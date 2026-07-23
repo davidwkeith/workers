@@ -25,30 +25,30 @@ lifecycle hooks. `@dwk/server` closes that gap:
 - **static hosting** via `express.static` with deterministic routing precedence
   — reserved protocol paths (`/.well-known/*` and each mount's configured paths)
   win over static files, then static, then a configurable fallback hook;
-- **Node-backed shims for the Cloudflare binding interfaces** so the endpoint
-  packages run unchanged: `D1Database` → `node:sqlite`, `R2Bucket` → filesystem,
-  `KVNamespace` → SQLite/memory, plus an in-process durable **Queue** and a
-  cron/`scheduled` timer;
+- **Node-backed shims for the Cloudflare binding interfaces**, from
+  [`@dwk/cf-shims`](../cf-shims), so the endpoint packages run unchanged:
+  `D1Database` → `node:sqlite`, `R2Bucket` → filesystem, `KVNamespace` →
+  SQLite/memory, plus an in-process durable **Queue** and a cron/`scheduled`
+  timer;
 - **lifecycle binding** (`bindQueueConsumer` / `bindScheduledTask`) that adapts
   the packages' Cloudflare-shaped `(batch|controller, env, ctx)` queue consumers
   and `scheduled` handlers onto the broker/scheduler, plus a WASM `HTMLRewriter`
-  global (installed at startup) so packages that scan HTML (webmention
-  verification, microsub feed discovery) run on Node;
-- **Durable Object emulation** (`createDurableObjectNamespace`): `SqlStorage`
-  over `node:sqlite`, one object per id behind a per-id mutex (the single-writer
-  guarantee) with `blockConcurrencyWhile` gating, plus emulated hibernatable
-  **WebSockets** bridged to real client connections over HTTP `upgrade` (the `ws`
-  library) so Solid notifications work. The `cloudflare:workers` import is
-  redirected to the shim by a `module.register` loader hook (production) or a
-  Vitest alias (tests), so `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
+  global (`@dwk/cf-shims`'s `installHTMLRewriter`, installed at startup) so
+  packages that scan HTML (webmention verification, microsub feed discovery)
+  run on Node;
+- **Durable Object emulation** (`@dwk/cf-shims`'s `createDurableObjectNamespace`):
+  `SqlStorage` over `node:sqlite`, one object per id behind a per-id mutex (the
+  single-writer guarantee) with `blockConcurrencyWhile` gating, plus emulated
+  hibernatable **WebSockets** bridged to real client connections over HTTP
+  `upgrade` (the `ws` library, in this package's `web-socket-upgrade.ts`) so
+  Solid notifications work. The `cloudflare:workers` import is redirected to
+  the shim by a `module.register` loader hook (production) or a Vitest alias
+  (tests), so `@dwk/webauthn` and `@dwk/solid-pod` run unchanged.
 
-It mirrors how `@dwk/store` confines Cloudflare *storage*; this package confines
-the *Node runtime and the Cloudflare-interface emulation*. The binding shims
-themselves live in [`@dwk/cf-shims`](../cf-shims) (the reference implementation
-of [`spec/host-contract.md`](../../spec/host-contract.md), extracted per #381);
-this package consumes them via `workspace:*`, re-exports the same names for
-compatibility, and adds the Express adapter, composition, lifecycle, and
-single-writer locking on top.
+It mirrors how `@dwk/store` confines Cloudflare *storage*: this package
+confines the *Node runtime*, composing the Cloudflare-interface emulations
+from [`@dwk/cf-shims`](../cf-shims) behind Express — extracted there (#381) so
+any Node host can reuse them without copying source.
 
 ## Correctness & the single-writer invariant
 
@@ -199,18 +199,20 @@ like Deno Deploy would need).
 
 ## Data portability
 
-The shims are mechanical mirrors of the Cloudflare stores, so migration is a copy
-in either direction: **D1 ⇄ `node:sqlite` file**, **R2 ⇄ a directory of objects**,
-**DO-SQLite ⇄ one SQLite file per object id** (`<dataDir>/do/<class>/<id>.sqlite`).
-Moving between Cloudflare and self-hosted is export-then-import, no schema change.
+`@dwk/cf-shims`'s shims are mechanical mirrors of the Cloudflare stores, so
+migration is a copy in either direction: **D1 ⇄ `node:sqlite` file**,
+**R2 ⇄ a directory of objects**, **DO-SQLite ⇄ one SQLite file per object id**
+(`<dataDir>/do/<class>/<id>.sqlite`). Moving between Cloudflare and self-hosted
+is export-then-import, no schema change.
 
 ## Status
 
 **Experimental, unreleased (`0.0.0`).** This package implements the host
-skeleton + adapter + static hosting, the D1/R2/KV storage shims, the
-queue/cron/`waitUntil` lifecycle shims, and the Durable Object emulation
-(`SqlStorage`, per-id single-writer, **alarms**, WebSocket hibernation) — enough
-to run **every** `@dwk` package that ships a DO: `@dwk/solid-pod`,
+skeleton + adapter + static hosting and the `waitUntil` lifecycle, and composes
+[`@dwk/cf-shims`](../cf-shims)'s D1/R2/KV storage shims, queue/cron scheduler,
+and Durable Object emulation (`SqlStorage`, per-id single-writer, **alarms**,
+WebSocket hibernation) — enough to run **every** `@dwk` package that ships a
+DO: `@dwk/solid-pod`,
 `@dwk/webauthn`, `@dwk/activitypub`, `@dwk/atproto-pds`, `@dwk/remotestorage`,
 and `@dwk/webdav` (mounted over solid-pod's DO), each exercised end-to-end
 against the host in `src/phase5-*.integration.test.ts` — plus the stateless and

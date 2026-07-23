@@ -12,12 +12,10 @@
  * SQLite, plus the in-process queue and cron lifecycle).
  *
  * It mirrors how `@dwk/store` confines Cloudflare *storage*: this package
- * confines the *Node runtime and the Cloudflare-interface emulation* so the 20+
- * endpoint packages run **unchanged**. The binding shims themselves live in
- * [`@dwk/cf-shims`](../cf-shims) (extracted from this package's `./shims`
- * layer, issue #381) and are re-exported here for compatibility; this package
- * adds the Express adapter, composition, lifecycle, and the single-process /
- * single-writer-per-data-directory invariant, enforced by a startup lockfile.
+ * confines the *Node runtime*, composing the Cloudflare-interface emulations
+ * from `@dwk/cf-shims` behind Express, so the 20+ endpoint packages run
+ * **unchanged**. Single-process / single-writer per data directory is a
+ * load-bearing invariant, enforced by a startup lockfile.
  *
  * @see spec/self-hosting.md
  * @packageDocumentation
@@ -61,8 +59,9 @@ export {
   type ReleaseLock,
 } from "./lock.js";
 
-// Re-exported from @dwk/cf-shims (the extracted shim layer) so existing
-// `@dwk/server` consumers keep a stable import surface.
+// Re-exported from `@dwk/cf-shims`: the Node-backed Cloudflare binding shims
+// and runtime-global seams this host composes behind Express. See that
+// package for the implementations.
 export {
   createD1Database,
   createR2Bucket,

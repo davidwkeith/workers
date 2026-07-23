@@ -17,9 +17,8 @@
  * package owns them, so the host stays decoupled from the 20+ endpoint packages
  * (the actual choice of what to mount lives in the deployer's composition root).
  * Secrets are injected the same way Worker secret bindings are — as plain `Env`
- * members. Queue/cron bindings are a lifecycle concern and come from the
- * `QueueBroker` / `CronScheduler` (from `@dwk/cf-shims`)
- * directly, not from here.
+ * members. Queue/cron bindings are a lifecycle concern and come from
+ * `@dwk/cf-shims`'s `QueueBroker` / `CronScheduler` directly, not from here.
  *
  * @see spec/self-hosting.md §7.1–§7.3, §9
  */

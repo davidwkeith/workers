@@ -89,9 +89,12 @@ test account, or any existing federated content).
    in home, with reply/favourite/reblog counts when the corresponding inbound
    activity exists.
 
-- [ ] **Pass** — timeline renders with media/CW/alt text and hydrated account
-      details as expected
-- [ ] **Pass** — the owner's own post and available interaction counters render
+- [x] **Pass** (Ice Cubes, 2026-07-23) — timeline renders with media/CW/alt
+      text and hydrated account details as expected
+- [x] **Pass** (Ice Cubes, 2026-07-23) — the owner's own posts and available
+      interaction counters render (favourite count visible on the Lemmy
+      federation post; profile posts tab loads via the new
+      `accounts/:id/statuses` route after the #388 fixes deployed)
 - [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 ### Step 3 — Notifications render the pixelfed-qa step-4 like + reply
@@ -100,8 +103,10 @@ Using the same Pixelfed test account from `pixelfed-qa.md` step 4 (which
 liked and replied to a post), confirm both now render as notifications in
 the client's notifications view:
 
-- [ ] **Pass** — the `Like` renders as a favourite notification
-- [ ] **Pass** — the reply renders as a mention notification
+- [x] **Pass** (Ice Cubes, 2026-07-23) — the `Like` renders as a favourite
+      notification
+- [x] **Pass** (Ice Cubes, 2026-07-23) — the reply renders as a mention
+      notification
 - [ ] **Fail** — note what's missing: **************\_\_\_\_**************
 
 Do **not** expect a Follow notification here even if the test account also
@@ -131,12 +136,12 @@ run surfaced three findings:
 
 ## Result
 
-|                    |                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Overall result     | ☐ Passing / ☐ Failing (in progress — Tusky run still pending)                                                                                                                                                                                                                                                                                                                                                                              |
-| Run date           | 2026-07-23 (partial: pixelfed-app attempt + descope)                                                                                                                                                                                                                                                                                                                                                                                       |
-| Tester             | David W. Keith                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Notes / follow-ups | Server-side preflight all green (instance/webfinger/apps/authorize/401s, outbox has the media+CW+alt post). Pixelfed app rejected the instance at its own preflight — root-caused to its Pixelfed-server-only gate and descoped (see Scope). Ice Cubes added as substitute row: Step 1 passed; the run surfaced three quirks (see Quirks above), fixes landed and need a target redeploy before re-running Steps 2–3. Tusky still pending. |
+|                    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overall result     | ☑ Passing (Ice Cubes) / ☐ Failing — Tusky target still pending                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Run date           | 2026-07-23                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Tester             | David W. Keith                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Notes / follow-ups | Server-side preflight all green. Pixelfed app rejected the instance at its own preflight — root-caused to its Pixelfed-server-only gate and descoped (see Scope). Ice Cubes substituted; its first run surfaced three quirks (see Quirks above), fixed in #388, redeployed, and all three steps then passed end-to-end (re-login required — Ice Cubes caches the login-time account entity, so the stale epoch join date persisted until sign-out/sign-in). Tusky still pending. |
 
 ## Recording the result
 

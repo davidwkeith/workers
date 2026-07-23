@@ -1,84 +1,101 @@
 # `@dwk/cf-shims`
 
-Node-backed implementations of the Cloudflare binding interfaces — the
-**reference implementation of the
-[host contract](../../spec/host-contract.md)**. Extracted from `@dwk/server`'s
-shim layer (issue
-[#381](https://github.com/davidwkeith/workers/issues/381)) so any Node-shaped
-host — `@dwk/server`, a bare `node:http` server, a test harness, a future Deno
-host via `node:` compat — can run the `@dwk` packages unchanged without copying
-source.
+Node-backed implementations of the **Cloudflare Workers binding interfaces** —
+`D1Database`, `R2Bucket`, `KVNamespace`, `Queue`, cron/`scheduled`, and Durable
+Objects — plus the runtime-global seams a Worker gets for free and Node does
+not (`cloudflare:workers`'s `DurableObject`, `HTMLRewriter`,
+`crypto.DigestStream`, hibernatable `WebSocket`s).
 
-Each shim implements the same TypeScript interface the endpoint packages
-already program against:
+Extracted from [`@dwk/server`](../server)'s internal shim layer so any Node
+host — `@dwk/server`, a bare `node:http` server, a test harness, a future
+Deno-compat host — can reuse them without copying source. See
+[`spec/self-hosting.md`](../../spec/self-hosting.md) for the design this
+package implements and
+[`spec/portability.md`](../../spec/portability.md) for the extraction
+rationale.
 
-| Shim | Backing | Contract section |
+## What's in here
+
+| Export | Cloudflare interface | Backing |
 | --- | --- | --- |
-| `createD1Database` | `node:sqlite` file | host-contract §3.5 |
-| `createR2Bucket` | filesystem (streaming, etag'd, metadata sidecars) | §3.4 |
-| `createKVNamespace` | SQLite (or in-memory) | non-requirement (§7) — provided as a courtesy |
-| `QueueBroker` | durable SQLite-backed queue + batch consumer loop | §3.6 |
-| `CronScheduler` | interval timer driving `scheduled` handlers | §3.7 |
-| `DurableObject` / `createDurableObjectNamespace` | per-id SQLite + per-id async mutex, transactional `SqlStorage`, durable alarms with bounded-backoff retry, hibernation-style WebSockets | §3.2–3.3 |
+| `createD1Database(path)` | `D1Database` | `node:sqlite` |
+| `createR2Bucket(dir)` | `R2Bucket` | filesystem (streaming, ETag'd, metadata sidecar) |
+| `createKVNamespace(options)` | `KVNamespace` | SQLite or in-memory `Map` |
+| `QueueBroker` | `Queue` (producer + consumer) | SQLite-backed durable in-process queue |
+| `CronScheduler` | `scheduled` | a timer, `ScheduledController`-shaped |
+| `createDurableObjectNamespace`, `DurableObject` | Durable Objects | `node:sqlite` + a per-id mutex, alarms, WebSocket hibernation |
+| `registerCloudflareWorkers`, `resolve` | `cloudflare:workers` (`{ DurableObject }`) | a `module.register` ESM loader hook |
+| `installHTMLRewriter` | `HTMLRewriter` | `@worker-tools/html-rewriter` (WASM) |
+| `installCryptoDigestStream` | `crypto.DigestStream` | `node:crypto` |
+| `installWebSocketGlobals`, `WebSocketPair`, `EmulatedWebSocket`, `responseWebSocket` | `WebSocketPair` / a `Response` carrying a `webSocket` | in-memory, `EventTarget`-based |
 
-Plus the module/global requirements of host-contract §5–6:
+Each shim implements the **same TypeScript interface** the endpoint packages
+already program against, so a package composed over these shims runs
+unchanged.
 
-- **`cloudflare:workers`** — the module stand-in
-  (`@dwk/cf-shims/cloudflare-workers`, exporting the `DurableObject` base) and
-  `registerCloudflareWorkers()`, a `module.register` loader hook that resolves
-  the bare specifier to it at runtime. Bundlers can use a build-time alias to
-  the subpath export instead; test runners use a Vitest `resolve.alias`.
-- **`installHTMLRewriter()`** — a WASM `lol-html` build installed as the
-  `HTMLRewriter` global.
-- **`installCryptoDigestStream()`** — Cloudflare's non-standard
-  `crypto.DigestStream` on `node:crypto`.
-- **`installWebSocketGlobals()`** — `WebSocketPair` and a `webSocket`-carrying
-  101 `Response`.
+## Usage
 
-All installers are idempotent (no-ops where a native global already exists,
-e.g. under `workerd`).
+```ts
+import { createD1Database, createR2Bucket, createKVNamespace } from "@dwk/cf-shims";
 
-## Boundary rules
+const AUTH_DB = createD1Database("./data/d1/AUTH_DB.sqlite");
+const MEDIA = createR2Bucket("./data/r2/MEDIA");
+const SESSION_CACHE = createKVNamespace({ location: "./data/kv/SESSION_CACHE.sqlite" });
+```
 
-- Imports **Node built-ins only** (`node:sqlite`, `node:fs`, `node:crypto`,
-  `node:stream`, `node:module`) plus the `HTMLRewriter` WASM build — no
-  Express, no host-runtime imports.
-- Requires **Node ≥ 22** (`node:sqlite`; ≥ 24 for flagless stable use).
-- **Exactly one process may write a given data directory.** The per-id mutex
-  reproduces the Durable Object single-writer guarantee only within a single
-  process; enforcing the single-process invariant (e.g. a startup lockfile) is
-  the consuming host's job. See `@dwk/server` for the reference enforcement.
-- Network bridging is out of scope: this package emulates the in-process
-  primitives; accepting real WebSocket upgrades and piping them onto the
-  emulated pair is host territory (`@dwk/server`'s `web-socket-upgrade`).
-
-## Consuming
+Durable Objects: redirect the `cloudflare:workers` bare specifier before
+importing a package that extends it, then build a namespace per DO class:
 
 ```ts
 import {
-  createD1Database,
-  createR2Bucket,
-  QueueBroker,
-  CronScheduler,
-  createDurableObjectNamespace,
   registerCloudflareWorkers,
+  createDurableObjectNamespace,
+} from "@dwk/cf-shims";
+import { SolidPodObject } from "@dwk/solid-pod"; // imports { DurableObject } from "cloudflare:workers"
+
+registerCloudflareWorkers(); // before any DO-package import resolves, or use a bundler alias instead
+
+const env = {};
+env.POD = createDurableObjectNamespace(SolidPodObject, {
+  dataDir: "./data",
+  env,
+  className: "SolidPodObject",
+});
+```
+
+Runtime-global polyfills are opt-in, install-once calls, each a no-op if the
+global already exists (e.g. under workerd):
+
+```ts
+import {
   installHTMLRewriter,
   installCryptoDigestStream,
   installWebSocketGlobals,
 } from "@dwk/cf-shims";
 
-registerCloudflareWorkers(); // before importing any DurableObject package
 installHTMLRewriter();
 installCryptoDigestStream();
 installWebSocketGlobals();
-
-const env = {
-  MY_DB: createD1Database("/data/d1/my-db.sqlite"),
-  BLOBS: createR2Bucket("/data/r2/blobs"),
-  // …
-};
 ```
 
-See [`spec/packages/cf-shims.md`](../../spec/packages/cf-shims.md) for the
-package spec and [`spec/host-contract.md`](../../spec/host-contract.md) for the
-normative semantics these implementations satisfy.
+`installWebSocketGlobals` gives you `WebSocketPair` and a `Response` that can
+carry a `webSocket` + status `101`, matching a Durable Object's upgrade
+contract. Bridging the emulated socket to a *real* network connection (an
+actual HTTP `Upgrade`) is host-specific — `@dwk/server` does this over the `ws`
+package — and is not part of this package.
+
+## Requirements
+
+Node **≥ 22** (`node:sqlite`; Node ≥ 24 runs it flag-free, otherwise
+`--experimental-sqlite` on 22.x).
+
+## Status
+
+**Experimental, unreleased.** Extracted verbatim from `@dwk/server`'s
+`./shims`, which already exercises every export end-to-end via its
+`phase*.integration.test.ts` suite against every `@dwk` package that ships a
+Durable Object.
+
+## License
+
+ISC

@@ -19,8 +19,8 @@
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { noopLogger, type Logger } from "@dwk/log";
-import { createServer, type DwkServer } from "./server.js";
 import { registerCloudflareWorkers } from "@dwk/cf-shims";
+import { createServer, type DwkServer } from "./server.js";
 import type { HostConfig } from "./config.js";
 
 /** A config module: a default (or named `config`) export — value or factory. */

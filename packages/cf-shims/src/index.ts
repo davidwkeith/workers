@@ -1,28 +1,26 @@
 /**
- * `@dwk/cf-shims` — Node-backed implementations of the Cloudflare binding
- * interfaces: the reference implementation of the host contract
- * (`spec/host-contract.md`).
+ * `@dwk/cf-shims` — Node-backed implementations of the Cloudflare Workers
+ * binding interfaces (`D1Database`, `R2Bucket`, `KVNamespace`, `Queue`,
+ * `scheduled`/cron, Durable Objects) plus the runtime-global seams a Worker
+ * gets for free and Node does not (`cloudflare:workers`'s `DurableObject`
+ * base class, `HTMLRewriter`, `crypto.DigestStream`, hibernatable
+ * `WebSocket`s).
  *
- * Each shim implements the same TypeScript interface the `@dwk` endpoint
- * packages already program against — D1 and DO-SQLite on `node:sqlite`, R2 on
- * the filesystem (streaming, etag'd, metadata sidecars), KV on SQLite, a
- * durable SQLite-backed queue broker, a cron scheduler, and the Durable Object
- * lifecycle (per-id single-writer mutex, transactional `SqlStorage`, durable
- * alarms with retry, hibernation-style WebSockets) — so the packages run
- * unchanged. Alongside the bindings it ships the `cloudflare:workers` module
- * stand-in (plus a `module.register` loader hook that resolves the bare
- * specifier to it) and the idempotent runtime polyfill installers for
- * `HTMLRewriter`, `crypto.DigestStream`, and the `WebSocketPair` /
- * 101-`webSocket` `Response` globals.
+ * This is **not protocol-agnostic** — unlike `@dwk/rdf`/`@dwk/dpop`/etc., it
+ * exists specifically to emulate Cloudflare's runtime surface on Node, so the
+ * confinement principle here is the mirror image of theirs: Cloudflare
+ * specifics are exactly what this package is for. What it does keep clean is
+ * the **host boundary** — every export imports only Node built-ins
+ * (`node:sqlite`, `node:fs`, `node:crypto`, `node:stream`) plus
+ * `@worker-tools/html-rewriter`, never a host framework (no Express) — so any
+ * Node host (a bare `node:http` server, a test harness, `@dwk/server`) can
+ * compose it unchanged.
  *
- * The package imports Node built-ins only (`node:sqlite`, `node:fs`,
- * `node:crypto`, `node:stream`, `node:module`) — no Express, no host-runtime
- * imports — so any Node-shaped host (`@dwk/server`, a bare `node:http` server,
- * a test harness, a future Deno host via `node:` compat) can consume it. The
- * single-writer-per-data-directory invariant is the consuming host's to
- * enforce (see `@dwk/server`'s startup lockfile).
+ * Extracted from `@dwk/server`'s internal `./shims` (see
+ * [self-hosting.md §16](../../../spec/self-hosting.md#16-resolved-decisions)
+ * decision 6 and [portability.md](../../../spec/portability.md)); `@dwk/server`
+ * is now its first consumer, not its owner.
  *
- * @see spec/host-contract.md
  * @see spec/packages/cf-shims.md
  * @packageDocumentation
  */
@@ -57,10 +55,12 @@ export {
 } from "./cloudflare-workers-loader.js";
 
 export { installHTMLRewriter } from "./html-rewriter.js";
+
 export { installCryptoDigestStream } from "./crypto-digest-stream.js";
+
 export {
   installWebSocketGlobals,
-  responseWebSocket,
-  EmulatedWebSocket,
   WebSocketPair,
+  EmulatedWebSocket,
+  responseWebSocket,
 } from "./web-socket.js";

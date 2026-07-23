@@ -100,9 +100,6 @@ importers:
         specifier: 0.1.0-pre.19
         version: 0.1.0-pre.19
     devDependencies:
-      '@cloudflare/workers-types':
-        specifier: 5.20260718.1
-        version: 5.20260718.1
       '@types/node':
         specifier: 26.1.1
         version: 26.1.1
