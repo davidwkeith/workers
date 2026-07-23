@@ -78,6 +78,7 @@ export {
   type QueueConsumerHandler,
   type CronSchedulerOptions,
   type ScheduledHandler,
+  type AlarmInvocationInfo,
   type DurableObjectClass,
   type DurableObjectNamespaceOptions,
   type DurableObjectState,

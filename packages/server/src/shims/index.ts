@@ -27,6 +27,7 @@ export {
 export {
   DurableObject,
   createDurableObjectNamespace,
+  type AlarmInvocationInfo,
   type DurableObjectClass,
   type DurableObjectNamespaceOptions,
   type DurableObjectState,

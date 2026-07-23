@@ -108,8 +108,9 @@ Express and are re-exported from `shims/index.ts` — the planned
 
 **Known gaps in the Node host today** (they gate Phase 0):
 
-- **No DO alarm shim** (`setAlarm`/`alarm()` unimplemented) — so
-  `activitypub` and `atproto-pds` cannot run on it yet.
+- ~~No DO alarm shim~~ — **resolved** (#379): alarms are emulated (persisted
+  in the per-object SQLite file, delivered through the per-id mutex, retried
+  with bounded backoff, re-armed on startup).
 - `activitypub`, `atproto-pds`, `remotestorage`, `webdav` are not wired into
   the host's composition/tests (documented in `packages/server/CLAUDE.md`).
 - Cron takes an interval in ms, not a cron expression.
@@ -152,7 +153,7 @@ queues + cron.
 
 | Provider | F | S | A | W | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| Any Docker host (VPS, ECS/EC2, GCE, Fly.io…) via `@dwk/server` | ✅ | ✅ (local SQLite) | ✅ (alarms pending) | ✅ | **Viable now** — finish Phase 0 |
+| Any Docker host (VPS, ECS/EC2, GCE, Fly.io…) via `@dwk/server` | ✅ | ✅ (local SQLite) | ✅ | ✅ | **Viable now** — finish Phase 0 |
 | Deno Deploy | ✅ native | ✅ (Deno KV) | ❌ no actor / no SQLite | ✅ | **Feasible with significant work** |
 | Google Cloud (GCF gen2 / Cloud Run) | adapter needed | ⚠️ ephemeral FS; Firestore/Cloud SQL | ❌ | ⚠️ | **Native host infeasible without shim rewrite; use the container path on a VM** |
 | Fastly Compute | ~ (WASM SDK) | ❌ KV **eventually consistent** | ❌ | ❌ | **Not viable for stateful cohort** |
