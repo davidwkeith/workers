@@ -55,10 +55,24 @@ function createHandlers(host: string) {
   return { webfinger, hostMeta };
 }
 
+/**
+ * Minimal HTML escape for text interpolated into the landing page. A hostname
+ * from `URL.hostname` cannot actually contain HTML metacharacters, but starter
+ * code gets copied — never interpolate unescaped input into markup.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /** A minimal landing page so the freshly deployed Worker explains itself. */
-function landing(host: string): Response {
+function landing(rawHost: string): Response {
+  const host = escapeHtml(rawHost);
   const webfingerQuery = `/.well-known/webfinger?resource=${encodeURIComponent(
-    `acct:${USER}@${host}`,
+    `acct:${USER}@${rawHost}`,
   )}`;
   const body = `<!doctype html>
 <meta charset="utf-8">
