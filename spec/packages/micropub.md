@@ -383,6 +383,180 @@ URI/parameter validation, malformed-query HTTP errors, disabled-group
 non-advertisement, store ordering/pagination, and missing store/binding startup
 failures.
 
+### Proposed media-endpoint extensions
+
+This is the design for issue #363 (roadmap #354). It is **design only — not
+yet implemented**. It adopts three upstream proposals as one gated feature:
+[Delete from Media Endpoint][mp-ext-media-delete],
+[Response from Media Endpoint][mp-ext-media-response], and
+[Query for Media from Media Endpoint][mp-ext-media-source] together with its
+[by-URL variant][mp-ext-media-url]. The separate Link-Rel-for-Media-Endpoint
+proposal is out of scope: the media endpoint stays discovered via `q=config`.
+
+[mp-ext-media-delete]: https://github.com/indieweb/micropub-extensions/issues/30
+[mp-ext-media-response]: https://github.com/indieweb/micropub-extensions/issues/13
+[mp-ext-media-source]: https://github.com/indieweb/micropub-extensions/issues/14
+[mp-ext-media-url]: https://github.com/indieweb/micropub-extensions/issues/37
+
+#### Enablement and advertisement
+
+Everything below is enabled only with `extensions.proposed`. With the default
+(`false`) the media endpoint's observable behaviour is unchanged: `POST`
+upload returns `201` + `Location` with an **empty body**, `GET` serves blobs,
+and no query or action parameter is interpreted — a `POST` carrying
+`action=delete` but no `file` part falls through to the existing
+"`file` part is required" `400`, and `?q=source` at the media endpoint is an
+unsupported-query `400 invalid_request`.
+
+When enabled, `q=config` (at the Micropub endpoint) advertises the capability
+under a package-defined member — the upstream proposals define no
+advertisement — so clients can feature-detect without probing:
+
+```json
+"media-endpoint-extensions": { "q": ["source"], "actions": ["delete", "undelete"] }
+```
+
+#### Media metadata record
+
+R2 keys are random UUIDs, so R2 listing alone cannot produce the
+newest-first ordering `q=source` needs. Every blob the package stores — both
+direct media-endpoint uploads and files folded out of a multipart create —
+gets a row in a new `micropub_media` table in the already-required
+`MICROPUB_DB` binding (no new `Env` member): `key` (primary key),
+`content_type`, `size_bytes`, `uploaded_at`, `deleted_at NULL`. The row is
+written **before** the `201` is returned; if the insert fails the endpoint
+best-effort deletes the fresh blob and returns `500`, so a URL handed to a
+client is always both servable and listed. Recording is **unconditional**
+(not gated on `extensions.proposed`): it is invisible to clients and avoids a
+history gap when a deployment later opts in.
+
+R2 remains the blob authority; the row is ordering/metadata bookkeeping and
+is never stored in KV. Blobs stored by earlier package versions have no row:
+they remain publicly servable and deletable (deletion resolves the R2 key
+from the URL, not the row) but are absent from listings; there is no
+backfill.
+
+#### Upload response body
+
+With the group enabled, a successful upload keeps the spec-required `201` +
+`Location` and adds the upstream minimum JSON body:
+
+```json
+{ "url": "https://example.com/media/6d9f…c2.jpg" }
+```
+
+Clients must still treat `Location` as authoritative per the core spec; the
+body is a convenience mirror. Richer members (dimensions, palette, …) are an
+explicitly allowed future enhancement upstream and are not designed here.
+
+#### `q=source` at the media endpoint
+
+Authorization: an authenticated, DPoP-bound token with the **`media`** scope.
+This deliberately differs from the post endpoint's `q=source` (which needs no
+action scope): the listing exposes URLs of every upload — including media
+attached to draft, unlisted, or private posts — so it is gated by the media
+endpoint's own least-privilege scope, matching "a token that can upload here
+can enumerate what it uploaded".
+
+- **List** (`?q=source`): `{ "items": [...] }`, live (non-deleted) media
+  newest-first by `uploaded_at` with `key` as the deterministic tie-breaker.
+  `limit` (default 10, max 100) and `offset` (default 0) paginate, matching
+  the post-list query. Each item carries the interop-consensus members:
+
+  ```json
+  {
+    "items": [
+      {
+        "url": "https://example.com/media/6d9f…c2.jpg",
+        "published": "2026-07-22T17:00:00Z",
+        "mime_type": "image/jpeg"
+      }
+    ]
+  }
+  ```
+
+  `url` is required by consuming clients (Quill), and `published` (RFC 3339,
+  from `uploaded_at`) feeds Quill's only-if-recent prepopulation, so both are
+  always present; `mime_type` is the stored content type.
+
+- **Single file** (`?q=source&url=<URL>`): the same object unwrapped. A URL
+  that fails ownership validation (below) is `400`; a valid-shaped URL with
+  no live media is `404` with an `invalid_request` body, per the
+  missing-post convention in [Error responses](#error-responses).
+
+Duplicate, unknown, or malformed parameters are `400 invalid_request`, as in
+the other extension queries.
+
+#### `action=delete` and `action=undelete`
+
+`POST` to the media endpoint (form-encoded or JSON) with `action=delete` and
+`url`. Per the upstream proposal the token must carry **both** the `delete`
+and `media` scopes; `action=undelete` is a package-defined symmetric restore
+requiring `undelete` and `media`. A `media`-only uploader token cannot
+destroy media; a `delete`-only post token cannot touch the media endpoint.
+
+**URL ownership validation (load-bearing).** The `url` must be an absolute
+URL that canonicalizes to exactly `${mediaEndpoint}/<key>` where `<key>` is a
+single path segment matching the generator format (UUID plus optional known
+extension, no encoded slashes, no `.`/`..` segments, no query or fragment).
+Anything else — other origins, other path prefixes, traversal or
+key-confusion attempts, the trash prefix — is `400 invalid_request` before
+any storage access. Combined with the mandatory subject (`me`) binding this
+is the cross-principal defense: the endpoint is single-owner, and no token
+minted for a different `me` reaches these actions at all.
+
+**Recoverable deletion.** Delete is a soft delete via a trash prefix:
+
+1. copy the blob to `.trash/<key>` (a streamed re-put, bounded by
+   `maxMediaBytes`);
+2. delete the live key;
+3. set the row's `deleted_at`.
+
+The ordering is load-bearing: the live blob is never removed before the
+trash copy is durable, so no partial failure can lose the bytes. The state
+machine makes retries convergent:
+
+| Live blob | Trash blob | Meaning                | `action=delete` outcome  |
+| --------- | ---------- | ---------------------- | ------------------------ |
+| yes       | no         | active                 | perform steps 1–3, `204` |
+| yes       | yes        | failed mid-delete      | resume steps 2–3, `204`  |
+| no        | yes        | deleted (recoverable)  | `404`                    |
+| no        | no         | purged or never stored | `404`                    |
+
+Deleting already-deleted or never-uploaded media is `404` with an
+`invalid_request` body, matching post deletion. `undelete` reverses the steps
+(copy back, delete trash, clear `deleted_at`) and succeeds only while the
+trash copy exists; after purge the deletion is permanent and `undelete` is
+`404`. Successful actions return `204 No Content` and emit structured log
+events alongside the existing `micropub.media.stored`.
+
+**Retention and purge.** Trash is retained for `mediaTrashRetentionDays`
+(default 30). Purging the blob bytes is delegated to an **R2 lifecycle rule**
+on the `.trash/` prefix, which the composed deployment configures (documented
+alongside the binding); the package does not need a cron trigger. Rows whose
+retention has passed are pruned opportunistically during media-endpoint
+writes — they are excluded from every response either way, so pruning is
+hygiene, not correctness. The public `GET` route serves only single-segment
+keys and therefore can never serve the trash prefix.
+
+**Orphaning is deliberate.** Media is not reference-counted against posts:
+deleting a blob that a live post still embeds leaves a broken link, exactly
+as deleting any web resource does. The alternative — scanning every post's
+properties on each media delete — couples the media endpoint to post
+storage for a guarantee the upstream extension does not promise. Clients
+that want consistency delete the post first (or update it), then its media.
+
+#### Test coverage
+
+Implementation must exercise: disabled-group behaviour byte-identical to
+today (empty upload body, `action`/`q` uninterpreted); scope-pair enforcement
+for delete/undelete and `media`-scope enforcement for the queries; URL
+ownership rejection (foreign origin, wrong prefix, traversal, encoded slash,
+trash prefix, query/fragment); the delete state machine including resumed
+partial failures and post-purge permanence; listing order, pagination, and
+deleted/legacy-blob exclusion; metadata-write failure rolling back the
+upload; and the gated upload response body.
+
 ## Auth / security
 
 - Authorize via an **IndieAuth access token + scope** (see
@@ -442,7 +616,10 @@ so on).
 
 ## Bindings (declared `Env` fragment)
 
-- **R2 bucket** for the media endpoint.
+- **R2 bucket** for the media endpoint. When the proposed media-endpoint
+  extensions ship, the deployment configures an R2 lifecycle rule expiring the
+  `.trash/` prefix after the retention window; the media metadata table lives
+  in the existing D1 binding, so no new binding is added.
 - Storage for published content / post records (D1 accessed with session
   consistency, or R2, per the consuming app's model). Authoritative state in
   strongly-consistent stores only — not KV.
@@ -457,6 +634,8 @@ so on).
   `extensions.proposed` is enabled; the consuming site/WAC layer supplies their
   actual authorization mapping.
 - Media bucket binding name and any size thresholds.
+- `mediaTrashRetentionDays` — how long soft-deleted media stays recoverable
+  (default 30); meaningful only with the proposed media-endpoint extensions.
 - Mapping/policy for where created posts are stored.
 
 ## Conformance
