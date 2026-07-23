@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dwk-discovery-starter",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "observability": { "enabled": true },
+  // No bindings on purpose: @dwk/webfinger and @dwk/host-meta are stateless
+  // and config-driven, so this Worker deploys on the free plan with nothing
+  // to provision. As you compose more @dwk packages in, add the union of the
+  // bindings their `Env` fragments declare (D1, R2, KV, Durable Objects, …) —
+  // each package's spec lists exactly what it needs.
+}

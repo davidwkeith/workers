@@ -162,6 +162,7 @@ class ShimDurableObjectStorage {
   readonly #db: DatabaseSync;
   readonly #onAlarmChange?: (scheduledTime: number | null) => void;
   #alarmTableReady = false;
+  #inTransaction = false;
 
   constructor(
     db: DatabaseSync,
@@ -211,8 +212,28 @@ class ShimDurableObjectStorage {
     this.#onAlarmChange?.(null);
   }
 
-  /** Synchronous transaction; rolls back if `fn` throws. No nesting needed. */
+  /**
+   * Nesting is unsupported (as on Cloudflare) and must fail loudly: without
+   * this guard the inner BEGIN throws, the inner ROLLBACK discards the
+   * outer, still-open transaction's writes, and the outer rollback then
+   * throws again, obscuring the original error. The flag is shared between
+   * `transactionSync` and `transaction` — both run on the same connection —
+   * so it also fires for concurrent-but-not-lexically-nested calls, e.g.
+   * two `transaction()` promises overlapping while one is mid-`await`;
+   * hence the "overlapping" wording in the error.
+   */
+  #enterTransaction(kind: string): void {
+    if (this.#inTransaction) {
+      throw new Error(
+        `${kind} does not support nesting or overlapping an in-flight transaction`,
+      );
+    }
+    this.#inTransaction = true;
+  }
+
+  /** Synchronous transaction; rolls back if `fn` throws. No nesting. */
   transactionSync<T>(fn: () => T): T {
+    this.#enterTransaction("transactionSync");
     this.#db.exec("BEGIN");
     try {
       const result = fn();
@@ -221,10 +242,13 @@ class ShimDurableObjectStorage {
     } catch (err) {
       this.#db.exec("ROLLBACK");
       throw err;
+    } finally {
+      this.#inTransaction = false;
     }
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    this.#enterTransaction("transaction");
     this.#db.exec("BEGIN");
     try {
       const result = await fn();
@@ -233,6 +257,8 @@ class ShimDurableObjectStorage {
     } catch (err) {
       this.#db.exec("ROLLBACK");
       throw err;
+    } finally {
+      this.#inTransaction = false;
     }
   }
 }
