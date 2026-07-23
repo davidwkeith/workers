@@ -9,11 +9,9 @@
 //
 // @see spec/self-hosting.md §10
 import { build } from "esbuild";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
 const pkgRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const entry = process.argv[2] ?? resolve(pkgRoot, "examples/serve.mjs");
 const outfile =
@@ -30,7 +28,13 @@ await build({
   // module with the Node shim (from `@dwk/cf-shims`), so the DO packages run
   // with no loader hook.
   alias: {
-    "cloudflare:workers": require.resolve("@dwk/cf-shims/cloudflare-workers"),
+    // @dwk/cf-shims is ESM-only (no "require" export condition, like every
+    // other @dwk package), so resolve it the ESM-native way rather than via
+    // createRequire — a CJS require.resolve() can't see an "import"-only
+    // exports entry.
+    "cloudflare:workers": fileURLToPath(
+      import.meta.resolve("@dwk/cf-shims/cloudflare-workers"),
+    ),
   },
   // `ws` loads these native accelerators optionally; keep them external so the
   // bundle runs on the pure-JS fallback when they are not installed.
