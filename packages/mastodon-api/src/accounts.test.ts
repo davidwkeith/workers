@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { MastodonBackend } from "./backend.js";
 import type { MastodonApiConfig } from "./config.js";
 import { sha256Hex } from "./encoding.js";
-import { TRANSPARENT_PIXEL } from "./entities.js";
+import { TRANSPARENT_PIXEL, encodeRemoteAccountId } from "./entities.js";
+import { encodeSnowflake } from "./snowflake.js";
 import { createMastodonStore } from "./store.js";
 import {
   api,
@@ -164,5 +166,110 @@ describe("GET /api/v1/apps/verify_credentials", () => {
   it("401s without a token", async () => {
     const res = await api()(get("/api/v1/apps/verify_credentials"));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/v1/accounts/:id/statuses", () => {
+  beforeEach(resetDb);
+
+  const ownEntry = {
+    id: encodeSnowflake(1_753_000_000_000, 1, 1),
+    receivedAt: 1_753_000_000_000,
+    objectType: "Note",
+    relayedBy: null,
+    source: 1 as const,
+    activity: {
+      type: "Create",
+      actor: "https://owner.example/users/owner",
+      object: { type: "Note", content: "<p>my own post</p>" },
+    },
+  };
+
+  function backendWithOwnStatuses(entries: unknown[]): MastodonBackend {
+    return {
+      account: async () => ({
+        counts: { followers: 2, following: 1, statuses: 16 },
+      }),
+      timeline: async () => ({ entries: [] }),
+      notifications: async () => ({ entries: [] }),
+      entry: async () => null,
+      ownStatuses: async () => ({ entries: entries as never }),
+    };
+  }
+
+  it("401s without a bearer token", async () => {
+    const res = await api()(get("/api/v1/accounts/1/statuses"));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the owner's own posts with the owner account and a Link header", async () => {
+    const token = await obtainAccessToken();
+    const res = await api({
+      ...testConfig,
+      backend: backendWithOwnStatuses([ownEntry]),
+    })(get("/api/v1/accounts/1/statuses", token));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      content: string;
+      account: { username: string };
+    }[];
+    expect(body).toHaveLength(1);
+    expect(body[0]?.id).toBe(ownEntry.id);
+    expect(body[0]?.content).toBe("<p>my own post</p>");
+    expect(body[0]?.account.username).toBe("owner");
+    expect(res.headers.get("link")).toContain('rel="next"');
+  });
+
+  it("returns [] for the owner when the backend lacks ownStatuses", async () => {
+    const token = await obtainAccessToken();
+    const backend = backendWithOwnStatuses([]);
+    const res = await api({
+      ...testConfig,
+      backend: { ...backend, ownStatuses: undefined },
+    })(get("/api/v1/accounts/1/statuses", token));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("returns [] for a remote account id (no enumeration of remote statuses)", async () => {
+    const token = await obtainAccessToken();
+    const id = encodeRemoteAccountId("https://remote.example/users/alice");
+    const res = await api()(get(`/api/v1/accounts/${id}/statuses`, token));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("404s an undecodable account id", async () => {
+    const token = await obtainAccessToken();
+    const res = await api()(get("/api/v1/accounts/nonsense/statuses", token));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("profile companion endpoints are valid-but-empty", () => {
+  beforeEach(resetDb);
+
+  for (const suffix of ["followers", "following", "featured_tags"]) {
+    it(`returns [] for /api/v1/accounts/:id/${suffix} with auth`, async () => {
+      const token = await obtainAccessToken();
+      const res = await api()(get(`/api/v1/accounts/1/${suffix}`, token));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+    });
+
+    it(`401s /api/v1/accounts/:id/${suffix} without auth`, async () => {
+      const res = await api()(get(`/api/v1/accounts/1/${suffix}`));
+      expect(res.status).toBe(401);
+    });
+  }
+
+  it("returns [] for /api/v1/accounts/relationships (not a 404 account id)", async () => {
+    const token = await obtainAccessToken();
+    const res = await api()(
+      get("/api/v1/accounts/relationships?id[]=1", token),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
   });
 });

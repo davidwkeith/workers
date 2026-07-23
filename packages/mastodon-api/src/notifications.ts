@@ -4,7 +4,7 @@ import { authenticateBearer } from "./auth.js";
 import { notificationEntity } from "./entities.js";
 import { accountRequired, invalidToken } from "./errors.js";
 import type { RouteContext } from "./handler.js";
-import { buildLinkHeader } from "./pagination.js";
+import { buildLinkHeader, pageQuery } from "./pagination.js";
 import { createMastodonStore } from "./store.js";
 
 const DEFAULT_LIMIT = 15;
@@ -21,20 +21,13 @@ export async function handleNotifications(
   if (token.accountId === null) return accountRequired();
   if (!ctx.config.backend) return Response.json([]);
 
-  const limit = Math.min(
-    Math.max(
-      1,
-      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
-        DEFAULT_LIMIT,
+  const page = await ctx.config.backend.notifications(
+    pageQuery(
+      ctx.url,
+      { limit: DEFAULT_LIMIT, max: MAX_LIMIT },
+      ctx.config.pageSize?.max,
     ),
-    ctx.config.pageSize?.max ?? MAX_LIMIT,
   );
-  const page = await ctx.config.backend.notifications({
-    limit,
-    maxId: ctx.url.searchParams.get("max_id") ?? undefined,
-    sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
-    minId: ctx.url.searchParams.get("min_id") ?? undefined,
-  });
   const notifications = page.entries
     .map((entry) => notificationEntity(entry, { baseUrl: ctx.config.baseUrl }))
     .filter((n): n is Record<string, unknown> => n !== null);

@@ -5,7 +5,7 @@ import { statusEntity } from "./entities.js";
 import { credentialAccountEntity } from "./entities.js";
 import { accountRequired, invalidToken } from "./errors.js";
 import type { RouteContext } from "./handler.js";
-import { buildLinkHeader } from "./pagination.js";
+import { buildLinkHeader, pageQuery } from "./pagination.js";
 import { createMastodonStore } from "./store.js";
 
 const DEFAULT_LIMIT = 20;
@@ -20,20 +20,13 @@ export async function handleHomeTimeline(ctx: RouteContext): Promise<Response> {
   if (token.accountId === null) return accountRequired();
   if (!ctx.config.backend) return Response.json([]);
 
-  const limit = Math.min(
-    Math.max(
-      1,
-      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
-        DEFAULT_LIMIT,
+  const page = await ctx.config.backend.timeline(
+    pageQuery(
+      ctx.url,
+      { limit: DEFAULT_LIMIT, max: MAX_LIMIT },
+      ctx.config.pageSize?.max,
     ),
-    ctx.config.pageSize?.max ?? MAX_LIMIT,
   );
-  const page = await ctx.config.backend.timeline({
-    limit,
-    maxId: ctx.url.searchParams.get("max_id") ?? undefined,
-    sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
-    minId: ctx.url.searchParams.get("min_id") ?? undefined,
-  });
   const hasOwnerPost = page.entries.some((entry) => entry.source === 1);
   const ownerAccount = hasOwnerPost
     ? credentialAccountEntity(

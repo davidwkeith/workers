@@ -47,6 +47,7 @@ describe("stub roster", () => {
   it("covers the full roster from the design", () => {
     expect(STUB_ROUTES.map((stub) => stub.path).sort()).toEqual(
       [
+        "/api/v1/accounts/relationships",
         "/api/v1/filters",
         "/api/v2/filters",
         "/api/v1/lists",

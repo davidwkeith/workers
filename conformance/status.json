@@ -33,11 +33,16 @@
           "lastRun": null,
           "targets": {
             "pixelfed-app": {
+              "status": "not-applicable",
+              "report": null,
+              "lastRun": "2026-07-23T17:30:00Z"
+            },
+            "tusky": {
               "status": "pending",
               "report": null,
               "lastRun": null
             },
-            "tusky": {
+            "ice-cubes": {
               "status": "pending",
               "report": null,
               "lastRun": null

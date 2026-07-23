@@ -67,6 +67,12 @@ export interface MastodonBackend {
   account(): Promise<BackendAccount>;
   /** Newest-first page of timeline entries (Create/Announce rows). */
   timeline(query: BackendPageQuery): Promise<BackendPage<BackendEntry>>;
+  /**
+   * Newest-first page of the owner's own posts only (outbox/source-1 rows),
+   * backing `GET /api/v1/accounts/:id/statuses` for the owner account.
+   * Optional: absent backends degrade that route to a valid-but-empty page.
+   */
+  ownStatuses?(query: BackendPageQuery): Promise<BackendPage<BackendEntry>>;
   /** Newest-first page of notification entries. */
   notifications(query: BackendPageQuery): Promise<BackendPage<BackendEntry>>;
   /** Single stored entry by snowflake id. */
