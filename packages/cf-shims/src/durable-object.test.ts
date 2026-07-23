@@ -140,6 +140,30 @@ class Kitchen extends DurableObject {
           .toArray();
         return json({ leaked: rows.length });
       }
+      case "/tx-nested": {
+        let message = "";
+        try {
+          this.#state.storage.transactionSync(() => {
+            sql.exec("INSERT INTO t (k, v) VALUES ('e', 5)");
+            this.#state.storage.transactionSync(() => {
+              sql.exec("INSERT INTO t (k, v) VALUES ('f', 6)");
+            });
+          });
+        } catch (e) {
+          message = (e as Error).message;
+        }
+        const leaked = sql
+          .exec("SELECT k FROM t WHERE k IN ('e', 'f')")
+          .toArray().length;
+        // The connection is usable again after the rejected nesting.
+        this.#state.storage.transactionSync(() =>
+          sql.exec("INSERT INTO t (k, v) VALUES ('g', 7)"),
+        );
+        const after = sql
+          .exec("SELECT k FROM t WHERE k = 'g'")
+          .toArray().length;
+        return json({ message, leaked, after });
+      }
       case "/cursor": {
         const cursor = sql.exec("SELECT k, v FROM t");
         let iterated = 0;
@@ -273,6 +297,21 @@ describe("Durable Object emulation", () => {
     expect((await commit.json()) as { n: number }).toEqual({ n: 3 });
     const rb = await ns.get(id).fetch(new Request("http://do/tx-rollback"));
     expect((await rb.json()) as { leaked: number }).toEqual({ leaked: 0 });
+  });
+
+  it("rejects nested transactionSync with a clear error, rolling back the outer transaction", async () => {
+    const ns = kitchenNs();
+    const res = await ns
+      .get(ns.idFromName("nest"))
+      .fetch(new Request("http://do/tx-nested"));
+    const body = (await res.json()) as {
+      message: string;
+      leaked: number;
+      after: number;
+    };
+    expect(body.message).toMatch(/does not support nesting/);
+    expect(body.leaked).toBe(0);
+    expect(body.after).toBe(1);
   });
 
   it("supports the cursor surface (columnNames, iteration, databaseSize)", async () => {

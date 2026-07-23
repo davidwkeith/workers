@@ -15,6 +15,18 @@ describe("D1 → node:sqlite shim", () => {
     );
   });
 
+  it("exec() counts statements without counting semicolons in literals", async () => {
+    const multi = await db.exec(
+      "CREATE TABLE a (id INTEGER); CREATE TABLE b (id INTEGER);",
+    );
+    expect(multi.count).toBe(2);
+    const literal = await db.exec("INSERT INTO notes (slug) VALUES ('a;b')");
+    expect(literal.count).toBe(1);
+    expect(
+      await db.prepare("SELECT slug FROM notes").first<string>("slug"),
+    ).toBe("a;b");
+  });
+
   it("inserts and reads back via first()", async () => {
     const run = await db
       .prepare("INSERT INTO notes (slug, body, n) VALUES (?, ?, ?)")
