@@ -1216,6 +1216,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // child keys concatenate correctly. The router normalizes this, but the
         // backend is a public seam, so guard here too.
         const dest = collectionDest(from, to);
+        // RFC 4918 §9.8.5: COPY onto a destination whose immediate parent
+        // doesn't exist must 409, not auto-vivify it (same bug class as
+        // MKCOL/PUT — litmus copymove `copy_nodestcoll`).
+        if (!this.#hasExistingParent(store, dest)) {
+          throw new WebdavResourceConflict("missing destination parent");
+        }
         const destExisted = store.head(dest) !== null;
         // Overwrite is delete-then-copy (the router already 412'd a no-overwrite
         // collision), so the destination subtree never lingers under the copy.
@@ -1235,6 +1241,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // MOVE is always Depth: infinity (RFC 4918 §9.9.3): copy the whole
         // subtree, then drop the source.
         const dest = collectionDest(from, to);
+        // Same missing-destination-parent guard as COPY (RFC 4918 §9.9.4).
+        if (!this.#hasExistingParent(store, dest)) {
+          throw new WebdavResourceConflict("missing destination parent");
+        }
         const destExisted = store.head(dest) !== null;
         if (destExisted) this.#webdavDeleteTree(store, dest);
         await this.#webdavCopyTree(store, origin, from, dest, "infinity");

@@ -547,6 +547,25 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus copymove `copy_nodestcoll`/RFC 4918 §9.8.5/§9.9.4: COPY/MOVE onto
+  // a destination whose immediate parent collection doesn't exist must 409,
+  // not auto-vivify it.
+  it("409s a COPY/MOVE whose destination's parent collection doesn't exist", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/src.txt", { body: "data" });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: "https://pod.example/missing/copy.txt" },
+      });
+      expect(copy.status).toBe(409);
+
+      await call("PUT", "/src2.txt", { body: "data" });
+      const move = await call("MOVE", "/src2.txt", {
+        headers: { destination: "https://pod.example/missing/moved.txt" },
+      });
+      expect(move.status).toBe(409);
+    });
+  });
+
   it("deletes a resource and refuses to delete a non-empty collection", async () => {
     await withHandler(async ({ call }) => {
       await call("MKCOL", "/full");

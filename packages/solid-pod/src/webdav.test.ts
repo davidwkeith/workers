@@ -357,6 +357,24 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  // litmus copymove `copy_nodestcoll`/RFC 4918 §9.8.5/§9.9.4: COPY/MOVE onto
+  // a destination whose immediate parent collection doesn't exist must 409.
+  it("409s a COPY/MOVE whose destination's parent collection doesn't exist", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/src.txt", { body: "data" });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: `${baseUrl}/missing/copy.txt` },
+      });
+      expect(copy.status).toBe(409);
+
+      await call("PUT", "/src2.txt", { body: "data" });
+      const move = await call("MOVE", "/src2.txt", {
+        headers: { destination: `${baseUrl}/missing/moved.txt` },
+      });
+      expect(move.status).toBe(409);
+    });
+  });
+
   it("COPYs a collection and its children (Depth: infinity)", async () => {
     await withPod(RW, async ({ call, baseUrl }) => {
       await call("MKCOL", "/box");

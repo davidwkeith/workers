@@ -217,6 +217,11 @@ export async function verifyAppPassword(
   pepper?: string,
 ): Promise<boolean> {
   if (record.expiresAt !== null && now() >= record.expiresAt) return false;
+  // A record minted with an iteration count above workerd's PBKDF2 ceiling
+  // (imported/migrated data, or anything minted outside mintAppPassword,
+  // which now refuses to produce one) would otherwise make deriveHash throw
+  // NotSupportedError here, breaking this function's "never throws" contract.
+  if (record.iterations > PBKDF2_ITERATION_CEILING) return false;
   const expected = fromHex(record.hashHex);
   const actual = await deriveHash(
     secret,
