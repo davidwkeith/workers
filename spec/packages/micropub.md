@@ -423,12 +423,22 @@ newest-first ordering `q=source` needs. Every blob the package stores — both
 direct media-endpoint uploads and files folded out of a multipart create —
 gets a row in a new `micropub_media` table in the already-required
 `MICROPUB_DB` binding (no new `Env` member): `key` (primary key),
-`content_type`, `size_bytes`, `uploaded_at`, `deleted_at NULL`. The row is
-written **before** the `201` is returned; if the insert fails the endpoint
-best-effort deletes the fresh blob and returns `500`, so a URL handed to a
-client is always both servable and listed. Recording is **unconditional**
-(not gated on `extensions.proposed`): it is invisible to clients and avoids a
-history gap when a deployment later opts in.
+`content_type`, `size_bytes`, `uploaded_at`, `deleted_at NULL`. Recording is
+**unconditional** (not gated on `extensions.proposed`): it is invisible to
+clients and avoids a history gap when a deployment later opts in.
+
+How an insert **failure** is handled depends on the group, because the row is
+load-bearing only when the extensions are on:
+
+- **Enabled:** the row is written before the `201` is returned; if the insert
+  fails the endpoint best-effort deletes the fresh blob and returns `500`, so
+  a URL handed to a client is always both servable and listed.
+- **Disabled:** the insert is best-effort. On failure the endpoint logs a
+  structured warning, keeps the blob, and still returns `201` — today's
+  guarantee that a successful R2 write means a successful upload is
+  preserved, and no blob is ever deleted underneath a client. The unrecorded
+  blob simply behaves like a legacy blob (next paragraph) if the group is
+  later enabled.
 
 R2 remains the blob authority; the row is ordering/metadata bookkeeping and
 is never stored in KV. Blobs stored by earlier package versions have no row:
@@ -555,7 +565,8 @@ ownership rejection (foreign origin, wrong prefix, traversal, encoded slash,
 trash prefix, query/fragment); the delete state machine including resumed
 partial failures and post-purge permanence; listing order, pagination, and
 deleted/legacy-blob exclusion; metadata-write failure rolling back the
-upload; and the gated upload response body.
+upload when enabled but leaving the `201` and blob untouched when disabled;
+and the gated upload response body.
 
 ## Auth / security
 
