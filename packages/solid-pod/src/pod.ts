@@ -51,6 +51,7 @@ import {
   resolveLockPolicy,
   CollectionNotEmpty as WebdavCollectionNotEmpty,
   PreconditionFailed as WebdavPreconditionFailed,
+  ResourceConflict as WebdavResourceConflict,
   CredentialStore,
   LockStore,
   type ResourceBody,
@@ -1134,6 +1135,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         preconditions: WritePreconditions,
         contentLength: number | null = null,
       ): Promise<WriteOutcome> => {
+        if (!this.#hasExistingParent(store, path)) {
+          throw new WebdavResourceConflict("missing parent collection");
+        }
         const existed = store.head(path) !== null;
         try {
           await this.#writeResolvedBody(
@@ -1156,6 +1160,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       },
 
       makeCollection: async (path: string): Promise<WriteOutcome> => {
+        if (!this.#hasExistingParent(store, path)) {
+          throw new WebdavResourceConflict("missing parent collection");
+        }
         try {
           store.writeQuads(path, containerTypeQuads(toIri(origin, path)), {
             contentType: "text/turtle",
@@ -1454,6 +1461,21 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   }
 
   // -- containment -----------------------------------------------------------
+
+  /**
+   * Whether `path`'s immediate parent container already exists. The LDP door
+   * auto-vivifies missing ancestors (`#ensureContainerChain`), but WebDAV's
+   * Class 2 semantics (RFC 4918 §7.3, §9.3.1) require `PUT`/`MKCOL` to fail
+   * with `409 Conflict` when the parent doesn't already exist (litmus
+   * `put_no_parent`/`mkcol_no_parent`) — so the WebDAV backend closures check
+   * this before writing, instead of calling `#ensureContainerChain` blind. The
+   * storage root is always implicitly present.
+   */
+  #hasExistingParent(store: Store, path: string): boolean {
+    const parent = parentContainer(path);
+    if (parent === null || parent === "/") return true;
+    return store.head(parent) !== null;
+  }
 
   /** Ensure every ancestor container of `key` exists and contains its child. */
   #ensureContainerChain(store: Store, origin: string, key: string): void {

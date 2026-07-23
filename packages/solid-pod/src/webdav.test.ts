@@ -225,6 +225,27 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  // litmus `mkcol_no_parent` / `put_no_parent`: unlike the LDP door (which
+  // auto-vivifies missing ancestor containers), the WebDAV door must 409
+  // rather than silently create the intermediate collection.
+  it("409s a MKCOL/PUT whose immediate parent collection doesn't exist", async () => {
+    await withPod(RW, async ({ call }) => {
+      expect((await call("MKCOL", "/missing/child")).status).toBe(409);
+      expect(
+        (await call("PUT", "/missing/child.txt", { body: "x" })).status,
+      ).toBe(409);
+    });
+  });
+
+  // litmus `mkcol_over_plain`: MKCOL naming an existing plain resource must
+  // refuse, not create a same-named collection alongside it.
+  it("405s a MKCOL over an existing plain resource", async () => {
+    await withPod(RW, async ({ call }) => {
+      await call("PUT", "/plain.txt", { body: "x" });
+      expect((await call("MKCOL", "/plain.txt")).status).toBe(405);
+    });
+  });
+
   it("locks a resource, blocks an unkeyed write (423), then admits the keyed one", async () => {
     await withPod(RW, async ({ call }) => {
       await call("PUT", "/doc.txt", { body: "v1" });
@@ -264,6 +285,13 @@ describe("@dwk/solid-pod WebDAV door", () => {
       expect((await call("GET", "/gone.txt")).status).toBe(404);
       // The storage root container is undeletable on the WebDAV door too.
       expect((await call("DELETE", "/")).status).toBe(405);
+    });
+  });
+
+  // litmus `delete_null`: DELETE on a resource that never existed must 404.
+  it("404s a DELETE of a resource that never existed", async () => {
+    await withPod(RW, async ({ call }) => {
+      expect((await call("DELETE", "/never.txt")).status).toBe(404);
     });
   });
 

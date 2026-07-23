@@ -96,11 +96,17 @@ node scripts/conformance/run-suite.mjs webdav \
 **3b. Via CI** — dispatch the `Conformance` workflow (Actions → Conformance →
 Run workflow) with:
 
-| Input        | Value                        |
-| ------------ | ---------------------------- |
-| `standard`   | `webdav`                     |
-| `target_url` | `https://conformance.dwk.io` |
-| `target_id`  | `cloudflare` (default)       |
+| Input        | Value                             |
+| ------------ | --------------------------------- |
+| `standard`   | `webdav`                          |
+| `target_url` | `https://conformance.dwk.io/dav/` |
+| `target_id`  | `cloudflare` (default)            |
+
+`target_url` must include the `/dav/` mount path, not just the domain —
+`run-suite.mjs` passes it straight to `litmus` with no per-standard suffix
+logic (unlike the ActivityPub path, which appends `/outbox` itself), so a
+bare domain 404s on litmus's very first `MKCOL` and the run aborts before
+any real group runs.
 
 This only succeeds if the `WEBDAV_USERNAME`/`WEBDAV_PASSWORD` repo secrets
 are already set to the values from Step 1 — the workflow reads them from
