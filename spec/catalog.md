@@ -170,8 +170,8 @@ unrecognized JSON keys, so adding them is backward-compatible.
   consumer requires this on every `prefix` claim (only a specification can
   approve child paths); recommended on `exact` claims too. Not yet
   back-filled onto this repo's pre-existing `prefix` claims (`/users/`,
-  `/media/`, `/nodeinfo/`, `/pod/`, `/dav/`, `/storage/`, `/xrpc/`) — tracked
-  as a follow-up rather than bundled into an unrelated change.
+  `/nodeinfo/`, `/pod/`, `/dav/`, `/storage/`, `/xrpc/`) — tracked as a
+  follow-up rather than bundled into an unrelated change.
 
 **Mount-prefix contract.** The composition contract lets a composer mount any
 handler under an arbitrary path prefix. Route claims are static data, so they

@@ -103,7 +103,8 @@
           "match": "prefix",
           "methods": ["GET"],
           "head": true,
-          "handler": "createMicropub"
+          "handler": "createMicropub",
+          "specificationURL": "https://micropub.spec.indieweb.org/#media-endpoint"
         }
       ]
     },
