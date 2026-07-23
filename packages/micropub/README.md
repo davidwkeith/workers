@@ -68,6 +68,13 @@ The handler fails loudly at startup if any of these are missing:
   filtered lists use deterministic keyset cursors.
 - **Opt-in Location/Venue** (`q=geo`): a read-only proximity search over an
   injected venue store, independent from post storage. See below.
+- **Opt-in media-endpoint extensions**: with `extensions.proposed` on, the
+  media endpoint gains a `q=source` listing (newest-first, `media` scope
+  required) and by-URL lookup, a `{ "url": ... }` JSON body on upload, and
+  recoverable `action=delete`/`action=undelete` (requiring both the action
+  scope and `media`). Deleted blobs move to an R2 `.trash/` prefix retained
+  for `mediaTrashRetentionDays` (default 30); configure an R2 lifecycle rule
+  on that prefix to purge the bytes.
 
 ### Location/Venue (`q=geo`) extension
 

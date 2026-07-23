@@ -170,6 +170,14 @@ export interface MicropubConfig {
   /** Maximum accepted media upload size in bytes. Defaults to 25 MiB. */
   readonly maxMediaBytes?: number;
   /**
+   * Days soft-deleted media stays recoverable under the R2 `.trash/` prefix
+   * before `undelete` permanently fails. Defaults to 30. Purging the trash
+   * *bytes* is delegated to an R2 lifecycle rule the composed deployment
+   * configures on the prefix; this window only drives the opportunistic
+   * pruning of expired metadata rows (proposed media-endpoint extensions).
+   */
+  readonly mediaTrashRetentionDays?: number;
+  /**
    * Whether to check each token against the issued-token store (revocation).
    * Defaults to `true` — staleness here is a security bug, so the check hits the
    * strongly-consistent `AUTH_DB` rather than any cache.
@@ -224,6 +232,7 @@ export interface ResolvedConfig {
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
   readonly fediverse?: FediverseSyndicationConfig;
   readonly maxMediaBytes: number;
+  readonly mediaTrashRetentionDays: number;
   readonly checkRevocation: boolean;
   readonly checkDpopReplay: boolean;
   readonly generatePostUrl: GeneratePostUrl;
@@ -232,6 +241,7 @@ export interface ResolvedConfig {
 }
 
 const DEFAULT_MAX_MEDIA_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MEDIA_TRASH_RETENTION_DAYS = 30;
 
 /** Lowercase, dash-separated slug derived from arbitrary text (max 80 chars). */
 function slugify(text: string): string {
@@ -358,6 +368,8 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),
     maxMediaBytes: config.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
+    mediaTrashRetentionDays:
+      config.mediaTrashRetentionDays ?? DEFAULT_MEDIA_TRASH_RETENTION_DAYS,
     checkRevocation: config.checkRevocation ?? true,
     checkDpopReplay: config.checkDpopReplay ?? true,
     generatePostUrl:

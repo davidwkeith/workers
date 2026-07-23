@@ -57,7 +57,16 @@ import {
   type MicropubVenueStore,
   type Venue,
 } from "./venues.js";
-import { authorize, tokenFromHeader, type AuthEnv } from "./auth.js";
+import { authorize, hasScope, tokenFromHeader, type AuthEnv } from "./auth.js";
+import {
+  createMicropubMediaStore,
+  MEDIA_EXTENSIONS,
+  MediaValidationError,
+  mediaKeyFromUrl,
+  mediaTrashKey,
+  parseMediaSourceParams,
+  type MediaRecord,
+} from "./media.js";
 import { syndicateEntry } from "./fediverse.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
@@ -351,30 +360,45 @@ async function foldUploadedMedia(
   for (const [key, values] of Object.entries(parsed.mf2.properties)) {
     properties[key] = [...values];
   }
-  for (const [field, file] of files) {
-    if (file.size > config.maxMediaBytes) {
-      throw new Mf2ParseError(
-        `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
-      );
+  const storedUrls: string[] = [];
+  try {
+    for (const [field, file] of files) {
+      if (file.size > config.maxMediaBytes) {
+        throw new Mf2ParseError(
+          `file "${file.name}" exceeds the ${config.maxMediaBytes}-byte limit`,
+        );
+      }
+      const url = await storeMedia(file, env, config);
+      storedUrls.push(url);
+      const prop = field.endsWith("[]") ? field.slice(0, -2) : field;
+      (properties[prop] ??= []).push(url);
     }
-    const url = await storeMedia(file, env, config);
-    const prop = field.endsWith("[]") ? field.slice(0, -2) : field;
-    (properties[prop] ??= []).push(url);
+  } catch (err) {
+    // A later file failed after earlier ones committed. Their URLs were never
+    // returned to the client, so roll them back — otherwise a servable (and,
+    // with the proposed extensions on, `q=source`-listed) orphan blob would
+    // outlive a create that never happened. Best-effort: a blob that survives
+    // a failed rollback is at worst an unreferenced legacy blob.
+    const store = createMicropubMediaStore(env);
+    for (const url of storedUrls) {
+      const key = url.slice(config.mediaEndpoint.length + 1);
+      try {
+        await env.MEDIA.delete(key);
+      } catch {
+        // Best-effort.
+      }
+      try {
+        await store.remove(key);
+      } catch {
+        // Best-effort.
+      }
+    }
+    throw err;
   }
   return { ...parsed, mf2: { type: parsed.mf2.type, properties } };
 }
 
 // --- Media ------------------------------------------------------------------
-
-const EXTENSIONS: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-  "image/avif": ".avif",
-  "video/mp4": ".mp4",
-  "audio/mpeg": ".mp3",
-};
 
 /**
  * Content types safe to serve inline with their declared type — the media this
@@ -382,19 +406,57 @@ const EXTENSIONS: Record<string, string> = {
  * is served as an opaque `application/octet-stream` attachment so a `media`-scope
  * client cannot upload active content that renders as stored XSS on this origin.
  */
-const SAFE_INLINE_TYPES = new Set(Object.keys(EXTENSIONS));
+const SAFE_INLINE_TYPES = new Set(Object.keys(MEDIA_EXTENSIONS));
 
-/** Stream a file to R2 under a random key and return its public media URL. */
+/**
+ * The `micropub_media` metadata insert failed after a successful R2 write
+ * while the proposed media extensions are on — the row is load-bearing for
+ * `q=source`, so the fresh blob was rolled back and the request must fail.
+ */
+class MediaMetadataError extends Error {}
+
+/**
+ * Stream a file to R2 under a random key and return its public media URL.
+ *
+ * Every stored blob also gets a `micropub_media` metadata row, regardless of
+ * `extensions.proposed` (invisible to clients; avoids a listing history gap
+ * when a deployment later opts in). Failure handling splits by enablement:
+ * enabled, the row is load-bearing for `q=source`, so an insert failure rolls
+ * the blob back and throws {@link MediaMetadataError}; disabled, the insert
+ * is best-effort — the upload keeps today's R2-write-succeeds guarantee and
+ * the unrecorded blob simply behaves as a legacy blob later.
+ */
 async function storeMedia(
   file: File,
   env: MicropubEnv,
   config: ResolvedConfig,
 ): Promise<string> {
-  const ext = EXTENSIONS[file.type] ?? "";
+  const ext = MEDIA_EXTENSIONS[file.type] ?? "";
   const key = `${crypto.randomUUID()}${ext}`;
+  const contentType = file.type || "application/octet-stream";
   await env.MEDIA.put(key, file.stream(), {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
+    httpMetadata: { contentType },
   });
+  try {
+    await createMicropubMediaStore(env).record({
+      key,
+      contentType,
+      sizeBytes: file.size,
+      now: Math.floor(Date.now() / 1000),
+    });
+  } catch (err) {
+    if (config.extensions.proposed) {
+      try {
+        await env.MEDIA.delete(key);
+      } catch {
+        // Best-effort rollback; the orphaned blob is unlisted either way.
+      }
+      throw new MediaMetadataError(
+        `failed to record media metadata: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    emit(config, "warn", MicropubLogEvent.MediaMetadataFailed, {});
+  }
   return `${config.mediaEndpoint}/${key}`;
 }
 
@@ -466,14 +528,272 @@ async function handleMediaUpload(
       413,
     );
   }
-  const url = await storeMedia(file, env, config);
+  let url: string;
+  try {
+    url = await storeMedia(file, env, config);
+  } catch (err) {
+    if (err instanceof MediaMetadataError) {
+      return error("server_error", err.message, 500);
+    }
+    throw err;
+  }
   emit(config, "info", MicropubLogEvent.MediaStored, {
     contentType: file.type || "application/octet-stream",
   });
+  if (config.extensions.proposed) {
+    await pruneExpiredMediaRows(env, config);
+    // Upstream Response-from-Media-Endpoint minimum: mirror the authoritative
+    // `Location` header in a JSON body so clients need not read headers.
+    return new Response(JSON.stringify({ url }), {
+      status: 201,
+      headers: {
+        location: url,
+        "content-type": "application/json",
+        ...CORS_HEADERS,
+      },
+    });
+  }
   return new Response(null, {
     status: 201,
     headers: { location: url, ...CORS_HEADERS },
   });
+}
+
+/**
+ * Opportunistically drop metadata rows whose trash retention has passed. The
+ * blob bytes are purged by the deployment's R2 lifecycle rule on the trash
+ * prefix; expired rows are excluded from every response either way, so this
+ * is hygiene, never correctness — failures are swallowed.
+ */
+async function pruneExpiredMediaRows(
+  env: MicropubEnv,
+  config: ResolvedConfig,
+): Promise<void> {
+  const cutoff =
+    Math.floor(Date.now() / 1000) - config.mediaTrashRetentionDays * 86400;
+  try {
+    await createMicropubMediaStore(env).pruneExpired(cutoff);
+  } catch {
+    // Hygiene only.
+  }
+}
+
+/** The interop-consensus media `q=source` item shape. */
+function mediaView(
+  record: MediaRecord,
+  config: ResolvedConfig,
+): Record<string, unknown> {
+  return {
+    url: `${config.mediaEndpoint}/${record.key}`,
+    published: new Date(record.uploadedAt * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, "Z"),
+    mime_type: record.contentType,
+  };
+}
+
+/**
+ * Handle `GET` to the media endpoint (proposed extensions only): `q=source`
+ * as a newest-first listing or a single-file lookup by `url`. Requires the
+ * `media` scope — deliberately unlike the post endpoint's scope-less
+ * `q=source`, because the listing enumerates every upload, including media
+ * attached to draft, unlisted, or private posts.
+ */
+async function handleMediaQuery(
+  request: Request,
+  env: MicropubEnv,
+  config: ResolvedConfig,
+): Promise<Response> {
+  const auth = await authorize(
+    request,
+    env,
+    config,
+    tokenFromHeader(request),
+    ["media"],
+    config.mediaEndpoint,
+  );
+  if (!auth.ok) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: auth.error,
+      status: auth.status,
+    });
+    return error(auth.error, auth.description, auth.status);
+  }
+
+  const params = new URL(request.url).searchParams;
+  const q = params.get("q");
+  if (q !== "source") {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "query_unsupported",
+    });
+    return error("invalid_request", `unsupported query \`q=${q ?? ""}\``, 400);
+  }
+
+  let query;
+  try {
+    query = parseMediaSourceParams(params);
+  } catch (err) {
+    if (err instanceof MediaValidationError) {
+      return error("invalid_request", err.message, 400);
+    }
+    throw err;
+  }
+
+  const store = createMicropubMediaStore(env);
+  if ("url" in query) {
+    const key = mediaKeyFromUrl(query.url, config.mediaEndpoint);
+    if (!key) {
+      return error(
+        "invalid_request",
+        "`url` does not name media owned by this endpoint",
+        400,
+      );
+    }
+    const record = await store.get(key);
+    if (!record || record.deletedAt !== null) {
+      // Body-code/status divergence per the missing-post convention in
+      // spec/packages/micropub.md "Error responses".
+      return error("invalid_request", "no media exists at that URL", 404);
+    }
+    return json(mediaView(record, config));
+  }
+  const records = await store.list(query.page);
+  return json({ items: records.map((record) => mediaView(record, config)) });
+}
+
+/**
+ * Handle a non-multipart `POST` to the media endpoint (proposed extensions
+ * only): `action=delete` — a recoverable soft delete via the R2 trash prefix
+ * — and the package-defined symmetric `action=undelete`. Each action requires
+ * **both** its action scope and `media`: a `media`-only uploader token cannot
+ * destroy media, and a `delete`-only post token cannot touch the media
+ * endpoint.
+ */
+async function handleMediaAction(
+  request: Request,
+  env: MicropubEnv,
+  config: ResolvedConfig,
+): Promise<Response> {
+  const auth = await authorize(
+    request,
+    env,
+    config,
+    tokenFromHeader(request),
+    ["media"],
+    config.mediaEndpoint,
+  );
+  if (!auth.ok) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: auth.error,
+      status: auth.status,
+    });
+    return error(auth.error, auth.description, auth.status);
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  let action: string | undefined;
+  let url: string | undefined;
+  if (contentType.includes("application/json")) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return error("invalid_request", "request body is not valid JSON", 400);
+    }
+    if (body && typeof body === "object") {
+      const record = body as Record<string, unknown>;
+      if (typeof record.action === "string") action = record.action;
+      if (typeof record.url === "string") url = record.url;
+    }
+  } else {
+    for (const [key, value] of await readForm(request)) {
+      if (key === "action") action ??= value;
+      if (key === "url") url ??= value;
+    }
+  }
+
+  if (action !== "delete" && action !== "undelete") {
+    emit(config, "warn", MicropubLogEvent.RequestRejected, {
+      reason: "action_unsupported",
+    });
+    return error(
+      "invalid_request",
+      `unsupported media action \`${action ?? ""}\``,
+      400,
+    );
+  }
+  if (!hasScope(auth.claims.scope, [action])) {
+    emit(config, "warn", MicropubLogEvent.AuthRejected, {
+      reason: "insufficient_scope",
+      status: 403,
+    });
+    return error(
+      "insufficient_scope",
+      `media \`${action}\` requires both the \`${action}\` and \`media\` scopes`,
+      403,
+    );
+  }
+  if (!url) {
+    return error(
+      "invalid_request",
+      `\`url\` is required for \`${action}\``,
+      400,
+    );
+  }
+  // Load-bearing ownership validation: reject anything that is not exactly
+  // this endpoint's single-segment generator-format key — before any storage
+  // access.
+  const key = mediaKeyFromUrl(url, config.mediaEndpoint);
+  if (!key) {
+    return error(
+      "invalid_request",
+      "`url` does not name media owned by this endpoint",
+      400,
+    );
+  }
+
+  const store = createMicropubMediaStore(env);
+  const now = Math.floor(Date.now() / 1000);
+  await pruneExpiredMediaRows(env, config);
+  const trashKey = mediaTrashKey(key);
+
+  if (action === "delete") {
+    const live = await env.MEDIA.head(key);
+    if (!live) {
+      // Already deleted (recoverable) or never stored: both are 404.
+      return error("invalid_request", "no media exists at that URL", 404);
+    }
+    // The live blob is never removed before the trash copy is durable, so no
+    // partial failure can lose the bytes; a resumed delete (both blobs
+    // present) skips straight to the removal.
+    if (!(await env.MEDIA.head(trashKey))) {
+      const body = await env.MEDIA.get(key);
+      if (body) {
+        await env.MEDIA.put(trashKey, body.body, {
+          httpMetadata: body.httpMetadata,
+        });
+      }
+    }
+    await env.MEDIA.delete(key);
+    await store.setDeleted(key, now);
+    emit(config, "info", MicropubLogEvent.MediaDeleted, {});
+    return noContent();
+  }
+
+  const trash = await env.MEDIA.get(trashKey);
+  if (!trash) {
+    // After the retention purge the deletion is permanent.
+    return error(
+      "invalid_request",
+      "no recoverable media exists at that URL",
+      404,
+    );
+  }
+  await env.MEDIA.put(key, trash.body, { httpMetadata: trash.httpMetadata });
+  await env.MEDIA.delete(trashKey);
+  await store.setDeleted(key, null);
+  emit(config, "info", MicropubLogEvent.MediaUndeleted, {});
+  return noContent();
 }
 
 /** Serve a previously uploaded media blob from R2 (public, unauthenticated). */
@@ -481,6 +801,11 @@ async function handleMediaGet(
   key: string,
   env: MicropubEnv,
 ): Promise<Response> {
+  // Only single-segment generator-format keys are public; in particular the
+  // recoverable-delete trash prefix (`.trash/<key>`) must never be servable.
+  if (!key || key.includes("/")) {
+    return new Response("Not Found", { status: 404 });
+  }
   const object = await env.MEDIA.get(key);
   if (!object) return new Response("Not Found", { status: 404 });
   const headers = new Headers(CORS_HEADERS);
@@ -606,6 +931,12 @@ async function handleQuery(
         ? {
             properties: ["audience", "location-visibility"],
             audiences: config.audiences,
+            // Package-defined advertisement (the upstream media proposals
+            // define none) so clients can feature-detect without probing.
+            "media-endpoint-extensions": {
+              q: ["source"],
+              actions: ["delete", "undelete"],
+            },
             "source-filters": {
               after: "whole-second RFC3339 exclusive creation-time lower bound",
               before:
@@ -978,6 +1309,9 @@ async function handleAction(
         });
         return error("invalid_request", err.message, 400);
       }
+      if (err instanceof MediaMetadataError) {
+        return error("server_error", err.message, 500);
+      }
       throw err;
     }
   }
@@ -1283,9 +1617,25 @@ export function createMicropub(config: MicropubConfig): MicropubHandler {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    // Media endpoint: POST uploads, GET serves a blob under `${mediaPath}/<key>`.
+    // Media endpoint: POST uploads (and, with the proposed extensions on,
+    // form/JSON `action=delete`/`undelete` plus GET `q=source`), GET serves a
+    // blob under `${mediaPath}/<key>`.
     if (pathname === resolved.mediaPath) {
-      if (method !== "POST") return methodNotAllowed("POST, OPTIONS");
+      if (method === "GET" && resolved.extensions.proposed) {
+        return handleMediaQuery(request, env, resolved);
+      }
+      if (method !== "POST") {
+        return methodNotAllowed(
+          resolved.extensions.proposed ? "GET, POST, OPTIONS" : "POST, OPTIONS",
+        );
+      }
+      const contentType = request.headers.get("content-type") ?? "";
+      if (
+        resolved.extensions.proposed &&
+        !contentType.toLowerCase().includes("multipart/form-data")
+      ) {
+        return handleMediaAction(request, env, resolved);
+      }
       return handleMediaUpload(request, env, resolved);
     }
     if (pathname.startsWith(`${resolved.mediaPath}/`)) {

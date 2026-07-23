@@ -149,3 +149,14 @@ export {
   type VenueSearchQuery,
   type VenueStoreEnv,
 } from "./venues.js";
+
+export {
+  createMicropubMediaStore,
+  mediaKeyFromUrl,
+  parseMediaSourceParams,
+  MediaValidationError,
+  type MediaRecord,
+  type MediaSourceQuery,
+  type MediaStoreEnv,
+  type MicropubMediaStore,
+} from "./media.js";

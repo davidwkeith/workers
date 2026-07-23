@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createMicropub,
   createMicropubContactStore,
+  createMicropubMediaStore,
   createMicropubVenueStore,
 } from "./index.js";
 import type { MicropubEnv } from "./index.js";
@@ -2323,5 +2324,505 @@ describe("@dwk/micropub proposed venues (q=geo)", () => {
       ctx,
     );
     expect(res.status).toBe(400);
+  });
+});
+
+// --- Proposed media-endpoint extensions ---------------------------------------
+
+describe("@dwk/micropub media-endpoint extensions", () => {
+  const mediaExt = createMicropub({
+    baseUrl: BASE,
+    me: ME,
+    extensions: { proposed: true },
+  });
+  const mediaStore = createMicropubMediaStore(harness);
+
+  beforeEach(async () => {
+    await mediaStore.init();
+    await harness.MICROPUB_DB.prepare("DELETE FROM micropub_media").run();
+    // Empty the R2 bucket so listing/trash assertions are isolated.
+    const listed = await harness.MEDIA.list();
+    for (const object of listed.objects) await harness.MEDIA.delete(object.key);
+  });
+
+  async function upload(
+    handlerFn: typeof handler,
+    bytes: number[] = [1, 2, 3],
+    type = "image/png",
+  ): Promise<Response> {
+    const minted = await mintToken("media");
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array(bytes)], "f", { type }));
+    return handlerFn(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MEDIA),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  async function mediaAction(
+    scope: string,
+    action: string,
+    url: string,
+    json = false,
+  ): Promise<Response> {
+    const minted = await mintToken(scope);
+    const headers = await authHeaders(minted, "POST", MEDIA);
+    const body = json
+      ? JSON.stringify({ action, url })
+      : new URLSearchParams({ action, url }).toString();
+    return mediaExt(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "content-type": json
+            ? "application/json"
+            : "application/x-www-form-urlencoded",
+        },
+        body,
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  async function mediaQuery(
+    scope: string,
+    query: string,
+    handlerFn: typeof handler = mediaExt,
+  ): Promise<Response> {
+    const minted = await mintToken(scope);
+    return handlerFn(
+      new Request(`${MEDIA}?${query}`, {
+        headers: await authHeaders(minted, "GET", MEDIA),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  // --- Disabled path stays byte-identical ------------------------------------
+
+  it("keeps action=delete uninterpreted when the proposed group is off", async () => {
+    const uploaded = await upload(handler);
+    const url = uploaded.headers.get("location")!;
+    const minted = await mintToken("delete media");
+    const res = await handler(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(minted, "POST", MEDIA)),
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ action: "delete", url }).toString(),
+      }),
+      harness,
+      ctx,
+    );
+    // Falls through to the existing missing-file 400; the blob survives.
+    expect(res.status).toBe(400);
+    expect((await handler(new Request(url), harness, ctx)).status).toBe(200);
+  });
+
+  it("keeps GET of the media endpoint a 405 when the proposed group is off", async () => {
+    const res = await mediaQuery("media", "q=source", handler);
+    expect(res.status).toBe(405);
+  });
+
+  it("keeps the upload response body empty when the proposed group is off", async () => {
+    const res = await upload(handler);
+    expect(res.status).toBe(201);
+    expect(await res.text()).toBe("");
+  });
+
+  it("omits the media-endpoint-extensions member from q=config by default", async () => {
+    const minted = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["media-endpoint-extensions"]).toBeUndefined();
+  });
+
+  it("records upload metadata even when the proposed group is off", async () => {
+    const res = await upload(handler);
+    const key = res.headers.get("location")!.slice(`${MEDIA}/`.length);
+    const record = await mediaStore.get(key);
+    expect(record?.contentType).toBe("image/png");
+    expect(record?.sizeBytes).toBe(3);
+  });
+
+  it("still 201s a disabled-path upload when the metadata insert fails", async () => {
+    await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+    await harness.MICROPUB_DB.prepare(
+      `CREATE TABLE micropub_media (
+        key TEXT PRIMARY KEY CHECK (0),
+        content_type TEXT, size_bytes INTEGER, uploaded_at INTEGER,
+        deleted_at INTEGER
+      )`,
+    ).run();
+    try {
+      const res = await upload(handler);
+      // Today's guarantee: a successful R2 write means a successful upload.
+      expect(res.status).toBe(201);
+      const url = res.headers.get("location")!;
+      expect((await handler(new Request(url), harness, ctx)).status).toBe(200);
+    } finally {
+      await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+      // A fresh store instance: the shared one memoizes its schema-ready
+      // promise, so its init() would no-op against the dropped table.
+      await createMicropubMediaStore(harness).init();
+    }
+  });
+
+  it("500s an enabled-path upload and removes the blob when the metadata insert fails", async () => {
+    await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+    await harness.MICROPUB_DB.prepare(
+      `CREATE TABLE micropub_media (
+        key TEXT PRIMARY KEY CHECK (0),
+        content_type TEXT, size_bytes INTEGER, uploaded_at INTEGER,
+        deleted_at INTEGER
+      )`,
+    ).run();
+    try {
+      const res = await upload(mediaExt);
+      // A URL handed to a client must always be both servable and listed.
+      expect(res.status).toBe(500);
+      expect((await harness.MEDIA.list()).objects.length).toBe(0);
+    } finally {
+      await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+      // A fresh store instance: the shared one memoizes its schema-ready
+      // promise, so its init() would no-op against the dropped table.
+      await createMicropubMediaStore(harness).init();
+    }
+  });
+
+  // --- Enabled: advertisement and upload body --------------------------------
+
+  it("advertises the media-endpoint extensions in q=config when enabled", async () => {
+    const minted = await mintToken("create");
+    const res = await mediaExt(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["media-endpoint-extensions"]).toEqual({
+      q: ["source"],
+      actions: ["delete", "undelete"],
+    });
+  });
+
+  it("adds the { url } JSON body to an enabled upload", async () => {
+    const res = await upload(mediaExt);
+    expect(res.status).toBe(201);
+    const location = res.headers.get("location")!;
+    expect((await res.json()) as { url: string }).toEqual({ url: location });
+  });
+
+  // --- Enabled: q=source at the media endpoint --------------------------------
+
+  it("lists uploads newest-first with url, published, and mime_type", async () => {
+    const first = await upload(mediaExt, [1], "image/png");
+    const second = await upload(mediaExt, [2, 2], "image/jpeg");
+    const firstUrl = first.headers.get("location")!;
+    const secondUrl = second.headers.get("location")!;
+    // Force distinct upload times for a deterministic order.
+    await harness.MICROPUB_DB.prepare(
+      "UPDATE micropub_media SET uploaded_at = uploaded_at + 10 WHERE key = ?",
+    )
+      .bind(secondUrl.slice(`${MEDIA}/`.length))
+      .run();
+
+    const res = await mediaQuery("media", "q=source");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { url: string; published: string; mime_type: string }[];
+    };
+    expect(body.items.map((item) => item.url)).toEqual([secondUrl, firstUrl]);
+    expect(body.items[0]!.mime_type).toBe("image/jpeg");
+    // RFC 3339 with no fractional seconds.
+    expect(body.items[0]!.published).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+    );
+  });
+
+  it("paginates the media listing with limit and offset", async () => {
+    await upload(mediaExt, [1]);
+    await upload(mediaExt, [2]);
+    const res = await mediaQuery("media", "q=source&limit=1&offset=1");
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items.length).toBe(1);
+  });
+
+  it("requires the media scope for the media listing", async () => {
+    const res = await mediaQuery("create", "q=source");
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "insufficient_scope",
+    );
+  });
+
+  it("rejects unknown media q=source parameters", async () => {
+    const res = await mediaQuery("media", "q=source&nope=1");
+    expect(res.status).toBe(400);
+  });
+
+  it("400s an unknown q at the enabled media endpoint", async () => {
+    const res = await mediaQuery("media", "q=bogus");
+    expect(res.status).toBe(400);
+  });
+
+  it("returns a single media object by url", async () => {
+    const uploaded = await upload(mediaExt, [7, 7], "image/png");
+    const url = uploaded.headers.get("location")!;
+    const res = await mediaQuery(
+      "media",
+      `q=source&url=${encodeURIComponent(url)}`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string; mime_type: string };
+    expect(body.url).toBe(url);
+    expect(body.mime_type).toBe("image/png");
+  });
+
+  it("400s a by-url query for a foreign URL and 404s an unknown one", async () => {
+    const foreign = await mediaQuery(
+      "media",
+      `q=source&url=${encodeURIComponent("https://evil.example.net/media/x")}`,
+    );
+    expect(foreign.status).toBe(400);
+    const unknown = await mediaQuery(
+      "media",
+      `q=source&url=${encodeURIComponent(
+        `${MEDIA}/6d9f2c3a-1b4e-4f5a-8c7d-0e1f2a3b4c5d.jpg`,
+      )}`,
+    );
+    expect(unknown.status).toBe(404);
+  });
+
+  // --- Enabled: action=delete / action=undelete -------------------------------
+
+  it("requires both delete and media scopes for action=delete", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    for (const scope of ["media", "delete"]) {
+      const res = await mediaAction(scope, "delete", url);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "insufficient_scope",
+      );
+    }
+  });
+
+  it("soft-deletes media into the trash prefix and undeletes it back", async () => {
+    const uploaded = await upload(mediaExt, [5, 5, 5], "image/png");
+    const url = uploaded.headers.get("location")!;
+    const key = url.slice(`${MEDIA}/`.length);
+
+    const del = await mediaAction("delete media", "delete", url);
+    expect(del.status).toBe(204);
+    // Live blob gone, trash copy durable, listing empty, public GET 404.
+    expect(await harness.MEDIA.get(key)).toBeNull();
+    expect(await harness.MEDIA.get(`.trash/${key}`)).not.toBeNull();
+    expect((await mediaExt(new Request(url), harness, ctx)).status).toBe(404);
+    const listing = (await (await mediaQuery("media", "q=source")).json()) as {
+      items: unknown[];
+    };
+    expect(listing.items.length).toBe(0);
+
+    // Deleting already-deleted media is 404 (recoverable ≠ addressable).
+    expect((await mediaAction("delete media", "delete", url)).status).toBe(404);
+
+    const undel = await mediaAction("undelete media", "undelete", url);
+    expect(undel.status).toBe(204);
+    expect(await harness.MEDIA.get(key)).not.toBeNull();
+    expect(await harness.MEDIA.get(`.trash/${key}`)).toBeNull();
+    const relisted = (await (await mediaQuery("media", "q=source")).json()) as {
+      items: { url: string }[];
+    };
+    expect(relisted.items.map((item) => item.url)).toEqual([url]);
+  });
+
+  it("accepts a JSON action=delete body", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    const res = await mediaAction("delete media", "delete", url, true);
+    expect(res.status).toBe(204);
+  });
+
+  it("404s undelete after the trash copy is gone (post-purge permanence)", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    const key = url.slice(`${MEDIA}/`.length);
+    await mediaAction("delete media", "delete", url);
+    await harness.MEDIA.delete(`.trash/${key}`);
+    const res = await mediaAction("undelete media", "undelete", url);
+    expect(res.status).toBe(404);
+  });
+
+  it("resumes a mid-failure delete where the trash copy already exists", async () => {
+    const uploaded = await upload(mediaExt, [9], "image/png");
+    const url = uploaded.headers.get("location")!;
+    const key = url.slice(`${MEDIA}/`.length);
+    // Simulate a crash between the trash copy and the live delete.
+    await harness.MEDIA.put(`.trash/${key}`, new Uint8Array([9]));
+    const res = await mediaAction("delete media", "delete", url);
+    expect(res.status).toBe(204);
+    expect(await harness.MEDIA.get(key)).toBeNull();
+    expect(await harness.MEDIA.get(`.trash/${key}`)).not.toBeNull();
+  });
+
+  it("rejects delete URLs outside the media endpoint before touching storage", async () => {
+    for (const url of [
+      "https://evil.example.net/media/6d9f2c3a-1b4e-4f5a-8c7d-0e1f2a3b4c5d.jpg",
+      `${MEDIA}/.trash/6d9f2c3a-1b4e-4f5a-8c7d-0e1f2a3b4c5d.jpg`,
+      `${MEDIA}/../secret`,
+      "not-a-url",
+    ]) {
+      const res = await mediaAction("delete media", "delete", url);
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("404s a delete of never-uploaded media", async () => {
+    const res = await mediaAction(
+      "delete media",
+      "delete",
+      `${MEDIA}/6d9f2c3a-1b4e-4f5a-8c7d-0e1f2a3b4c5d.jpg`,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects an unknown media action", async () => {
+    const res = await mediaAction("delete media", "destroy", `${MEDIA}/x`);
+    expect(res.status).toBe(400);
+  });
+
+  it("never serves the trash prefix from the public GET route", async () => {
+    const uploaded = await upload(mediaExt, [3], "image/png");
+    const url = uploaded.headers.get("location")!;
+    const key = url.slice(`${MEDIA}/`.length);
+    await mediaAction("delete media", "delete", url);
+    const res = await mediaExt(
+      new Request(`${MEDIA}/.trash/${key}`),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("records metadata for files folded out of a multipart create", async () => {
+    const minted = await mintToken("create");
+    const form = new FormData();
+    form.set("h", "entry");
+    form.set("content", "with a photo");
+    form.set(
+      "photo",
+      new File([new Uint8Array([9, 9])], "p.jpg", { type: "image/jpeg" }),
+    );
+    const res = await mediaExt(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: form,
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    const listing = (await (await mediaQuery("media", "q=source")).json()) as {
+      items: { mime_type: string }[];
+    };
+    expect(listing.items.map((item) => item.mime_type)).toEqual(["image/jpeg"]);
+  });
+
+  it("prunes expired trash rows during media-endpoint writes", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    const key = url.slice(`${MEDIA}/`.length);
+    await mediaAction("delete media", "delete", url);
+    // Age the deletion far past the 30-day retention default.
+    await harness.MICROPUB_DB.prepare(
+      "UPDATE micropub_media SET deleted_at = 1 WHERE key = ?",
+    )
+      .bind(key)
+      .run();
+    await upload(mediaExt);
+    expect(await mediaStore.get(key)).toBeNull();
+  });
+
+  it("requires both undelete and media scopes for action=undelete", async () => {
+    const uploaded = await upload(mediaExt);
+    const url = uploaded.headers.get("location")!;
+    await mediaAction("delete media", "delete", url);
+    for (const scope of ["media", "undelete"]) {
+      const res = await mediaAction(scope, "undelete", url);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "insufficient_scope",
+      );
+    }
+  });
+
+  it("rolls back earlier files when a later fold's metadata insert fails", async () => {
+    // Sabotage: the `.png` key (first file) inserts fine, the `.jpg` key
+    // (second file) trips the CHECK — so the failure hits mid-loop with one
+    // blob and row already committed.
+    await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+    await harness.MICROPUB_DB.prepare(
+      `CREATE TABLE micropub_media (
+        key TEXT PRIMARY KEY CHECK (key NOT LIKE '%.jpg'),
+        content_type TEXT, size_bytes INTEGER, uploaded_at INTEGER,
+        deleted_at INTEGER
+      )`,
+    ).run();
+    try {
+      const minted = await mintToken("create");
+      const form = new FormData();
+      form.set("h", "entry");
+      form.set("content", "two photos");
+      form.append(
+        "photo[]",
+        new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+      );
+      form.append(
+        "photo[]",
+        new File([new Uint8Array([2])], "b.jpg", { type: "image/jpeg" }),
+      );
+      const res = await mediaExt(
+        new Request(MICROPUB, {
+          method: "POST",
+          headers: await authHeaders(minted, "POST", MICROPUB),
+          body: form,
+        }),
+        harness,
+        ctx,
+      );
+      // The create fails closed — and no blob or row from the failed request
+      // survives, so nothing servable/listed outlives a post never created.
+      expect(res.status).toBe(500);
+      expect((await harness.MEDIA.list()).objects.length).toBe(0);
+      const rows = await harness.MICROPUB_DB.prepare(
+        "SELECT COUNT(*) AS n FROM micropub_media",
+      ).first<{ n: number }>();
+      expect(rows?.n).toBe(0);
+    } finally {
+      await harness.MICROPUB_DB.prepare("DROP TABLE micropub_media").run();
+      // A fresh store instance: the shared one memoizes its schema-ready
+      // promise, so its init() would no-op against the dropped table.
+      await createMicropubMediaStore(harness).init();
+    }
   });
 });
