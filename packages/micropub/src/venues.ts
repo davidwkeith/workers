@@ -13,6 +13,12 @@ export interface VenueStoreEnv {
   readonly MICROPUB_DB: D1Database;
 }
 
+/** Config passed to {@link createMicropubVenueStore}. */
+export interface VenueStoreConfig {
+  /** Base URL venue resource links are resolved against, e.g. `https://example.com`. */
+  readonly baseUrl: string;
+}
+
 /** A venue location with geographic coordinates. */
 export interface GeoPoint {
   readonly latitude: number;
@@ -46,11 +52,6 @@ export interface VenueRecord extends Venue {
   readonly updatedAt: number;
 }
 
-/** A venue write for create/update operations. */
-export interface VenueWrite extends Omit<VenueRecord, "id" | "updatedAt"> {
-  readonly id?: string;
-}
-
 /**
  * A venue store for the `q=geo` extension. The built-in D1 implementation is
  * strongly consistent; custom implementations may inject their own seam.
@@ -80,77 +81,276 @@ const INDEXES = [
   "CREATE INDEX IF NOT EXISTS micropub_venues_name ON micropub_venues (name)",
 ];
 
+/** Earth's mean radius in metres, used by the haversine distance formula. */
+const EARTH_RADIUS_METRES = 6_371_000;
+
+/** Metres per degree of latitude (and of longitude at the equator). */
+const METRES_PER_DEGREE = 111_000;
+
+export class VenueValidationError extends Error {}
+
 /** Haversine distance (metres) between two points on earth's surface. */
 function haversineDistance(p1: GeoPoint, p2: GeoPoint): number {
-  const R = 6371000; // Earth's radius in metres
   const dLat = ((p2.latitude - p1.latitude) * Math.PI) / 180;
   const dLon = ((p2.longitude - p1.longitude) * Math.PI) / 180;
   const lat1 = (p1.latitude * Math.PI) / 180;
   const lat2 = (p2.latitude * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) *
-      Math.cos(lat2) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  return EARTH_RADIUS_METRES * c;
 }
 
 /**
- * Parse and validate a Geo URI `geo:lat,lon;u=radius` format.
- * Returns normalized coordinates and radius.
+ * Build a `GeoSuggestion` from coordinates. This echoes the input coordinates
+ * back as the label; it is a placeholder for real reverse-geocoding, which
+ * this store does not perform.
  */
-export function parseVenueGeoUri(geoUri: string): { latitude: number; longitude: number } {
-  const match = geoUri.match(/^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:;u=(\d+(?:\.\d+)?))?$/);
-  if (!match) {
-    throw new VenueValidationError(
-      `geo URI must have the form geo:lat,lon;u=radius, got "${geoUri}"`
-    );
-  }
-  const [_, latStr, lonStr] = match;
-  const latitude = Number(latStr);
-  const longitude = Number(lonStr);
-  
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    throw new VenueValidationError(
-      `geo URI coordinates must be numeric, got "${geoUri}"`
-    );
-  }
-  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-    throw new VenueValidationError(
-      `geo URI coordinates must be in [-90, 90] for latitude, [-180, 180] for longitude, got "${geoUri}"`
-    );
-  }
-  
-  return { latitude, longitude };
-}
-
-/**
- * Build a `GeoSuggestion` from coordinates. This returns a formatted
- * coordinate pair as a placeholder for reverse-geocoding.
- */
-function geosuggestionFrom(lat: number, lon: number): GeoSuggestion {
+function geoSuggestionFrom(point: GeoPoint): GeoSuggestion {
   return {
-    latitude: Number(lat.toFixed(6)),
-    longitude: Number(lon.toFixed(6)),
-    label: `${lat.toFixed(6)}, ${lon.toFixed(6)}`,
+    latitude: point.latitude,
+    longitude: point.longitude,
+    label: `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}`,
   };
 }
 
-export class VenueValidationError extends Error {}
+function venueUrl(baseUrl: string, id: string): string {
+  return `${baseUrl.replace(/\/$/, "")}/venues/${encodeURIComponent(id)}`;
+}
+
+// --- Query-parameter parsing (`q=geo&...`) ----------------------------------
+
+const GEO_URI_RE =
+  /^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:;u=(\d+(?:\.\d+)?))?$/;
+const DECIMAL_RE = /^-?\d+(?:\.\d+)?$/;
+const NON_NEGATIVE_DECIMAL_RE = /^\d+(?:\.\d+)?$/;
+const NON_NEGATIVE_INTEGER_RE = /^\d+$/;
+
+const DEFAULT_RADIUS_METRES = 1000;
+const MAX_RADIUS_METRES = 50_000;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+const ALLOWED_GEO_PARAMS = new Set([
+  "q",
+  "uri",
+  "lat",
+  "lon",
+  "u",
+  "limit",
+  "offset",
+]);
+
+function oneParam(params: URLSearchParams, name: string): string | null {
+  const values = params.getAll(name);
+  if (values.length > 1) {
+    throw new VenueValidationError(`\`${name}\` must not be repeated`);
+  }
+  return values[0] ?? null;
+}
+
+function validateCoordinates(latitude: number, longitude: number): void {
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    throw new VenueValidationError(
+      "coordinates must be finite decimal degrees, latitude in [-90, 90] and longitude in [-180, 180]",
+    );
+  }
+}
+
+function parseRadius(raw: string): number {
+  if (!NON_NEGATIVE_DECIMAL_RE.test(raw)) {
+    throw new VenueValidationError(
+      "`u` must be a non-negative decimal number of metres",
+    );
+  }
+  const radius = Number(raw);
+  if (radius > MAX_RADIUS_METRES) {
+    throw new VenueValidationError(
+      `\`u\` must not exceed ${MAX_RADIUS_METRES} metres`,
+    );
+  }
+  return radius;
+}
+
+/**
+ * Parse and validate a Geo URI in the `geo:lat,lon` or `geo:lat,lon;u=radius`
+ * form (RFC 5870, restricted to exactly latitude/longitude and an optional
+ * `u` parameter). Altitude and any other parameter are rejected.
+ */
+function parseGeoUri(uri: string): {
+  latitude: number;
+  longitude: number;
+  radiusMetres?: number;
+} {
+  const match = GEO_URI_RE.exec(uri);
+  if (!match) {
+    throw new VenueValidationError(
+      `\`uri\` must have the form geo:lat,lon or geo:lat,lon;u=radius, got "${uri}"`,
+    );
+  }
+  const latRaw = match[1] as string;
+  const lonRaw = match[2] as string;
+  const radiusRaw = match[3];
+  const latitude = Number(latRaw);
+  const longitude = Number(lonRaw);
+  validateCoordinates(latitude, longitude);
+  return {
+    latitude,
+    longitude,
+    ...(radiusRaw !== undefined
+      ? { radiusMetres: parseRadius(radiusRaw) }
+      : {}),
+  };
+}
+
+/**
+ * Parse and validate the full `q=geo` query string into a {@link
+ * VenueSearchQuery}: exactly one of `uri` or `lat`+`lon`, an optional `u`
+ * radius (metres, default 1000, max 50000), and `limit`/`offset` pagination
+ * (default 20, max 100; `offset` requires an explicit `limit`). Throws {@link
+ * VenueValidationError} on any malformed, duplicated, unsupported, or
+ * out-of-range parameter.
+ */
+export function parseGeoQuery(params: URLSearchParams): VenueSearchQuery {
+  for (const key of params.keys()) {
+    if (!ALLOWED_GEO_PARAMS.has(key)) {
+      throw new VenueValidationError(
+        `unsupported \`q=geo\` query parameter \`${key}\``,
+      );
+    }
+  }
+  if (params.getAll("q").length !== 1) {
+    throw new VenueValidationError("`q` must be supplied exactly once");
+  }
+
+  const uri = oneParam(params, "uri");
+  const lat = oneParam(params, "lat");
+  const lon = oneParam(params, "lon");
+  const u = oneParam(params, "u");
+
+  let point: GeoPoint;
+  let radiusMetres: number;
+
+  if (uri !== null) {
+    if (lat !== null || lon !== null) {
+      throw new VenueValidationError(
+        "`uri` cannot be combined with `lat`/`lon`",
+      );
+    }
+    if (u !== null) {
+      throw new VenueValidationError(
+        "`u` cannot be combined with `uri`; encode the radius in the geo URI's `;u=` component",
+      );
+    }
+    const parsed = parseGeoUri(uri);
+    point = { latitude: parsed.latitude, longitude: parsed.longitude };
+    radiusMetres = parsed.radiusMetres ?? DEFAULT_RADIUS_METRES;
+  } else {
+    if (lat === null || lon === null) {
+      throw new VenueValidationError(
+        "`q=geo` requires either `uri` or both `lat` and `lon`",
+      );
+    }
+    if (!DECIMAL_RE.test(lat) || !DECIMAL_RE.test(lon)) {
+      throw new VenueValidationError("`lat` and `lon` must be decimal degrees");
+    }
+    const latitude = Number(lat);
+    const longitude = Number(lon);
+    validateCoordinates(latitude, longitude);
+    point = { latitude, longitude };
+    radiusMetres = u === null ? DEFAULT_RADIUS_METRES : parseRadius(u);
+  }
+
+  const limitRaw = oneParam(params, "limit");
+  const offsetRaw = oneParam(params, "offset");
+  if (offsetRaw !== null && limitRaw === null) {
+    throw new VenueValidationError("`offset` requires an explicit `limit`");
+  }
+
+  let limit = DEFAULT_LIMIT;
+  if (limitRaw !== null) {
+    if (!NON_NEGATIVE_INTEGER_RE.test(limitRaw) || Number(limitRaw) < 1) {
+      throw new VenueValidationError(
+        "`limit` must be a positive base-10 integer",
+      );
+    }
+    limit = Math.min(Number(limitRaw), MAX_LIMIT);
+  }
+
+  let offset = 0;
+  if (offsetRaw !== null) {
+    if (
+      !NON_NEGATIVE_INTEGER_RE.test(offsetRaw) ||
+      !Number.isSafeInteger(Number(offsetRaw))
+    ) {
+      throw new VenueValidationError(
+        "`offset` must be a non-negative base-10 integer",
+      );
+    }
+    offset = Number(offsetRaw);
+  }
+
+  return { point, radiusMetres, limit, offset };
+}
+
+// --- Wire views --------------------------------------------------------------
+
+/** Render a {@link GeoSuggestion} in the `q=geo` JSON response shape. */
+export function geoSuggestionView(
+  suggestion: GeoSuggestion,
+): Record<string, unknown> {
+  return {
+    label: suggestion.label,
+    latitude: suggestion.latitude.toString(),
+    longitude: suggestion.longitude.toString(),
+  };
+}
+
+/** Render a {@link Venue} in the `q=geo` JSON response shape. */
+export function venueView(venue: Venue): Record<string, unknown> {
+  return {
+    name: venue.name,
+    latitude: venue.latitude.toString(),
+    longitude: venue.longitude.toString(),
+    url: venue.url,
+    ...(venue.description ? { description: venue.description } : {}),
+    ...(venue.category ? { category: venue.category } : {}),
+  };
+}
+
+// --- Store --------------------------------------------------------------------
+
+interface VenueRow {
+  readonly id: string;
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly description: string | null;
+  readonly category: string | null;
+  readonly updated_at: number;
+}
 
 export function createMicropubVenueStore(
-  env: VenueStoreEnv
+  env: VenueStoreEnv,
+  config: VenueStoreConfig,
 ): MicropubVenueStore {
   if (!env.MICROPUB_DB) {
     throw new VenueValidationError(
-      "@dwk/micropub: missing required D1 binding `MICROPUB_DB` for venue storage"
+      "@dwk/micropub: missing required D1 binding `MICROPUB_DB` for venue storage",
     );
   }
   const db = env.MICROPUB_DB;
+  const baseUrl = config.baseUrl;
   let ready: Promise<void> | null = null;
-  
+
   const ensureSchema = (): Promise<void> => {
     ready ??= db
       .prepare(SCHEMA)
@@ -164,86 +364,70 @@ export function createMicropubVenueStore(
       });
     return ready;
   };
-  
+
   /**
-   * Search venues near a point using the haversine formula for distance.
-   * Results are ordered by ascending distance, with name as tie-breaker.
-   * Pagination is applied to the distance-sorted result set.
+   * Search venues near a point using a lat/lon bounding-box prefilter (widened
+   * by `1 / cos(latitude)` in longitude so the box never excludes an in-radius
+   * venue) followed by an exact haversine filter. Results are ordered by
+   * ascending distance, with the canonical venue URL as a deterministic
+   * tie-breaker, then paginated.
    */
-  const searchNearby = async (query: VenueSearchQuery): Promise<{
+  const searchNearby = async (
+    query: VenueSearchQuery,
+  ): Promise<{
     readonly geo?: GeoSuggestion;
     readonly venues: readonly Venue[];
   }> => {
     await ensureSchema();
-    
+
     const { point, radiusMetres, limit, offset } = query;
-    
-    const rows: {
-      id: string;
-      name: string;
-      latitude: number;
-      longitude: number;
-      description: string | null;
-      category: string | null;
-      updated_at: number;
-    }[] = [];
-    
-    // Get candidates using lat/lon bounding box
-    const boxResult = await db
+
+    const latDelta = radiusMetres / METRES_PER_DEGREE;
+    const cosLat = Math.cos((point.latitude * Math.PI) / 180);
+    const lonDelta =
+      radiusMetres / (METRES_PER_DEGREE * Math.max(cosLat, 1e-6));
+
+    const { results } = await db
       .prepare(
         `SELECT id, name, latitude, longitude, description, category, updated_at
          FROM micropub_venues
          WHERE latitude BETWEEN ? AND ?
-           AND longitude BETWEEN ? AND ?`
+           AND longitude BETWEEN ? AND ?`,
       )
       .bind(
-        point.latitude - radiusMetres / 111000,
-        point.latitude + radiusMetres / 111000,
-        point.longitude - radiusMetres / 111000,
-        point.longitude + radiusMetres / 111000
+        point.latitude - latDelta,
+        point.latitude + latDelta,
+        point.longitude - lonDelta,
+        point.longitude + lonDelta,
       )
-      .all<VenueRecord>();
-    
-    // Compute exact distances and filter by radius
-    for (const venue of boxResult.results ?? []) {
-      const distance = haversineDistance(
-        { latitude: venue.latitude, longitude: venue.longitude },
-        point
-      );
-      if (distance <= radiusMetres) {
-        rows.push({
-          ...venue,
-          distance: distance,
-        } as any);
-      }
-    }
-    
-    // Sort by distance ascending, then by name ascending for determinism
-    rows.sort((a, b) => {
-      const distDiff = (a as any).distance - (b as any).distance;
-      if (distDiff !== 0) return distDiff;
-      return a.name.localeCompare(b.name);
+      .all<VenueRow>();
+
+    const withinRadius = (results ?? [])
+      .map((row) => ({ row, distance: haversineDistance(row, point) }))
+      .filter(({ distance }) => distance <= radiusMetres)
+      .map(({ row, distance }) => ({
+        distance,
+        venue: {
+          url: venueUrl(baseUrl, row.id),
+          name: row.name,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          ...(row.description ? { description: row.description } : {}),
+          ...(row.category ? { category: row.category } : {}),
+        } satisfies Venue,
+      }));
+
+    withinRadius.sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      return a.venue.url.localeCompare(b.venue.url);
     });
-    
-    // Apply pagination
-    const paginated = rows.slice(offset, offset + limit);
-    
+
     return {
-      geo: geosuggestionFrom(point.latitude, point.longitude),
-      venues: paginated.map(
-        (v) =>
-          ({
-            url: `https://example.com/venues/${encodeURIComponent(v.id)}`,
-            name: v.name,
-            latitude: v.latitude,
-            longitude: v.longitude,
-            ...(v.description ? { description: v.description } : {}),
-            ...(v.category ? { category: v.category } : {}),
-          }) as Venue,
-      ),
+      geo: geoSuggestionFrom(point),
+      venues: withinRadius.slice(offset, offset + limit).map((v) => v.venue),
     };
   };
-  
+
   return {
     async init() {
       await ensureSchema();

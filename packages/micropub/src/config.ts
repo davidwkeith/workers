@@ -14,9 +14,7 @@ import type {
   MicropubContactStore,
   MicropubContactStoreEnv,
 } from "./contacts.js";
-import {
-  type MicropubVenueStore,
-} from ".\/venues.js";
+import type { MicropubVenueStore, VenueStoreEnv } from "./venues.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /**
@@ -92,6 +90,11 @@ export type MicropubContactStoreProvider = (
   env: MicropubContactStoreEnv,
 ) => MicropubContactStore;
 
+/** Builds a request-bound Venue store from the composed Worker bindings. */
+export type MicropubVenueStoreProvider = (
+  env: VenueStoreEnv,
+) => MicropubVenueStore;
+
 /**
  * Derive the canonical URL of a newly created post from its microformats2
  * object and the parsed `mp-*` commands. Returning a relative path is allowed;
@@ -146,7 +149,7 @@ export interface MicropubConfig {
    * are queried via proximity search and are independent from post storage.
    * The store enables `q=geo` when configured and the proposed group is enabled.
    */
-  readonly venues?: MicropubVenueStore | MicropubVenueStore;
+  readonly venues?: MicropubVenueStore | MicropubVenueStoreProvider;
   /**
    * Post types advertised as `post-types` in `q=config` (the stable Supported
    * Vocabulary extension). Omitted from the response when unset, or when the
@@ -220,7 +223,7 @@ export interface ResolvedConfig {
   /** Normalized Contacts store provider, when the extension is configured. */
   readonly contacts?: MicropubContactStoreProvider;
   /** Normalized Venue store provider, when the extension is configured. */
-  readonly venues?: MicropubVenueStore;
+  readonly venues?: MicropubVenueStoreProvider;
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
@@ -290,6 +293,13 @@ function normalizeContactStore(
   return typeof contacts === "function" ? contacts : () => contacts;
 }
 
+function normalizeVenueStore(
+  venues: MicropubVenueStore | MicropubVenueStoreProvider | undefined,
+): MicropubVenueStoreProvider | undefined {
+  if (venues === undefined) return undefined;
+  return typeof venues === "function" ? venues : () => venues;
+}
+
 function pathOf(absoluteUrl: string, label: string): string {
   try {
     return new URL(absoluteUrl).pathname;
@@ -320,6 +330,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
   const micropubEndpoint = config.micropubEndpoint ?? `${origin}/micropub`;
   const mediaEndpoint = config.mediaEndpoint ?? `${origin}/media`;
   const contactStore = normalizeContactStore(config.contacts);
+  const venueStore = normalizeVenueStore(config.venues);
   const audiences = config.audiences ?? [];
   const audienceIds = new Set<string>();
   for (const audience of audiences) {
@@ -355,7 +366,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     audiences,
     audienceIds,
     ...(contactStore ? { contacts: contactStore } : {}),
-    ...(config.venues ? { venues: config.venues } : {}),
+    ...(venueStore ? { venues: venueStore } : {}),
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),

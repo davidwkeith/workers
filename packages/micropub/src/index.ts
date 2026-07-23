@@ -38,6 +38,7 @@ export type {
   ExtensionGroupsConfig,
   PostTypeConfig,
   MicropubContactStoreProvider,
+  MicropubVenueStoreProvider,
   AudienceConfig,
 } from "./config.js";
 
@@ -140,8 +141,16 @@ export { MicropubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";
 export {
   createMicropubVenueStore,
+  parseGeoQuery,
+  geoSuggestionView,
+  venueView,
   VenueValidationError,
   type VenueSearchQuery,
   type VenueStoreEnv,
+  type VenueStoreConfig,
   type MicropubVenueStore,
+  type GeoPoint,
+  type GeoSuggestion,
+  type Venue,
+  type VenueRecord,
 } from "./venues.js";

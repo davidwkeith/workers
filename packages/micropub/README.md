@@ -74,11 +74,14 @@ It remains disabled by default (`extensions.proposed: false`); clients must
 enable the `proposed` group and configure a `venues` store to use it.
 
 A `GET ?q=geo&uri=geo:lat,lon;u=radius` or `GET ?q=geo&lat=...&lon=...&u=...` query
-returns a reverse-geocoded `geo` suggestion (when available) and nearby venues
-ordered by distance. Each venue has `name`, `latitude`, `longitude`, and a
-canonical `url`. Clients reference a venue via the post's `location` property
-(either plain text or an `h-card` with `url`). The store is independent of
-post storage — querying `q=geo` never reads post data.
+returns a `geo` suggestion and nearby venues ordered by distance. The bundled
+D1 `MicropubVenueStore` does not perform real reverse-geocoding: its `geo`
+suggestion simply echoes the input coordinates back as the label. A composed
+app injecting its own store may return an actual place name. Each venue has
+`name`, `latitude`, `longitude`, and a canonical `url`. Clients reference a
+venue via the post's `location` property (either plain text or an `h-card`
+with `url`). The store is independent of post storage — querying `q=geo`
+never reads post data.
 
 See the [package specification](../../spec/packages/micropub.md#proposed-locationvenue-qgeo).
 
