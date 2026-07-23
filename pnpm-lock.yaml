@@ -153,6 +153,12 @@ importers:
         specifier: 5.20260718.1
         version: 5.20260718.1
 
+  packages/deno-host:
+    devDependencies:
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+
   packages/dpop: {}
 
   packages/esi:

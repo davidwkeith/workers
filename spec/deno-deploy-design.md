@@ -110,6 +110,17 @@ synchronous JS call). This still reintroduces the third-party dependency
 open question against the project's "infrastructure the user owns" thesis —
 **still unresolved, not addressed by this re-verification.**
 
+> **Update (issue #397):** this shim is now implemented as the first
+> increment of `@dwk/deno-host` (`packages/deno-host`; spec:
+> [packages/deno-host.md](packages/deno-host.md)). The synchronous-surface
+> gap resolved as anticipated above — `D1Database` wraps the async remote
+> client directly, while `SqlStorage`/`transactionSync` take libSQL's
+> synchronous **embedded-replica** client (the `libsql` package's
+> better-sqlite3-compatible API), whose blocking write-forwarding is exactly
+> the "whole DO event loop blocks until commit" semantics the contract
+> encodes, so no host-contract text change was needed. §3.2–§3.4 remain
+> unbuilt and the §6 gate still holds for them.
+
 ### 3.2 Single-writer actor (Durable Objects, host-contract §3.3)
 
 Unchanged in shape from the original sketch: a lease per object id, built on

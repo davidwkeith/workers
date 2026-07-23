@@ -493,6 +493,14 @@
         "cases": []
       }
     },
+    "@dwk/deno-host": {
+      "standard": null,
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/dpop": {
       "standard": null,
       "suites": {},

@@ -274,7 +274,11 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
    Deploy Classic shut down, the successor dropped queues) — see
    [deno-deploy-design.md](deno-deploy-design.md) for the updated gap list,
    design sketch, and revised (larger) effort estimate. The demand-driven
-   gate still holds; still no work started.
+   gate still holds for the host itself; the "resolve the SQLite question"
+   prerequisite is now resolved in code — the SQL shim landed as
+   `@dwk/deno-host`'s first increment (#397,
+   [packages/deno-host.md](packages/deno-host.md)); the actor, queue, and
+   object-storage gaps (#398–#400) remain unstarted.
 3. **Explicit non-goals for now:** Fastly Compute, Lambda@Edge, and Puter
    hosts for the stateful cohort, for the reasons in §4 — each with a
    documented re-evaluation trigger (a strongly-consistent store; a fetch
