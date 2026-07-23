@@ -66,16 +66,37 @@ The handler fails loudly at startup if any of these are missing:
 - **Opt-in source-list filters**: proposed deployments can filter a `q=source`
   list by creation bounds, type, status, visibility, or exact mf2 properties;
   filtered lists use deterministic keyset cursors.
+- **Opt-in Location/Venue** (`q=geo`): a read-only proximity search over an
+  injected venue store, independent from post storage. See below.
 
-### Proposed Location/Venue design
+### Location/Venue (`q=geo`) extension
 
-`q=geo` is a proposed extension and remains disabled by default; it is not yet
-implemented. Its API and injected, strongly-consistent `VenueStore` contract
-are defined in the [package specification](../../spec/packages/micropub.md#proposed-locationvenue-qgeo).
-When implemented, a Geo URI or `lat`/`lon`/`u` query will return a
-reverse-geocoded `geo` suggestion and nearby `venues`. Venue lookup is separate
-from post storage; a client references a selected venue with the ordinary
-`location` post property.
+The `q=geo` extension is implemented for the proposed Location/Venue feature.
+It remains disabled by default (`extensions.proposed: false`); clients must
+enable the `proposed` group and configure a `venues` store to use it.
+
+A `GET ?q=geo&uri=geo:lat,lon;u=radius` or `GET ?q=geo&lat=...&lon=...&u=...` query
+returns a `geo` suggestion and nearby venues ordered by distance. **`geo` is not
+a real reverse-geocoding lookup** — this first implementation echoes the query
+coordinates back as `geo.label`; wiring in an actual place-name service is
+future work. Each venue has `name`, `latitude`, `longitude`, and a canonical
+`url` (populated by whatever writes venue rows — venue create/update/delete is
+out of scope for this read-only query). Clients reference a venue via the
+post's `location` property (either plain text or an `h-card` with `url`). The
+store is independent of post storage — querying `q=geo` never reads post data.
+
+```ts
+import { createMicropub, createMicropubVenueStore } from "@dwk/micropub";
+
+const micropub = createMicropub({
+  baseUrl: "https://example.com",
+  me: "https://example.com/",
+  extensions: { proposed: true },
+  venues: createMicropubVenueStore(env),
+});
+```
+
+See the [package specification](../../spec/packages/micropub.md#locationvenue-qgeo-extension).
 
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession

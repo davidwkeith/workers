@@ -14,6 +14,7 @@ import type {
   MicropubContactStore,
   MicropubContactStoreEnv,
 } from "./contacts.js";
+import type { MicropubVenueStore } from "./venues.js";
 import type { Mf2Object, MicropubCommands } from "./mf2.js";
 
 /**
@@ -139,6 +140,12 @@ export interface MicropubConfig {
    */
   readonly contacts?: MicropubContactStore | MicropubContactStoreProvider;
   /**
+   * Venue store for the proposed Location/Venue (`q=geo`) extension. Venues
+   * are queried via proximity search and are independent from post storage.
+   * The store enables `q=geo` when configured and the proposed group is enabled.
+   */
+  readonly venues?: MicropubVenueStore;
+  /**
    * Post types advertised as `post-types` in `q=config` (the stable Supported
    * Vocabulary extension). Omitted from the response when unset, or when the
    * `stable` extension group is disabled.
@@ -210,6 +217,8 @@ export interface ResolvedConfig {
   readonly audienceIds: ReadonlySet<string>;
   /** Normalized Contacts store provider, when the extension is configured. */
   readonly contacts?: MicropubContactStoreProvider;
+  /** Normalized Venue store provider, when the extension is configured. */
+  readonly venues?: MicropubVenueStore;
   readonly postTypes?: readonly PostTypeConfig[];
   /** Normalized to an async provider regardless of the configured shape. */
   readonly syndicateTo: () => Promise<readonly SyndicationTarget[]>;
@@ -344,6 +353,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     audiences,
     audienceIds,
     ...(contactStore ? { contacts: contactStore } : {}),
+    ...(config.venues ? { venues: config.venues } : {}),
     ...(config.postTypes ? { postTypes: config.postTypes } : {}),
     syndicateTo: normalizeSyndicateTo(config.syndicateTo),
     ...(config.fediverse ? { fediverse: config.fediverse } : {}),

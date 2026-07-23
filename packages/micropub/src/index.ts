@@ -138,3 +138,14 @@ export {
 
 export { MicropubLogEvent } from "./log.js";
 export type { Logger, Metrics } from "@dwk/log";
+export {
+  createMicropubVenueStore,
+  parseVenueSearchParams,
+  VenueValidationError,
+  type GeoPoint,
+  type GeoSuggestion,
+  type MicropubVenueStore,
+  type Venue,
+  type VenueSearchQuery,
+  type VenueStoreEnv,
+} from "./venues.js";

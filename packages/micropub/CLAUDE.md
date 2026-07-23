@@ -33,6 +33,10 @@ toggled by maturity group via the `extensions` config
   newest-first, with `limit`/`offset` pagination (#351/#353).
 - **Richer Post List Filters** — proposed-only `q=source` filters with keyset
   cursors; see the package spec for the wire contract.
+- **Location/Venue** (`q=geo`, #359) — proposed-only read-only proximity
+  search over an injected `venues` D1 store, independent from post storage.
+  `geo`'s reverse-geocoded suggestion is a placeholder (echoes the query
+  coordinates) until a real lookup is wired in.
 
 ## Spec
 
@@ -75,6 +79,7 @@ src/store.ts       # createMicropubStore (D1-backed post persistence)
 src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source view, list view
 src/pagination.ts  # offset-based pagination parsing/validation (pure, reusable)
 src/source-filters.ts # proposed source-list filter and cursor parsing (pure)
+src/venues.ts      # proposed q=geo venue store (D1) + query parsing
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
 src/event.ts       # h-event post type: markup rendering, h-event → CalendarEvent
 src/fediverse.ts   # h-entry → PostInput adapter + syndication to @dwk/activitypub's /publish (#278; wire-format contract, no AP import)

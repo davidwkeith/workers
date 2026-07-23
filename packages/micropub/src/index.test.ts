@@ -2,7 +2,11 @@ import { env } from "cloudflare:test";
 import { signAccessToken, createIndieAuthStore } from "@dwk/indieauth";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createMicropub, createMicropubContactStore } from "./index.js";
+import {
+  createMicropub,
+  createMicropubContactStore,
+  createMicropubVenueStore,
+} from "./index.js";
 import type { MicropubEnv } from "./index.js";
 
 const harness = env as unknown as MicropubEnv;
@@ -150,11 +154,19 @@ const contactsHandler = createMicropub({
   extensions: { proposed: true },
   contacts: createMicropubContactStore,
 });
+const venueStore = createMicropubVenueStore(harness);
+const venuesHandler = createMicropub({
+  baseUrl: BASE,
+  me: ME,
+  extensions: { proposed: true },
+  venues: venueStore,
+});
 
 beforeEach(async () => {
   await createIndieAuthStore(harness).init();
   await (await import("./store.js")).createMicropubStore(harness).init();
   await contactStore.init();
+  await venueStore.init();
   await (await import("./replay.js")).createDpopReplayStore(harness).init();
 });
 
@@ -2196,5 +2208,120 @@ describe("@dwk/micropub proposed contacts", () => {
       ctx,
     );
     expect(malformed.status).toBe(400);
+  });
+});
+
+describe("@dwk/micropub proposed venues (q=geo)", () => {
+  it("advertises geo only when a venue store is configured", async () => {
+    const reader = await mintToken("create");
+    const withVenues = await venuesHandler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(reader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await withVenues.json()) as { q: string[] }).q).toContain("geo");
+    const withoutVenues = await handler(
+      new Request(`${MICROPUB}?q=config`, {
+        headers: await authHeaders(reader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(((await withoutVenues.json()) as { q: string[] }).q).not.toContain(
+      "geo",
+    );
+  });
+
+  it("returns nearby venues ordered by distance, with a geo suggestion", async () => {
+    const reader = await mintToken("create");
+    const suffix = crypto.randomUUID();
+    await harness.MICROPUB_DB.prepare(
+      `INSERT INTO micropub_venues
+         (id, url, name, latitude, longitude, description, category, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    )
+      .bind(
+        `near-${suffix}`,
+        `${BASE}/venues/near-${suffix}`,
+        "Near Cafe",
+        37.786971,
+        -122.399677,
+        1,
+      )
+      .run();
+    await harness.MICROPUB_DB.prepare(
+      `INSERT INTO micropub_venues
+         (id, url, name, latitude, longitude, description, category, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)`,
+    )
+      .bind(
+        `far-${suffix}`,
+        `${BASE}/venues/far-${suffix}`,
+        "Far Diner",
+        40,
+        -70,
+        1,
+      )
+      .run();
+
+    const res = await venuesHandler(
+      new Request(`${MICROPUB}?q=geo&lat=37.786971&lon=-122.399677&u=500`, {
+        headers: await authHeaders(reader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      geo: { label: string; latitude: string; longitude: string };
+      venues: Array<{
+        name: string;
+        url: string;
+        latitude: string;
+        longitude: string;
+      }>;
+    };
+    expect(body.geo).toEqual({
+      label: "37.786971, -122.399677",
+      latitude: "37.786971",
+      longitude: "-122.399677",
+    });
+    expect(body.venues).toEqual([
+      {
+        name: "Near Cafe",
+        url: `${BASE}/venues/near-${suffix}`,
+        latitude: "37.786971",
+        longitude: "-122.399677",
+      },
+    ]);
+  });
+
+  it("rejects malformed q=geo queries with 400 invalid_request", async () => {
+    const reader = await mintToken("create");
+    const res = await venuesHandler(
+      new Request(`${MICROPUB}?q=geo&lat=999&lon=0`, {
+        headers: await authHeaders(reader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("400s q=geo as an unsupported query when no venue store is configured", async () => {
+    const reader = await mintToken("create");
+    const res = await handler(
+      new Request(`${MICROPUB}?q=geo&lat=0&lon=0`, {
+        headers: await authHeaders(reader, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
   });
 });
