@@ -405,8 +405,11 @@ Everything below is enabled only with `extensions.proposed`. With the default
 upload returns `201` + `Location` with an **empty body**, `GET` serves blobs,
 and no query or action parameter is interpreted — a `POST` carrying
 `action=delete` but no `file` part falls through to the existing
-"`file` part is required" `400`, and `?q=source` at the media endpoint is an
-unsupported-query `400 invalid_request`.
+"`file` part is required" `400`, and a `GET` of the media endpoint itself
+(e.g. `?q=source`) stays today's `405 Method Not Allowed`. When enabled,
+`GET` joins the endpoint's allowed methods and an unknown or absent `q` is an
+unsupported-query `400 invalid_request`, matching the Micropub endpoint's
+query fallback.
 
 When enabled, `q=config` (at the Micropub endpoint) advertises the capability
 under a package-defined member — the upstream proposals define no
