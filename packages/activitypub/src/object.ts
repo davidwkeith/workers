@@ -568,7 +568,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     config: ForwardedConfig,
   ): Promise<void> {
     const follower = actorIri(activity.actor);
-    const target = objectId(activity.object);
+    // `participationTarget` (object, falling back to target) rather than a
+    // bare `objectId(activity.object)`: a `Follow` only ever sets `object`,
+    // but the FEP-1b12 membership `Join` synonym (#376) may name the Group
+    // actor via `target` instead — the same dual-field addressing the
+    // `#onJoin`/`#onLeave` event-RSVP path already accepts. Using the same
+    // resolver here that the dispatch switch used to route here keeps the two
+    // checks from disagreeing (a `Join` addressed via `target` alone would
+    // otherwise pass routing and then be silently dropped here).
+    const target = participationTarget(activity);
     // The Follow must target this actor; a misaddressed Follow is ignored.
     if (!follower || target !== config.iris.id) return;
 
@@ -1396,12 +1404,19 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         : config.pageSize;
     const offset = (page - 1) * pageSize;
 
+    // A moderator-tombstoned row (#376 remove-post) is excluded: the whole
+    // point of `removed_at` is that a removed community post stops
+    // surfacing through this actor's own reads, not just through the
+    // `Undo(Announce)` fanned out to peers.
     const total = this.#sql
-      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM inbox`)
+      .exec<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM inbox WHERE removed_at IS NULL`,
+      )
       .one().n;
     const items = this.#sql
       .exec<{ json: string }>(
-        `SELECT json FROM inbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
+        `SELECT json FROM inbox WHERE removed_at IS NULL
+           ORDER BY seq DESC LIMIT ? OFFSET ?`,
         pageSize,
         offset,
       )
@@ -1566,7 +1581,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const { where, params } = boundedWhere(
       "received_at",
       0,
-      "verify_state IS NOT 'failed'", // defensive; see cursor-contract note
+      // `removed_at IS NULL`: a moderator-tombstoned post (#376 remove-post)
+      // is excluded from the owner's own client-style reads too, not just
+      // from the `Undo(Announce)` fanned out to peers.
+      "verify_state IS NOT 'failed' AND removed_at IS NULL", // defensive; see cursor-contract note
     );
 
     const order = oldestFirst ? "ASC" : "DESC";
@@ -1891,7 +1909,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }>(
         source === "1"
           ? `SELECT seq, json, published_at AS received_at, NULL AS relayed_by FROM ${table} WHERE ${timestamp} = ? ORDER BY seq`
-          : `SELECT seq, json, received_at, relayed_by FROM ${table} WHERE ${timestamp} = ? ORDER BY seq`,
+          : // `removed_at IS NULL`: a moderator-tombstoned post (#376) 404s here
+            // rather than resolving, matching its exclusion from the list reads.
+            `SELECT seq, json, received_at, relayed_by FROM ${table} WHERE ${timestamp} = ? AND removed_at IS NULL ORDER BY seq`,
         receivedAt,
       )
       .toArray();

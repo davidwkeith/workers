@@ -1980,6 +1980,105 @@ describe("Group actor hosting (#376)", () => {
       expect((undo.object as { id: string }).id).toBe(announceId);
     });
   });
+
+  it("records membership from a Join addressed via `target` alone, not just `object`", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${AUTHOR}/activities/join-3`,
+            type: "Join",
+            actor: AUTHOR,
+            target: iris.id,
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(res.status).toBe(202);
+      const followers = state.storage.sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM followers WHERE actor = ?`, AUTHOR)
+        .one().n;
+      expect(followers).toBe(1);
+    });
+  });
+
+  it("excludes a moderator-removed post from __inbox and __client/timeline reads", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const innerId = `${AUTHOR}/activities/post-4`;
+      const create = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: innerId,
+            type: "Create",
+            actor: AUTHOR,
+            object: {
+              id: `${innerId}/object`,
+              type: "Note",
+              attributedTo: AUTHOR,
+              content: "hi",
+            },
+          },
+          AUTHOR,
+          { actorType: "Group" },
+        ),
+      );
+      expect(create.status).toBe(202);
+
+      const announceId = state.storage.sql
+        .exec<{ id: string }>(`SELECT id FROM outbox`)
+        .one().id;
+
+      const removed = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${MODERATOR}/activities/remove-4`,
+            type: "Remove",
+            actor: MODERATOR,
+            object: announceId,
+            target: iris.outbox,
+          },
+          MODERATOR,
+          { actorType: "Group", moderators: [MODERATOR] },
+        ),
+      );
+      expect(removed.status).toBe(202);
+
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/__inbox`, {
+          headers: {
+            [INTERNAL_HEADERS.config]: cfgHeader(username),
+            [INTERNAL_HEADERS.internal]: "1",
+          },
+        }),
+      );
+      const listedBody = (await listed.json()) as {
+        total: number;
+        items: unknown[];
+      };
+      expect(listedBody.total).toBe(0);
+      expect(listedBody.items).toHaveLength(0);
+
+      const timeline = await instance.fetch(
+        clientRequest(username, "/__client/timeline?limit=10"),
+      );
+      const timelineBody = (await timeline.json()) as { items: unknown[] };
+      expect(timelineBody.items).toHaveLength(0);
+    });
+  });
 });
 
 describe("follow-target typing and backfill", () => {
