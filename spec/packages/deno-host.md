@@ -113,7 +113,7 @@ The synchronous DO-SQLite surface over the sync seam:
   (matching Cloudflare and `@dwk/cf-shims`) and MUST fail loudly: a nested
   call throws a clear error instead of letting the inner `BEGIN`/`ROLLBACK`
   corrupt the outer transaction. The full `DurableObjectState` (alarms,
-  WebSockets, per-id lease) is #398's job and will embed this.
+  WebSockets, per-id lease) is #398's job (implemented — see "Design: single-writer actor + alarm emulation (issue #398)" below), which embeds this.
 - `createSqlStorage(db)` returns just the `sql` member, for consumers that
   take an injected `SqlStorage` (`@dwk/webdav`'s `LockStore` /
   `CredentialStore`).
@@ -235,7 +235,7 @@ opening every object's database:
 `setAlarm(idHex, epochMs)` / `getAlarm(idHex)` / `deleteAlarm(idHex)` wrap
 these two keys behind one atomic KV transaction each.
 
-`pollAlarms(namespace, { now, batchSize? })` is the exported tick function a
+`ns.pollAlarms({ now, batchSize? })` is a method on the namespace a
 composing app wires to whatever periodic trigger its runtime offers
 (`Deno.cron()` on Deno Deploy) — the package itself never starts a timer:
 

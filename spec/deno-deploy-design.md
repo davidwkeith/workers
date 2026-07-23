@@ -151,7 +151,7 @@ instance (in tension with §1's "instances come and go" execution model).
 > `pollAlarms` an exported tick function the composing app wires to its own
 > `Deno.cron()` rather than a self-driving timer) is now written up in
 > [packages/deno-host.md](packages/deno-host.md#design-single-writer-actor--alarm-emulation-issue-398);
-> not yet implemented. One refinement from the sketch above: alarm retries
+> implemented. One refinement from the sketch above: alarm retries
 > after a throwing handler are re-scheduled by writing a new KV due-index
 > entry (picked up by whichever instance runs the next poll), not an
 > in-process timer — the sketch's "instances come and go" tension applies to

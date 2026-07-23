@@ -86,7 +86,7 @@ const storage = createDurableSqlite(db); // { sql, transactionSync }
 ```
 
 `createDurableSqlite` returns the `{ sql, transactionSync }` slice of
-`DurableObjectStorage`; the DO emulation layer (#398) will embed it in a
+`DurableObjectStorage`; the DO emulation layer (#398) embeds it in a
 full `DurableObjectState`. `createSqlStorage` returns just the `sql` member
 (e.g. for `@dwk/webdav`'s injected `LockStore`/`CredentialStore`).
 
