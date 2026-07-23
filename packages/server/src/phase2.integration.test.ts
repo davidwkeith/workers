@@ -31,7 +31,7 @@ import { createVc } from "@dwk/vc";
 
 import { createServer, type DwkServer } from "./server.js";
 import { assembleBindings } from "./bindings.js";
-import { QueueBroker } from "./shims/queue.js";
+import { QueueBroker } from "@dwk/cf-shims";
 import type { FetchHandler, Mount } from "./config.js";
 
 // The host reconstructs every request URL from the configured baseUrl (never the

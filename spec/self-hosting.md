@@ -539,6 +539,11 @@ The six questions this study opened have been decided (tracking issue
    frameworks) is mechanical. Nothing is published yet, so deferring the split
    costs nothing.
 
+   **Update:** the extraction happened (#381, part of the
+   [portability](portability.md) Phase 0 plan) — the shims now live in
+   [`@dwk/cf-shims`](../packages/cf-shims), and `@dwk/server` composes them via
+   `workspace:*` as its first consumer rather than owning them.
+
 ## 17. Reference links
 
 - [Composition contract](composition-contract.md) ·

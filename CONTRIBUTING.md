@@ -62,6 +62,17 @@ pnpm test        # full vitest suite, Node + workerd projects
    All five must pass — `.github/workflows/ci.yml` runs exactly this sequence.
    `pnpm format` fixes formatting violations in place.
 
+   This gate does not exercise the Docker image's bundling step, so a change
+   to `@dwk/cf-shims`'s public exports (or how `@dwk/server` resolves them at
+   bundle time) can pass lint/typecheck/build/test and still break
+   `packages/server/scripts/bundle.mjs` — e.g. an ESM/CJS resolution mismatch
+   (`require.resolve()` can't see an `import`-only `exports` entry) only
+   surfaces there. If your change touches that surface, also run:
+
+   ```bash
+   pnpm --filter @dwk/server bundle
+   ```
+
 5. **Record a changeset** for any user-visible change to a publishable
    package:
 

@@ -1,6 +1,6 @@
 /**
- * Lifecycle binding: adapt Cloudflare-shaped queue/scheduled handlers onto the
- * host's {@link ./shims/queue.QueueBroker} and {@link ./shims/cron.CronScheduler}.
+ * Lifecycle binding: adapt Cloudflare-shaped queue/scheduled handlers onto
+ * `@dwk/cf-shims`'s `QueueBroker` and `CronScheduler`.
  *
  * The endpoint packages export their async work as the same handlers a
  * Cloudflare Worker exposes: a queue consumer is `(batch, env, ctx)` and a
@@ -19,9 +19,8 @@ import type {
   MessageBatch,
   ScheduledController,
 } from "@cloudflare/workers-types";
+import type { QueueConsumerHandler, ScheduledHandler } from "@dwk/cf-shims";
 import { HostExecutionContext, type WaitUntilTracker } from "./context.js";
-import type { QueueConsumerHandler } from "./shims/queue.js";
-import type { ScheduledHandler } from "./shims/cron.js";
 
 /**
  * A Cloudflare-shaped queue consumer. `env` is typed `never` so a consumer
@@ -44,7 +43,7 @@ export type ScheduledTaskHandler = (
 
 /**
  * Bind a queue consumer's `env` and a fresh waitUntil-tracked `ExecutionContext`
- * so it can be registered with {@link ./shims/queue.QueueBroker.consumer}. Pass
+ * so it can be registered with `@dwk/cf-shims`'s `QueueBroker.consumer`. Pass
  * the same {@link WaitUntilTracker} you hand to `createServer` (via
  * `HostConfig.tracker`) so background work the consumer schedules is drained on
  * shutdown.
@@ -60,9 +59,8 @@ export function bindQueueConsumer<T>(
 
 /**
  * Bind a `scheduled` handler's `env` and a fresh waitUntil-tracked
- * `ExecutionContext` so it can be registered with
- * {@link ./shims/cron.CronScheduler.register}. Powers the `microsub` poller and
- * the R2 GC cron.
+ * `ExecutionContext` so it can be registered with `@dwk/cf-shims`'s
+ * `CronScheduler.register`. Powers the `microsub` poller and the R2 GC cron.
  */
 export function bindScheduledTask(
   handler: ScheduledTaskHandler,

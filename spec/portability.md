@@ -42,9 +42,11 @@
   `remotestorage`, `webdav`) into the Node host. That single step makes
   "other providers" mean "anywhere a container runs," which covers most of
   the audience in #369 without touching any endpoint package. **All of it is
-  done except the `@dwk/cf-shims` extraction** (#379, #380) — every DO
-  package now runs on the Node host, so the container path (§4.3–4.4) is the
-  documented, working answer for AWS/GCP/other-cloud users today.
+  done** (#379, #380, #381, #382) — every DO package now runs on the Node
+  host, the shims are extracted into `@dwk/cf-shims`, and the **host
+  contract** spec is written ([host-contract.md](host-contract.md)) — so the
+  container path (§4.3–4.4) is the documented, working answer for
+  AWS/GCP/other-cloud users today.
 
 ## 2. What the investigation found in the codebase
 
@@ -99,15 +101,17 @@ emulation strategy (§3) — the *interfaces* are the seam, not `@dwk/store`.
 
 ### 2.3 `@dwk/server` is the existence proof
 
-The Node host already re-implements the full binding surface behind an
-Express-free boundary (`packages/server/src/shims/`): D1 and DO-SQLite on
-`node:sqlite`, R2 on the filesystem (streaming, etag'd, metadata sidecars),
-KV, a durable SQLite-backed queue broker, a cron scheduler, `waitUntil`
-tracking, an `HTMLRewriter` polyfill, real hibernatable-WebSocket bridging,
-and a `cloudflare:workers` module alias. The shims import nothing from
-Express and are re-exported from `shims/index.ts` — the planned
-`@dwk/cf-shims` extraction is described as "mechanical" in
-[self-hosting.md](self-hosting.md).
+The Node host re-implements the full binding surface via
+[`@dwk/cf-shims`](../packages/cf-shims) (extracted from `@dwk/server`'s
+internal `./shims` in #381, per the "mechanical" extraction
+[self-hosting.md](self-hosting.md) planned): D1 and DO-SQLite on `node:sqlite`,
+R2 on the filesystem (streaming, etag'd, metadata sidecars), KV, a durable
+SQLite-backed queue broker, a cron scheduler, an `HTMLRewriter` polyfill, a
+`crypto.DigestStream` polyfill, `WebSocketPair`/hibernatable-`WebSocket`
+globals, and a `cloudflare:workers` module alias. The shims import nothing
+from Express, so any Node host can compose them — `@dwk/server` adds
+`waitUntil` tracking and the real hibernatable-WebSocket-to-HTTP-`Upgrade`
+bridging on top.
 
 **Known gaps in the Node host today** (they gate Phase 0):
 
@@ -125,7 +129,7 @@ Express and are re-exported from `shims/index.ts` — the planned
   solid-pod. Wiring webdav's `COPY`/`MOVE` surfaced one real gap, since fixed:
   `@dwk/store`'s streamed blob-hashing path depends on Cloudflare's
   non-standard `crypto.DigestStream`, now polyfilled
-  (`packages/server/src/crypto-digest-stream.ts`) on `node:crypto`.
+  (`packages/cf-shims/src/crypto-digest-stream.ts`) on `node:crypto`.
 - Cron takes an interval in ms, not a cron expression.
 - Single-process, single-writer by design (lockfile) — no HA.
 
@@ -246,10 +250,11 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
      answer for AWS/GCP/other-cloud users.~~ Done (#380) —
      `packages/server/README.md` §"Deploying to AWS, GCP, or any other
      cloud".
-   - Remaining: extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).
-     The **host contract** spec (§3) is written —
-     [host-contract.md](host-contract.md) (#382) — and the extraction is its
-     reference implementation.
+   - ~~Extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).~~ Done
+     (#381).
+   - ~~Write the **host contract** spec (§3).~~ Done (#382) —
+     [host-contract.md](host-contract.md), with the `@dwk/cf-shims` extraction
+     as its reference implementation.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.

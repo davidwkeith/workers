@@ -1,0 +1,56 @@
+{
+  "name": "@dwk/cf-shims",
+  "version": "0.0.0",
+  "description": "Node-backed implementations of the Cloudflare Workers binding interfaces (D1, R2, KV, Queue, cron, Durable Objects) and runtime-global seams (cloudflare:workers, HTMLRewriter, crypto.DigestStream, hibernatable WebSockets), for any Node host.",
+  "keywords": [
+    "cloudflare-workers",
+    "node-sqlite",
+    "durable-objects",
+    "self-hosting",
+    "shim"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/cf-shims#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/cf-shims"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cloudflare-workers": {
+      "types": "./dist/cloudflare-workers.d.ts",
+      "import": "./dist/cloudflare-workers.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@worker-tools/html-rewriter": "0.1.0-pre.19"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1"
+  }
+}

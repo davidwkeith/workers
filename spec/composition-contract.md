@@ -45,8 +45,11 @@ several packages inside one Worker (see the example in the
 
 ## Confinement of Cloudflare specifics
 
-- Cloudflare-specific concerns are confined to `@dwk/store` and the endpoint
-  packages.
+- Cloudflare-specific concerns are confined to `@dwk/store`, the endpoint
+  packages, and `@dwk/cf-shims` (which exists specifically to *emulate* the
+  Cloudflare binding interfaces on Node for `@dwk/server` and other Node
+  hosts — see [self-hosting.md §16](self-hosting.md#16-resolved-decisions)
+  and [portability.md](portability.md)).
 - `@dwk/wac`, `@dwk/rdf`, and `@dwk/dpop` MUST take their inputs as plain data,
   so they unit-test without a Workers runtime.
 

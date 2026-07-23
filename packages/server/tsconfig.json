@@ -11,6 +11,7 @@
       "@dwk/activitypub": ["../activitypub/src/index.ts"],
       "@dwk/atproto-pds": ["../atproto-pds/src/index.ts"],
       "@dwk/calendar": ["../calendar/src/index.ts"],
+      "@dwk/cf-shims": ["../cf-shims/src/index.ts"],
       "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/host-meta": ["../host-meta/src/index.ts"],
       "@dwk/http-signatures": ["../http-signatures/src/index.ts"],
