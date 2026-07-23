@@ -37,6 +37,11 @@ toggled by maturity group via the `extensions` config
   search over an injected `venues` D1 store, independent from post storage.
   `geo`'s reverse-geocoded suggestion is a placeholder (echoes the query
   coordinates) until a real lookup is wired in.
+- **Media-endpoint extensions** (#363) — proposed-only media `q=source`
+  (listing + by-URL, `media` scope), `{ url }` upload response body, and
+  recoverable `action=delete`/`undelete` via an R2 `.trash/` prefix with
+  scope-pair enforcement. Upload metadata is always recorded in the
+  `micropub_media` D1 table (fail-closed only when the group is on).
 
 ## Spec
 
@@ -80,6 +85,7 @@ src/mf2.ts         # mf2 body parsing (form + JSON), update operations, source v
 src/pagination.ts  # offset-based pagination parsing/validation (pure, reusable)
 src/source-filters.ts # proposed source-list filter and cursor parsing (pure)
 src/venues.ts      # proposed q=geo venue store (D1) + query parsing
+src/media.ts       # proposed media-endpoint extensions: metadata store (D1), URL ownership validation, q=source parsing
 src/auth.ts        # token extraction, scope checking, DPoP enforcement
 src/event.ts       # h-event post type: markup rendering, h-event → CalendarEvent
 src/fediverse.ts   # h-entry → PostInput adapter + syndication to @dwk/activitypub's /publish (#278; wire-format contract, no AP import)

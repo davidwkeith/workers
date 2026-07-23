@@ -34,6 +34,20 @@ export const MicropubLogEvent = {
   ActionCompleted: "micropub.action.completed",
   /** A media upload was streamed to R2. */
   MediaStored: "micropub.media.stored",
+  /**
+   * A media blob was soft-deleted into the trash prefix
+   * (proposed media-endpoint extensions).
+   */
+  MediaDeleted: "micropub.media.deleted",
+  /** A soft-deleted media blob was restored from the trash prefix. */
+  MediaUndeleted: "micropub.media.undeleted",
+  /**
+   * The `micropub_media` metadata insert failed after a successful R2 write
+   * while the proposed group is off, so the upload still returned `201` and
+   * the blob is unrecorded (it behaves as a legacy blob if the group is later
+   * enabled).
+   */
+  MediaMetadataFailed: "micropub.media.metadata.failed",
 } as const;
 
 /** Union of the event-name string literals in {@link MicropubLogEvent}. */

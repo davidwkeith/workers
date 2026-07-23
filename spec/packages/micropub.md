@@ -385,8 +385,9 @@ failures.
 
 ### Proposed media-endpoint extensions
 
-This is the design for issue #363 (roadmap #354). It is **design only — not
-yet implemented**. It adopts three upstream proposals as one gated feature:
+This is the design for issue #363 (roadmap #354), now **implemented** (media
+metadata in `src/media.ts`, endpoint wiring in `src/handler.ts`). It adopts
+three upstream proposals as one gated feature:
 [Delete from Media Endpoint][mp-ext-media-delete],
 [Response from Media Endpoint][mp-ext-media-response], and
 [Query for Media from Media Endpoint][mp-ext-media-source] together with its
