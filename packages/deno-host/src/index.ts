@@ -59,3 +59,13 @@ export {
   SyncSqlCursor,
   type DurableSqlite,
 } from "./sql-storage.js";
+export {
+  createDurableObjectNamespace,
+  DurableObject,
+  DenoDurableObjectId,
+  DenoDurableObjectState,
+  DurableObjectNamespaceLike,
+  type DurableObjectClass,
+  type DurableObjectNamespaceOptions,
+  type AlarmInvocationInfo,
+} from "./durable-object.js";
