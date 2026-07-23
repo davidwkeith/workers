@@ -51,6 +51,7 @@ import {
   resolveLockPolicy,
   CollectionNotEmpty as WebdavCollectionNotEmpty,
   PreconditionFailed as WebdavPreconditionFailed,
+  ResourceConflict as WebdavResourceConflict,
   CredentialStore,
   LockStore,
   type ResourceBody,
@@ -1134,6 +1135,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         preconditions: WritePreconditions,
         contentLength: number | null = null,
       ): Promise<WriteOutcome> => {
+        if (!this.#hasExistingParent(store, path)) {
+          throw new WebdavResourceConflict("missing parent collection");
+        }
         const existed = store.head(path) !== null;
         try {
           await this.#writeResolvedBody(
@@ -1156,6 +1160,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       },
 
       makeCollection: async (path: string): Promise<WriteOutcome> => {
+        if (!this.#hasExistingParent(store, path)) {
+          throw new WebdavResourceConflict("missing parent collection");
+        }
         try {
           store.writeQuads(path, containerTypeQuads(toIri(origin, path)), {
             contentType: "text/turtle",
@@ -1209,6 +1216,12 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // child keys concatenate correctly. The router normalizes this, but the
         // backend is a public seam, so guard here too.
         const dest = collectionDest(from, to);
+        // RFC 4918 §9.8.5: COPY onto a destination whose immediate parent
+        // doesn't exist must 409, not auto-vivify it (same bug class as
+        // MKCOL/PUT — litmus copymove `copy_nodestcoll`).
+        if (!this.#hasExistingParent(store, dest)) {
+          throw new WebdavResourceConflict("missing destination parent");
+        }
         const destExisted = store.head(dest) !== null;
         // Overwrite is delete-then-copy (the router already 412'd a no-overwrite
         // collision), so the destination subtree never lingers under the copy.
@@ -1228,6 +1241,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // MOVE is always Depth: infinity (RFC 4918 §9.9.3): copy the whole
         // subtree, then drop the source.
         const dest = collectionDest(from, to);
+        // Same missing-destination-parent guard as COPY (RFC 4918 §9.9.4).
+        if (!this.#hasExistingParent(store, dest)) {
+          throw new WebdavResourceConflict("missing destination parent");
+        }
         const destExisted = store.head(dest) !== null;
         if (destExisted) this.#webdavDeleteTree(store, dest);
         await this.#webdavCopyTree(store, origin, from, dest, "infinity");
@@ -1454,6 +1471,24 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   }
 
   // -- containment -----------------------------------------------------------
+
+  /**
+   * Whether `path`'s immediate parent container already exists. The LDP door
+   * auto-vivifies missing ancestors (`#ensureContainerChain`), but WebDAV's
+   * Class 2 semantics (RFC 4918 §7.3, §9.3.1) require `PUT`/`MKCOL` to fail
+   * with `409 Conflict` when the parent doesn't already exist (litmus
+   * `put_no_parent`/`mkcol_no_parent`) — so the WebDAV backend closures check
+   * this before writing, instead of calling `#ensureContainerChain` blind.
+   * This pod's own storage root (`this.#storageRoot` — `"/dav/"`, say, for a
+   * pod whose `baseUrl` has its own path component, not just the universal
+   * `"/"`) is always implicitly present; it's never stat-able as a resource
+   * a client wrote, unlike every other container.
+   */
+  #hasExistingParent(store: Store, path: string): boolean {
+    const parent = parentContainer(path);
+    if (parent === null || parent === this.#storageRoot) return true;
+    return store.head(parent) !== null;
+  }
 
   /** Ensure every ancestor container of `key` exists and contains its child. */
   #ensureContainerChain(store: Store, origin: string, key: string): void {

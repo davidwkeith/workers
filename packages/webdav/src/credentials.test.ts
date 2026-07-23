@@ -122,6 +122,22 @@ describe("mintAppPassword / verifyAppPassword", () => {
     expect(await verifyAppPassword(a.secret, b.record)).toBe(false);
   });
 
+  it("verifyAppPassword never throws, even for a record above the iteration ceiling", async () => {
+    const minted = await mintAppPassword({
+      webid: "https://me.example/#me",
+      label: "legacy",
+      scope: SCOPE,
+      iterations: ITERATIONS,
+    });
+    // Simulate a record minted outside mintAppPassword (imported/migrated
+    // data) with an iteration count workerd's deriveBits would reject.
+    const record = {
+      ...minted.record,
+      iterations: PBKDF2_ITERATION_CEILING + 1,
+    };
+    await expect(verifyAppPassword(minted.secret, record)).resolves.toBe(false);
+  });
+
   // Real workerd, real default — no `iterations` override — so a regression
   // that pushes DEFAULT_PBKDF2_ITERATIONS back above workerd's deriveBits
   // ceiling fails here instead of only in production.

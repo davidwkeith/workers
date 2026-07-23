@@ -478,6 +478,26 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus `mkcol_no_parent` / `put_no_parent` (RFC 4918 §7.3, §9.3.1): a
+  // missing intermediate collection must fail the write, not auto-vivify it.
+  it("409s a MKCOL/PUT whose immediate parent collection doesn't exist", async () => {
+    await withHandler(async ({ call }) => {
+      expect((await call("MKCOL", "/missing/child")).status).toBe(409);
+      expect(
+        (await call("PUT", "/missing/child.txt", { body: "x" })).status,
+      ).toBe(409);
+    });
+  });
+
+  // litmus `mkcol_over_plain`: MKCOL naming an existing plain resource must
+  // refuse, not silently create a same-named collection alongside it.
+  it("405s a MKCOL over an existing plain resource", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/plain.txt", { body: "x" });
+      expect((await call("MKCOL", "/plain.txt")).status).toBe(405);
+    });
+  });
+
   it("copies a resource and moves another, dropping the source", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/src.txt", { body: "data" });
@@ -527,6 +547,25 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus copymove `copy_nodestcoll`/RFC 4918 §9.8.5/§9.9.4: COPY/MOVE onto
+  // a destination whose immediate parent collection doesn't exist must 409,
+  // not auto-vivify it.
+  it("409s a COPY/MOVE whose destination's parent collection doesn't exist", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/src.txt", { body: "data" });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: "https://pod.example/missing/copy.txt" },
+      });
+      expect(copy.status).toBe(409);
+
+      await call("PUT", "/src2.txt", { body: "data" });
+      const move = await call("MOVE", "/src2.txt", {
+        headers: { destination: "https://pod.example/missing/moved.txt" },
+      });
+      expect(move.status).toBe(409);
+    });
+  });
+
   it("deletes a resource and refuses to delete a non-empty collection", async () => {
     await withHandler(async ({ call }) => {
       await call("MKCOL", "/full");
@@ -534,6 +573,14 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
       expect((await call("DELETE", "/full/")).status).toBe(409);
       expect((await call("DELETE", "/full/child.txt")).status).toBe(204);
       expect((await call("DELETE", "/full/")).status).toBe(204);
+    });
+  });
+
+  // litmus `delete_null`: DELETE on a resource that never existed must 404,
+  // not silently no-op a success.
+  it("404s a DELETE of a resource that never existed", async () => {
+    await withHandler(async ({ call }) => {
+      expect((await call("DELETE", "/never.txt")).status).toBe(404);
     });
   });
 });

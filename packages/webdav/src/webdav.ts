@@ -440,6 +440,12 @@ async function remove(
   resolved: Resolved,
 ): Promise<Response> {
   if (!(await authorize(ctx, "write"))) return problem(403, "Forbidden");
+  // RFC 4918 requires DELETE on a nonexistent resource to fail (litmus
+  // `delete_null`); the backend contract otherwise makes no promise about
+  // treating a missing target as a no-op vs. an error.
+  if ((await ctx.backend.stat(ctx.path)) === null) {
+    return problem(404, "Not found");
+  }
   const blocking = ctx.backend.locks.blockingLock(
     ctx.path,
     presentedToken(ctx.request),
@@ -488,7 +494,14 @@ async function mkcol(
   const collectionPath = isCollectionPath(ctx.path) ? ctx.path : `${ctx.path}/`;
   const mkctx = { ...ctx, path: collectionPath };
   if (!(await authorize(mkctx, "write"))) return problem(403, "Forbidden");
-  if ((await ctx.backend.stat(collectionPath)) !== null) {
+  // A plain (non-collection) resource is stored under the un-slashed name, so
+  // checking only `collectionPath` (litmus `mkcol_over_plain`) misses it —
+  // MKCOL would silently create a same-named collection alongside it instead
+  // of refusing.
+  if (
+    (await ctx.backend.stat(ctx.path)) !== null ||
+    (await ctx.backend.stat(collectionPath)) !== null
+  ) {
     return methodNotAllowed(
       "Collection already exists",
       resolved,
