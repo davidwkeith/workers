@@ -1467,7 +1467,7 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
     async fetch(): Promise<Response> {
       return new Response("ok");
     }
-    async alarm(info?: AlarmInvocationInfo): Promise<void> {
+    override async alarm(info?: AlarmInvocationInfo): Promise<void> {
       const idHex = this.ctx.id.toString();
       fireLog.push({ id: idHex, retryCount: info?.retryCount ?? 0 });
       if (failOnce.delete(idHex)) throw new Error("boom");
@@ -1530,7 +1530,7 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
       async fetch(): Promise<Response> {
         return new Response("ok");
       }
-      async alarm(): Promise<void> {
+      override async alarm(): Promise<void> {
         await this.ctx.storage.setAlarm(9999);
         throw new Error("boom");
       }
@@ -1767,6 +1767,14 @@ Replace with:
         this.#leaseKey(idHex),
         this.#leaseOptions,
       );
+      // Firing consumes the alarm slot: `claimDueAlarm` only removed the
+      // due-index entry, so the by-id record (what `getAlarm`/`setAlarm`
+      // read/write) still holds the pre-fire schedule. Clear it before
+      // invoking the handler so the catch block's "did the handler set its
+      // own new alarm?" check below is meaningful instead of always seeing
+      // the stale pre-fire value (which would silently defeat both the
+      // auto-retry path and the supersede check).
+      await deleteAlarmKv(this.#options.kv, this.#options.className, idHex);
       const instance = this.#materialize(id);
       const run = instance.chain
         .then(() => instance.state.concurrencyGate)
