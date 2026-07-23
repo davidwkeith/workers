@@ -126,8 +126,9 @@ so composers deduplicate onto one auth database.
 Implemented in [#349](https://github.com/davidwkeith/workers/issues/349),
 the DO-backed read surface. Every route below requires an account-bound
 token (`422` for an app-level `client_credentials` token, same as phase
-1's account endpoints) and, absent a configured `backend`, degrades to an
-empty-but-valid response (`[]` for the two list endpoints, `404` for the
+1's account endpoints; the `accounts/:id*` rows accept any valid bearer)
+and, absent a configured `backend`, degrades to an
+empty-but-valid response (`[]` for the list endpoints, `404` for the
 two entry endpoints) rather than erroring.
 
 | Endpoint | Auth | Backing |
@@ -136,9 +137,19 @@ two entry endpoints) rather than erroring.
 | `GET /api/v1/notifications` | account token | `MastodonBackend.notifications()` |
 | `GET /api/v1/statuses/:id` | account token | `MastodonBackend.entry(id)` |
 | `GET /api/v1/accounts/:id` | account token | owner (config) or reversibly-decoded remote id — no backend call |
+| `GET /api/v1/accounts/:id/statuses` | bearer | owner id → `MastodonBackend.ownStatuses()` (own outbox posts); remote ids → `[]` (no remote status history is stored); undecodable ids → `404` |
+| `GET /api/v1/accounts/:id/{followers,following,featured_tags}` | bearer | valid-but-empty `[]` (follower/following IRIs are not exposed through the client API) |
+| `GET /api/v1/accounts/relationships` | bearer | valid-but-empty `[]`, registered as an **exact** stub route so the id is never misread by the dynamic `accounts/:id` pattern |
 
-List endpoints (`timelines/home`, `notifications`) accept `limit`,
-`max_id`, `since_id`, `min_id` (opaque decimal snowflake strings) and
+The `accounts/:id*` additions come from the 2026-07-23 Ice Cubes client-QA
+run (`conformance/mastodon-client-qa.md`): the profile view hard-errors on
+a `404` from `accounts/:id/statuses`, and `accounts/relationships` was
+being swallowed by the dynamic route. Like `accounts/:id`, they require a
+valid bearer but accept an app-level token.
+
+List endpoints (`timelines/home`, `notifications`,
+`accounts/:id/statuses`) accept `limit`, `max_id`, `since_id`, `min_id`
+(opaque decimal snowflake strings) and
 answer an RFC 8288 `Link: rel="next"/"prev"` header built from the
 returned page's first/last ids, Mastodon's own pagination convention.
 
@@ -147,7 +158,9 @@ returned page's first/last ids, Mastodon's own pagination convention.
 `@dwk/activitypub`'s `createActivitypubMastodonApi`
 (`packages/activitypub/src/mastodon-api.ts`) is the only implementation:
 it builds a synthetic internal `Request` to the owning actor's Durable
-Object (`__stats`, `__client/timeline`, `__client/notifications`,
+Object (`__stats`, `__client/timeline` — with `source=1` for the optional
+`ownStatuses()` method, which skips the inbox scan and pages only owner
+outbox posts — `__client/notifications`,
 `__client/entry`, carrying `INTERNAL_HEADERS.config` +
 `INTERNAL_HEADERS.internal`) rather than holding an in-DO closure —
 the `mcp-tools.ts`/`syndication.ts` internal-fetch pattern, not

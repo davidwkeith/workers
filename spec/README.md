@@ -16,7 +16,8 @@ built and what "done" means.
 | 4 | [non-functional-requirements.md](non-functional-requirements.md) | Consistency, runtime budget, security, observability, distribution, licensing. |
 | 5 | [observability.md](observability.md) | The cross-cutting injectable-logging requirement and event-taxonomy conventions. |
 | 6 | [conformance-and-testing.md](conformance-and-testing.md) | Conformance suites and local test strategy. |
-| 7 | [open-questions.md](open-questions.md) | Deferred decisions and known limits. |
+| 7 | [host-contract.md](host-contract.md) | The normative portable subset of the Cloudflare binding interfaces an alternative host must provide. |
+| 8 | [open-questions.md](open-questions.md) | Deferred decisions and known limits. |
 
 ## Per-package specifications
 

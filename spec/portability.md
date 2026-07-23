@@ -42,10 +42,11 @@
   `remotestorage`, `webdav`) into the Node host. That single step makes
   "other providers" mean "anywhere a container runs," which covers most of
   the audience in #369 without touching any endpoint package. **All of it is
-  done** (#379, #380, #381) — every DO package now runs on the Node host and
-  the shims are extracted into `@dwk/cf-shims`, so the container path
-  (§4.3–4.4) is the documented, working answer for AWS/GCP/other-cloud users
-  today. Only the host-contract spec (§3) remains.
+  done** (#379, #380, #381, #382) — every DO package now runs on the Node
+  host, the shims are extracted into `@dwk/cf-shims`, and the **host
+  contract** spec is written ([host-contract.md](host-contract.md)) — so the
+  container path (§4.3–4.4) is the documented, working answer for
+  AWS/GCP/other-cloud users today.
 
 ## 2. What the investigation found in the codebase
 
@@ -157,7 +158,9 @@ subset of their semantics the packages actually rely on (single-writer DOs,
 `transactionSync`, alarms, hibernatable WebSockets, streaming R2 bodies,
 read-your-writes D1, at-least-once queues, cron), plus the module alias for
 `cloudflare:workers` and polyfills for `crypto.DigestStream`/`HTMLRewriter`.
-The §2 inventory is effectively its first draft.
+The §2 inventory was effectively its first draft — **now written as the
+normative [host-contract.md](host-contract.md)** (#382), which supersedes §2
+where the two disagree.
 
 ## 4. Provider-by-provider feasibility
 
@@ -249,7 +252,9 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
      cloud".
    - ~~Extract `@dwk/cf-shims` per [self-hosting.md](self-hosting.md).~~ Done
      (#381).
-   - Remaining: write the **host contract** spec (§3).
+   - ~~Write the **host contract** spec (§3).~~ Done (#382) —
+     [host-contract.md](host-contract.md), with the `@dwk/cf-shims` extraction
+     as its reference implementation.
 2. **Phase 1 (demand-driven) — Deno Deploy host** (`@dwk/deno-host` or
    similar), reusing `@dwk/cf-shims` where `node:` compat allows; resolve
    the SQLite question (likely libSQL) first.

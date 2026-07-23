@@ -18,6 +18,21 @@ Motivation section). Run this doc, record results here, then update
   to file. Also out of scope: posting or any write action
   (non-goal, no write endpoint exists), streaming (non-goal, no
   `urls.streaming_api` is advertised).
+- **Descoped 2026-07-23: the official Pixelfed app.** Its login preflight
+  (`loginPreflightCheck` in
+  [pixelfed-rn `src/requests.ts`](https://github.com/pixelfed/pixelfed-rn/blob/main/src/requests.ts))
+  fetches the Pixelfed-proprietary path `/api/nodeinfo/2.0.json` (not the
+  `/.well-known/nodeinfo` discovery this target correctly serves), then
+  requires `software.version >= 0.12.3` and `software.name === "pixelfed"`,
+  refusing everything else with "this app is only compatible with Pixelfed."
+  The app is Pixelfed-server-only **by design** — the same wall GoToSocial
+  deployments hit — and getting past it would mean advertising a nodeinfo
+  document that misrepresents this server as Pixelfed, with further
+  Pixelfed-specific breakage likely (`verify_credentials?_pe=1` entity
+  extensions). The `pixelfed-app` target is therefore recorded
+  `"not-applicable"` in `status.json`, not `"failing"`: the server's
+  Mastodon-API surface is never exercised. Generic Mastodon clients
+  (Tusky; web clients as a stretch) remain the matrix.
 
 ## Environment
 
@@ -25,8 +40,9 @@ Motivation section). Run this doc, record results here, then update
 | ----------------- | ------------------------------------------------------------- |
 | Target instance   | `conformance.dwk.io`                                          |
 | Target actor      | `https://conformance.dwk.io/users/conformance`                |
-| Test client 1     | Pixelfed's own app                                            |
+| Test client 1     | ~~Pixelfed's own app~~ — descoped 2026-07-23 (see Scope)      |
 | Test client 2     | Tusky                                                         |
+| Test client 3     | Ice Cubes (iOS; substitute row added 2026-07-23)              |
 | Prerequisite data | The like + reply from `pixelfed-qa.md` step 4 (or equivalent) |
 
 ## Prerequisites
@@ -35,7 +51,8 @@ Motivation section). Run this doc, record results here, then update
       the actor's inbox already holds a `Like` and a reply `Create` from a
       real Pixelfed account (step 4 of that runbook). If not, repeat that
       step first — this runbook's Step 3 depends on it.
-- [ ] The Pixelfed app and/or Tusky installed and ready to add an account.
+- [ ] Tusky (or a substitute generic Mastodon client) installed and ready
+      to add an account.
 
 ## Procedure
 
@@ -49,8 +66,12 @@ Motivation section). Run this doc, record results here, then update
 3. Confirm the client shows the owner's profile
    (`GET /api/v1/accounts/verify_credentials`).
 
-- [ ] **Pass** (Pixelfed app)
+- [ ] **Pass** (Pixelfed app) — N/A, descoped (see Scope): the app's
+      preflight rejects any non-Pixelfed server before OAuth starts
+      ("This server is not compatible or is unavailable", 2026-07-23 run)
 - [ ] **Pass** (Tusky)
+- [x] **Pass** (Ice Cubes, 2026-07-23) — registration, consent, and
+      `verify_credentials` completed; the owner profile rendered
 - [ ] **Fail** — note what happened: **************\_\_\_\_**************
 
 ### Step 2 — Home timeline renders
@@ -87,14 +108,35 @@ Do **not** expect a Follow notification here even if the test account also
 follows the actor — that's the documented v1 gap (see Scope above), not
 something this step is checking for.
 
+## Quirks surfaced (2026-07-23 Ice Cubes run)
+
+Per the phase-3 policy (record → fix → fixture-test), the first Ice Cubes
+run surfaced three findings:
+
+1. **"Error while posting: Record not found"** — Ice Cubes composed a post;
+   `POST /api/v1/statuses` does not exist (writes are a documented
+   non-goal) and 404s with Mastodon's error shape. **Expected, not a bug**
+   — don't file this; the client keeps the draft locally.
+2. **"Joined December 31, 1969"** — the deployed target's owner `account`
+   config lacked `createdAt`, so the entity's epoch fallback rendered as
+   1969 in Pacific. Fixed in the conformance target's config (first-deploy
+   date).
+3. **Profile posts view: "An error occurred"** — Ice Cubes calls
+   `GET /api/v1/accounts/:id/statuses`, which didn't exist. Fixed:
+   implemented over the new `ownStatuses` backend seam
+   (`__client/timeline?source=1`); `accounts/relationships` (previously
+   swallowed by the dynamic `accounts/:id` route → 404) and the
+   `accounts/:id/{followers,following,featured_tags}` companions now
+   answer valid-but-empty pages. All fixture-tested.
+
 ## Result
 
-|                    |                       |
-| ------------------ | --------------------- |
-| Overall result     | ☐ Passing / ☐ Failing |
-| Run date           |                       |
-| Tester             |                       |
-| Notes / follow-ups |                       |
+|                    |                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Overall result     | ☐ Passing / ☐ Failing (in progress — Tusky run still pending)                                                                                                                                                                                                                                                                                                                                                                              |
+| Run date           | 2026-07-23 (partial: pixelfed-app attempt + descope)                                                                                                                                                                                                                                                                                                                                                                                       |
+| Tester             | David W. Keith                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Notes / follow-ups | Server-side preflight all green (instance/webfinger/apps/authorize/401s, outbox has the media+CW+alt post). Pixelfed app rejected the instance at its own preflight — root-caused to its Pixelfed-server-only gate and descoped (see Scope). Ice Cubes added as substitute row: Step 1 passed; the run surfaced three quirks (see Quirks above), fixes landed and need a target redeploy before re-running Steps 2–3. Tusky still pending. |
 
 ## Recording the result
 

@@ -135,9 +135,13 @@ export function buildMastodonBackend(options: {
   async function listEntries(
     kind: "timeline" | "notifications",
     query: BackendPageQuery,
+    extraParams?: Readonly<Record<string, string>>,
   ): Promise<BackendPage<BackendEntry>> {
     const url = new URL(`${config.iris.id}/__client/${kind}`);
     for (const [key, value] of cursorParams(query)) {
+      url.searchParams.set(key, value);
+    }
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
       url.searchParams.set(key, value);
     }
     const response = await stub().fetch(
@@ -189,6 +193,9 @@ export function buildMastodonBackend(options: {
     },
 
     timeline: (query) => listEntries("timeline", query),
+    // Owner posts only (`source=1` skips the DO's inbox scan) — backs
+    // `GET /api/v1/accounts/:id/statuses` for the owner account.
+    ownStatuses: (query) => listEntries("timeline", query, { source: "1" }),
     notifications: (query) => listEntries("notifications", query),
 
     async entry(id: string): Promise<BackendEntry | null> {
