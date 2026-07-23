@@ -16,7 +16,7 @@ import {
 } from "./entities.js";
 import { accountRequired, invalidToken, recordNotFound } from "./errors.js";
 import type { RouteContext } from "./handler.js";
-import { buildLinkHeader } from "./pagination.js";
+import { buildLinkHeader, pageQuery } from "./pagination.js";
 import { createMastodonStore } from "./store.js";
 
 const DEFAULT_LIMIT = 20;
@@ -97,20 +97,13 @@ export async function handleAccountStatuses(
   const backend = ctx.config.backend;
   if (!backend?.ownStatuses) return Response.json([]);
 
-  const limit = Math.min(
-    Math.max(
-      1,
-      Number.parseInt(ctx.url.searchParams.get("limit") ?? "", 10) ||
-        DEFAULT_LIMIT,
+  const page = await backend.ownStatuses(
+    pageQuery(
+      ctx.url,
+      { limit: DEFAULT_LIMIT, max: MAX_LIMIT },
+      ctx.config.pageSize?.max,
     ),
-    ctx.config.pageSize?.max ?? MAX_LIMIT,
   );
-  const page = await backend.ownStatuses({
-    limit,
-    maxId: ctx.url.searchParams.get("max_id") ?? undefined,
-    sinceId: ctx.url.searchParams.get("since_id") ?? undefined,
-    minId: ctx.url.searchParams.get("min_id") ?? undefined,
-  });
   const ownerAccount = credentialAccountEntity(
     ctx.config,
     (await backend.account()).counts,
