@@ -217,15 +217,15 @@ for the full per-provider notes.
 [`@dwk/deno-host`](spec/packages/deno-host.md) is building-block Cloudflare-
 interface emulation for Deno Deploy — the most credible *native* (non-
 container) target beyond Cloudflare, but **not yet usable to compose any
-`@dwk` package**. So far it implements the D1/DO-SQLite shim over an external
-libSQL/Turso database and single-writer actor + alarm emulation over a Deno
-KV lease. Two gaps remain unimplemented and demand-gated: a durable
-at-least-once **queue** and an **object-storage** (`R2Bucket`-equivalent)
-adapter — without the queue shim, no endpoint package can mount even at the
-lowest conformance tier. It also depends on an external libSQL/Turso service,
-a trade-off against this project's "data and keys live only on
-infrastructure the user owns" thesis that isn't resolved yet. Track progress
-in [`spec/deno-deploy-design.md`](spec/deno-deploy-design.md) and
+`@dwk` package**. It now implements the D1/DO-SQLite shim over an external
+libSQL/Turso database, single-writer actor + alarm emulation over a Deno KV
+lease, and a durable at-least-once **queue** on Deno KV. One gap remains
+unimplemented and demand-gated: an **object-storage** (`R2Bucket`-equivalent)
+adapter — without it, no endpoint package can mount even at the lowest
+conformance tier. It also depends on an external libSQL/Turso service, a
+trade-off against this project's "data and keys live only on infrastructure
+the user owns" thesis that isn't resolved yet. Track progress in
+[`spec/deno-deploy-design.md`](spec/deno-deploy-design.md) and
 [`spec/packages/deno-host.md`](spec/packages/deno-host.md).
 
 Fastly Compute, AWS Lambda@Edge, and Puter were also investigated and are
