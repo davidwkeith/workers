@@ -254,8 +254,7 @@ export class LibsqlKv implements DenoKvLike {
   }
 
   #ready(): Promise<void> {
-    this.#schema ??= this.#client.executeMultiple(SCHEMA_SQL);
-    return this.#schema;
+    return (this.#schema ??= this.#client.executeMultiple(SCHEMA_SQL));
   }
 
   async get<T = unknown>(key: KvKey): Promise<DenoKvEntryLike<T>> {
