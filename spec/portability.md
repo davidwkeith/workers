@@ -276,9 +276,10 @@ re-check; the audience overlap with IndieWeb self-hosters is real.
    design sketch, and revised (larger) effort estimate. The demand-driven
    gate still holds for the host itself; the "resolve the SQLite question"
    prerequisite is now resolved in code — the SQL shim landed as
-   `@dwk/deno-host`'s first increment (#397,
-   [packages/deno-host.md](packages/deno-host.md)); the actor, queue, and
-   object-storage gaps (#398–#400) remain unstarted.
+   `@dwk/deno-host`'s first two increments (#397, #398 — actor + alarm
+   emulation, gate overridden on demonstrated demand —
+   [packages/deno-host.md](packages/deno-host.md)); the queue and
+   object-storage gaps (#399, #400) remain unstarted.
 3. **Explicit non-goals for now:** Fastly Compute, Lambda@Edge, and Puter
    hosts for the stateful cohort, for the reasons in §4 — each with a
    documented re-evaluation trigger (a strongly-consistent store; a fetch

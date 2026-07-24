@@ -11,9 +11,11 @@
  * embedded-replica client), so the same code runs on Deno Deploy, Node, or
  * anywhere else the composing app can supply a client.
  *
- * **Status: exploratory/gated.** This is the SQL gap (issue #397) of the
- * demand-gated `@dwk/deno-host` plan (#396); the actor/alarm (#398), queue
- * (#399), and object-storage (#400) gaps are not implemented here yet.
+ * **Status: exploratory/gated.** This is the SQL gap (issue #397) and the
+ * single-writer actor + alarm emulation (issue #398, gate overridden on
+ * demonstrated demand) of the demand-gated `@dwk/deno-host` plan (#396);
+ * the queue (#399) and object-storage (#400) gaps are not implemented
+ * here yet.
  *
  * @see spec/packages/deno-host.md
  */
@@ -28,7 +30,30 @@ export {
   type SyncSqliteStatementLike,
   type SyncSqliteDatabaseLike,
 } from "./client.js";
+export {
+  type KvKeyPart,
+  type KvKey,
+  type DenoKvEntryLike,
+  type DenoKvCheckLike,
+  type DenoKvCommitResultLike,
+  type DenoKvAtomicLike,
+  type DenoKvListSelectorLike,
+  type DenoKvLike,
+} from "./kv-client.js";
+export {
+  acquireLease,
+  releaseLease,
+  LeaseContendedError,
+  type Lease,
+  type LeaseOptions,
+} from "./lease.js";
 export { createD1Database } from "./d1.js";
+export {
+  setAlarm,
+  getAlarm,
+  deleteAlarm,
+  type DueAlarmEntry,
+} from "./alarms.js";
 export {
   createSqlStorage,
   createDurableSqlite,
@@ -36,3 +61,14 @@ export {
   SyncSqlCursor,
   type DurableSqlite,
 } from "./sql-storage.js";
+export {
+  createDurableObjectNamespace,
+  DurableObject,
+  DenoDurableObjectId,
+  DenoDurableObjectState,
+  DurableObjectNamespaceLike,
+  type DurableObjectClass,
+  type DurableObjectNamespaceOptions,
+  type DenoDurableObjectStorage,
+  type AlarmInvocationInfo,
+} from "./durable-object.js";

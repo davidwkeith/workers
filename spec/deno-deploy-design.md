@@ -144,6 +144,19 @@ consumers of alarms — would need to tolerate that coarser granularity, or the
 design needs a finer-grained polling loop running inside a long-lived
 instance (in tension with §1's "instances come and go" execution model).
 
+> **Update (issue #398, design finalized 2026-07-23):** the demand gate in
+> §6 was overridden for this increment on a demonstrated demand signal (the
+> rest of the plan — #399, #400 — stays gated). The full design (KV lease
+> shape, alarm indexing, WebSocket handling, and the decision to make
+> `pollAlarms` an exported tick function the composing app wires to its own
+> `Deno.cron()` rather than a self-driving timer) is now written up in
+> [packages/deno-host.md](packages/deno-host.md#design-single-writer-actor--alarm-emulation-issue-398);
+> implemented. One refinement from the sketch above: alarm retries
+> after a throwing handler are re-scheduled by writing a new KV due-index
+> entry (picked up by whichever instance runs the next poll), not an
+> in-process timer — the sketch's "instances come and go" tension applies to
+> retry delivery too, not just the initial tick.
+
 ### 3.3 Queues (host-contract §3.6) — new gap
 
 Since native queues are gone, a durable at-least-once queue would need to be

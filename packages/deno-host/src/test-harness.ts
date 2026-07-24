@@ -29,6 +29,16 @@ import {
   type SyncSqliteDatabaseLike,
   type SyncSqliteStatementLike,
 } from "./client.js";
+import type {
+  DenoKvAtomicLike,
+  DenoKvCheckLike,
+  DenoKvCommitResultLike,
+  DenoKvEntryLike,
+  DenoKvLike,
+  DenoKvListSelectorLike,
+  KvKey,
+  KvKeyPart,
+} from "./kv-client.js";
 
 /** Matches SQLite's numbered placeholder form (`?1`, `?2`, ...). */
 const NUMBERED_PLACEHOLDER = /\?\d+/;
@@ -153,4 +163,251 @@ export function createStrictSyncSqlite(
       };
     },
   };
+}
+
+interface FakeKvRecord {
+  readonly key: KvKey;
+  value: unknown;
+  versionstamp: string;
+  expiresAt: number | null;
+}
+
+function keyTypeRank(part: KvKeyPart): number {
+  if (part instanceof Uint8Array) return 0;
+  if (typeof part === "bigint") return 1;
+  if (typeof part === "number") return 2;
+  if (typeof part === "string") return 3;
+  return 4; // boolean
+}
+
+function compareKeyPart(a: KvKeyPart, b: KvKeyPart): number {
+  const ra = keyTypeRank(a);
+  const rb = keyTypeRank(b);
+  if (ra !== rb) return ra - rb;
+  if (a instanceof Uint8Array && b instanceof Uint8Array) {
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+      const diff = (a[i] ?? 0) - (b[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return a.length - b.length;
+  }
+  if (typeof a === "bigint" && typeof b === "bigint") {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "string" && typeof b === "string") {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  if (typeof a === "boolean" && typeof b === "boolean") {
+    return a === b ? 0 : a ? 1 : -1;
+  }
+  return 0;
+}
+
+function compareKeys(a: KvKey, b: KvKey): number {
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const c = compareKeyPart(a[i] as KvKeyPart, b[i] as KvKeyPart);
+    if (c !== 0) return c;
+  }
+  return a.length - b.length;
+}
+
+function hasPrefix(key: KvKey, prefix: KvKey): boolean {
+  if (key.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (compareKeyPart(key[i] as KvKeyPart, prefix[i] as KvKeyPart) !== 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function keyToId(key: KvKey): string {
+  return key
+    .map((part) =>
+      part instanceof Uint8Array
+        ? `bytes:${Buffer.from(part).toString("hex")}`
+        : `${typeof part}:${String(part)}`,
+    )
+    .join("\u0000");
+}
+
+/**
+ * An in-memory `DenoKvLike` reproducing `Deno.Kv`'s documented atomic-CAS
+ * semantics: `atomic().check(...)` compares the current versionstamp
+ * exactly (including `null` for "must not exist"), `set`/`delete` only
+ * apply if every check passes, and `expireIn` entries are pruned lazily on
+ * access. Key comparison (used by `list`'s ordering/range) ranks by type
+ * first (bytes < bigint < number < string < boolean) then by value —
+ * sufficient for this package's own key shapes (string/number only); real
+ * `Deno.Kv` ordering is a live-verification item, not something this fake
+ * needs to match exactly (see spec/packages/deno-host.md).
+ */
+export class FakeDenoKv implements DenoKvLike {
+  readonly #store = new Map<string, FakeKvRecord>();
+  #version = 0;
+
+  #nextVersionstamp(): string {
+    this.#version += 1;
+    return this.#version.toString().padStart(20, "0");
+  }
+
+  #prune(): void {
+    const now = Date.now();
+    for (const [id, rec] of this.#store) {
+      if (rec.expiresAt !== null && rec.expiresAt <= now) {
+        this.#store.delete(id);
+      }
+    }
+  }
+
+  async get<T = unknown>(key: KvKey): Promise<DenoKvEntryLike<T>> {
+    this.#prune();
+    const rec = this.#store.get(keyToId(key));
+    return {
+      key,
+      value: (rec?.value ?? null) as T,
+      versionstamp: rec?.versionstamp ?? null,
+    };
+  }
+
+  async set(
+    key: KvKey,
+    value: unknown,
+    options?: { expireIn?: number },
+  ): Promise<{ versionstamp: string }> {
+    const versionstamp = this.#nextVersionstamp();
+    this.#store.set(keyToId(key), {
+      key,
+      value,
+      versionstamp,
+      expiresAt:
+        options?.expireIn != null ? Date.now() + options.expireIn : null,
+    });
+    return { versionstamp };
+  }
+
+  async delete(key: KvKey): Promise<void> {
+    this.#store.delete(keyToId(key));
+  }
+
+  async *list<T = unknown>(
+    selector: DenoKvListSelectorLike,
+    options?: { limit?: number },
+  ): AsyncIterableIterator<DenoKvEntryLike<T>> {
+    this.#prune();
+    const matches: FakeKvRecord[] = [];
+    for (const rec of this.#store.values()) {
+      if (!hasPrefix(rec.key, selector.prefix)) continue;
+      if (
+        selector.start !== undefined &&
+        compareKeys(rec.key, selector.start) < 0
+      ) {
+        continue;
+      }
+      if (
+        selector.end !== undefined &&
+        compareKeys(rec.key, selector.end) >= 0
+      ) {
+        continue;
+      }
+      matches.push(rec);
+    }
+    matches.sort((a, b) => compareKeys(a.key, b.key));
+    const limited =
+      options?.limit != null ? matches.slice(0, options.limit) : matches;
+    for (const rec of limited) {
+      yield {
+        key: rec.key,
+        value: rec.value as T,
+        versionstamp: rec.versionstamp,
+      };
+    }
+  }
+
+  atomic(): DenoKvAtomicLike {
+    return new FakeDenoKvAtomic(this);
+  }
+
+  /** @internal accessed by {@link FakeDenoKvAtomic} only. */
+  _get(id: string): FakeKvRecord | undefined {
+    this.#prune();
+    return this.#store.get(id);
+  }
+  /** @internal accessed by {@link FakeDenoKvAtomic} only. */
+  _write(id: string, rec: FakeKvRecord): void {
+    this.#store.set(id, rec);
+  }
+  /** @internal accessed by {@link FakeDenoKvAtomic} only. */
+  _delete(id: string): void {
+    this.#store.delete(id);
+  }
+  /** @internal accessed by {@link FakeDenoKvAtomic} only. */
+  _nextVersionstamp(): string {
+    return this.#nextVersionstamp();
+  }
+}
+
+type FakeKvOp =
+  | {
+      readonly type: "set";
+      readonly key: KvKey;
+      readonly value: unknown;
+      readonly expireIn?: number;
+    }
+  | { readonly type: "delete"; readonly key: KvKey };
+
+class FakeDenoKvAtomic implements DenoKvAtomicLike {
+  readonly #kv: FakeDenoKv;
+  readonly #checks: DenoKvCheckLike[] = [];
+  readonly #ops: FakeKvOp[] = [];
+
+  constructor(kv: FakeDenoKv) {
+    this.#kv = kv;
+  }
+
+  check(...checks: DenoKvCheckLike[]): DenoKvAtomicLike {
+    this.#checks.push(...checks);
+    return this;
+  }
+
+  set(
+    key: KvKey,
+    value: unknown,
+    options?: { expireIn?: number },
+  ): DenoKvAtomicLike {
+    this.#ops.push({ type: "set", key, value, expireIn: options?.expireIn });
+    return this;
+  }
+
+  delete(key: KvKey): DenoKvAtomicLike {
+    this.#ops.push({ type: "delete", key });
+    return this;
+  }
+
+  async commit(): Promise<DenoKvCommitResultLike> {
+    for (const c of this.#checks) {
+      const rec = this.#kv._get(keyToId(c.key));
+      const actual = rec?.versionstamp ?? null;
+      if (actual !== c.versionstamp) return { ok: false };
+    }
+    let versionstamp: string | undefined;
+    for (const op of this.#ops) {
+      const id = keyToId(op.key);
+      if (op.type === "delete") {
+        this.#kv._delete(id);
+      } else {
+        versionstamp = this.#kv._nextVersionstamp();
+        this.#kv._write(id, {
+          key: op.key,
+          value: op.value,
+          versionstamp,
+          expiresAt: op.expireIn != null ? Date.now() + op.expireIn : null,
+        });
+      }
+    }
+    return { ok: true, versionstamp };
+  }
 }
