@@ -94,6 +94,54 @@ describe("GET /api/v1/notifications", () => {
     expect(body.every((n) => n !== null)).toBe(true);
   });
 
+  it("resolves in_reply_to_account_id to the real owner id for a reply to the owner's post (handler wires ownerAccount)", async () => {
+    await resetDb();
+    const token = await obtainAccessToken();
+    // A mention notification: a remote reply whose inReplyTo targets the
+    // owner's own post, resolved by the backend to a local (source-1) row.
+    const reply = {
+      id: encodeSnowflake(1_753_000_000_030, 1),
+      receivedAt: 1_753_000_000_030,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/reply",
+          type: "Note",
+          content: "<p>nice</p>",
+          // Must start with baseUrl to classify as a mention.
+          inReplyTo: "https://owner.example/users/owner/posts/1",
+        },
+      },
+      inReplyTo: {
+        id: encodeSnowflake(1_753_000_000_001, 1, 1),
+        authorIri: "https://owner.example/users/owner",
+        authorIsOwner: true,
+      },
+    };
+    const cfg = { ...testConfig, backend: fakeBackend([reply]) };
+    const response = await api(cfg)(
+      new Request("https://owner.example/api/v1/notifications", {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      type: string;
+      status: { in_reply_to_id: string; in_reply_to_account_id: string };
+    }[];
+    expect(body).toHaveLength(1);
+    expect(body[0]?.type).toBe("mention");
+    // The regression the review flagged: without the handler wiring
+    // ownerAccount, this fell through to a synthesized `r_...` id.
+    expect(body[0]?.status.in_reply_to_account_id).toBe("1");
+    expect(body[0]?.status.in_reply_to_id).toBe(
+      encodeSnowflake(1_753_000_000_001, 1, 1),
+    );
+  });
+
   it("maps a FEP-1b12 Join row to a follow notification", async () => {
     await resetDb();
     const token = await obtainAccessToken();

@@ -329,6 +329,24 @@ function mediaAttachments(raw: unknown): Record<string, unknown>[] {
 }
 
 /**
+ * Whether rendering this entry may need the real owner account (id) rather
+ * than a synthesized remote one. True when the entry *is* the owner's own
+ * post (`source === 1`), *replies to* one (`inReplyTo.authorIsOwner`), or
+ * *boosts* one (`boost.authorIsOwner`) — the reply/boost cases matter because
+ * `in_reply_to_account_id` / `reblog.account.id` must resolve to the owner's
+ * real id, not a fallback `r_...`. A caller passes `ownerAccount` into
+ * `statusEntity`/`notificationEntity` iff this is true for the entry (or any
+ * entry on the page).
+ */
+export function entryNeedsOwnerAccount(entry: BackendEntry): boolean {
+  return (
+    entry.source === 1 ||
+    entry.inReplyTo?.authorIsOwner === true ||
+    entry.boost?.authorIsOwner === true
+  );
+}
+
+/**
  * `Create`/`Announce` row → `Status`. A `relayed_by` row is wrapped as a
  * reblog attributed to the relaying group's account (FEP-1b12 provenance —
  * spec/mastodon-client-api.md Decision 3's MCP-spec provenance requirement).
@@ -476,7 +494,12 @@ export function statusEntity(
  */
 export function notificationEntity(
   entry: BackendEntry,
-  opts: { readonly baseUrl: string },
+  opts: {
+    readonly baseUrl: string;
+    /** Passed through to the mention's status so a reply to the owner's own
+     * post resolves `in_reply_to_account_id` to the real owner id. */
+    readonly ownerAccount?: Record<string, unknown>;
+  },
 ): Record<string, unknown> | null {
   // Same discipline as statusEntity: every field read off entry.activity is
   // attacker-controlled remote AS2 JSON (from the inbox of a remote

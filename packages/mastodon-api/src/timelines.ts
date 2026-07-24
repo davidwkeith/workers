@@ -1,7 +1,7 @@
 /** `GET /api/v1/timelines/home` — the inbox-derived home timeline. */
 
 import { authenticateBearer } from "./auth.js";
-import { statusEntity } from "./entities.js";
+import { statusEntity, entryNeedsOwnerAccount } from "./entities.js";
 import { credentialAccountEntity } from "./entities.js";
 import { accountRequired, invalidToken } from "./errors.js";
 import type { RouteContext } from "./handler.js";
@@ -27,8 +27,10 @@ export async function handleHomeTimeline(ctx: RouteContext): Promise<Response> {
       ctx.config.pageSize?.max,
     ),
   );
-  const hasOwnerPost = page.entries.some((entry) => entry.source === 1);
-  const ownerAccount = hasOwnerPost
+  // Fetch the owner account when any entry on the page is, replies to, or
+  // boosts the owner's post — not merely when the entry itself is source 1.
+  const needsOwnerAccount = page.entries.some(entryNeedsOwnerAccount);
+  const ownerAccount = needsOwnerAccount
     ? credentialAccountEntity(
         ctx.config,
         (await ctx.config.backend.account()).counts,
