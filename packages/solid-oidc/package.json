@@ -1,6 +1,6 @@
 {
   "name": "@dwk/solid-oidc",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Solid-OIDC OpenID Provider: authorization-code + PKCE + DPoP-bound, ES256-signed WebID access tokens.",
   "keywords": [
     "solid",

@@ -1,5 +1,61 @@
 # @dwk/activitypub
 
+## 0.1.0-beta.6
+
+### Minor Changes
+
+- 49e29f8: Host FEP-1b12 `Group` actors — the producer side of a fediverse community
+  (#376), the concrete use case being Anglesite V-5 communities. Set
+  `actor.type: "Group"` (default `"Person"`) to serve a community rather than an
+  individual: membership is recorded exactly like following (a `Follow`, or a
+  `Join`/`Leave` that targets the Group actor itself rather than one of its owned
+  events, honors the existing `manuallyApprovesFollowers` gate); a `Create` from a
+  current member is wrapped in a Group-authored `Announce` and fanned out to the
+  whole membership; and a new `moderators` actor-IRI allowlist authorizes AS2
+  `Remove`-based moderation — banning a member (dropped from followers, future
+  activities rejected) or un-announcing a post (tombstoned, `Undo(Announce)`
+  broadcast to members).
+- 20c4e9e: Serve the owner's own posts on account profiles, and stop 404ing the profile
+  companion endpoints real clients call — the fixes for the quirks surfaced by
+  the 2026-07-23 Ice Cubes client-QA run (conformance/mastodon-client-qa.md,
+  issue #327).
+
+  - **`@dwk/mastodon-api`:** new `GET /api/v1/accounts/:id/statuses` route —
+    the owner id answers their own posts (newest-first, standard `Link`
+    pagination) via the new optional `MastodonBackend.ownStatuses` seam
+    method; remote account ids answer a valid-but-empty page (no remote
+    status history is stored). `GET /api/v1/accounts/relationships` joins the
+    exact-route stub roster (previously the dynamic `accounts/:id` pattern
+    misread `relationships` as an account id and 404ed), and the dynamic
+    profile companions `accounts/:id/{followers,following,featured_tags}`
+    answer valid-but-empty pages.
+  - **`@dwk/activitypub`:** the DO's `__client/timeline` accepts `source=1`
+    to restrict a page to owner outbox posts (skipping the inbox scan
+    entirely), and `buildMastodonBackend` implements `ownStatuses` over it.
+
+- dc59912: Implement `follow` notifications (the deferred phase-2 gap): `@dwk/activitypub`'s `#onFollow` now stores a _new_ follower's `Follow` (or FEP-1b12 `Group` membership `Join`) in the actor's inbox — a re-Follow from a still-recorded follower is not a fresh notification — and the `__client/notifications` classifier surfaces those rows; `@dwk/mastodon-api`'s `notificationEntity` maps them to Mastodon's `type: "follow"` (account attached, `status: null`), so clients like Tusky and Pixelfed now see new-follower notifications. Storing via the existing inbox path also queues the follower's actor-profile fetch, so the notification renders with a real display name and avatar once hydrated.
+- 07fc404: Resolve two Mastodon read-surface fidelity gaps for locally-held targets. The actor DO gains `#resolveLocalObject` (pure SQL over its owner outbox then inbox, never an outbound fetch): a reply whose `inReplyTo` names a post the DO holds now carries that post's snowflake as `in_reply_to_id` plus its author as `in_reply_to_account_id` (the owner account when replying to the owner's own post), and a bare-IRI `Announce` of a locally-held post now hydrates its reblog with the real content and author instead of rendering content-less. Targets the DO does not hold still degrade to `null`/content-less as before — dereferencing a remote object is the remaining increment. New optional `BackendEntry.inReplyTo`/`BackendEntry.boost` fields carry the resolution through the adapter into `statusEntity`.
+- 77d929a: Add an opt-in owner-scoped write surface to the Mastodon client API (`config.allowWrites`, default off). When enabled, `POST /api/v1/statuses` lets the single owner account author a status through a `write`-scoped bearer: the plain-text `status` is rendered to `Note` HTML (with `spoiler_text`/`sensitive` carried through), published via `@dwk/activitypub`'s existing outbox/fan-out path over a new internal `__client/publish` DO route, and returned as the owner-attributed `Status`. This deliberately widens the documented plain-bearer DPoP-everywhere exception from read-only to owner-scoped write — but only when opted in; the default keeps every write route `404`, so the exception stays strictly read-only. Enforcement: owner account required (`422` for app-level tokens), `write`/`write:statuses` scope required (`403` otherwise), 500-char ceiling. New seam `MastodonBackend.publishStatus?` and `tokenHasScope` helper. Delete, interaction verbs, follow, and reply-on-create are follow-up increments.
+
+### Patch Changes
+
+- 4cd36af: Add a `bugs` field to every publishable package manifest, so the npm package
+  page links to the repository issue tracker instead of omitting the "report
+  issues" link entirely. Metadata only — no runtime or API change.
+- Updated dependencies [20c4e9e]
+- Updated dependencies [dc59912]
+- Updated dependencies [07fc404]
+- Updated dependencies [77d929a]
+- Updated dependencies [4cd36af]
+  - @dwk/mastodon-api@0.1.0-beta.1
+  - @dwk/calendar@0.1.0-beta.3
+  - @dwk/http-signatures@0.1.0-beta.4
+  - @dwk/ldn@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.5
+  - @dwk/mcp@0.1.0-beta.1
+  - @dwk/safe-fetch@0.1.0-beta.4
+  - @dwk/webfinger@0.1.0-beta.5
+
 ## 0.1.0-beta.5
 
 ### Minor Changes

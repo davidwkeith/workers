@@ -1,5 +1,188 @@
 # @dwk/server
 
+## 0.1.0-beta.5
+
+### Minor Changes
+
+- be30ce4: Make the `central` storage mode's replica fleet operable (spec/scale-out.md,
+  phase 4 of the horizontal scale-out plan, #433): queue pollers on every
+  replica, a cron tick lease so a scheduled handler fires once fleet-wide,
+  graceful drain, and health surfaces.
+
+  - `CentralFleetPoller` (`central-fleet-poller.ts`) — `DurableObjectAlarmPoller`
+    (#432), renamed and extended: it now also polls every registered
+    `@dwk/deno-host` `QueueBroker`'s `pollQueues()` on the same jittered
+    per-replica tick as DO alarms and the coordination-KV sweep. Central mode
+    always wires the conforming, redeliver-by-default queue broker — never
+    `@dwk/cf-shims`'s auto-acking one.
+  - `CentralCronScheduler` (`central-cron.ts`) — the central-mode counterpart to
+    `@dwk/cf-shims`'s `CronScheduler`: every replica registers the same
+    `scheduled` handlers on the same cadence, but each tick first attempts a
+    short-lived tick-lease CAS in the coordination KV, so exactly one replica
+    runs a given cadence bucket. Structurally compatible with
+    `@dwk/cf-shims`'s `ScheduledHandler`, so a package's `scheduled` handler
+    runs unchanged.
+  - `createCentralHealthMounts` (`central-health.ts`) — liveness (`/healthz`,
+    always `200` while the process is up) and readiness (`/readyz`, re-running
+    the startup store probes on a short cache) as ordinary `Mount`s a deployer
+    spreads into `HostConfig.mounts`.
+  - `DwkServer.closeCentral(fleetPollers?)` (`server.ts`) — the central-mode
+    graceful drain, in spec order: stop accepting connections → stop the given
+    fleet pollers (each already awaits its own in-flight tick) → drain the
+    `WaitUntilTracker` → close WebSockets → release the (central-mode) writer-
+    lock reference. A separate method from `close()`, which is unchanged and
+    still exactly right for local mode.
+  - New observability events: `central_fleet.{alarm,queue}_poll_error`,
+    `central_fleet.sweep_ok`/`sweep_error`; `central_cron.tick_lease_acquired`/
+    `tick_lease_contended`/`claim_error`/`handler_error`;
+    `central_do.sync_duration_ms`/`sync_error` (added to
+    `createCentralDurableObjectNamespace`'s dispatch path);
+    `central_health.probe_failed`/`probe_recovered`.
+
+  Proven with two independent `CentralFleetPoller`/`CentralCronScheduler`
+  instances sharing one `LibsqlKv` (`central-fleet-poller.test.ts`,
+  `central-cron.test.ts`) — two replicas from the coordination store's point of
+  view — covering exactly-once queue delivery, redelivery when a handler never
+  decides, and single-winner tick-lease election across cadence buckets, plus a
+  `central-fleet.integration.test.ts` proving readiness over real HTTP and a
+  `closeCentral` drain on one replica while a peer keeps the fleet operable.
+
+  The docker-compose/k8s reference, `dwk migrate`, live verification, and
+  hosted-conformance runs remain phase 5, as originally scoped.
+
+- 10ecb12: Packaging, migration tooling, and verification runbook for `central` storage
+  mode (spec/scale-out.md, phase 5 of the horizontal scale-out plan, #434).
+
+  - `dwk-migrate` — a second CLI bin (alongside `dwk-serve`, also exported as
+    plain functions from `@dwk/server/migrate`) for mechanical local ↔ central
+    data migration: D1/DO-SQLite dump-and-replay (dialect-identical, so it's a
+    copy in either direction), streamed R2 object migration preserving
+    content-type/custom metadata, pending-alarm lifting/lowering between a
+    Durable Object's local SQLite file and the central coordination KV's
+    due/by-id indexes (baked into every DO-object migration call, not a
+    separate step to forget), and local queue backlog import into the
+    coordination KV as due entries. `to-central` auto-discovers bindings by
+    scanning `dataDir` the way `bindings.ts` lays it out; `to-local` takes an
+    explicit target since central mode has no directory to list.
+  - `docker-compose.yml` — the sqld + MinIO + 2-replica reference deployment,
+    doubling as the live-verification test bed; both replicas build from
+    `examples/central-composition.mjs` via the existing `Dockerfile`
+    (parameterized with a new `BUNDLE_ENTRY` build arg), fronted by an nginx
+    proxy (`nginx.conf`) with WebSocket session affinity for whichever
+    DO-WebSocket path a composition mounts.
+  - `k8s-notes.md` — the same topology's Kubernetes adaptation notes
+    (`Deployment` vs `StatefulSet`, readiness/liveness probe shape, ingress
+    session-affinity annotations, `emptyDir` scratch volumes for the
+    embedded-replica cache).
+  - `conformance/scale-out-qa.md` — the fillable live-verification checklist
+    (spec §14 item 4: libSQL read-your-writes/`batch` atomicity over hrana,
+    embedded-replica forwarding under concurrent replicas, the `libsql` native
+    module on the container base image, S3 read-after-write, streaming-body
+    signing, sqld under sustained multi-writer lease traffic) and the hosted
+    conformance run against a ≥2-replica target (item 5).
+  - README guidance ("Central mode: horizontal scale-out (experimental)") on
+    when — and, more importantly, when _not_ — to reach for central mode over
+    the local-mode default, echoed with a one-line pointer from the repo root
+    README.
+
+  Central mode remains **experimental, not supported** (host-contract §9)
+  until the live-verification checklist and hosted-suite run are actually
+  executed and recorded passing against real sqld/MinIO services — this phase
+  delivers the runbook and its test bed, not the run itself.
+
+- bd0b8cb: Add the opt-in `central` storage mode (spec/scale-out.md, phase 2 of the
+  horizontal scale-out plan, #431): `HostConfig.storage` now takes
+  `{ mode: "central", kv, objectStore? }` alongside the default
+  `{ mode: "local" }`, so N stateless replicas can share centralized D1/R2
+  stores instead of local SQLite files.
+
+  - `assembleCentralBindings(spec)` — the `central`-mode counterpart to
+    `assembleBindings`: D1 bindings over `@dwk/deno-host`'s `createD1Database`
+    (one injected `LibsqlClientLike` per binding), R2 bindings over
+    `createS3Bucket` (an injected `S3ClientLike` + endpoint per binding), and KV
+    bindings always backed in-memory per replica (KV is only ever a
+    safe-to-be-stale cache, so centralizing it buys nothing).
+  - `assertNoLocalStores`, `assertModeMarker`, and `probeCentralStores`
+    (`central-mode.ts`) — the mode guard and fail-loud startup invariants that
+    replace the local-writer lockfile for central mode: `createServer` skips
+    `acquireWriterLock` entirely and refuses a `dataDir` still holding
+    local-mode stores; the deployer runs the marker check and a round-trip
+    probe of every configured store before serving, so an unreachable store is
+    a clear startup error rather than a first-request 500.
+
+  Durable Objects across replicas (Tier 2) and the queue/cron poller lifecycle
+  are explicitly out of scope for this phase (spec/scale-out.md §15 phases 3–4).
+
+- 43f5d48: Bring Durable Objects (Tier 2 — `solid-pod`, `activitypub`, `remotestorage`,
+  `webauthn`, `atproto-pds`) up in `central` storage mode across replicas
+  (spec/scale-out.md, phase 3 of the horizontal scale-out plan, #432).
+
+  - `createCentralDurableObjectNamespace(ctor, options)` — the `central`-mode
+    counterpart to composing `@dwk/deno-host`'s `createDurableObjectNamespace`
+    directly: wires the per-id lease over an injected `DenoKvLike` (typically
+    `LibsqlKv`) to an injected `getStorageClient(idHex) => EmbeddedReplicaClientLike`
+    (a `SyncSqliteDatabaseLike` plus a `sync()` method, e.g. the `libsql`
+    package's embedded-replica client), with the sync-before-serve rule baked
+    in as a non-optional part of the wrapper: every dispatch calls
+    `client.sync()` after the lease is acquired and before the event runs.
+    The endpoint packages that ship a Durable Object run **completely
+    unmodified** under this — no second `cloudflare:workers` loader hook is
+    needed, since their `DurableObject` base class only wires `ctx`/`env` in
+    its constructor.
+  - `DurableObjectAlarmPoller` — the per-replica jittered interval timer every
+    replica MUST run for central-mode alarms to fire at all (unlike
+    `@dwk/cf-shims`'s local-mode shim, `@dwk/deno-host`'s namespace never
+    auto-arms one): polls every registered namespace's `pollAlarms()` and
+    optionally sweeps a coordination store's expired rows on the same tick.
+  - A `LeaseContendedError` thrown by a mount's handler now maps to `503` +
+    `Retry-After: 1` in the host's dispatch path, instead of falling through to
+    a generic `500` — a load balancer retry against the same URL is safe.
+
+  Proven end to end for one representative package
+  (`central-do-activitypub.integration.test.ts`: the inbound-`Follow`-to-
+  alarm-driven-`Accept` lifecycle across two replicas, driven entirely through
+  the real `@dwk/activitypub` package) plus a synthetic multi-replica suite
+  (`central-do.integration.test.ts`) covering sync-before-serve, racing writes
+  serializing, and crash recovery (a replica that never releases its lease
+  frees the id for another after `leaseTtlMs`). The remaining four Tier-2
+  packages' own cross-replica lifecycle suites, and the fleet lifecycle items
+  (queue poller, cron tick lease, drain, readiness — phase 4), are follow-ups.
+
+### Patch Changes
+
+- 713e3de: Add `@dwk/cf-shims` (#381): Node-backed implementations of the Cloudflare
+  Workers binding interfaces — `D1Database` → `node:sqlite`, `R2Bucket` →
+  filesystem, `KVNamespace` → SQLite/memory, an in-process durable `Queue`, a
+  cron/`scheduled` timer, and Durable Object emulation (`SqlStorage`, per-id
+  single-writer mutex, alarms, WebSocket hibernation) — plus the runtime-global
+  seams a Worker gets for free and Node does not: the `cloudflare:workers`
+  module stand-in and its `module.register` loader hook, a WASM `HTMLRewriter`
+  polyfill, a `crypto.DigestStream` polyfill, and `WebSocketPair`/hibernatable-
+  `WebSocket` globals.
+
+  Extracted verbatim from `@dwk/server`'s internal `./shims` (already mechanical
+  per `spec/self-hosting.md` §16 decision 6), so any Node host — a bare
+  `node:http` server, a test harness, a future Deno-compat host — can reuse
+  them without copying source. `@dwk/server` now depends on `@dwk/cf-shims` via
+  `workspace:*` and is its first consumer, not its owner; `web-socket-upgrade.ts`
+  (bridging the emulated `WebSocketPair` to a real HTTP `Upgrade` socket over the
+  `ws` package) stays in `@dwk/server` since it is genuinely host-specific. No
+  behavior change — `@dwk/server`'s public exports are unchanged (now re-exported
+  from `@dwk/cf-shims`), and its full `phase*.integration.test.ts` suite
+  continues to pass unmodified as `@dwk/cf-shims`'s de facto integration test.
+
+- Updated dependencies [713e3de]
+- Updated dependencies [ff698af]
+- Updated dependencies [c677f51]
+- Updated dependencies [43f5d48]
+- Updated dependencies [6bee3fc]
+- Updated dependencies [c867873]
+- Updated dependencies [139a2a5]
+- Updated dependencies [4cd36af]
+  - @dwk/cf-shims@0.1.0-beta.0
+  - @dwk/deno-host@0.1.0-beta.0
+  - @dwk/log@0.1.0-beta.5
+
 ## 0.1.0-beta.4
 
 ### Patch Changes

@@ -1,5 +1,68 @@
 # @dwk/webdav
 
+## 0.1.0-beta.2
+
+### Patch Changes
+
+- 4cd36af: Add a `bugs` field to every publishable package manifest, so the npm package
+  page links to the repository issue tracker instead of omitting the "report
+  issues" link entirely. Metadata only — no runtime or API change.
+- a20ddcf: Fix a polynomial-regex-ReDoS finding (CodeQL `js/polynomial-redos`, alert #11)
+  in `parseBasicAuthorization`: `/^basic\s+(.+)$/i` had `\s+` immediately
+  followed by `(.+)$`, and since `\s` is a subset of what `.` matches, the two
+  quantifiers were ambiguous about how to split the client-supplied
+  `Authorization` header between them — the same shape already fixed in
+  `@dwk/webmention`'s `parseLinkHeader` (#436). Replaced the combined regex with
+  a plain `String.prototype.search`/`slice` split on the first whitespace run,
+  which is unambiguous by construction. Behavior is unchanged, confirmed by the
+  existing `parseBasicAuthorization` test suite.
+- 8f14f4d: Address code-review follow-ups on the litmus conformance fixes:
+
+  - `verifyAppPassword` now returns `false` instead of throwing when a
+    record's `iterations` exceeds workerd's PBKDF2 ceiling, restoring its
+    documented "never throws" contract for any record regardless of
+    provenance (imported/migrated data, or anything minted outside
+    `mintAppPassword`).
+  - `COPY`/`MOVE` onto a destination whose immediate parent collection
+    doesn't exist now `409`s instead of auto-vivifying it, closing the same
+    RFC 4918 §9.8.5/§9.9.4 gap already fixed for `MKCOL`/`PUT`.
+
+- 8f14f4d: Fix four RFC 4918 conformance bugs surfaced by a real litmus run against
+  `conformance.dwk.io`:
+
+  - `MKCOL`/`PUT` with a missing intermediate collection silently succeeded
+    instead of `409 Conflict` (litmus `mkcol_no_parent`/`put_no_parent`) —
+    the WebDAV door was calling into `@dwk/solid-pod`'s LDP write path, which
+    auto-vivifies missing ancestor containers by design; the WebDAV backend
+    now checks the immediate parent exists first and throws `ResourceConflict`
+    when it doesn't, leaving the LDP door's own auto-vivify behavior untouched.
+  - `MKCOL` over an existing plain resource silently succeeded instead of
+    refusing (litmus `mkcol_over_plain`) — the existing-resource check only
+    looked up the collection-path variant (with a trailing slash appended),
+    missing a plain resource stored under the un-slashed name.
+  - `DELETE` of a resource that never existed silently succeeded instead of
+    `404` (litmus `delete_null`) — the router didn't check existence before
+    calling into the backend's remove.
+
+- e6eab17: Fix `MKCOL` silently succeeding over an existing plain resource when the
+  request's percent-encoding hex case differs from the `PUT` that created it
+  (litmus `mkcol_over_plain`, following `put_get_utf8_segment`). RFC 3986 §2.1
+  treats `%e2` and `%E2` as the same octet, but the router resolved each
+  request's path straight from `URL#pathname`, which copies an already-encoded
+  triplet through verbatim rather than normalizing its case — so two requests
+  naming the same UTF-8 segment with different encoder casing produced
+  different path strings and missed each other in the backend's exact-match
+  lookup. `pathOf` now uppercases every percent-encoded triplet before it's
+  used anywhere downstream (backend calls, authorization, lock/precondition
+  checks), so encoding-case no longer affects resource identity.
+- c55669e: Fix `mintAppPassword` throwing `NotSupportedError` on every call in production:
+  `DEFAULT_PBKDF2_ITERATIONS` was set to OWASP's 2023-recommended 600,000, but
+  workerd's `crypto.subtle.deriveBits` hard-rejects PBKDF2 iteration counts above
+  100,000. Capped the default at that runtime ceiling — still within OWASP's
+  longstanding prior-generation minimum — so the owner-gated app-password mint
+  endpoint (`createSolidPodWebdavCredentials`) actually works on Cloudflare
+  Workers.
+
 ## 0.1.0-beta.1
 
 ### Patch Changes

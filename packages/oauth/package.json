@@ -1,6 +1,6 @@
 {
   "name": "@dwk/oauth",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "OAuth 2.0 server building blocks: RFC 8414 metadata, RFC 7662 introspection, RFC 7009 revocation, RFC 9126 PAR, RFC 7591 dynamic client registration. Cross-standard reusable; no Workers runtime dependency.",
   "keywords": [
     "oauth2",
