@@ -18,6 +18,7 @@ import {
 import { safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { discoverEndpoint } from "./discovery.js";
 import { WebmentionLogEvent } from "./log.js";
+import type { SentLog } from "./sent-log.js";
 
 /** Options for {@link sendWebmention} / {@link sendWebmentions}. */
 export interface SendOptions {
@@ -34,6 +35,14 @@ export interface SendOptions {
    * enable in a production composition.
    */
   readonly fetchAllowedHosts?: readonly string[];
+  /**
+   * Opt-in delivered-notification log (see `sent-log.ts`). When supplied,
+   * every accepted notification is recorded so
+   * {@link resendForDeletedSource} can honor Webmention §3.1.5 after the
+   * source is deleted. Log writes are best-effort: a failed write never
+   * fails the send that succeeded.
+   */
+  readonly sentLog?: SentLog;
 }
 
 /** Outcome of attempting to notify a single target. */
@@ -118,12 +127,24 @@ export async function sendWebmention(
     return logOutcome({ target, endpoint, delivered: false, status: 0 });
   }
 
-  return logOutcome({
+  const outcome = logOutcome({
     target,
     endpoint,
     delivered: response.ok,
     status: response.status,
   });
+  if (outcome.delivered && options?.sentLog) {
+    // Best-effort: the notification already succeeded, so a failed log write
+    // only costs a future §3.1.5 re-send, never the send itself.
+    try {
+      await options.sentLog.record(source, target, Date.now());
+    } catch {
+      logger.warn(WebmentionLogEvent.SentLogWriteFailed, {
+        targetHost: hostFromUrl(target),
+      });
+    }
+  }
+  return outcome;
 }
 
 /**
@@ -139,4 +160,59 @@ export function sendWebmentions(
   return Promise.all(
     targets.map((target) => sendWebmention(source, target, options)),
   );
+}
+
+/** Options for {@link resendForDeletedSource}: a {@link SentLog} is required. */
+export interface ResendOptions extends SendOptions {
+  /** The log the original sends recorded into — the targets to re-notify. */
+  readonly sentLog: SentLog;
+}
+
+/**
+ * Webmention §3.1.5 (SHOULD): after `source` has been deleted (it now serves
+ * `410 Gone`, ideally with a tombstone), re-send a Webmention to every target
+ * the sent log recorded for it, so each receiver re-fetches the source, sees
+ * it gone, and drops the stored mention.
+ *
+ * Call this *after* the deletion is live — a receiver that re-verifies against
+ * a still-200 source will keep the mention. Log rows are cleared for targets
+ * whose re-notification was accepted (or that no longer declare an endpoint —
+ * there is nothing left to notify); a target whose endpoint failed keeps its
+ * row so a later call can retry. Failures are reported per target, never
+ * thrown.
+ */
+export async function resendForDeletedSource(
+  source: string,
+  options: ResendOptions,
+): Promise<SendResult[]> {
+  const { sentLog } = options;
+  const logger = options.logger ?? noopLogger;
+  const metrics = options.metrics ?? noopMetrics;
+  const targets = await sentLog.listTargets(source);
+  const results = await Promise.all(
+    targets.map(async (target) => {
+      // Plain sendWebmention, minus the delivered-notification recording: a
+      // re-send tears the log entry down rather than refreshing it.
+      const result = await sendWebmention(source, target, {
+        ...options,
+        sentLog: undefined,
+      });
+      if (result.delivered || result.endpoint === null) {
+        try {
+          await sentLog.remove(source, target);
+        } catch {
+          // Best-effort, like the record path: a kept row only means a
+          // harmless duplicate re-send on the next call.
+        }
+      }
+      return result;
+    }),
+  );
+  const fields = {
+    targets: results.length,
+    delivered: results.filter((r) => r.delivered).length,
+  };
+  logger.info(WebmentionLogEvent.ResendCompleted, fields);
+  metrics.count(WebmentionLogEvent.ResendCompleted, fields);
+  return results;
 }

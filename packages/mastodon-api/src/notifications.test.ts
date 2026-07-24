@@ -35,7 +35,7 @@ describe("GET /api/v1/notifications", () => {
     expect(response.status).toBe(422);
   });
 
-  it("maps a Like row to a favourite notification, dropping unmapped rows", async () => {
+  it("maps Like and Follow rows to notifications, dropping unmapped rows", async () => {
     await resetDb();
     const token = await obtainAccessToken();
     const like = {
@@ -49,8 +49,6 @@ describe("GET /api/v1/notifications", () => {
         object: "https://owner.example/users/owner/outbox/1",
       },
     };
-    // A row that notificationEntity maps to null (a Follow, unhandled until
-    // phase 3) must not leak a `null` entry into the response array.
     const follow = {
       id: encodeSnowflake(1_753_000_000_011, 1),
       receivedAt: 1_753_000_000_011,
@@ -62,7 +60,55 @@ describe("GET /api/v1/notifications", () => {
         object: "https://owner.example/users/owner",
       },
     };
-    const cfg = { ...testConfig, backend: fakeBackend([like, follow]) };
+    // A row that notificationEntity maps to null (an activity type with no
+    // notification shape) must not leak a `null` entry into the response.
+    const unmapped = {
+      id: encodeSnowflake(1_753_000_000_012, 1),
+      receivedAt: 1_753_000_000_012,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        type: "Block",
+        actor: "https://remote.example/users/eve",
+        object: "https://owner.example/users/owner",
+      },
+    };
+    const cfg = {
+      ...testConfig,
+      backend: fakeBackend([like, follow, unmapped]),
+    };
+    const response = await api(cfg)(
+      new Request("https://owner.example/api/v1/notifications", {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      type: string;
+      status: unknown;
+      account: { acct: string };
+    }[];
+    expect(body.map((n) => n.type)).toEqual(["favourite", "follow"]);
+    expect(body[1]?.status).toBeNull();
+    expect(body[1]?.account.acct).toBe("dave@remote.example");
+    expect(body.every((n) => n !== null)).toBe(true);
+  });
+
+  it("maps a FEP-1b12 Join row to a follow notification", async () => {
+    await resetDb();
+    const token = await obtainAccessToken();
+    const join = {
+      id: encodeSnowflake(1_753_000_000_013, 1),
+      receivedAt: 1_753_000_000_013,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        type: "Join",
+        actor: "https://remote.example/users/erin",
+        object: "https://owner.example/users/owner",
+      },
+    };
+    const cfg = { ...testConfig, backend: fakeBackend([join]) };
     const response = await api(cfg)(
       new Request("https://owner.example/api/v1/notifications", {
         headers: { authorization: `Bearer ${token}` },
@@ -70,9 +116,7 @@ describe("GET /api/v1/notifications", () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { type: string }[];
-    expect(body).toHaveLength(1);
-    expect(body[0]?.type).toBe("favourite");
-    expect(body.every((n) => n !== null)).toBe(true);
+    expect(body.map((n) => n.type)).toEqual(["follow"]);
   });
 
   it("returns a Link header when the page has real entries", async () => {

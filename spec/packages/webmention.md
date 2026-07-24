@@ -76,6 +76,17 @@ Receives and sends Webmentions for the user's domain.
 
 - Discover Webmention endpoints for outbound links.
 - Notify targets **on publish**.
+- **Re-notify targets on delete (§3.1.5, a SHOULD).** The sender is stateless
+  per call, so re-sending is opt-in via a `SentLog` (`sent-log.ts`): when one
+  is supplied in `SendOptions`, every accepted notification is recorded
+  (D1-backed default `createD1SentLog`, own `webmentions_sent` table, same
+  strongly-consistent-store rule as the inbox). After the source is deleted
+  and serving `410 Gone`, `resendForDeletedSource(source, options)` re-sends
+  to every recorded target so each receiver re-verifies, finds the source
+  gone, and drops the mention. Log rows are cleared for targets that accepted
+  the re-send (or no longer declare an endpoint); failed targets keep their
+  row for a later retry. Log writes are best-effort — a failed write never
+  fails the send that succeeded.
 
 ### Federation handoff (documented config, not core code)
 
@@ -102,9 +113,8 @@ Receives and sends Webmentions for the user's domain.
 
 ### Known gaps
 
-- **Deleted-source re-send (§3.1.5, a SHOULD).** When a previously sent source
-  is later deleted, the sender does not re-send a Webmention so the receiver can
-  drop the mention. This is an intentional scope limit: the receiver already
-  removes a mention when asynchronous re-verification finds the link gone
-  (including a `410 Gone` source), so the inbox stays correct on the receiving
-  side. Re-sending on delete from the publishing side is deferred.
+- None currently. The last one — the §3.1.5 deleted-source re-send — is now
+  implemented on the publishing side (see the sender's opt-in `SentLog` +
+  `resendForDeletedSource`); the receiving side already dropped a mention
+  when asynchronous re-verification found the link gone (including a
+  `410 Gone` source).

@@ -37,6 +37,16 @@ export const WebmentionLogEvent = {
   QueueRetry: "webmention.queue.retry",
   /** A send attempt finished. Fields: `endpointHost`, `delivered`, `status`. */
   SendCompleted: "webmention.send.completed",
+  /**
+   * A delivered notification could not be recorded in the sent log; the send
+   * itself succeeded. Field: `targetHost`.
+   */
+  SentLogWriteFailed: "webmention.send.sent_log_write_failed",
+  /**
+   * A §3.1.5 deleted-source re-send pass finished. Fields: `targets`,
+   * `delivered` (count re-accepted).
+   */
+  ResendCompleted: "webmention.resend.completed",
 } as const;
 
 /** Union of the event-name string literals in {@link WebmentionLogEvent}. */

@@ -2979,30 +2979,34 @@ describe("__client/notifications", () => {
     });
   });
 
-  it("classifies Like as favourite and Announce as reblog, omits Follow", async () => {
+  it("classifies Like as favourite, Announce as reblog, and a new follower's Follow as follow", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
-      // Follows never reach `inbox` at all (only `followers`/`pending_accept`
-      // rows) — deliver one to document that gap rather than silently relying
-      // on it, and confirm no row lands in `inbox` regardless.
+      // A *new* follower's Follow is stored in `inbox` (alongside its
+      // `followers` row) so the notifications read can surface it; a distinct
+      // re-Follow (fresh activity id, same still-recorded follower) is not a
+      // fresh notification and stores no second row.
+      const follow = (id: string) =>
+        JSON.stringify({
+          id: `https://remote.example/activities/${id}`,
+          type: "Follow",
+          actor: REMOTE,
+          object: iris.id,
+        });
       const followRes = await instance.fetch(
-        inboxRequest(
-          username,
-          JSON.stringify({
-            id: "https://remote.example/activities/notif-follow",
-            type: "Follow",
-            actor: REMOTE,
-            object: iris.id,
-          }),
-        ),
+        inboxRequest(username, follow("notif-follow")),
       );
       expect(followRes.status).toBe(202);
+      const refollowRes = await instance.fetch(
+        inboxRequest(username, follow("notif-refollow")),
+      );
+      expect(refollowRes.status).toBe(202);
       const followRows = state.storage.sql
         .exec<{
           n: number;
         }>(`SELECT COUNT(*) AS n FROM inbox WHERE json LIKE '%"Follow"%'`)
         .one().n;
-      expect(followRows).toBe(0);
+      expect(followRows).toBe(1);
 
       await instance.fetch(
         inboxRequest(
@@ -3031,9 +3035,10 @@ describe("__client/notifications", () => {
       const body = (await res.json()) as {
         items: { activity: { id: string; type: string } }[];
       };
-      expect(body.items).toHaveLength(2);
+      expect(body.items).toHaveLength(3);
       expect(body.items.map((i) => i.activity.type).sort()).toEqual([
         "Announce",
+        "Follow",
         "Like",
       ]);
       expect(
@@ -3041,7 +3046,7 @@ describe("__client/notifications", () => {
           (i) =>
             i.activity.id === "https://remote.example/activities/notif-follow",
         ),
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 

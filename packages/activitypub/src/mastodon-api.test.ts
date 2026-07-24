@@ -618,6 +618,68 @@ describe("buildMastodonBackend", () => {
     );
   });
 
+  it("notifications() surfaces a new follower's Follow once — a re-Follow is not a fresh notification", async () => {
+    // manuallyApprovesFollowers avoids an outbound actor fetch in this DO.
+    const config = resolveConfig({
+      baseUrl: "https://owner.example",
+      actor: {
+        username: `owner-${crypto.randomUUID().slice(0, 8)}`,
+        manuallyApprovesFollowers: true,
+      },
+      publicKeyPem: "PUBLIC-PEM",
+    });
+    const follow = (id: string) => ({
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: `https://remote.example/activities/${id}`,
+      type: "Follow",
+      actor: "https://remote.example/users/frank",
+      object: config.iris.id,
+    });
+    await seedActivity(config, follow("follow-1"));
+    // A distinct re-Follow (fresh id, so not caught by activity dedup) from
+    // the same, still-recorded follower is not a new notification.
+    await seedActivity(config, follow("follow-2"));
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const page = await backend.notifications({ limit: 10 });
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]?.activity["type"]).toBe("Follow");
+
+    // After an unfollow, following again is a genuinely new follower — and a
+    // fresh notification alongside the historical one.
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/unfollow-1",
+      type: "Undo",
+      actor: "https://remote.example/users/frank",
+      object: follow("follow-1"),
+    });
+    await seedActivity(config, follow("follow-3"));
+    const after = await backend.notifications({ limit: 10 });
+    expect(after.entries).toHaveLength(2);
+  });
+
+  it("notifications() excludes a misaddressed Follow (never recorded)", async () => {
+    const config = resolveConfig({
+      baseUrl: "https://owner.example",
+      actor: {
+        username: `owner-${crypto.randomUUID().slice(0, 8)}`,
+        manuallyApprovesFollowers: true,
+      },
+      publicKeyPem: "PUBLIC-PEM",
+    });
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/misaddressed",
+      type: "Follow",
+      actor: "https://remote.example/users/frank",
+      object: "https://someone-else.example/users/other",
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const page = await backend.notifications({ limit: 10 });
+    expect(page.entries).toHaveLength(0);
+  });
+
   it("caps the inbox scan instead of exhausting a plain-post-dominated table", async () => {
     const config = freshConfig();
     const timestamp = Date.now();

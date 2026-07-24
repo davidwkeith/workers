@@ -31,11 +31,12 @@ future `@dwk` packages can adopt it unchanged.
   **without a Workers runtime**.
 - **Protocol-agnostic:** no IndieWeb- or Solid-specific claim handling baked in.
   Caller supplies issuer/audience expectations.
-- **Algorithm allow-list:** `DpopAlgorithm` is `ES256 | ES384 | RS256 | PS256`.
-  Symmetric (`HS*`) and `none` are excluded on purpose — a DPoP proof must be
-  signed by the client-held private key whose public half is the embedded
-  `jwk`. `EdDSA`/`ES512` are simply not implemented yet (no deliberate
-  security reason excludes them); widen the allow-list if a caller needs one.
+- **Algorithm allow-list:** `DpopAlgorithm` is
+  `ES256 | ES384 | ES512 | EdDSA | RS256 | PS256`. Symmetric (`HS*`) and
+  `none` are excluded on purpose — a DPoP proof must be signed by the
+  client-held private key whose public half is the embedded `jwk`. `EdDSA`
+  accepts Ed25519 (RFC 8037 OKP keys) only: Ed448 has no Web Crypto support
+  in the Workers runtime, so an Ed448 `jwk` is rejected as `crv_mismatch`.
 - **`htu` has no port allow-list.** `htu` binding is exact-match string
   comparison after normalization (scheme + host + path, port included when
   non-default); the package does not restrict which ports a caller's

@@ -23,11 +23,11 @@ export const DEFAULT_MAX_AGE_SECONDS = 300;
  *
  * Symmetric (`HS*`) and `none` are deliberately excluded: a DPoP proof must be
  * signed by the client-held private key whose public half is embedded as `jwk`.
- * `EdDSA`/`ES512` are simply not implemented yet — no deliberate security
- * reason excludes them, unlike the symmetric/`none` exclusion above; widen
- * this allow-list if a caller needs one of them.
+ * `EdDSA` is Ed25519 only — Ed448 has no Web Crypto support in the Workers
+ * runtime, so an Ed448 `jwk` is rejected as `crv_mismatch`.
  */
-export type DpopAlgorithm = "ES256" | "ES384" | "RS256" | "PS256";
+export type DpopAlgorithm =
+  "ES256" | "ES384" | "ES512" | "EdDSA" | "RS256" | "PS256";
 
 /** Stable, locale-independent failure codes returned in {@link DpopVerifyResult.reason}. */
 export type DpopFailureReason =
@@ -130,8 +130,8 @@ interface VerifyAlg {
 }
 
 interface AlgSpec {
-  kty: "EC" | "RSA";
-  /** For EC algorithms, the curve the `alg` implies (`jwk.crv` must match it). */
+  kty: "EC" | "RSA" | "OKP";
+  /** For EC/OKP algorithms, the curve the `alg` implies (`jwk.crv` must match it). */
   expectedCrv?: string;
   importParams: ImportAlg;
   verifyParams: VerifyAlg;
@@ -149,6 +149,20 @@ const ALGS: Record<DpopAlgorithm, AlgSpec> = {
     expectedCrv: "P-384",
     importParams: { name: "ECDSA", namedCurve: "P-384" },
     verifyParams: { name: "ECDSA", hash: "SHA-384" },
+  },
+  ES512: {
+    kty: "EC",
+    expectedCrv: "P-521",
+    importParams: { name: "ECDSA", namedCurve: "P-521" },
+    verifyParams: { name: "ECDSA", hash: "SHA-512" },
+  },
+  // RFC 8037: EdDSA proofs carry an OKP jwk. Ed25519 only — Ed448 has no Web
+  // Crypto support in the Workers runtime, so its jwk fails the crv check.
+  EdDSA: {
+    kty: "OKP",
+    expectedCrv: "Ed25519",
+    importParams: { name: "Ed25519" },
+    verifyParams: { name: "Ed25519" },
   },
   RS256: {
     kty: "RSA",
@@ -282,6 +296,13 @@ async function jwkThumbprint(
       return null;
     }
     canonical = JSON.stringify({ e, kty: "RSA", n });
+  } else if (jwk.kty === "OKP") {
+    // RFC 8037 §2: an OKP key's thumbprint members are crv, kty, x.
+    const { crv, x } = jwk;
+    if (typeof crv !== "string" || typeof x !== "string") {
+      return null;
+    }
+    canonical = JSON.stringify({ crv, kty: "OKP", x });
   } else {
     return null;
   }
@@ -291,7 +312,7 @@ async function jwkThumbprint(
 /** Build a clean public-only JWK for `importKey`, dropping `alg`/`use`/`key_ops`. */
 function publicJwk(
   jwk: Record<string, unknown>,
-  kty: "EC" | "RSA",
+  kty: "EC" | "RSA" | "OKP",
 ): JsonWebKey | null {
   if (kty === "EC") {
     const { crv, x, y } = jwk;
@@ -303,6 +324,13 @@ function publicJwk(
       return null;
     }
     return { kty: "EC", crv, x, y };
+  }
+  if (kty === "OKP") {
+    const { crv, x } = jwk;
+    if (typeof crv !== "string" || typeof x !== "string") {
+      return null;
+    }
+    return { kty: "OKP", crv, x };
   }
   const { n, e } = jwk;
   if (typeof n !== "string" || typeof e !== "string") {
@@ -385,12 +413,13 @@ export async function verifyDpopProof(
   if (jwk.kty !== algSpec.kty) {
     return fail("jwk_invalid");
   }
-  // EC: the curve must be the one the alg implies (ES256⇒P-256, …). WebCrypto
-  // would also reject a mismatch on import, but check it explicitly up front.
-  // A missing/non-string `crv` is malformed, not a mismatch — let it fall
-  // through to `publicJwk` below, which rejects it as `jwk_invalid`.
+  // EC/OKP: the curve must be the one the alg implies (ES256⇒P-256,
+  // EdDSA⇒Ed25519, …). WebCrypto would also reject a mismatch on import, but
+  // check it explicitly up front. A missing/non-string `crv` is malformed, not
+  // a mismatch — let it fall through to `publicJwk` below, which rejects it as
+  // `jwk_invalid`.
   if (
-    algSpec.kty === "EC" &&
+    algSpec.expectedCrv !== undefined &&
     typeof jwk.crv === "string" &&
     jwk.crv !== algSpec.expectedCrv
   ) {

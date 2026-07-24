@@ -58,9 +58,10 @@ rejected with `jkt_required` rather than validating an unbound proof
 
 - **Header** — `typ` is exactly `dpop+jwt`; no `crit` parameter is present
   (RFC 7515 §4.1.11); `alg` is an asymmetric algorithm from the allow-list
-  (`ES256`, `ES384`, `RS256`, `PS256` — never `none` or HMAC); `jwk` is present,
-  carries no private key material, has an EC `crv` matching the `alg`, and (for
-  RSA) a modulus of at least 2048 bits.
+  (`ES256`, `ES384`, `ES512`, `EdDSA`, `RS256`, `PS256` — never `none` or
+  HMAC); `jwk` is present, carries no private key material, has an EC/OKP
+  `crv` matching the `alg` (`EdDSA` is Ed25519 only — the Workers runtime has
+  no Ed448 Web Crypto support), and (for RSA) a modulus of at least 2048 bits.
 - **Signature** — over `header.payload` using the embedded `jwk`.
 - **Claims** — `htm` matches the request method (case-insensitive); `htu`
   matches the request URI after normalization (scheme/host lowercased, default

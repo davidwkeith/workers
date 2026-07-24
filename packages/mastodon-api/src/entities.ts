@@ -421,10 +421,11 @@ export function statusEntity(
 }
 
 /**
- * `Like`/`Announce`/reply-`Create` row → `Notification`, or `null` if the
- * row fits none of the phase-2 notification types (design doc: "Rows that
- * fit no type are omitted from this endpoint"). `Follow` is deliberately
- * unhandled — deferred to phase 3, not an oversight.
+ * `Like`/`Announce`/reply-`Create`/`Follow` row → `Notification`, or `null`
+ * if the row fits none of the notification types (design doc: "Rows that
+ * fit no type are omitted from this endpoint"). A `Join` is the FEP-1b12
+ * membership synonym for `Follow` on a `Group` actor and renders the same
+ * `follow` notification.
  */
 export function notificationEntity(
   entry: BackendEntry,
@@ -460,6 +461,15 @@ export function notificationEntity(
     return {
       id: entry.id,
       type: "reblog",
+      created_at: new Date(entry.receivedAt).toISOString(),
+      account,
+      status: null,
+    };
+  }
+  if (type === "Follow" || type === "Join") {
+    return {
+      id: entry.id,
+      type: "follow",
       created_at: new Date(entry.receivedAt).toISOString(),
       account,
       status: null,
