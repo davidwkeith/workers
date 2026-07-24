@@ -62,10 +62,11 @@ host cannot do:
 - **Polling runs on a schedule via a queue / Cron Trigger with backoff**, never
   inline on the `action=timeline` read path — the read path serves stored
   entries only, so a slow or dead source never blocks a client.
-- **Reuse, don't re-implement, microformats2 parsing:** the mf2 → JF2 path
-  already exists in [`@dwk/micropub`](micropub.md)'s `mf2.ts`; factor the shared
-  parsing out rather than forking it. RSS / Atom / JSON Feed normalisation to
-  JF2 is the new surface this package adds.
+- **Reuse, don't re-implement, microformats2 parsing:** the `h-entry` → JF2
+  extraction behind `parseHFeed` lives in the shared [`@dwk/mf2`](mf2.md) lib
+  (extracted from this package's `hfeed.ts`, issue #412) — this package is a
+  consumer, not the owner. RSS / Atom / JSON Feed normalisation to JF2 is the
+  surface this package adds itself.
 - **Complements, does not duplicate, [`@dwk/websub`](websub.md):** where a
   followed source advertises a `rel="hub"`, the poller MAY subscribe via WebSub
   for push instead of polling that source — WebSub is the user as *subscriber*

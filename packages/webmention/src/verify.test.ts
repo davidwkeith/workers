@@ -167,6 +167,8 @@ describe("verifySource", () => {
     expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({
       links: true,
       status: 200,
+      // A bare link with no responding h-entry is a plain mention.
+      interactionType: "mention",
     });
   });
 
@@ -182,6 +184,45 @@ describe("verifySource", () => {
       links: true,
       status: 200,
       rsvp: "yes",
+      // An rsvp is by definition a reply to the target.
+      interactionType: "reply",
+    });
+  });
+
+  it("enriches a reply with author, content, and published time", async () => {
+    const html =
+      `<article class="h-entry">` +
+      `<a class="u-in-reply-to" href="${target}">re</a>` +
+      `<time class="dt-published" datetime="2026-07-01T10:00:00Z">Jul 1</time>` +
+      `<div class="e-content"><p>Great <em>post</em>!<script>x()</script></p></div>` +
+      `<div class="p-author h-card"><span class="p-name">Reply Guy</span>` +
+      `<img class="u-photo" src="/me.png"></div>` +
+      `</article>`;
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({
+      links: true,
+      status: 200,
+      interactionType: "reply",
+      author: { name: "Reply Guy", photo: "https://blog.example/me.png" },
+      content: "<p>Great <em>post</em>!</p>",
+      published: "2026-07-01T10:00:00Z",
+    });
+  });
+
+  it("classifies a non-HTML source that links as a plain mention", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ref: target }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({
+      links: true,
+      status: 200,
+      interactionType: "mention",
     });
   });
 
@@ -229,7 +270,7 @@ describe("verifySource fetchAllowedHosts (local-dev opt-in, issue #257)", () => 
         fetch: fetchImpl,
         fetchAllowedHosts: ["localhost:4321"],
       }),
-    ).toEqual({ links: true, status: 200 });
+    ).toEqual({ links: true, status: 200, interactionType: "mention" });
   });
 
   it("still blocks a loopback source when the allowlist names another host", async () => {

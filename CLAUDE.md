@@ -12,10 +12,11 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **29 publishable packages** — the
+**Status: implemented, unreleased.** There are **30 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`) and the
+`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`,
+`@dwk/mf2`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
@@ -79,13 +80,20 @@ cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
 `HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
 from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
 them — `@dwk/server` is its first consumer, not its owner.
-`@dwk/deno-host` is the newest — the first increment (#397) of the otherwise
+`@dwk/deno-host` is the first increment (#397) of the otherwise
 still demand-gated Deno Deploy host plan (#396): runtime-agnostic,
 dependency-free shims presenting an external libSQL/Turso database behind
 the host-contract `D1Database` (async remote client) and
 `SqlStorage`/`transactionSync` (synchronous embedded-replica client)
 surfaces, via injected structural client seams; the actor/alarm, queue, and
 object-storage gaps (#398–#400) are not implemented and remain gated.
+`@dwk/mf2` is the newest — the `HTMLRewriter`-based `h-entry` → JF2 extractor
+moved out of `@dwk/microsub`'s `hfeed.ts` (#412), extended with
+`u-repost-of`/`u-bookmark-of` recognition and `e-content` inner-HTML capture,
+plus the allowlist `sanitizeHtml` for that captured UGC; `@dwk/microsub`
+consumes it for `parseHFeed` and `@dwk/webmention` uses it to enrich stored
+mentions with interaction type, author, sanitized content, and published
+time.
 When changing behaviour, the authoritative
 requirements are the per-package specs under `spec/packages/`, not guesswork.
 
@@ -183,7 +191,10 @@ injected state.
   `<esi:comment>`/`<esi:remove>` markup in a composed Worker's outgoing
   `Response`, fetching fragments concurrently through `@dwk/safe-fetch`
   (#247); no `@dwk` endpoint package is a required consumer yet.
-- **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
+- **Standard-specific libs** — `@dwk/wac` (tied to Solid/WAC by design) and
+  `@dwk/mf2` (microformats2, an IndieWeb building block; also the one lib
+  that is runtime-bound — it is built on the `HTMLRewriter` global — so its
+  tests run under workerd, not Node).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 - **Cloudflare-runtime-emulation lib** — `@dwk/cf-shims` is the one package
   that is deliberately Cloudflare-specific in the same way `@dwk/store` and
@@ -286,7 +297,9 @@ when adding a package:
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
-  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`.
+  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`, and — the one lib
+  in this group — `@dwk/mf2` (its extractor/sanitizer run on the
+  `HTMLRewriter` global; no bindings).
 - **Node-native packages** also run under `environment: "node"` (no
   Miniflare) but, unlike the pure libs above, are inherently Node-specific
   rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare

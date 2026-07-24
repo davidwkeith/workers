@@ -210,6 +210,8 @@ importers:
         specifier: workspace:*
         version: link:../dpop
 
+  packages/mf2: {}
+
   packages/micropub:
     dependencies:
       '@dwk/calendar':
@@ -242,6 +244,9 @@ importers:
       '@dwk/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@dwk/mf2':
+        specifier: workspace:*
+        version: link:../mf2
       '@dwk/safe-fetch':
         specifier: workspace:*
         version: link:../safe-fetch
@@ -446,6 +451,9 @@ importers:
       '@dwk/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@dwk/mf2':
+        specifier: workspace:*
+        version: link:../mf2
       '@dwk/safe-fetch':
         specifier: workspace:*
         version: link:../safe-fetch

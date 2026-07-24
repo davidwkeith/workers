@@ -58,6 +58,7 @@ their own.
 | [`@dwk/store`](spec/packages/store.md) | lib | DO-SQLite quad store + R2 copy-on-write blob bodies behind one storage-agnostic interface. |
 | [`@dwk/ldn`](spec/packages/ldn.md) | lib | Linked Data Notifications primitives (inbox discovery, notification validation, listing). RDF-only; shared by `solid-pod` and `activitypub`. Discovery reachable n3-free as `@dwk/ldn/discovery`. |
 | [`@dwk/calendar`](spec/packages/calendar.md) | lib | Canonical JSCalendar (RFC 8984)-shaped event model + RFC 5545 iCalendar / JSCalendar serializers. Protocol-agnostic; per-standard adapters live in the endpoint packages. |
+| [`@dwk/mf2`](spec/packages/mf2.md) | lib | Microformats2 `h-entry` → JF2 extraction + allowlist HTML sanitizer, on the runtime's `HTMLRewriter`. Shared by `microsub` (h-feed timelines) and `webmention` (mention enrichment). |
 | [`@dwk/mcp`](spec/packages/mcp.md) | lib | Model Context Protocol server core: dependency-free JSON-RPC 2.0 + Streamable HTTP, tools-only v1 subset, per-tool scope-intersection authz. Cross-standard reusable. **In progress** — protocol core implemented; the auth bridge and endpoint packages' tool contributions are next. |
 
 **Mental model:** stateless Worker front door → per-pod Durable Object as the
