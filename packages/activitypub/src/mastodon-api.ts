@@ -20,6 +20,7 @@ import {
   type BackendEntry,
   type BackendPage,
   type BackendPageQuery,
+  type BackendPublishInput,
   type MastodonApiConfig,
   type MastodonApiEnv,
   type MastodonBackend,
@@ -222,7 +223,50 @@ export function buildMastodonBackend(options: {
       if (!response.ok) return null;
       return (await response.json()) as BackendActorProfile;
     },
+
+    async publishStatus(input: BackendPublishInput): Promise<BackendEntry> {
+      // Render the client's plain-text status into the HTML an AS2 Note
+      // carries. The DO's outbox stores it verbatim and the read path
+      // re-sanitizes on the way out, so escaping here is belt-and-suspenders.
+      const headers = internalHeaders();
+      headers.set(INTERNAL_HEADERS.publish, "1");
+      headers.set("content-type", "application/json");
+      const body: Record<string, unknown> = {
+        kind: "note",
+        content: plainTextToHtml(input.status),
+      };
+      if (input.spoilerText !== undefined) body.summary = input.spoilerText;
+      if (input.sensitive !== undefined) body.sensitive = input.sensitive;
+      const response = await stub().fetch(
+        new Request(`${config.iris.id}/__client/publish`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+      if (!response.ok) {
+        throw new Error(
+          `__client/publish failed (${response.status}): ${await response.text()}`,
+        );
+      }
+      const row = (await response.json()) as ClientEntryRow;
+      return toBackendEntry(row);
+    },
   };
+}
+
+/**
+ * Escape a plain-text status and wrap it as the HTML an AS2 `Note` carries:
+ * `\n\n` splits paragraphs, a single `\n` becomes `<br>`. Mastodon clients
+ * submit plain text and expect the server to render markup.
+ */
+function plainTextToHtml(text: string): string {
+  const escape = (value: string): string =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${escape(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
 }
 
 /**

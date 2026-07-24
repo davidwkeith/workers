@@ -62,6 +62,19 @@ export interface BackendPage<T> {
   readonly entries: readonly T[];
 }
 
+/**
+ * An owner-authored status to publish (`POST /api/v1/statuses`). `status` is
+ * the plain-text body the client typed; the backend renders it to the HTML an
+ * AS2 `Note` carries.
+ */
+export interface BackendPublishInput {
+  readonly status: string;
+  /** Content warning (Mastodon `spoiler_text` → AS2 `summary`). */
+  readonly spoilerText?: string;
+  /** Mark the status sensitive (`as:sensitive`). */
+  readonly sensitive?: boolean;
+}
+
 export interface MastodonBackend {
   /** Actor profile + live counts (followers/following/statuses). */
   account(): Promise<BackendAccount>;
@@ -79,4 +92,11 @@ export interface MastodonBackend {
   entry(id: string): Promise<BackendEntry | null>;
   /** Cached remote actor profile, or null when it has not resolved yet. */
   actorProfile?(actor: string): Promise<BackendActorProfile | null>;
+  /**
+   * Publish an owner status and return the stored entry (source-1). Optional:
+   * a backend without it leaves the write route unsupported even where the
+   * deployment opted into writes. The owner bearer + `write` scope are
+   * enforced by the route before this is called.
+   */
+  publishStatus?(input: BackendPublishInput): Promise<BackendEntry>;
 }
