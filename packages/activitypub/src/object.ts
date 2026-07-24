@@ -1796,12 +1796,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
     }
 
-    const items = matches.map((entry) => ({
-      ...entry,
-      interactions: this.#clientInteractions(entry.activity),
-      actorProfiles: this.#clientActorProfiles(entry.activity, entry.relayedBy),
-      ...this.#clientResolved(entry.activity),
-    }));
+    const items = matches.map((entry) => {
+      const resolved = this.#clientResolved(entry.activity);
+      return {
+        ...entry,
+        interactions: this.#clientInteractions(entry.activity),
+        // Enrich the resolved reply/boost authors too, so a hydrated reblog's
+        // `account` renders from the cached profile (a free DO-local read)
+        // rather than the IRI-derived fallback.
+        actorProfiles: this.#clientActorProfiles(
+          entry.activity,
+          entry.relayedBy,
+          [resolved.boost?.authorIri, resolved.replyTo?.authorIri],
+        ),
+        ...resolved,
+      };
+    });
     return json(200, {
       items,
       combinedNewestFirst,
@@ -1986,17 +1996,25 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     };
   }
 
-  /** Return cached AS2 actor fields for the activity's author and relay group. */
+  /**
+   * Return cached AS2 actor fields for the activity's author, its relay group,
+   * and any additionally-resolved actors (a hydrated boost's / reply target's
+   * author, so the nested reblog account enriches). Purely cache reads — never
+   * a network fetch.
+   */
   #clientActorProfiles(
     activity: JsonValue,
     relayedBy: string | null,
+    extraActors: ReadonlyArray<string | null | undefined> = [],
   ): Record<string, Record<string, string>> {
     const actors = [
       actorIri((activity as ActivityObject).actor),
       relayedBy,
+      ...extraActors,
     ].filter((value): value is string => !!value);
     const profiles: Record<string, Record<string, string>> = {};
     for (const actor of actors) {
+      if (profiles[actor]) continue;
       const profile = this.#cachedActorProfile(actor);
       if (profile) profiles[actor] = profile;
     }
@@ -2078,6 +2096,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         : rows[0];
     if (!row) return json(404, { error: "not found" } as JsonValue);
     const parsed = JSON.parse(row.json) as JsonValue;
+    const resolved = this.#clientResolved(parsed);
     return json(200, {
       seq: row.seq,
       receivedAt: row.received_at,
@@ -2085,8 +2104,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       relayedBy: row.relayed_by,
       source: source === "1" ? 1 : 0,
       interactions: this.#clientInteractions(parsed),
-      actorProfiles: this.#clientActorProfiles(parsed, row.relayed_by),
-      ...this.#clientResolved(parsed),
+      actorProfiles: this.#clientActorProfiles(parsed, row.relayed_by, [
+        resolved.boost?.authorIri,
+        resolved.replyTo?.authorIri,
+      ]),
+      ...resolved,
     } as unknown as JsonValue);
   }
 

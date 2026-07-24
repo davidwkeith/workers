@@ -964,6 +964,49 @@ describe("buildMastodonBackend", () => {
     expect(decodeSnowflake(boost!.boost!.id)?.source).toBe(1);
   });
 
+  it("includes the boosted post author's cached profile in a hydrated boost's actorProfiles", async () => {
+    const config = freshConfig();
+    const author = "https://remote.example/users/bob";
+    const boostedNote = "https://remote.example/objects/boosted-note";
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO actor_cache (actor, json, fetched_at) VALUES (?, ?, ?)`,
+        author,
+        JSON.stringify({ preferredUsername: "bob", name: "Bob Example" }),
+        Date.now(),
+      );
+    });
+    // The boosted post itself, held in our inbox, authored by the cached actor.
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/boosted-create",
+      type: "Create",
+      actor: author,
+      object: { id: boostedNote, type: "Note", content: "hi" },
+    });
+    // A bare-IRI boost of it by someone else.
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/boost-remote",
+      type: "Announce",
+      actor: "https://remote.example/users/booster",
+      object: boostedNote,
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const page = await backend.notifications({ limit: 10 });
+    const boost = page.entries.find(
+      (e) =>
+        e.activity["id"] === "https://remote.example/activities/boost-remote",
+    );
+    expect(boost?.boost?.authorIri).toBe(author);
+    // The fix: the boosted author's cached profile is a free DO-local read, so
+    // it must be present for the reblog account to render enriched.
+    expect(boost?.actorProfiles?.[author]).toMatchObject({
+      name: "Bob Example",
+    });
+  });
+
   it("entry() returns null for an unparseable id", async () => {
     const config = freshConfig();
     const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
