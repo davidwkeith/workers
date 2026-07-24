@@ -16,18 +16,18 @@ unlike it, the implementation is **runtime-agnostic** (no `node:` imports,
 no Deno globals) and reaches its backing store only through injected client
 seams.
 
-> **Status: exploratory/gated.** Implements the SQL gap (issue #397) and the
-> single-writer actor + alarm emulation (issue #398, gate overridden on
-> demonstrated demand — see
-> [below](#design-single-writer-actor--alarm-emulation-issue-398)) of the
-> demand-gated `@dwk/deno-host` plan (#396;
-> [deno-deploy-design.md](../deno-deploy-design.md) §3.1, §3.2). The
-> KV-backed queue (#399) and the `R2Bucket` object-storage adapter (#400)
-> are **not** implemented, so no endpoint package can mount on this host
-> yet — per
+> **Status: exploratory/gated.** Implements the SQL gap (issue #397), the
+> single-writer actor + alarm emulation (issue #398), and the KV-backed
+> queue emulation (issue #399) — all three gate overrides on demonstrated
+> demand — of the demand-gated `@dwk/deno-host` plan (#396;
+> [deno-deploy-design.md](../deno-deploy-design.md) §3.1, §3.2, §3.3). See
+> [below](#design-single-writer-actor--alarm-emulation-issue-398) and
+> [below](#design-kv-backed-queue-emulation-issue-399) for each design. The
+> `R2Bucket` object-storage adapter (#400) is **not** implemented, so no
+> endpoint package can mount on this host yet — per
 > [deno-deploy-design.md §6](../deno-deploy-design.md#6-decision-gate) even
 > Tier 1 ([host-contract.md §9](../host-contract.md#9-conformance-tiers-and-how-a-host-proves-compliance))
-> needs the queue gap closed first. #399/#400 stay demand-gated.
+> needs the object-storage gap closed too. #400 stays demand-gated.
 
 ## Why libSQL (and not Postgres, KV, or local disk)
 
@@ -355,6 +355,110 @@ mock that always succeeds). New colocated tests:
 - WebSocket: accept/dispatch to `webSocketMessage`/`webSocketClose`
   overrides, matching `@dwk/cf-shims`' existing coverage shape.
 
+## Design: KV-backed queue emulation (issue #399)
+
+> **Status: implemented.** Approved via the same demand-override posture as
+> #398 — #400 (object storage) stays gated. See
+> [issue #399](https://github.com/davidwkeith/workers/issues/399) and
+> [deno-deploy-design.md §3.3](../deno-deploy-design.md#33-queues-host-contract-36--new-gap).
+
+Deno Deploy's successor platform dropped native Deno Queues entirely
+(`Deno.Kv.enqueue()`/`Deno.Kv.listenQueue()` are not supported), so
+host-contract §3.6 (queues) — a **Tier 1** requirement
+([host-contract.md §9](../host-contract.md#9-conformance-tiers-and-how-a-host-proves-compliance))
+that `webmention`, `microsub`, and `websub` all need — has to be built on
+Deno KV directly, the same store #398's lease/alarm design already depends
+on.
+
+### Storage shape (`queue.ts`)
+
+Unlike alarms (one schedule slot per Durable Object id, replaced on each
+`setAlarm`), a queue message has no identity to replace — every
+`send`/`sendBatch` call is an independent entry, so there is no by-id
+secondary index, only a due-time-ordered index:
+
+- `["dwk_queue_due", queueName, dueAtMs, messageId]` → `{ body, attempts }`,
+  where `messageId` is a random id (`crypto.randomUUID()`) minted at send
+  time. `dueAtMs` is `now + (delaySeconds ?? 0) * 1000` at enqueue time, or
+  `now + backoff` on a redelivery.
+- `send`/`sendBatch` write with a plain `kv.set` (no CAS needed — nothing to
+  replace) and accept an iterable of any size, satisfying host-contract
+  §3.6's "at least Cloudflare's limits (100 messages / 256 KiB)" floor by
+  imposing no cap of its own. `sendBatch`'s per-message `delaySeconds`
+  overrides its batch-level `options.delaySeconds` default (not additive) —
+  the usual Cloudflare Queues precedence.
+
+### Dispatch (`QueueBroker.pollQueues`)
+
+Mirrors `pollAlarms`'s claim-then-dispatch shape:
+
+1. Range-scan `["dwk_queue_due", queueName]` up to `["dwk_queue_due",
+   queueName, now + 1]`, up to a per-consumer `maxBatchSize` (default 10).
+2. Atomically claim each due entry — `check` its versionstamp and `delete`
+   it in one atomic op, exactly like `claimDueAlarm` — so two overlapping
+   polls can't both deliver the same message. A losing claim is skipped.
+   Claiming *is* the durable removal: nothing further happens for a message
+   that ends up acked, since its due-index entry is already gone.
+3. Construct one `MessageBatchLike` from every successfully claimed entry
+   (`message.attempts` reported as the stored count **+ 1**, so first
+   delivery reads `1`) and invoke the registered consumer once with the
+   whole batch.
+4. Per host-contract §3.6, **"a message neither acked nor retried when the
+   consumer invocation ends — including by throwing — MUST be
+   redelivered"**: after the handler call (or its catch), every claimed
+   message without an explicit `ack()` decision is requeued via a **new**
+   due-index entry (not un-deleting the claimed one), with `attempts`
+   incremented. `retry({ delaySeconds })` uses that delay directly; the
+   default path uses exponential backoff (base `baseRetryDelayMs`, doubling
+   per attempt — same shape as #398's alarm retry schedule). This makes the
+   contract's redeliver-by-default rule the *only* path (throw and
+   quiet-return-without-deciding fall through to the exact same code), which
+   is intentionally the opposite of `@dwk/cf-shims`' `QueueBroker` (which
+   auto-acks a message with no explicit decision on a non-throwing return) —
+   the host-contract text is unambiguous and this package follows it, not
+   the Node host's existing (and, on this point, non-conforming) shim.
+5. A per-consumer `maxAttempts` (default 5) is a dead-letter backstop: once
+   a redelivery's incremented `attempts` would reach the cap, the message is
+   dropped instead of requeued — matching host-contract §3.6's "a host
+   SHOULD apply a bounded redelivery cap... but the consumers self-limit via
+   `attempts` and never rely on a DLQ existing," so a dropped message here
+   is not a correctness gap for the production consumers.
+
+### Not implemented (host-contract §7 non-requirements)
+
+`ackAll()`, `retryAll()`, `batch.queue`, per-message `contentType`,
+producer-side delays on `send`/`sendBatch` beyond `delaySeconds` — none of
+the production consumers (`webmention`, `microsub`, `websub`) use these.
+
+### Clock injection
+
+`send`/`sendBatch`/`pollQueues` all read time through one injected
+`QueueBrokerOptions.now` (default `Date.now`), not a literal `Date.now()`
+call per site — this is the one place `@dwk/deno-host` departs from
+alarms.ts/lease.ts's pattern of an explicit `now` parameter per call, chosen
+because a queue producer's `send` has no natural caller-supplied "now" the
+way `ctx.storage.setAlarm(scheduledTime)` does. Tests inject a mutable
+closure (`{ now: () => now }`) for deterministic backoff/delay assertions,
+matching `@dwk/cf-shims`' `QueueBroker` test convention.
+
+### Testing plan (#399)
+
+New colocated tests in `queue.test.ts`, reusing the `FakeDenoKv` from #398:
+
+- Delivery: `send` → `pollQueues` delivers with `attempts: 1`; an acked
+  message is not redelivered; a message neither acked nor retried **is**
+  redelivered (the host-contract default, in contrast to `@dwk/cf-shims`);
+  a throwing handler redelivers every unacked message in the batch, while
+  acks issued before the throw are honored.
+- Retry timing: explicit `retry({ delaySeconds })` reschedules at
+  `now + delaySeconds * 1000`; the default path backs off exponentially
+  from `baseRetryDelayMs`; a message exceeding `maxAttempts` is dropped
+  instead of requeued.
+- Batching: `sendBatch` enqueues every entry; delivery respects
+  `maxBatchSize`; queues are isolated from each other; two concurrent
+  `pollQueues()` calls racing the same due message deliver it only once
+  (the same claim race #398's alarm tests cover).
+
 ## Consistency (host-contract §4)
 
 | Contract requirement | How this design meets it |
@@ -363,6 +467,7 @@ mock that always succeeds). New colocated tests:
 | D1: atomic `batch` | `client.batch(..., "write")` is one implicit transaction. |
 | DO SQLite: `transactionSync` atomicity | SQLite transaction on the sync client; BEGIN/COMMIT/ROLLBACK. |
 | DO SQLite: serialized per id | Out of scope here — #398's per-id lease provides it; these shims assume a single writer per database. |
+| Queues: durable, at-least-once | KV writes are durably replicated; claim-then-requeue (never un-delete) makes redelivery-until-acked the only path — see #399 design above. |
 
 ## Live verification required before any host claim
 
@@ -397,7 +502,16 @@ Addendum for #398, once implemented:
    undocumented in
    [deno-deploy-design.md §7](../deno-deploy-design.md#7-open-questions)) —
    directly determines alarm delivery latency for whatever `pollAlarms`
-   interval the composing app's `Deno.cron()` uses.
+   interval the composing app's `Deno.cron()` uses; for #399 it equally
+   determines queue delivery/redelivery latency for `pollQueues`, since both
+   are meant to share one tick.
+
+Addendum for #399, once implemented:
+
+7. **Sustained `pollQueues` throughput under real message volume** — the
+   test-harness fake proves claim/requeue correctness, not whether one
+   cron-tick-driven poll pass keeps up with `webmention`/`microsub`/`websub`
+   production traffic without an unbounded due-index backlog.
 
 Also still open (unchanged from
 [deno-deploy-design.md §7](../deno-deploy-design.md#7-open-questions)):
@@ -412,24 +526,27 @@ Node (`environment: "node"`), no Miniflare. The seams are driven by
 `LibsqlClientLike` fake reproducing libSQL's documented behaviors
 (positional `?N` binding, `rowsAffected`, array-like hybrid rows,
 transactional `batch`) and a strict better-sqlite3-style sync driver
-(`reader` metadata, `all()` throwing on writes).
+(`reader` metadata, `all()` throwing on writes). `lease.ts`, `alarms.ts`,
+and `queue.ts` (#398, #399) are instead driven by `test-harness.ts`'s
+`FakeDenoKv` — an in-memory `DenoKvLike` with real atomic-CAS semantics —
+since none of those three touch SQL at all.
 
 ## Non-goals (tracked separately)
 
-- Durable at-least-once queue emulation on Deno KV — #399.
 - `R2Bucket`-shaped adapter over an S3-compatible store — #400.
-- Any commitment to proceed with #399/#400: the decision gate in
+- Any commitment to proceed with #400: the decision gate in
   [deno-deploy-design.md §6](../deno-deploy-design.md#6-decision-gate)
-  still holds for the remainder of the plan; only #398 was greenlit, on a
-  demonstrated demand signal specific to it.
+  still holds for the remainder of the plan; #398 and #399 were each
+  greenlit on a demonstrated demand signal specific to them, not a blanket
+  override of the gate.
 
 ## Reference links
 
 - [deno-deploy-design.md](../deno-deploy-design.md) — the re-verification
   and design sketch this implements (§3.1 for the SQL shims, §3.2 for the
-  #398 actor/alarm design above);
+  #398 actor/alarm design, §3.3 for the #399 queue design above);
   [host-contract.md](../host-contract.md) — the normative contract
-  (§3.2, §3.5, §4); [portability.md](../portability.md) §5 —
+  (§3.2, §3.5, §3.6, §4); [portability.md](../portability.md) §5 —
   the demand-gated Phase 1 this belongs to; [cf-shims.md](cf-shims.md) —
   the Node-host precedent.
 - [`@libsql/client` docs](https://docs.turso.tech/sdk/ts/reference) ·

@@ -8,14 +8,17 @@ SQLite) interfaces from the
 [host contract](../../spec/host-contract.md).
 
 > **Status: exploratory/gated.** This package implements the SQL gap
-> ([#397](https://github.com/davidwkeith/workers/issues/397)) and the
+> ([#397](https://github.com/davidwkeith/workers/issues/397)), the
 > single-writer actor + alarm emulation
-> ([#398](https://github.com/davidwkeith/workers/issues/398), gate overridden
-> on demonstrated demand) of the demand-gated `@dwk/deno-host` plan
+> ([#398](https://github.com/davidwkeith/workers/issues/398)), and the
+> KV-backed queue emulation
+> ([#399](https://github.com/davidwkeith/workers/issues/399)) — all three
+> gate overrides on demonstrated demand — of the demand-gated
+> `@dwk/deno-host` plan
 > ([#396](https://github.com/davidwkeith/workers/issues/396), designed in
 > [`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md)). The
-> queue (#399) and object-storage (#400) gaps are not implemented yet, so this
-> package cannot mount any endpoint package on its own — the queue gap is the
+> object-storage gap (#400) is not implemented yet, so this package cannot
+> mount an R2-dependent endpoint package on its own — that gap is the
 > remaining blocker.
 
 ## Why libSQL
@@ -142,18 +145,62 @@ in-memory per-instance socket set, ported from `@dwk/cf-shims` — see
 [`spec/packages/deno-host.md`](../../spec/packages/deno-host.md) for the
 documented cross-process limitation on live sockets.
 
+## `createQueueBroker(kv, options?)` — host-contract §3.6
+
+Durable at-least-once queue emulation over the same injected `DenoKvLike`
+(issue #399), since the new Deno Deploy platform dropped native Deno Queues
+with no built-in replacement.
+
+```ts
+import { createQueueBroker } from "@dwk/deno-host";
+import { createWebmentionQueueConsumer } from "@dwk/webmention";
+
+const kv = await Deno.openKv();
+const broker = createQueueBroker(kv);
+
+const env = { WEBMENTION_QUEUE: broker.producer("webmention-verify") };
+broker.consumer(
+  "webmention-verify",
+  createWebmentionQueueConsumer({ store: env.WEBMENTION_STORE }),
+);
+
+// Shares its cadence with the DO alarm poll above — the same tick drives
+// both, matching deno-deploy-design.md §3.3.
+Deno.cron("queue poll", "* * * * *", () => broker.pollQueues());
+```
+
+`producer(name)` returns a `send`/`sendBatch` binding accepting batches of
+any size (no artificial cap). `consumer(name, handler, options?)` registers
+one handler per queue name; `pollQueues()` claims due messages (an atomic
+KV check-then-delete, so two concurrent polls can't double-deliver one
+message) and invokes the handler with a batch. Per host-contract §3.6, a
+message neither `ack()`'d nor `retry()`'d when the handler call ends —
+including by throwing — is redelivered: this package always requeues a
+non-acked message (default exponential backoff, or the delay from an
+explicit `retry({ delaySeconds })`), which is the contract-conforming
+behavior and is stricter than `@dwk/cf-shims`' `QueueBroker` (which
+auto-acks a quiet return). A per-consumer `maxAttempts` (default 5) drops a
+message instead of requeuing it past that cap, as a dead-letter backstop —
+the production consumers (`webmention`, `microsub`, `websub`) self-limit via
+`message.attempts` already and don't depend on one existing.
+
 ## What still needs live verification
 
-The colocated tests drive both shims against a real SQLite engine through
-the seams, but three claims depend on the real libSQL services and are
-listed as explicit verification items in
+The colocated tests drive both SQL shims against a real SQLite engine
+through the seams, but three claims depend on the real libSQL services and
+are listed as explicit verification items in
 [`spec/packages/deno-host.md`](../../spec/packages/deno-host.md):
 read-your-writes at the primary for its own writer, `batch` atomicity over
 hrana, and interactive-transaction write forwarding on embedded replicas.
+The KV-backed lease/alarm/queue tests drive a documented-behavior fake
+(`FakeDenoKv`), not a real `Deno.Kv` — real atomic-CAS contention, `list()`
+key-ordering, `expireIn` precision, cron tick granularity, and sustained
+`pollQueues` throughput under production traffic are separate live-
+verification items, also tracked in the spec.
 
 ## Spec
 
 [`spec/packages/deno-host.md`](../../spec/packages/deno-host.md) —
 authoritative requirements. Design context:
-[`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md) §3.1,
-[`spec/host-contract.md`](../../spec/host-contract.md) §3.2/§3.5/§4.
+[`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md) §3.1–§3.3,
+[`spec/host-contract.md`](../../spec/host-contract.md) §3.2/§3.5/§3.6/§4.

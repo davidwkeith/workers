@@ -80,17 +80,19 @@ cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
 `HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
 from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
 them — `@dwk/server` is its first consumer, not its owner.
-`@dwk/deno-host` is two increments of the otherwise still
-demand-gated Deno Deploy host plan (#396): runtime-agnostic,
-dependency-free shims presenting an external libSQL/Turso database behind
-the host-contract `D1Database` (async remote client) and
-`SqlStorage`/`transactionSync` (synchronous embedded-replica client)
-surfaces (#397), and `createDurableObjectNamespace`, a single-writer actor +
-alarm emulation over a per-id Deno KV atomic-CAS lease, with an in-memory
-WebSocket stub (#398, gate overridden on demonstrated demand). The queue and
-object-storage gaps (#399, #400) are not implemented and remain gated.
-`@dwk/mf2` is the newest — the `HTMLRewriter`-based `h-entry` → JF2 extractor
-moved out of `@dwk/microsub`'s `hfeed.ts` (#412), extended with
+`@dwk/deno-host` is three increments of the otherwise still
+demand-gated Deno Deploy host plan (#396), each gate-overridden on
+demonstrated demand: runtime-agnostic, dependency-free shims presenting an
+external libSQL/Turso database behind the host-contract `D1Database` (async
+remote client) and `SqlStorage`/`transactionSync` (synchronous
+embedded-replica client) surfaces (#397); `createDurableObjectNamespace`, a
+single-writer actor + alarm emulation over a per-id Deno KV atomic-CAS
+lease, with an in-memory WebSocket stub (#398); and `createQueueBroker`, a
+durable at-least-once queue emulation over the same Deno KV, since the new
+Deno Deploy platform dropped native Deno Queues (#399). The object-storage
+gap (#400) is not implemented and remains gated. `@dwk/mf2` is the newest —
+the `HTMLRewriter`-based `h-entry` → JF2 extractor moved out of
+`@dwk/microsub`'s `hfeed.ts` (#412), extended with
 `u-repost-of`/`u-bookmark-of` recognition and `e-content` inner-HTML capture,
 plus the allowlist `sanitizeHtml` for that captured UGC; `@dwk/microsub`
 consumes it for `parseHFeed` and `@dwk/webmention` uses it to enrich stored
@@ -208,9 +210,11 @@ injected state.
   `./shims` (#381); see `spec/self-hosting.md` §16 and `spec/portability.md`.
 - **Deno-host lib** — `@dwk/deno-host` is Cloudflare-interface emulation in
   the same deliberate sense, but for the (gated, #396) Deno Deploy host:
-  libSQL/Turso behind `D1Database`/`SqlStorage` (#397). Unlike `@dwk/cf-shims`
-  its code is runtime-agnostic — no `node:` imports, only injected client
-  seams — so it runs on Deno, Node, or anywhere the app supplies a client.
+  libSQL/Turso behind `D1Database`/`SqlStorage` (#397), a KV-lease Durable
+  Object emulation (#398), and a KV-backed Queue emulation (#399). Unlike
+  `@dwk/cf-shims` its code is runtime-agnostic — no `node:` imports, only
+  injected client seams — so it runs on Deno, Node, or anywhere the app
+  supplies a client.
 
 ### Composition contract (`spec/composition-contract.md`)
 

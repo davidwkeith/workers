@@ -11,11 +11,11 @@
  * embedded-replica client), so the same code runs on Deno Deploy, Node, or
  * anywhere else the composing app can supply a client.
  *
- * **Status: exploratory/gated.** This is the SQL gap (issue #397) and the
- * single-writer actor + alarm emulation (issue #398, gate overridden on
- * demonstrated demand) of the demand-gated `@dwk/deno-host` plan (#396);
- * the queue (#399) and object-storage (#400) gaps are not implemented
- * here yet.
+ * **Status: exploratory/gated.** This is the SQL gap (issue #397), the
+ * single-writer actor + alarm emulation (issue #398), and the KV-backed
+ * queue emulation (issue #399) — all three gate overrides on demonstrated
+ * demand — of the demand-gated `@dwk/deno-host` plan (#396); the
+ * object-storage gap (#400) is not implemented here yet.
  *
  * @see spec/packages/deno-host.md
  */
@@ -72,3 +72,15 @@ export {
   type DenoDurableObjectStorage,
   type AlarmInvocationInfo,
 } from "./durable-object.js";
+export {
+  createQueueBroker,
+  QueueBroker,
+  type QueueBrokerOptions,
+  type MessageSendOptions,
+  type MessageSendRequestLike,
+  type MessageLike,
+  type MessageBatchLike,
+  type QueueLike,
+  type QueueConsumerHandler,
+  type ConsumerOptions,
+} from "./queue.js";
