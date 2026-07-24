@@ -37,7 +37,7 @@ export function parseLinkHeader(value: string | null): LinkHeaderEntry[] {
   }
   const entries: LinkHeaderEntry[] = [];
   for (const part of splitLinks(value)) {
-    const match = /^\s*<([^>]*)>\s*(.*)$/.exec(part);
+    const match = /^\s*<([^>]*)>(.*)$/.exec(part);
     if (match === null) {
       continue;
     }
