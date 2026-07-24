@@ -21,6 +21,7 @@
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/mastodon-api": ["../mastodon-api/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
+      "@dwk/mf2": ["../mf2/src/index.ts"],
       "@dwk/micropub": ["../micropub/src/index.ts"],
       "@dwk/microsub": ["../microsub/src/index.ts"],
       "@dwk/oauth": ["../oauth/src/index.ts"],
