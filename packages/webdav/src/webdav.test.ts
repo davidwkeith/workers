@@ -945,6 +945,42 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
     });
   });
 
+  it("normalizes percent-encoding case in the configured mount path too, so it matches a request using different hex case", async () => {
+    // Mirrors the pathOf fix, but for the config side: `resolve()` must
+    // normalize `mountPath`/`baseUrl` the same way `pathOf` normalizes the
+    // request path, or a percent-encoded mount segment could itself drift
+    // out of sync with a differently-cased request and 404 spuriously.
+    const id = harness.WEBDAV_DO.idFromName(crypto.randomUUID());
+    const stub = harness.WEBDAV_DO.get(id);
+    await runInDurableObject(stub, async (instance) => {
+      const now = () => 1_000_000;
+      const backend = new MemBackend(instance.sql, now);
+      const cred = await backend.credentials.mint({
+        webid: WEBID,
+        label: "Finder",
+        scope: { modes: ["read", "write"] },
+        iterations: ITER,
+      });
+      const basic = `Basic ${btoa(`${cred.username}:${cred.secret}`)}`;
+      const handler = createWebdav({
+        baseUrl: "https://pod.example/caf%e9/",
+        mountPath: "/caf%e9",
+        backend: () => backend,
+        now,
+      });
+      const res = await handler(
+        new Request("https://pod.example/caf%E9/plain.txt", {
+          method: "PUT",
+          headers: { authorization: basic },
+          body: "x",
+        }),
+        {} as never,
+        createExecutionContext(),
+      );
+      expect(res.status).toBe(201);
+    });
+  });
+
   it("never advertises DELETE on the mount root reached via a trailing slash", async () => {
     // A sub-path baseUrl makes storageRoot `/dav/`, and `pathOf` resolves the
     // trailing-slash mount root down to a bare `/`; the Allow set must still omit
