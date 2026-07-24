@@ -122,4 +122,65 @@ describe("createS3Bucket", () => {
     got?.writeHttpMetadata(headers);
     expect(headers.get("content-type")).toBe("text/csv");
   });
+
+  it("checksums.toJSON() is present and callable, per R2Object's shape", async () => {
+    const { bucket } = setup();
+    const put = await bucket.put("k", "v", {});
+    expect(put.checksums.toJSON()).toEqual({});
+  });
+
+  it("put accepts a null body", async () => {
+    const { bucket } = setup();
+    const put = await bucket.put("empty", null, {});
+    expect(put.size).toBe(0);
+    expect(await (await bucket.get("empty"))?.text()).toBe("");
+  });
+
+  it("put accepts a Blob body", async () => {
+    const { bucket } = setup();
+    const blob = new Blob(["blob content"], { type: "text/plain" });
+    const put = await bucket.put("blob-key", blob, {});
+    expect(put.size).toBe(blob.size);
+    expect(await (await bucket.get("blob-key"))?.text()).toBe("blob content");
+  });
+
+  it("R2ObjectBody exposes arrayBuffer/json/blob/bytes alongside text", async () => {
+    const { bucket } = setup();
+    await bucket.put("obj", JSON.stringify({ a: 1 }), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    const got = await bucket.get("obj");
+    expect(await got?.json()).toEqual({ a: 1 });
+
+    const asArrayBuffer = await (await bucket.get("obj"))?.arrayBuffer();
+    expect(new TextDecoder().decode(asArrayBuffer)).toBe('{"a":1}');
+
+    const asBytes = await (await bucket.get("obj"))?.bytes();
+    expect(new TextDecoder().decode(asBytes)).toBe('{"a":1}');
+
+    const asBlob = await (await bucket.get("obj"))?.blob();
+    expect(await asBlob?.text()).toBe('{"a":1}');
+  });
+
+  it("swallows a response body that fails to drain rather than throwing", async () => {
+    // A client whose response body is backed by an already-errored stream —
+    // simulating a body that's unusable by the time this shim tries to
+    // drain it (e.g. an already-consumed or disconnected response).
+    const brokenBody = (): ReadableStream<Uint8Array> =>
+      new ReadableStream({
+        start(controller) {
+          controller.error(new Error("simulated stream failure"));
+        },
+      });
+    const client = {
+      async fetch(): Promise<Response> {
+        return new Response(brokenBody(), { status: 200 });
+      },
+    };
+    const bucket = createS3Bucket({ client, endpoint: ENDPOINT });
+
+    await expect(bucket.put("k", "v", {})).resolves.toBeDefined();
+    await expect(bucket.head("k")).resolves.toBeDefined();
+    await expect(bucket.delete("k")).resolves.toBeUndefined();
+  });
 });

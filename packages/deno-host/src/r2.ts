@@ -93,6 +93,19 @@ function unquoteEtag(etag: string | null): string {
 }
 
 /**
+ * Consume and discard a response body. Every request this shim makes reads
+ * the response body to completion (fetch/undici otherwise warns about, or
+ * in some environments leaks, an unconsumed body) even when the shim itself
+ * has no use for the bytes — `PUT`/`HEAD`/`DELETE` responses and error
+ * responses on `GET`. A body that's already unusable (consumed, or backed
+ * by an errored stream) is not this shim's problem to raise, so failures
+ * here are swallowed rather than surfaced.
+ */
+async function drain(res: Response): Promise<void> {
+  await res.arrayBuffer().catch(() => undefined);
+}
+
+/**
  * Wrap a source stream so bytes pass through unbuffered while a running
  * total is kept — `put` needs the final size for the returned `R2Object`,
  * but must not read a streamed body fully into memory to get it (the same
@@ -193,7 +206,7 @@ class S3Bucket {
     const init: FetchInit = { method: "PUT", headers, body };
     if (duplex) init.duplex = duplex;
     const res = await this.#client.fetch(this.#url(key), init);
-    await res.arrayBuffer().catch(() => undefined);
+    await drain(res);
     if (!res.ok) {
       throw new Error(`R2 put failed for "${key}": ${res.status}`);
     }
@@ -209,7 +222,7 @@ class S3Bucket {
 
   async head(key: string): Promise<R2Object | null> {
     const res = await this.#client.fetch(this.#url(key), { method: "HEAD" });
-    await res.arrayBuffer().catch(() => undefined);
+    await drain(res);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`R2 head failed for "${key}": ${res.status}`);
     return this.#objectFromResponse(key, res);
@@ -218,11 +231,11 @@ class S3Bucket {
   async get(key: string): Promise<R2ObjectBody | null> {
     const res = await this.#client.fetch(this.#url(key), { method: "GET" });
     if (res.status === 404) {
-      await res.arrayBuffer().catch(() => undefined);
+      await drain(res);
       return null;
     }
     if (!res.ok) {
-      await res.arrayBuffer().catch(() => undefined);
+      await drain(res);
       throw new Error(`R2 get failed for "${key}": ${res.status}`);
     }
     return this.#objectBodyFromResponse(key, res);
@@ -230,15 +243,17 @@ class S3Bucket {
 
   async delete(keys: string | string[]): Promise<void> {
     const list = Array.isArray(keys) ? keys : [keys];
-    for (const key of list) {
-      const res = await this.#client.fetch(this.#url(key), {
-        method: "DELETE",
-      });
-      await res.arrayBuffer().catch(() => undefined);
-      if (!res.ok && res.status !== 404) {
-        throw new Error(`R2 delete failed for "${key}": ${res.status}`);
-      }
-    }
+    await Promise.all(
+      list.map(async (key) => {
+        const res = await this.#client.fetch(this.#url(key), {
+          method: "DELETE",
+        });
+        await drain(res);
+        if (!res.ok && res.status !== 404) {
+          throw new Error(`R2 delete failed for "${key}": ${res.status}`);
+        }
+      }),
+    );
   }
 
   #objectFromResponse(key: string, res: Response): R2Object {
