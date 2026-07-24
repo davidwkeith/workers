@@ -246,11 +246,15 @@ export function parseBasicAuthorization(
   header: string | null | undefined,
 ): BasicCredential | null {
   if (!header) return null;
-  const match = /^basic\s+(.+)$/i.exec(header.trim());
-  if (!match || !match[1]) return null;
+  const trimmed = header.trim();
+  const separator = trimmed.search(/\s/);
+  if (separator === -1) return null;
+  if (trimmed.slice(0, separator).toLowerCase() !== "basic") return null;
+  const token = trimmed.slice(separator).trimStart();
+  if (!token) return null;
   let decoded: string;
   try {
-    const binary = atob(match[1]);
+    const binary = atob(token);
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
     decoded = new TextDecoder("utf-8").decode(bytes);
   } catch {
