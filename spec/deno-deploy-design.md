@@ -190,6 +190,21 @@ storage decision §3.3 lands on, though all three could in principle share
 one provider's product suite), compounding the "infrastructure the user
 owns" tension noted in §3.1.
 
+> **Update (issue #400, implemented 2026-07-24):** the demand gate in §6
+> was overridden for this increment, closing out the four gaps this
+> document scoped — #397, #398, and #399 were already implemented; #400 was
+> the last. The design landed as sketched above, with one refinement: rather
+> than modeling `@aws-sdk/client-s3`'s `S3Client.send(Command)` surface (too
+> large to reduce to a small structural seam the way `@libsql/client`'s or
+> `Deno.Kv`'s do), the injected client seam is a single `fetch`-shaped
+> method (`S3ClientLike`), which the composing app satisfies with an
+> already-signing `fetch` — most naturally `aws4fetch`'s `AwsClient#fetch`
+> bound to the provider's endpoint/region/credentials. This keeps the
+> package itself dependency-free (only standard Web Platform APIs:
+> `fetch`/`Headers`/`ReadableStream`/`TransformStream`) without taking on
+> the AWS SDK as a dependency just to type the seam. Full design in
+> [packages/deno-host.md](packages/deno-host.md#design-r2bucket-shaped-object-storage-adapter-issue-400).
+
 ## 4. Consistency analysis (host-contract.md §4)
 
 | Store | Contract requirement | Design here |
@@ -245,6 +260,17 @@ demand appears, and re-run §1's platform check periodically — the new
 platform is young and evolving (mirroring the same
 "re-verify before committing" caution `portability.md` §4.1 already gave
 about Classic).
+
+> **Update (2026-07-24):** the gate was subsequently overridden, one
+> increment at a time, on demonstrated demand signals specific to each
+> (#397, then #398, then #399, then #400) — see each subsection's own
+> "Update" callout above. All four gaps this document scoped are now
+> implemented in `@dwk/deno-host`
+> ([packages/deno-host.md](packages/deno-host.md)). This resolves "can a
+> conforming `@dwk/deno-host` be built," not "should Phase 1 (a real,
+> deployed Deno Deploy app) proceed" — that remains a separate decision, at
+> the `portability.md` §5 level, still gated behind demonstrated demand for
+> an actual deployment.
 
 ## 7. Open questions
 

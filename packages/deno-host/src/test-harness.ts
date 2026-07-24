@@ -1,5 +1,6 @@
 /**
- * Test doubles for the two client seams, backed by `node:sqlite`.
+ * Test doubles for the client seams, backed by `node:sqlite` (SQL) or plain
+ * in-memory state (KV, S3).
  *
  * `createFakeLibsqlClient` emulates the documented `@libsql/client`
  * semantics the D1 shim depends on: positional args (including SQLite's
@@ -39,6 +40,7 @@ import type {
   KvKey,
   KvKeyPart,
 } from "./kv-client.js";
+import type { S3ClientLike } from "./r2.js";
 
 /** Matches SQLite's numbered placeholder form (`?1`, `?2`, ...). */
 const NUMBERED_PLACEHOLDER = /\?\d+/;
@@ -409,5 +411,69 @@ class FakeDenoKvAtomic implements DenoKvAtomicLike {
       }
     }
     return { ok: true, versionstamp };
+  }
+}
+
+interface FakeS3Object {
+  readonly bytes: Uint8Array;
+  /** Lowercased header names, mirroring real S3's case-folding. */
+  readonly headers: Record<string, string>;
+}
+
+/**
+ * An in-memory `S3ClientLike` reproducing the slice of the S3 REST API the
+ * `r2.ts` shim depends on: `PUT`/`GET`/`HEAD`/`DELETE` on `{origin}{path}`,
+ * `Content-Type` and `x-amz-meta-*` headers stored and echoed back
+ * (case-folded, as real S3 does — headers are case-insensitive), an `ETag`
+ * minted per `PUT`, and a `404` for a `GET`/`HEAD` on a missing key.
+ * `DELETE` is idempotent (a missing key still gets `204`), matching
+ * host-contract §3.4.
+ */
+export class FakeS3Client implements S3ClientLike {
+  readonly #store = new Map<string, FakeS3Object>();
+
+  async fetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+    const path = new URL(input.toString()).pathname;
+    const method = (init.method ?? "GET").toUpperCase();
+
+    if (method === "PUT") {
+      const bytes = new Uint8Array(
+        await new Response(init.body as BodyInit | null).arrayBuffer(),
+      );
+      const headers: Record<string, string> = {};
+      new Headers(init.headers).forEach((value, name) => {
+        headers[name.toLowerCase()] = value;
+      });
+      headers["etag"] = crypto.randomUUID();
+      this.#store.set(path, { bytes, headers });
+      return new Response(null, {
+        status: 200,
+        headers: { etag: `"${headers["etag"]}"` },
+      });
+    }
+
+    const object = this.#store.get(path);
+    if (method === "DELETE") {
+      this.#store.delete(path);
+      return new Response(null, { status: 204 });
+    }
+    if (object === undefined) return new Response(null, { status: 404 });
+
+    const headers = new Headers();
+    if (object.headers["content-type"]) {
+      headers.set("content-type", object.headers["content-type"]);
+    }
+    headers.set("content-length", String(object.bytes.byteLength));
+    headers.set("etag", `"${object.headers["etag"] ?? "0"}"`);
+    headers.set("last-modified", new Date(0).toUTCString());
+    for (const [name, value] of Object.entries(object.headers)) {
+      if (name.startsWith("x-amz-meta-")) headers.set(name, value);
+    }
+
+    if (method === "HEAD") return new Response(null, { status: 200, headers });
+    if (method === "GET") {
+      return new Response(object.bytes, { status: 200, headers });
+    }
+    throw new Error(`FakeS3Client: unsupported method ${method}`);
   }
 }

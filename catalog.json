@@ -674,7 +674,7 @@
   "libraries": {
     "@dwk/calendar": "JSCalendar/iCalendar event model and serializers \u2014 consumed by endpoint packages, not mountable.",
     "@dwk/cf-shims": "Node-backed Cloudflare Workers binding shims (D1/R2/KV/Queue/cron/Durable Objects) consumed by @dwk/server \u2014 not mountable.",
-    "@dwk/deno-host": "Deno Deploy host building blocks (libSQL/Turso behind D1Database/SqlStorage) for a future composed Deno app \u2014 not mountable.",
+    "@dwk/deno-host": "Deno Deploy host building blocks (libSQL/Turso behind D1Database/SqlStorage, Deno KV behind Durable Objects/Queues, an S3-compatible store behind R2Bucket) for a future composed Deno app \u2014 not mountable.",
     "@dwk/dpop": "DPoP proof verification primitives \u2014 consumed by endpoint packages, not mountable.",
     "@dwk/esi": "Streaming Edge Side Includes response processor \u2014 composed around a Worker's responses, not a mountable endpoint (may become componentTied later).",
     "@dwk/http-signatures": "HTTP Message Signatures primitives \u2014 consumed by endpoint packages, not mountable.",
