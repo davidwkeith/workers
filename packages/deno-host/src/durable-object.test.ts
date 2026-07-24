@@ -90,6 +90,65 @@ describe("createDurableObjectNamespace (host-contract §3.3)", () => {
     ).toBe("done");
   });
 
+  it("calls onLeaseAcquired once per dispatch, after the lease and before fetch() runs, with the id's cached storage client", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    const calls: string[] = [];
+    const ns = createDurableObjectNamespace(CounterObject, {
+      kv,
+      className: "Counter",
+      env: {},
+      getStorageClient: () => db,
+      onLeaseAcquired: (idHex, client) => {
+        calls.push(idHex);
+        expect(client).toBe(db);
+      },
+    });
+    const id = ns.idFromName("alice");
+    await ns.get(id).fetch(new Request("http://x/"));
+    await ns.get(id).fetch(new Request("http://x/"));
+    expect(calls).toEqual([id.toString(), id.toString()]);
+  });
+
+  it("propagates an onLeaseAcquired rejection instead of running fetch(), and still releases the lease", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    let fetchRan = false;
+    class TrackedObject extends DurableObject<Record<string, never>> {
+      async fetch(): Promise<Response> {
+        fetchRan = true;
+        return new Response("ok");
+      }
+    }
+    const ns = createDurableObjectNamespace(TrackedObject, {
+      kv,
+      className: "Tracked",
+      env: {},
+      getStorageClient: () => db,
+      onLeaseAcquired: () => {
+        throw new Error("sync failed");
+      },
+    });
+    const id = ns.idFromName("alice");
+    await expect(ns.get(id).fetch(new Request("http://x/"))).rejects.toThrow(
+      "sync failed",
+    );
+    expect(fetchRan).toBe(false);
+    // The lease was released despite the rejection — a subsequent dispatch
+    // (with a working hook this time) is not stuck contending it.
+    const ns2 = createDurableObjectNamespace(TrackedObject, {
+      kv,
+      className: "Tracked",
+      env: {},
+      getStorageClient: () => db,
+    });
+    expect(
+      await (
+        await ns2.get(ns2.idFromName("alice")).fetch(new Request("http://x/"))
+      ).text(),
+    ).toBe("ok");
+  });
+
   it("dispatches accepted WebSocket events to the instance's overrides", async () => {
     const kv = new FakeDenoKv();
     const db = createStrictSyncSqlite();

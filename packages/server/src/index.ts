@@ -99,6 +99,23 @@ export {
   type StartupProbeFailure,
 } from "./central-mode.js";
 
+// Central-mode Durable Objects (Tier 2, spec/scale-out.md §6, #432): the
+// namespace composition wrapper that bakes in the sync-before-serve rule, and
+// the per-replica alarm/sweep poller `ns.pollAlarms()` needs wired to
+// something.
+export {
+  createCentralDurableObjectNamespace,
+  type CentralDurableObjectNamespaceOptions,
+  type EmbeddedReplicaClientLike,
+} from "./central-durable-object.js";
+
+export {
+  DurableObjectAlarmPoller,
+  type DurableObjectAlarmPollerOptions,
+  type PollableDurableObjectNamespace,
+  type SweepableCoordinationStore,
+} from "./central-do-poller.js";
+
 // Re-exported from `@dwk/cf-shims`: the Node-backed Cloudflare binding shims
 // and runtime-global seams this host composes behind Express. See that
 // package for the implementations.

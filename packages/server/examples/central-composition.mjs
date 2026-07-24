@@ -1,29 +1,34 @@
-// A reference `central`-mode composition (spec/scale-out.md, #431): WebFinger
-// + IndieAuth mounted over centralized D1/R2 stores instead of local SQLite
-// files, so this composition can run identically across N replicas behind a
-// load balancer. Unlike `composition.mjs` (local mode — the default and
-// recommended path for a single-owner deployment), this is illustrative: it
-// is a standalone runnable script (`node examples/central-composition.mjs`),
-// not a `dwk-serve` config module — `dwk-serve`'s `startServer` calls
-// `createServer` directly and doesn't yet know about `createCentralServer`'s
-// preflight sequence (a follow-up, not this PR's Tier-1 scope). It is not
-// bundled/run by this package's own build or tests, and the libSQL/S3 client
-// libraries it references (`@libsql/client`, `aws4fetch`) are the deployer's
-// own dependencies to add, not `@dwk/server`'s.
+// A reference `central`-mode composition (spec/scale-out.md, #431/#432):
+// WebFinger + IndieAuth (Tier 1, over centralized D1/R2) and WebAuthn (Tier 2,
+// a per-RP Durable Object over an embedded-replica libSQL database), so this
+// composition can run identically across N replicas behind a load balancer.
+// Unlike `composition.mjs` (local mode — the default and recommended path for
+// a single-owner deployment), this is illustrative: it is a standalone
+// runnable script (`node examples/central-composition.mjs`), not a
+// `dwk-serve` config module — `dwk-serve`'s `startServer` calls `createServer`
+// directly and doesn't yet know about `createCentralServer`'s preflight
+// sequence (a follow-up). It is not bundled/run by this package's own build or
+// tests, and the libSQL/S3 client libraries it references (`@libsql/client`,
+// `libsql`, `aws4fetch`) are the deployer's own dependencies to add, not
+// `@dwk/server`'s.
 //
 // Composition order matters here (spec/scale-out.md §9.2/§9.3): build the
 // coordination KV client, assemble the Env, then call `createCentralServer`
 // — NOT `createServer` directly — so the mode-marker + startup-probe checks
 // are guaranteed to run before the server accepts any request.
 import { createClient } from "@libsql/client";
+import Database from "libsql";
 import { AwsClient } from "aws4fetch";
 import {
   assembleCentralBindings,
+  createCentralDurableObjectNamespace,
   createCentralServer,
+  DurableObjectAlarmPoller,
   LibsqlKv,
 } from "@dwk/server";
 import { createWebfinger } from "@dwk/webfinger";
 import { createIndieAuth, createIndieAuthStore } from "@dwk/indieauth";
+import { createWebAuthn, WebAuthnObject } from "@dwk/webauthn";
 
 const baseUrl = process.env.DWK_BASE_URL ?? "https://example.com";
 const dataDir = process.env.DWK_DATA_DIR ?? "./data";
@@ -54,6 +59,24 @@ const env = assembleCentralBindings({
   secrets: { TOKEN_SIGNING_KEY: process.env.DWK_TOKEN_SIGNING_KEY },
 });
 await createIndieAuthStore(env).init();
+
+// Tier 2 (spec/scale-out.md §6, #432): a per-RP `WebAuthnObject`, unmodified,
+// over an embedded-replica libSQL database — one logical database per object
+// id at the primary (`getStorageClient(idHex)`), synced from the primary on
+// every dispatch (`createCentralDurableObjectNamespace`'s non-optional
+// sync-before-serve rule). The replica file under `replicaDir` is a
+// rebuildable cache; ephemeral scratch disk is sufficient.
+const replicaDir = process.env.DWK_REPLICA_DIR ?? "./replicas";
+env.WEBAUTHN = createCentralDurableObjectNamespace(WebAuthnObject, {
+  kv: coordinationKv,
+  className: "webauthn",
+  env,
+  getStorageClient: (idHex) =>
+    new Database(`${replicaDir}/webauthn/${idHex}.db`, {
+      syncUrl: process.env.DWK_LIBSQL_URL,
+      authToken: process.env.DWK_LIBSQL_AUTH_TOKEN,
+    }),
+});
 
 const config = {
   baseUrl,
@@ -87,6 +110,16 @@ const config = {
       ],
       requires: ["AUTH_DB", "TOKEN_SIGNING_KEY"],
     },
+    {
+      name: "@dwk/webauthn",
+      handler: createWebAuthn({
+        rpId: new URL(baseUrl).hostname,
+        rpName: "Example",
+        origin: baseUrl,
+      }),
+      reservedPaths: ["/register", "/authenticate"],
+      requires: ["WEBAUTHN"],
+    },
   ],
 };
 
@@ -99,3 +132,13 @@ const server = await createCentralServer(config, {
 });
 const { port } = await server.listen(process.env.PORT ?? 3000);
 process.stdout.write(`dwk-serve (central mode) listening on :${port}\n`);
+
+// Every replica MUST run this: @dwk/deno-host's Durable Object namespace
+// never arms a timer of its own (spec/scale-out.md §6.3) — without a poller,
+// `env.WEBAUTHN`'s scheduled alarms (and the coordination KV's expired-row
+// sweep) never fire on this replica.
+const alarmPoller = new DurableObjectAlarmPoller({
+  namespaces: [env.WEBAUTHN],
+  kv: coordinationKv,
+});
+alarmPoller.start();

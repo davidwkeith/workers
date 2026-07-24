@@ -30,7 +30,7 @@ import {
   type QueueBroker,
   type CronScheduler,
 } from "@dwk/cf-shims";
-import { createS3Bucket } from "@dwk/deno-host";
+import { createS3Bucket, LeaseContendedError } from "@dwk/deno-host";
 import { sendWebResponse, toWebRequest } from "./adapter.js";
 import { HostExecutionContext, WaitUntilTracker } from "./context.js";
 import { installRequestDuplex } from "./request-duplex.js";
@@ -300,6 +300,22 @@ async function dispatch(
     const response = await mount.handler(request, env as never, ctx);
     await sendWebResponse(res, response);
   } catch (err) {
+    if (err instanceof LeaseContendedError) {
+      // Central mode, Tier 2 (spec/scale-out.md §6.1): another replica holds
+      // this Durable Object id's lease. A load balancer retry against the
+      // same URL is safe — the winning replica holds consistency — so this
+      // is a 503 + Retry-After, not a 500.
+      logger.warn("server.lease_contended", {
+        mount: mount.name,
+        path: req.path,
+      });
+      if (!res.headersSent) {
+        res.status(503).set("Retry-After", "1").end();
+      } else {
+        res.end();
+      }
+      return;
+    }
     logger.error("server.handler_error", {
       mount: mount.name,
       path: req.path,

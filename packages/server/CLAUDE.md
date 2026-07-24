@@ -52,8 +52,38 @@ for Cloudflare bindings.
   `central-mode.ts`'s mode guard (`assertNoLocalStores`, refusing a `dataDir`
   that still holds local-mode stores) and startup probes
   (`assertModeMarker`/`probeCentralStores`, deployer-invoked before
-  `createServer`). Tier 1 (stateless + D1/R2) only — Durable Objects across
-  replicas are phase 3, out of scope here.
+  `createServer`).
+- **Central-mode Durable Objects (Tier 2, spec/scale-out.md §6, #432).**
+  `createCentralDurableObjectNamespace` (`central-durable-object.ts`) wraps
+  `@dwk/deno-host`'s `createDurableObjectNamespace` with the sync-before-serve
+  rule baked in — every dispatch calls the injected embedded-replica client's
+  `sync()` after the per-id lease is acquired and before the event runs, via
+  `@dwk/deno-host`'s `onLeaseAcquired` hook (added for this issue). A
+  `LeaseContendedError` from a mount's handler maps to `503` + `Retry-After`
+  in `server.ts`'s `dispatch()`, not the generic `500`. `central-do-poller.ts`'s
+  `DurableObjectAlarmPoller` is the per-replica jittered timer every replica
+  MUST run for scheduled alarms to fire at all — unlike `@dwk/cf-shims`'
+  local-mode shim, `@dwk/deno-host`'s namespace never auto-arms one. The
+  endpoint packages that ship a Durable Object run **completely unmodified**
+  under central mode (proven for `activitypub`,
+  `central-do-activitypub.integration.test.ts`): their `DurableObject` base
+  class still resolves to `@dwk/cf-shims`'s shim via the existing
+  `cloudflare:workers` alias, but since that class only wires `ctx`/`env` in
+  its constructor, constructing the same class through `@dwk/deno-host`'s
+  structurally-compatible namespace works regardless — no second loader hook
+  is needed. WebSockets (the Solid notifications endpoint, the atproto
+  firehose) are unaffected by storage mode either way — `web-socket-upgrade.ts`
+  and the `WebSocketPair`/hibernation globals are per-process runtime seams,
+  not storage (spec/scale-out.md §5) — but a live socket is still pinned to
+  whichever replica terminated the upgrade; central mode's v1 stance
+  (spec/scale-out.md §6.4) is operational, not architectural: put session
+  affinity on the load balancer for WebSocket-upgrade paths, or keep a
+  DO-WebSocket-heavy mount on a single replica if that window is
+  unacceptable. `@dwk/server` takes no runtime dependency on the `libsql` npm
+  package — `getStorageClient` is always deployer-injected, same posture as
+  every other central-mode seam — `libsql-native.smoke.test.ts` is the one
+  file that imports it, as a `devDependency`-gated check that the native
+  module loads on Node.
 - **All @dwk packages as devDeps.** The server imports all endpoint packages
   for composition but they're devDependencies since this is never published.
 
@@ -85,7 +115,11 @@ src/central-bindings.ts       # assembleCentralBindings: central-mode Env assemb
                               #   over @dwk/deno-host's D1/R2 shims (scale-out §5, #431)
 src/central-mode.ts           # central mode's startup invariants: assertNoLocalStores,
                               #   assertModeMarker, probeCentralStores (scale-out §9, #431)
-src/central-test-harness.ts   # fakes for the two files above; excluded from the build
+src/central-durable-object.ts # createCentralDurableObjectNamespace: central-mode DO
+                              #   namespace with sync-before-serve baked in (scale-out §6, #432)
+src/central-do-poller.ts      # DurableObjectAlarmPoller: per-replica alarm/sweep timer
+                              #   (scale-out §6.3, #432)
+src/central-test-harness.ts   # fakes for the files above; excluded from the build
 src/request-duplex.ts         # installRequestDuplex for streaming request bodies
 src/web-socket-upgrade.ts     # bridges a real HTTP Upgrade socket to a mount's DO
                               #   (the one shim-adjacent piece that stays here — see above)
@@ -106,9 +140,12 @@ The Cloudflare binding shims and runtime-global polyfills themselves
 - `@dwk/deno-host` — the `DenoKvLike`/`LibsqlClientLike`/`S3ClientLike` seams
   `LibsqlKv` and `central-bindings.ts`/`central-mode.ts` consume at runtime:
   `createD1Database`/`createS3Bucket` assemble the `central` storage mode's D1
-  and R2 bindings. `@dwk/server` never constructs a network connection
+  and R2 bindings, and `createDurableObjectNamespace` (wrapped by
+  `central-durable-object.ts`) assembles Tier 2's DO namespaces over its
+  `onLeaseAcquired` hook. `@dwk/server` never constructs a network connection
   itself — the deployer injects an already-connected client (a real
-  `@libsql/client`/`aws4fetch` instance) for every seam.
+  `@libsql/client`/`aws4fetch`/`libsql` embedded-replica instance) for every
+  seam.
 - `@dwk/log` — structured logging.
 - `express` (5.x) — HTTP server.
 - `helmet` — baseline security-header middleware (nosniff, frame-options,

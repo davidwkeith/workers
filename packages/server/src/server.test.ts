@@ -10,6 +10,7 @@ import type { FetchHandler, Mount } from "./config.js";
 import { StartupProbeError } from "./central-mode.js";
 import { LibsqlKv } from "./libsql-kv.js";
 import { createFakeLibsqlClient } from "./central-test-harness.js";
+import { LeaseContendedError } from "@dwk/deno-host";
 
 function dataDir(): string {
   return mkdtempSync(join(tmpdir(), "dwk-srv-"));
@@ -220,6 +221,25 @@ describe("createServer (end-to-end)", () => {
     });
     const res = await fetch(`${base}/boom`);
     expect(res.status).toBe(500);
+  });
+
+  it("maps a LeaseContendedError to 503 + Retry-After instead of 500 (scale-out §6.1)", async () => {
+    const mount: Mount = {
+      name: "contended",
+      reservedPaths: ["/contended"],
+      handler: (async () => {
+        throw new LeaseContendedError(["dwk_lease", "Pod", "abc"]);
+      }) as FetchHandler,
+    };
+    await start({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [mount],
+      env: {},
+    });
+    const res = await fetch(`${base}/contended`);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("1");
   });
 
   it("refuses an insecure non-localhost base URL outside dev mode", () => {
