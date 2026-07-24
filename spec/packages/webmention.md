@@ -41,6 +41,37 @@ Receives and sends Webmentions for the user's domain.
   out of the Worker bundle. The inbox schema gains a nullable `rsvp` column;
   pre-existing inboxes are migrated with an additive `ALTER TABLE`.
 
+### Received-mention enrichment (issue #412)
+
+- During the same asynchronous verification pass, read the source's
+  microformats2 via the shared [`@dwk/mf2`](mf2.md) extractor (still no full
+  parser in the bundle) and enrich the stored mention with what a consumer
+  needs to render it: **interaction type**, **author**, **content**, and
+  **published time**.
+- **Scope:** the enrichment comes only from the one `h-entry` whose
+  `u-in-reply-to` / `u-like-of` / `u-repost-of` / `u-bookmark-of` resolves to
+  *our* target. Precedence when several match on the same entry:
+  reply > repost > like > bookmark. A bare link with no matching entry is a
+  plain `mention` with author/content **omitted**, never guessed from an
+  unrelated entry on the page.
+- **Content is untrusted UGC, sanitized at capture time, in the Worker,
+  before it reaches D1:** the captured `e-content` HTML is reduced to
+  `@dwk/mf2`'s `sanitizeHtml` allowlist
+  (`p br em strong b i code pre blockquote ul ol li del s a`; all attributes
+  stripped except a validated `a[href]`; `rel="ugc nofollow"` forced onto
+  every surviving link — closing the SEO/spam-link vector) and truncated to
+  ~500 text characters.
+- **`publishedAt` is always populated:** the entry's declared `dt-published`
+  when parseable, else the verification time.
+- **Inbox schema:** additive nullable columns on the existing table (`id`,
+  `interaction_type`, `author_name`, `author_url`, `author_photo`, `content`,
+  `published_at`), same `ALTER TABLE` migration pattern as `rsvp`. `id` is a
+  stable `wm-{hash}` derived from `(source, target)` with the same FNV-1a
+  hash `@dwk/mf2` uses for its JF2 `_id`s — deterministic, so pre-migration
+  rows re-derive it on read.
+- `VerifiedMention` (inbox), `VerifyResult` (verification), and the
+  `webmention_list_received` MCP tool output all surface the new fields.
+
 ### Sender
 
 - Discover Webmention endpoints for outbound links.

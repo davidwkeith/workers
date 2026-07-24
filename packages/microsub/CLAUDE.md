@@ -53,7 +53,7 @@ src/mcp-tools.ts    # createMicrosubMcpTools — the `microsub_list_channels`/`m
 src/store.ts        # createMicrosubStore (D1-backed channels, follows, timeline)
 src/jf2.ts          # feed → JF2 normalization (JSON Feed/Atom/RSS/h-feed entries)
 src/xml.ts          # minimal dependency-free XML reader for Atom/RSS parsing
-src/hfeed.ts        # h-feed/h-entry mf2 parsing (HTMLRewriter → JF2)
+src/hfeed.ts        # parseHFeed over @dwk/mf2's shared h-entry extractor
 src/discovery.ts    # discoverFeed (feed URL discovery + parsing)
 src/auth.ts         # token extraction, scope checking, DPoP enforcement
 src/replay.ts       # D1-backed DPoP proof jti replay record (short TTL)
@@ -71,6 +71,8 @@ src/*.test.ts       # colocated tests
 - `@dwk/indieauth` — access token verification.
 - `@dwk/log` — structured logging.
 - `@dwk/mcp` — `ToolDefinition`/`ToolCallResult` types for `mcp-tools.ts`.
+- `@dwk/mf2` — the shared `h-entry` → JF2 extractor behind `parseHFeed`
+  (extracted from this package's `hfeed.ts`, issue #412).
 - `@dwk/safe-fetch` — SSRF-safe fetch (`safeFetch`, `readBodyCapped`,
   `FetchLike`) with private/reserved IP blocking; re-exported from
   `index.ts` for backwards compatibility.

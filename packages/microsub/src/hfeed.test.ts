@@ -57,4 +57,17 @@ describe("parseHFeed", () => {
     expect(entry?.url).toBeUndefined();
     expect(entry?._id).toBeTruthy();
   });
+
+  it("sanitizes captured e-content HTML before it reaches the timeline", async () => {
+    const html =
+      `<div class="h-entry"><div class="e-content">` +
+      `<p onclick="evil()">Hi <script>x()</script><a href="/p" target="_blank">link</a></p>` +
+      `</div></div>`;
+    const [entry] = await parseHFeed(html, "https://feed.example/");
+    expect(entry?.content?.html).toBe(
+      '<p>Hi <a href="https://feed.example/p" rel="ugc nofollow">link</a></p>',
+    );
+    // The plain-text capture is untouched by sanitization.
+    expect(entry?.content?.text).toContain("Hi");
+  });
 });
