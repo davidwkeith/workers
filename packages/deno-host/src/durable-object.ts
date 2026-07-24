@@ -238,6 +238,23 @@ export interface DurableObjectNamespaceOptions<Env> {
   /** Per-id libSQL embedded-replica client; called once per id, cached for
    *  the process's lifetime alongside the constructed instance. */
   readonly getStorageClient: (idHex: string) => SyncSqliteDatabaseLike;
+  /**
+   * Called once per dispatch — a `fetch()` or an about-to-run `alarm()` — after
+   * the id's lease is acquired and before the event runs, with the same
+   * `SyncSqliteDatabaseLike` instance `getStorageClient(idHex)` returned (cached
+   * across dispatches for this id). This is the injection point for the
+   * sync-before-serve rule: a different replica may have written to this id's
+   * database since this instance last held the lease, so a composing host whose
+   * concrete storage client also exposes a `sync()`-style method (e.g. the
+   * `libsql` package's embedded-replica client) calls it here. This package takes
+   * no dependency on any such method itself — `client` is typed as the plain
+   * `SyncSqliteDatabaseLike` seam, and the callback narrows it to whatever richer
+   * type the host's own `getStorageClient` actually constructs.
+   */
+  readonly onLeaseAcquired?: (
+    idHex: string,
+    client: SyncSqliteDatabaseLike,
+  ) => Promise<void> | void;
   readonly leaseTtlMs?: number;
   readonly leaseAcquireTimeoutMs?: number;
 }
@@ -249,6 +266,7 @@ interface StubLike {
 interface Instance<T> {
   readonly object: T;
   readonly state: DenoDurableObjectState;
+  readonly db: SyncSqliteDatabaseLike;
   chain: Promise<unknown>;
 }
 
@@ -316,7 +334,7 @@ export class DurableObjectNamespaceLike<
       const state = new DenoDurableObjectState(id, storage);
       const object = new this.#ctor(state as never, this.#options.env as never);
       state._setOwner(object as HibernationHandlers);
-      instance = { object, state, chain: Promise.resolve() };
+      instance = { object, state, db, chain: Promise.resolve() };
       this.#instances.set(idHex, instance);
     }
     return instance;
@@ -334,6 +352,12 @@ export class DurableObjectNamespaceLike<
     );
     try {
       const instance = this.#materialize(id);
+      // Sync-before-serve: a different replica may have written to this id's
+      // database since this instance last held the lease (or since it was
+      // constructed) — the hook is the injection point for pulling those
+      // writes in before `fetch()` sees them. Runs after the lease is held so
+      // nothing else can write underneath it before the event executes.
+      await this.#options.onLeaseAcquired?.(idHex, instance.db);
       const run = instance.chain
         .then(() => instance.state.concurrencyGate)
         .then(() => instance.object.fetch(request));
@@ -408,6 +432,10 @@ export class DurableObjectNamespaceLike<
       );
       if (!stillClaimed) return;
       const instance = this.#materialize(id);
+      // Same sync-before-serve rule as #dispatch (see its comment), applied
+      // just before the handler actually runs — skipped above for a
+      // superseded/no-op claim so an alarm that won't fire never pays for it.
+      await this.#options.onLeaseAcquired?.(idHex, instance.db);
       const run = instance.chain
         .then(() => instance.state.concurrencyGate)
         .then(async () => {

@@ -238,6 +238,78 @@ and in v1 it is handled operationally, not architecturally:
   (`replicas: 1` for the pod service, scale the stateless cohort separately)
   or wait for v2.
 
+> **Update (issue #432): Tier 2 implemented** for the mechanism (§6.1–§6.3);
+> real per-package lifecycles are proven for one representative package
+> (`activitypub`), with the remaining four left as an explicit follow-up (see
+> below).
+>
+> - **§6.1 (lease)**: unchanged from `@dwk/deno-host`'s existing
+>   `acquireLease`/`releaseLease`; the one gap this issue closed is the *host
+>   mapping* — `@dwk/server`'s `server.ts` `dispatch()` now catches
+>   `LeaseContendedError` specifically and responds `503` + `Retry-After: 1`
+>   instead of falling through to the generic `500` handler.
+> - **§6.2 (sync-before-serve)**: `@dwk/deno-host`'s
+>   `createDurableObjectNamespace` gained a new, opt-in
+>   `DurableObjectNamespaceOptions.onLeaseAcquired?(idHex, client)` hook —
+>   called once per dispatch, after the lease and before the event runs (see
+>   `spec/packages/deno-host.md` "Design: sync-before-serve hook (issue
+>   #432)"). `@dwk/server`'s new `central-durable-object.ts`
+>   (`createCentralDurableObjectNamespace`) wraps that hook to call
+>   `client.sync()` **unconditionally** — the rule is structural (baked into
+>   the wrapper every central-mode DO namespace is built through), not
+>   something a deployer can forget. `EmbeddedReplicaClientLike` is the small
+>   type (`SyncSqliteDatabaseLike & { sync(): Promise<void> }`) a deployer's
+>   `getStorageClient` factory must return — `@dwk/server` does not construct
+>   embedded-replica connections itself, same seam-injection posture as every
+>   other central-mode store (`libsql-native.smoke.test.ts` is the one place
+>   in the package that imports the real `libsql` npm package at all, and only
+>   as a `devDependency`-gated check that the native module loads on Node —
+>   see the "Out of scope" note below).
+> - **§6.3 (alarms)**: `@dwk/server`'s new `central-do-poller.ts`
+>   (`DurableObjectAlarmPoller`) is the per-replica jittered interval timer
+>   (default ~1 s + jitter, mirroring `@dwk/cf-shims`'s `CronScheduler` in
+>   shape) that drives every registered namespace's `pollAlarms()` and,
+>   optionally, `LibsqlKv.sweepExpired` on the same tick — required because,
+>   unlike `@dwk/cf-shims`'s local-mode shim, `@dwk/deno-host`'s namespace
+>   never auto-arms a timer for a scheduled alarm.
+> - **A previously-unremarked simplification**: the endpoint packages import
+>   their `DurableObject` base class from the `cloudflare:workers` bare
+>   specifier, resolved today to `@dwk/cf-shims`'s shim (via
+>   `registerCloudflareWorkers`/the vitest alias). That base class only wires
+>   `ctx`/`env` fields in its constructor and carries no other behavior, so
+>   which concrete `DurableObject` class a package's `extends` clause resolved
+>   to at *import* time is irrelevant at *construction* time: constructing the
+>   exact same class through `@dwk/deno-host`'s namespace (whose `ctx`/`env`
+>   are structurally compatible) works completely unmodified. **No second
+>   loader hook or build-time alias is needed for central mode** — this was
+>   left open in earlier phases' text and is resolved here.
+> - **Testing**: `central-durable-object.test.ts` and `central-do-poller.test.ts`
+>   cover the mechanism against `central-test-harness.ts`'s new
+>   `FakeEmbeddedReplicaClient` (a `node:sqlite`-backed fake reproducing a real
+>   embedded replica's observable contract — writes forward to a shared
+>   "primary" and are reflected locally immediately, reads and `sync()` only
+>   ever touch the local file — without needing a live libSQL server).
+>   `central-do.integration.test.ts` is the §14 item 2/3 suite over two real
+>   `DwkServer` HTTP replicas: sync-before-serve (write via A, read via B),
+>   racing writes to one id serialize (never interleaved), and crash recovery
+>   (a replica that never releases its lease frees the id for another after
+>   `leaseTtlMs`). `central-do-activitypub.integration.test.ts` is the one real
+>   Tier-2 lifecycle this issue brings up end to end across two replicas — the
+>   inbound-`Follow`-to-alarm-driven-`Accept` flow from
+>   `phase5-activitypub.integration.test.ts`, with `ActivityPubObject` used
+>   completely unmodified. **The other four Tier-2 packages'
+>   (`solid-pod`/`remotestorage`/`webauthn`/`atproto-pds`) cross-replica
+>   lifecycle suites are not implemented here** — the mechanism they'd exercise
+>   is identical to what `activitypub`'s suite already proves (same namespace
+>   wrapper, same poller, same lease), so this is scoped as a follow-up rather
+>   than four more copies of the same proof; a package with WebSocket-specific
+>   lifecycle behavior over central mode is the one case that would need new
+>   coverage of its own, not just a port of its phase5 suite (see §6.4 above).
+> - **Out of scope, per this issue's own scoping**: live Turso/sqld
+>   verification (the embedded-replica smoke test is Node-native-module-only,
+>   against no configured `syncUrl`); the fleet lifecycle items (queue poller,
+>   cron tick lease, drain, readiness — phase 4).
+
 ### 6.5 v2 sketch (not in scope): residency leases + internal forwarding
 
 The per-request lease pays one KV round-trip per DO event and leaves the
@@ -598,6 +670,11 @@ existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
    `getStorageClient` with sync-before-serve, alarm poller. Bring up
    `solid-pod`/`activitypub`/`remotestorage`/`webauthn`/`atproto-pds`
    lifecycles across two replicas.
+   > **Update (issue #432): mechanism implemented**, one package
+   > (`activitypub`) proven end to end across two replicas; see the §6 update
+   > note above for what's implemented, the simplification found along the
+   > way, and why the other four packages' lifecycle suites are scoped out as
+   > a follow-up rather than duplicated proof.
 4. **Fleet lifecycle**: queue poller on every replica, cron tick lease,
    drain-aware shutdown, readiness endpoint, observability events.
 5. **Packaging & docs**: docker-compose reference (sqld + MinIO + N

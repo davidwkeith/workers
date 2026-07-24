@@ -145,6 +145,32 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
     expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]); // now fires normally
   });
 
+  it("calls onLeaseAcquired before an alarm handler runs, but not for a superseded/no-op claim", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    const synced: string[] = [];
+    const ns = createDurableObjectNamespace(AlarmObject, {
+      kv,
+      className: "AlarmObject",
+      env: {},
+      getStorageClient: () => db,
+      onLeaseAcquired: (idHex) => {
+        synced.push(idHex);
+      },
+    });
+    const id = ns.idFromName("alice");
+    const idHex = id.toString();
+    await setAlarm(kv, "AlarmObject", idHex, 1000);
+    await ns.pollAlarms({ now: 1000 });
+    expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]);
+    expect(synced).toEqual([idHex]);
+
+    // A poll that finds nothing due never fires the handler, so the sync hook
+    // (which costs a network round trip in a real host) is not called either.
+    await ns.pollAlarms({ now: 1000 });
+    expect(synced).toEqual([idHex]);
+  });
+
   it("does not delete a concurrently-rescheduled future alarm when a stale fire attempt finally acquires the lease", async () => {
     const kv = new FakeDenoKv();
     const db = createStrictSyncSqlite();

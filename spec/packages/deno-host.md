@@ -268,6 +268,13 @@ export interface DurableObjectNamespaceOptions<Env> {
   /** Per-id libSQL embedded-replica client; called once per id, cached for
    *  the process's lifetime alongside the constructed instance. */
   readonly getStorageClient: (idHex: string) => SyncSqliteDatabaseLike;
+  /** Called once per dispatch, after the id's lease is acquired and before
+   *  the event runs — see "Design: sync-before-serve hook (issue #432)"
+   *  below. */
+  readonly onLeaseAcquired?: (
+    idHex: string,
+    client: SyncSqliteDatabaseLike,
+  ) => Promise<void> | void;
   readonly leaseTtlMs?: number;
   readonly leaseAcquireTimeoutMs?: number;
 }
@@ -356,6 +363,40 @@ mock that always succeeds). New colocated tests:
   dispatches for the same id.
 - WebSocket: accept/dispatch to `webSocketMessage`/`webSocketClose`
   overrides, matching `@dwk/cf-shims`' existing coverage shape.
+
+## Design: sync-before-serve hook (issue #432)
+
+> **Status: implemented.** A small, contract-reviewed extension to #398's
+> `createDurableObjectNamespace` (host-contract §8's growth discipline), made
+> for `@dwk/server`'s central storage mode
+> ([spec/scale-out.md §6.2](../scale-out.md#62-sqlstorage-per-object-libsql-database-embedded-replica)):
+> its first consumer needs a **per-dispatch** point to sync a per-object
+> embedded-replica database from its primary, and the namespace previously
+> called `getStorageClient(idHex)` only once per id (on first construction),
+> with no hook thereafter.
+
+`DurableObjectNamespaceOptions.onLeaseAcquired?: (idHex, client) =>
+Promise<void> | void` is called once per dispatch — a `fetch()` or an
+about-to-run `alarm()` (skipped for a claim that turns out to be
+superseded/no-op, since the handler never runs then) — after the id's lease
+is acquired and before the event runs, passed the same
+`SyncSqliteDatabaseLike` instance `getStorageClient(idHex)` returned for that
+id (cached across dispatches, exactly as before). This package still takes no
+dependency on any richer client capability: `client`'s static type is the
+plain `SyncSqliteDatabaseLike` seam, and it is the **host's** job (not this
+package's) to narrow it to whatever concrete type its own `getStorageClient`
+actually constructs and call that type's own sync method there — for
+`@dwk/server`'s central mode, the `libsql` npm package's embedded-replica
+`sync(): Promise<void>`. A rejection from the hook propagates instead of
+running the event, and the lease is still released in the namespace's normal
+`finally` path.
+
+This is opt-in and additive: omitting `onLeaseAcquired` (every existing
+caller, including `@dwk/cf-shims`' local-mode Node host, which has no replica
+to sync from) is unchanged behavior. No other documented host needs it today
+— `@dwk/cf-shims`' `ShimDurableObjectNamespace` has exactly one SQLite file
+per object id and no primary/replica split, so there is nothing to sync
+before serving.
 
 ## Design: KV-backed queue emulation (issue #399)
 
