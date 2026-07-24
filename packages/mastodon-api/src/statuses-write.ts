@@ -13,7 +13,7 @@
  */
 
 import { authenticateBearer, tokenHasScope } from "./auth.js";
-import { statusEntity } from "./entities.js";
+import { credentialAccountEntity, statusEntity } from "./entities.js";
 import {
   accountRequired,
   insufficientScope,
@@ -22,7 +22,6 @@ import {
   unprocessable,
 } from "./errors.js";
 import type { RouteContext } from "./handler.js";
-import { credentialAccountEntity } from "./entities.js";
 import { createMastodonStore } from "./store.js";
 import type { BackendPublishInput } from "./backend.js";
 

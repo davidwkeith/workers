@@ -1339,6 +1339,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       seq: stored.seq,
       receivedAt: stored.publishedAt,
       activity: stored.activity,
+      // Owner-authored, never group-relayed — set explicitly so the row's
+      // declared `relayedBy: string | null` holds, matching every other
+      // `__client/*` producer (an omitted field would reach `toBackendEntry`
+      // as `undefined`).
+      relayedBy: null,
       source: 1,
     } as unknown as JsonValue);
   }
