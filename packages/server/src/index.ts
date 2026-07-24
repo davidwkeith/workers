@@ -100,21 +100,40 @@ export {
 } from "./central-mode.js";
 
 // Central-mode Durable Objects (Tier 2, spec/scale-out.md §6, #432): the
-// namespace composition wrapper that bakes in the sync-before-serve rule, and
-// the per-replica alarm/sweep poller `ns.pollAlarms()` needs wired to
-// something.
+// namespace composition wrapper that bakes in the sync-before-serve rule.
 export {
   createCentralDurableObjectNamespace,
   type CentralDurableObjectNamespaceOptions,
   type EmbeddedReplicaClientLike,
 } from "./central-durable-object.js";
 
+// The per-replica background tick every replica MUST run for central-mode
+// alarms and queue messages to be delivered at all (spec/scale-out.md §6.3,
+// §7.1, #432/#433) — `ns.pollAlarms()` and `broker.pollQueues()` need wired
+// to something, and this is it.
 export {
-  DurableObjectAlarmPoller,
-  type DurableObjectAlarmPollerOptions,
+  CentralFleetPoller,
+  type CentralFleetPollerOptions,
   type PollableDurableObjectNamespace,
+  type PollableQueueBroker,
   type SweepableCoordinationStore,
-} from "./central-do-poller.js";
+} from "./central-fleet-poller.js";
+
+// Central-mode cron (spec/scale-out.md §7.2, #433): the tick-lease-guarded
+// scheduler every replica runs so a `scheduled` handler fires once fleet-wide
+// per cadence bucket instead of once per replica.
+export {
+  CentralCronScheduler,
+  type CentralCronSchedulerOptions,
+} from "./central-cron.js";
+
+// Central-mode health surfaces (spec/scale-out.md §12, #433): liveness +
+// readiness `Mount`s a deployer adds to `HostConfig.mounts` alongside the
+// endpoint packages.
+export {
+  createCentralHealthMounts,
+  type CentralHealthOptions,
+} from "./central-health.js";
 
 // Re-exported from `@dwk/cf-shims`: the Node-backed Cloudflare binding shims
 // and runtime-global seams this host composes behind Express. See that

@@ -352,6 +352,37 @@ losers skip silently. A winner that crashes mid-run is covered by handler
 idempotency plus the next tick (missed-tick coalescing is already permitted
 by host-contract §3.7).
 
+> **Update (issue #433): implemented.** `CentralFleetPoller`
+> (`packages/server/src/central-fleet-poller.ts`) is issue #432's
+> `DurableObjectAlarmPoller`, renamed and extended: it now polls every
+> registered `@dwk/deno-host` `QueueBroker`'s `pollQueues()` alongside DO
+> alarms and the coordination-KV sweep, all on the same jittered per-replica
+> tick — the literal reading of "shared with #432's alarm tick." §7.1's
+> "conforming redeliver-by-default broker" requirement is satisfied by
+> construction: central mode only ever wires `@dwk/deno-host`'s
+> `createQueueBroker`, never `@dwk/cf-shims`'s auto-acking one.
+>
+> Cron is a separate class, `CentralCronScheduler`
+> (`packages/server/src/central-cron.ts`) — structurally compatible with
+> `@dwk/cf-shims`'s `ScheduledHandler`, so a package's `scheduled` handler
+> runs unchanged — because a cron schedule's cadence is per-handler and
+> typically far longer than the fleet poller's ~1s base tick, so each
+> schedule keeps its own timer exactly as §7.2 above describes, rather than
+> folding into the shared tick. `register(name, handler, intervalMs, cron?)`
+> takes an explicit `name` (§7.2's sketch calls it `handlerName`) since it is
+> the lease-key identity every replica computes independently from the same
+> stable string.
+>
+> Proven at the unit level with two independent poller/scheduler instances
+> sharing one `LibsqlKv` (`central-fleet-poller.test.ts`,
+> `central-cron.test.ts`) — this **is** "two replicas" from the coordination
+> store's point of view — covering exactly-once queue delivery, redelivery
+> when a handler never decides, and single-winner tick-lease election across
+> buckets; `central-fleet.integration.test.ts` adds the one scenario that
+> only proves itself through a real `DwkServer`/Express instance: a graceful
+> `closeCentral` drain on one replica (in-flight batch finishes; the poller's
+> `stop()` is awaited) while a peer's poller keeps redelivering.
+
 ## 8. The coordination store: `DenoKvLike` over libSQL
 
 The lease/alarm/queue machinery needs a small strongly-consistent KV with
@@ -607,6 +638,39 @@ micropub media, fediverse delivery bursts, feed polling fan-out.
   failures — the fleet's health is legible only through these
   ([observability.md](observability.md) taxonomy applies).
 
+> **Update (issue #433): implemented.**
+>
+> - **Health:** `createCentralHealthMounts` (`packages/server/src/central-health.ts`)
+>   returns ordinary `Mount`s — `/healthz` (liveness, always `200` while the
+>   process is up, no store round trip) and `/readyz` (re-runs
+>   `probeCentralStores`, cached for `cacheMs`, default 2000ms) — so a
+>   deployer spreads them into `HostConfig.mounts` like any endpoint package;
+>   no bespoke wiring mechanism.
+> - **Graceful drain:** `DwkServer.closeCentral(fleetPollers?)`
+>   (`packages/server/src/server.ts`) is a **separate method from `close()`**,
+>   not a parameterized variant — `close()`'s order (websockets first) stays
+>   exactly right for local mode, which has no cross-replica leases and no
+>   fleet pollers to stop. `closeCentral` runs this section's order exactly:
+>   stop accepting connections → `Promise.all` over the given
+>   `CentralFleetPoller`/`CentralCronScheduler` instances' `stop()` (each
+>   already waits out its own in-flight tick) → stop any local-mode-shaped
+>   `cron`/`queue` also configured → drain the `WaitUntilTracker` → close
+>   WebSockets → release the (always-null, in central mode) writer-lock
+>   reference. "Release any held leases" needed no extra orchestration beyond
+>   this: a DO/cron/queue lease is released or expires on its own once its
+>   holding request/poll completes, which waiting out the fleet pollers
+>   already guarantees.
+> - **Observability:** `central_fleet.{alarm,queue}_poll_error`,
+>   `central_fleet.sweep_ok`/`sweep_error` (poller); `central_cron.tick_lease_
+>   acquired`/`tick_lease_contended`/`claim_error`/`handler_error` (cron);
+>   `central_do.sync_duration_ms`/`sync_error` (replica sync duration, added
+>   to `createCentralDurableObjectNamespace`'s dispatch path);
+>   `central_health.probe_failed`/`probe_recovered` (readiness, logged only on
+>   a state *transition*, not every cached probe, to stay legible under load).
+>   Queue claimed-batch-size metrics are deferred — `@dwk/deno-host`'s
+>   `QueueBroker.pollQueues()` doesn't yet surface a count, and widening its
+>   return type is left to a follow-up rather than done speculatively here.
+
 ## 13. Migration between modes
 
 Mechanical in both directions, extending the
@@ -677,6 +741,12 @@ existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
    > a follow-up rather than duplicated proof.
 4. **Fleet lifecycle**: queue poller on every replica, cron tick lease,
    drain-aware shutdown, readiness endpoint, observability events.
+   > **Update (issue #433): implemented.** See the §7 and §12 update notes
+   > above for what shipped (`CentralFleetPoller`'s queue polling,
+   > `CentralCronScheduler`, `DwkServer.closeCentral`,
+   > `createCentralHealthMounts`, the new `central_*` log events). Out of
+   > scope, as originally scoped: the docker-compose/k8s reference, `dwk
+   > migrate`, live verification, and hosted-conformance runs — all phase 5.
 5. **Packaging & docs**: docker-compose reference (sqld + MinIO + N
    replicas), k8s notes (affinity for WS paths, scratch volumes), `dwk
    migrate` local↔central, README guidance on when *not* to use this mode.
