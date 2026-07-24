@@ -13,6 +13,13 @@
  * `rel="ugc nofollow"` so received spam links cannot buy SEO. Output can be
  * truncated on text length, closing any still-open tags.
  *
+ * Two element kinds are rewritten instead of unwrapped (issue #413):
+ * `<img>` becomes a link to its `src` labeled by its `alt` text — an
+ * auto-fetching embed is a tracking/egress vector the snapshot model must
+ * not take on, but the photo's existence and location are content worth
+ * keeping — and headings (`h1`–`h6`) demote to bold paragraphs so a reply
+ * can never out-rank the surrounding page's own heading hierarchy.
+ *
  * @packageDocumentation
  */
 
@@ -36,6 +43,20 @@ export const SANITIZE_ALLOWED_TAGS: ReadonlySet<string> = new Set([
   "del",
   "s",
   "a",
+]);
+
+/**
+ * Headings demote to `<p><strong>` rather than passing through or unwrapping:
+ * the emphasis survives, but a reply's markup can never claim a slot in the
+ * embedding page's document outline.
+ */
+const DEMOTED_HEADINGS: ReadonlySet<string> = new Set([
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
 ]);
 
 /**
@@ -83,6 +104,14 @@ function escapeAttribute(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;");
+}
+
+/** Encode a decoded string for emission as HTML text. */
+function escapeText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 /**
@@ -140,8 +169,20 @@ export async function sanitizeHtml(
   let droppedDepth = 0;
   // Tags emitted but not yet closed. `onEndTag` never fires for an element the
   // source leaves unclosed, so whatever remains here is closed after the parse
-  // — stored output must not leak formatting past the fragment.
-  const open: Array<{ readonly tag: string }> = [];
+  // — stored output must not leak formatting past the fragment. Each entry
+  // carries its full closing markup because a demoted heading closes two tags.
+  const open: Array<{ readonly close: string }> = [];
+
+  // Emit already-encoded text, honoring the length cap.
+  const emitText = (text: string): string => {
+    const remaining = maxTextLength - textLength;
+    if (text.length <= remaining) {
+      textLength += text.length;
+      return text;
+    }
+    truncated = true;
+    return truncateEncodedText(text, remaining) + "…";
+  };
 
   const rewriter = new HTMLRewriter()
     .on("*", {
@@ -156,7 +197,24 @@ export async function sanitizeHtml(
           }
           return;
         }
-        if (droppedDepth > 0 || truncated || !SANITIZE_ALLOWED_TAGS.has(tag)) {
+        if (droppedDepth > 0 || truncated) return;
+        if (tag === "img") {
+          // Rewritten, not embedded: an `<img>` auto-fetches on every render,
+          // so a pass-through `src` would let received content beacon to
+          // attacker-controlled infrastructure (issue #413). A link defers
+          // the fetch to a click while keeping the photo reachable.
+          const resolved = resolveHttpUrl(el.getAttribute("src"), baseUrl);
+          const alt = decodeEntities(el.getAttribute("alt") ?? "").trim();
+          const label = escapeText(alt !== "" ? alt : (resolved ?? ""));
+          if (label === "") return;
+          const text = emitText(label);
+          out +=
+            resolved === null
+              ? text
+              : `<a href="${escapeAttribute(resolved)}" rel="${SANITIZE_LINK_REL}">${text}</a>`;
+          return;
+        }
+        if (!SANITIZE_ALLOWED_TAGS.has(tag) && !DEMOTED_HEADINGS.has(tag)) {
           // Unwrapped: the tag is dropped but its text still flows through.
           return;
         }
@@ -164,20 +222,26 @@ export async function sanitizeHtml(
           out += "<br>";
           return;
         }
+        let close: string;
         if (tag === "a") {
           const resolved = resolveHttpUrl(el.getAttribute("href"), baseUrl);
           if (resolved === null) return;
           out += `<a href="${escapeAttribute(resolved)}" rel="${SANITIZE_LINK_REL}">`;
+          close = "</a>";
+        } else if (DEMOTED_HEADINGS.has(tag)) {
+          out += "<p><strong>";
+          close = "</strong></p>";
         } else {
           out += `<${tag}>`;
+          close = `</${tag}>`;
         }
-        const token = { tag };
+        const token = { close };
         open.push(token);
         el.onEndTag(() => {
           const index = open.lastIndexOf(token);
           if (index !== -1) {
             open.splice(index, 1);
-            out += `</${tag}>`;
+            out += close;
           }
         });
       },
@@ -190,20 +254,13 @@ export async function sanitizeHtml(
         if (droppedDepth > 0 || truncated || chunk.text === "") return;
         // Text chunks arrive as written (entities are NOT decoded), so they
         // are emitted verbatim — already valid HTML text.
-        const remaining = maxTextLength - textLength;
-        if (chunk.text.length <= remaining) {
-          out += chunk.text;
-          textLength += chunk.text.length;
-          return;
-        }
-        out += truncateEncodedText(chunk.text, remaining) + "…";
-        truncated = true;
+        out += emitText(chunk.text);
       },
     });
 
   await rewriter.transform(new Response(html)).text();
-  for (const { tag } of open.reverse()) {
-    out += `</${tag}>`;
+  for (const { close } of open.reverse()) {
+    out += close;
   }
   return out.trim();
 }

@@ -99,6 +99,85 @@ describe("sanitizeHtml", () => {
     expect(await sanitizeHtml("<p>a<br>b</p>")).toBe("<p>a<br>b</p>");
   });
 
+  it("rewrites img to a link labeled by its alt text", async () => {
+    const out = await sanitizeHtml(
+      '<p>Look: <img src="https://a.example/cat.jpg" alt="A cat" width="800" onerror="evil()"></p>',
+    );
+    expect(out).toBe(
+      '<p>Look: <a href="https://a.example/cat.jpg" rel="ugc nofollow">A cat</a></p>',
+    );
+  });
+
+  it("labels an alt-less img with its resolved URL", async () => {
+    const out = await sanitizeHtml('<img src="/cat.jpg">', {
+      baseUrl: "https://source.example/reply",
+    });
+    expect(out).toBe(
+      '<a href="https://source.example/cat.jpg" rel="ugc nofollow">https://source.example/cat.jpg</a>',
+    );
+  });
+
+  it("keeps only alt text when img src is unsafe or unresolvable", async () => {
+    expect(await sanitizeHtml('<img src="javascript:x()" alt="cat">')).toBe(
+      "cat",
+    );
+    // Entity-obfuscated scheme is decoded before validation.
+    expect(
+      await sanitizeHtml('<img src="java&#115;cript:x()" alt="cat">'),
+    ).toBe("cat");
+    expect(await sanitizeHtml('<img alt="cat">')).toBe("cat");
+    // No safe src and no alt: nothing survives.
+    expect(await sanitizeHtml('<img src="/rel">')).toBe("");
+  });
+
+  it("drops img inside dropped subtrees", async () => {
+    expect(
+      await sanitizeHtml(
+        '<noscript><img src="https://a.example/cat.jpg" alt="cat"></noscript>',
+      ),
+    ).toBe("");
+  });
+
+  it("re-encodes entity-encoded img attributes without double-escaping", async () => {
+    const out = await sanitizeHtml(
+      '<img src="https://a.example/?a=1&amp;b=2" alt="a &amp; b">',
+    );
+    expect(out).toBe(
+      '<a href="https://a.example/?a=1&amp;b=2" rel="ugc nofollow">a &amp; b</a>',
+    );
+  });
+
+  it("counts img labels toward maxTextLength", async () => {
+    const out = await sanitizeHtml(
+      '<p>abcde<img src="https://a.example/p.jpg" alt="0123456789"></p>',
+      { maxTextLength: 10 },
+    );
+    expect(out).toBe(
+      '<p>abcde<a href="https://a.example/p.jpg" rel="ugc nofollow">01234…</a></p>',
+    );
+  });
+
+  it("demotes headings to bold paragraphs", async () => {
+    expect(await sanitizeHtml("<h1>Big</h1><h6>Small</h6>")).toBe(
+      "<p><strong>Big</strong></p><p><strong>Small</strong></p>",
+    );
+  });
+
+  it("preserves inline formatting inside a demoted heading", async () => {
+    const out = await sanitizeHtml(
+      '<h2>See <em>this</em> <a href="https://a.example/">link</a></h2>',
+    );
+    expect(out).toBe(
+      '<p><strong>See <em>this</em> <a href="https://a.example/" rel="ugc nofollow">link</a></strong></p>',
+    );
+  });
+
+  it("closes a demoted heading the source leaves unclosed", async () => {
+    expect(await sanitizeHtml("<h3>title")).toBe(
+      "<p><strong>title</strong></p>",
+    );
+  });
+
   it("returns '' when nothing survives", async () => {
     expect(await sanitizeHtml("")).toBe("");
     expect(await sanitizeHtml("<script>x()</script>")).toBe("");
