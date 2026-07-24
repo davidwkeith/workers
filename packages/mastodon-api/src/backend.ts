@@ -45,6 +45,32 @@ export interface BackendEntry {
   };
   /** Cached actor documents keyed by IRI, never fetched in a request path. */
   readonly actorProfiles?: Readonly<Record<string, BackendActorProfile>>;
+  /**
+   * Reply target, resolved by the backend when this entry replies to a
+   * locally-held post: the target's snowflake id and its author. A reply
+   * whose `inReplyTo` names a post the backend does not hold stays absent
+   * (the status renders with `in_reply_to_id: null`). `authorIsOwner`
+   * selects the owner account over a synthesized remote one for
+   * `in_reply_to_account_id`.
+   */
+  readonly inReplyTo?: {
+    readonly id: string;
+    readonly authorIri: string | null;
+    readonly authorIsOwner: boolean;
+  };
+  /**
+   * Hydration for a bare-IRI `Announce` (boost): the boosted post's embedded
+   * AS2 object, its snowflake id, and its author, resolved by the backend
+   * from a locally-held copy. Absent when the boost is already embedded or
+   * the boosted post is not held — the reblog then renders content-less, as
+   * before.
+   */
+  readonly boost?: {
+    readonly id: string;
+    readonly authorIri: string | null;
+    readonly authorIsOwner: boolean;
+    readonly object: Record<string, unknown>;
+  };
 }
 
 /** Safe, best-effort fields retained from a cached remote AS2 actor document. */

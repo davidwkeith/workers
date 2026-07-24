@@ -270,18 +270,17 @@ text is correct behavior, not a bug.
 
 ## Known gaps (phase 2)
 
-- **Bare-IRI `Announce` objects render as empty statuses.** A plain
-  (non-relayed) boost's `object` is often just the boosted post's IRI as
-  a string, not an embedded object; `statusEntity` reads object fields
-  assuming an embedded shape, so such a row currently renders as a
-  content-less `Status` rather than the actual boosted post. Safe (no
-  crash), but a known fidelity gap — see the phase-2 implementation notes
-  for the open question of whether to denormalize `Announce` rows at
-  write time or add a dereference branch at read time.
-- **`in_reply_to_id` is always `null`.** Full reply-threading to a local
-  snowflake isn't implemented; a reply still surfaces correctly as a
-  `mention` notification, so this doesn't block the phase-2 acceptance
-  bar.
+- **Bare-IRI `Announce` / `in_reply_to_id` resolution is local-only.** Both
+  reply-threading and bare-IRI boost hydration are resolved at read time
+  against posts the actor DO already holds (its owner outbox, then its
+  inbox) via `#resolveLocalObject` — pure SQL, never an outbound fetch. A
+  reply to a locally-held post carries that post's snowflake
+  (`in_reply_to_id`) and its author (`in_reply_to_account_id`); a bare-IRI
+  boost of a locally-held post renders its reblog with the real content and
+  author. A target the DO does **not** hold still degrades to `null`
+  (reply) or a content-less reblog (boost) — dereferencing and caching a
+  remote boosted/replied-to object is the remaining increment, the same
+  network-fetch shape as actor-profile hydration.
 
 ## Phase 3 (implemented; manual QA pending)
 
@@ -294,8 +293,8 @@ counters from stored inbox activity. The Pixelfed and Tusky runs remain the
 acceptance gate in `conformance/mastodon-client-qa.md`; record/fix client
 quirks there before marking the conformance suite passing.
 
-`in_reply_to_id` threading remains a known fidelity gap: a remote reply
-target cannot yet be reliably translated to a local snowflake id. Follow
-notifications are implemented — `@dwk/activitypub` stores each new
-follower's `Follow`/`Join` in the inbox and the notifications read maps it
-to `type: "follow"`.
+Reply-threading and bare-IRI boost hydration are implemented for
+locally-held targets (see Known gaps above); only the remote-dereference
+case remains. Follow notifications are implemented — `@dwk/activitypub`
+stores each new follower's `Follow`/`Join` in the inbox and the
+notifications read maps it to `type: "follow"`.
