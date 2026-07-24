@@ -46,7 +46,14 @@ for Cloudflare bindings.
 - **Node 24 required.** `@dwk/cf-shims` uses built-in `node:sqlite` for D1/DO
   SQLite emulation.
 - **Data directory locking.** `acquireWriterLock` prevents multiple server
-  instances from corrupting the same data directory.
+  instances from corrupting the same data directory — **local mode only**.
+  `HostConfig.storage: { mode: "central" }` (spec/scale-out.md, #431) skips
+  the lockfile entirely (replicas are supposed to coexist) and instead runs
+  `central-mode.ts`'s mode guard (`assertNoLocalStores`, refusing a `dataDir`
+  that still holds local-mode stores) and startup probes
+  (`assertModeMarker`/`probeCentralStores`, deployer-invoked before
+  `createServer`). Tier 1 (stateless + D1/R2) only — Durable Objects across
+  replicas are phase 3, out of scope here.
 - **All @dwk packages as devDeps.** The server imports all endpoint packages
   for composition but they're devDependencies since this is never published.
 
@@ -73,8 +80,12 @@ src/context.ts                # WaitUntilTracker, HostExecutionContext
 src/lifecycle.ts              # queue/scheduled handler adapters (bind Env + ctx)
 src/lock.ts                   # acquireWriterLock, data directory locking
 src/libsql-kv.ts              # LibsqlKv: @dwk/deno-host's DenoKvLike over a
-                              #   centralized libSQL DB (scale-out §8, #428);
-                              #   standalone — not composed into the host yet
+                              #   centralized libSQL DB (scale-out §8, #428)
+src/central-bindings.ts       # assembleCentralBindings: central-mode Env assembly
+                              #   over @dwk/deno-host's D1/R2 shims (scale-out §5, #431)
+src/central-mode.ts           # central mode's startup invariants: assertNoLocalStores,
+                              #   assertModeMarker, probeCentralStores (scale-out §9, #431)
+src/central-test-harness.ts   # fakes for the two files above; excluded from the build
 src/request-duplex.ts         # installRequestDuplex for streaming request bodies
 src/web-socket-upgrade.ts     # bridges a real HTTP Upgrade socket to a mount's DO
                               #   (the one shim-adjacent piece that stays here — see above)
@@ -89,10 +100,15 @@ The Cloudflare binding shims and runtime-global polyfills themselves
 
 ## Dependencies (runtime)
 
-- `@dwk/cf-shims` — the Cloudflare binding shims and runtime-global seams.
-- `@dwk/deno-host` — the `DenoKvLike`/`LibsqlClientLike` seams `LibsqlKv`
-  implements/consumes (type-only in production code today; its runtime
-  lease/alarm/queue machinery arrives with the scale-out `central` mode).
+- `@dwk/cf-shims` — the Cloudflare binding shims and runtime-global seams
+  (local storage mode), plus the in-memory KV backing central mode also uses
+  (KV is never centralized — see `central-bindings.ts`).
+- `@dwk/deno-host` — the `DenoKvLike`/`LibsqlClientLike`/`S3ClientLike` seams
+  `LibsqlKv` and `central-bindings.ts`/`central-mode.ts` consume at runtime:
+  `createD1Database`/`createS3Bucket` assemble the `central` storage mode's D1
+  and R2 bindings. `@dwk/server` never constructs a network connection
+  itself — the deployer injects an already-connected client (a real
+  `@libsql/client`/`aws4fetch` instance) for every seam.
 - `@dwk/log` — structured logging.
 - `express` (5.x) — HTTP server.
 - `helmet` — baseline security-header middleware (nosniff, frame-options,

@@ -3,10 +3,13 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWebfinger } from "@dwk/webfinger";
-import { createServer, type DwkServer } from "./server.js";
+import { createServer, createCentralServer, type DwkServer } from "./server.js";
 import { WaitUntilTracker } from "./context.js";
 import { MissingBindingError } from "./config.js";
 import type { FetchHandler, Mount } from "./config.js";
+import { StartupProbeError } from "./central-mode.js";
+import { LibsqlKv } from "./libsql-kv.js";
+import { createFakeLibsqlClient } from "./central-test-harness.js";
 
 function dataDir(): string {
   return mkdtempSync(join(tmpdir(), "dwk-srv-"));
@@ -228,5 +231,53 @@ describe("createServer (end-to-end)", () => {
         env: {},
       }),
     ).toThrow();
+  });
+});
+
+describe("createCentralServer", () => {
+  it("runs the mode-marker + startup probes before serving, then works normally", async () => {
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    server = await createCentralServer(
+      {
+        baseUrl: "http://localhost",
+        dataDir: dataDir(),
+        mounts: [webfingerMount],
+        env: {},
+        storage: { mode: "central", kv },
+      },
+      {},
+    );
+    const { port } = await server.listen(0, "127.0.0.1");
+    base = `http://127.0.0.1:${port}`;
+
+    const res = await fetch(
+      `${base}/.well-known/webfinger?resource=acct:alice@example.com`,
+    );
+    expect(res.status).toBe(200);
+
+    const marker = await kv.get<string>(["dwk_meta", "mode"]);
+    expect(marker.value).toBe("central");
+  });
+
+  it("rejects before serving when a configured store is unreachable", async () => {
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    const brokenD1 = {
+      prepare: () => {
+        throw new Error("connection refused");
+      },
+    } as never;
+
+    await expect(
+      createCentralServer(
+        {
+          baseUrl: "http://localhost",
+          dataDir: dataDir(),
+          mounts: [webfingerMount],
+          env: {},
+          storage: { mode: "central", kv },
+        },
+        { d1: { AUTH_DB: brokenD1 } },
+      ),
+    ).rejects.toThrow(StartupProbeError);
   });
 });

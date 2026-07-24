@@ -22,6 +22,7 @@ import express, {
 } from "express";
 import helmet from "helmet";
 import { noopLogger, type Logger } from "@dwk/log";
+import type { D1Database } from "@cloudflare/workers-types";
 import {
   installCryptoDigestStream,
   installHTMLRewriter,
@@ -29,15 +30,22 @@ import {
   type QueueBroker,
   type CronScheduler,
 } from "@dwk/cf-shims";
+import { createS3Bucket } from "@dwk/deno-host";
 import { sendWebResponse, toWebRequest } from "./adapter.js";
 import { HostExecutionContext, WaitUntilTracker } from "./context.js";
 import { installRequestDuplex } from "./request-duplex.js";
 import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
 import { acquireWriterLock, type ReleaseLock } from "./lock.js";
 import {
+  assertModeMarker,
+  assertNoLocalStores,
+  probeCentralStores,
+} from "./central-mode.js";
+import {
   assertBindings,
   isReservedPath,
   resolveOrigin,
+  type CentralStorageConfig,
   type HostConfig,
   type Mount,
 } from "./config.js";
@@ -154,8 +162,18 @@ export function createServer(config: HostConfig): DwkServer {
   installWebSocketGlobals();
   installCryptoDigestStream();
 
+  // Central mode: replicas are supposed to coexist (the per-id lease, once
+  // Durable Objects land in phase 3, is the single-writer mechanism there),
+  // so the local-writer lockfile is never acquired — but a `dataDir` still
+  // holding local-mode authoritative stores means a half-migrated deployment,
+  // which is refused loudly rather than silently corrupted (spec/scale-out.md
+  // §9.3).
+  const centralMode = config.storage?.mode === "central";
+  if (centralMode) assertNoLocalStores(config.dataDir);
   const release =
-    (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;
+    !centralMode && (config.lock ?? true)
+      ? acquireWriterLock(config.dataDir)
+      : null;
   const tracker = config.tracker ?? new WaitUntilTracker();
 
   const app = express();
@@ -204,6 +222,43 @@ export function createServer(config: HostConfig): DwkServer {
     cron: config.cron,
     logger,
   });
+}
+
+/** D1 bindings to probe, keyed by `Env` name — see {@link createCentralServer}. */
+export interface CentralServerProbeTargets {
+  readonly d1?: Readonly<Record<string, D1Database>>;
+}
+
+/**
+ * Build a {@link DwkServer} for a `central`-mode {@link HostConfig}, running
+ * the async startup invariants ({@link assertModeMarker},
+ * {@link probeCentralStores}) *before* {@link createServer} — the structural
+ * counterpart to `assertBindings`' automatic, synchronous enforcement for
+ * local mode. Prefer this over calling `createServer` directly for central
+ * mode: it makes the fail-loud startup guarantee (spec/scale-out.md §9.2)
+ * something a deployer can't forget to wire up, rather than an exported
+ * function they have to remember to call themselves.
+ *
+ * The object-store probe target is built from `config.storage.objectStore`
+ * directly (nothing else in `HostConfig` needs it); D1 bindings have no such
+ * single source — `env` is an untyped bag with no per-binding-kind
+ * information — so `probeTargets.d1` asks for the same values already handed
+ * to {@link assembleCentralBindings} to build `config.env`.
+ */
+export async function createCentralServer(
+  config: HostConfig & { readonly storage: CentralStorageConfig },
+  probeTargets: CentralServerProbeTargets = {},
+): Promise<DwkServer> {
+  await assertModeMarker(config.storage.kv);
+  const objectStore = config.storage.objectStore
+    ? createS3Bucket(config.storage.objectStore)
+    : undefined;
+  await probeCentralStores({
+    kv: config.storage.kv,
+    d1: probeTargets.d1,
+    objectStore,
+  });
+  return createServer(config);
 }
 
 /**

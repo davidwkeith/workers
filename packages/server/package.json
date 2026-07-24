@@ -46,7 +46,8 @@
     "examples",
     "scripts",
     "Dockerfile",
-    "!src/**/*.test.ts"
+    "!src/**/*.test.ts",
+    "!src/central-test-harness.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

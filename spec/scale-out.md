@@ -414,6 +414,55 @@ The invariant generalizes from "exactly one process writes a given data
 directory" to **"a given store set is written under exactly one mode, and
 each DO id under exactly one lease holder at a time."**
 
+> **Update (issue #431): Tier 1 implemented**, with two deliberate deviations
+> from §9.1's sketch above:
+>
+> 1. `HostConfig.storage`'s `central` variant takes `kv: DenoKvLike` (an
+>    already-constructed coordination store, typically a `LibsqlKv` over an
+>    injected libSQL client) rather than a raw
+>    `{ url, authToken, replicaDir }` connection descriptor — consistent with
+>    every other `@dwk/deno-host` seam's "the composing app injects an
+>    already-connected client, the package never constructs one" philosophy
+>    (`objectStore.client` already worked this way). `@dwk/server` gains no
+>    new client-library dependency as a result.
+> 2. `replicaDir`, `pollIntervalMs`, `leaseTtlMs`, and `leaseAcquireTimeoutMs`
+>    are dropped from the type entirely rather than carried as unconsumed
+>    fields — nothing in this phase reads them (they're phase 3/4 concerns:
+>    the embedded-replica `SqlStorage` cache directory and the lease/alarm/
+>    queue poller cadence). Add them back when phase 3/4 code actually
+>    consumes them; an unused reserved field is dead API surface, not
+>    forward-compatibility.
+>
+> Implemented as `packages/server/src/central-bindings.ts`
+> (`assembleCentralBindings`: D1 via `@dwk/deno-host`'s `createD1Database` over
+> an injected `LibsqlClientLike` per binding, R2 via `createS3Bucket` over an
+> injected `S3ClientLike` + per-binding endpoint, KV always `@dwk/cf-shims`'
+> in-memory backing) and `packages/server/src/central-mode.ts`
+> (`assertNoLocalStores`, `assertModeMarker`, `probeCentralStores` — the §9.2/
+> §9.3 invariants). `createServer` itself only handles the *synchronous* half
+> unconditionally: skipping `acquireWriterLock` and calling
+> `assertNoLocalStores` when `storage.mode === "central"`. The async marker/
+> probe checks are structurally required, not merely documented, via
+> `createCentralServer` (`server.ts`) — a thin wrapper that runs them (building
+> the object-store probe target straight from `storage.objectStore`) before
+> delegating to `createServer`, so a central-mode deployment that uses it gets
+> the same "impossible to skip the fail-loud startup check" guarantee
+> `assertBindings` gives local mode automatically; calling `createServer`
+> directly still works but bypasses both checks. `examples/central-composition.mjs`
+> demonstrates the full deployer-invoked sequence end to end (a standalone
+> runnable script, not a `dwk-serve` config module — the CLI's `startServer`
+> doesn't yet know about `createCentralServer`, a follow-up).
+>
+> The §14 item 2 multi-replica integration slice
+> (`packages/server/src/central.integration.test.ts`) boots two `DwkServer`
+> instances (via `createCentralServer`) against the same `dataDir` sharing one
+> fake libSQL backing and one in-memory S3 fake, proving: central mode never
+> contends the writer lockfile, a D1 write on replica A is visible from
+> replica B (read-your-writes), an R2 body written on A streams back out
+> through B, and both replicas' startup probes/mode-marker checks agree.
+> Durable Objects (Tier 2, phase 3) and the
+> queue/cron poller lifecycle (phase 4) remain unimplemented, as scoped.
+
 ## 10. Consistency review (host-contract §4)
 
 | Store | Contract requirement | Central mode |
@@ -564,6 +613,14 @@ existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
    (e.g. `@dwk/central-shims`), extract a shared core, or live with the name?
    Nothing is stable-released yet, so a rename is still cheap; consuming
    as-is is the least work and the most misleading.
+   > **Decided for #431: consume as-is.** `@dwk/server` now runtime-imports
+   > `@dwk/deno-host` (`central-bindings.ts`) rather than only type-importing
+   > it (#430's posture). A rename/extraction is still on the table and still
+   > cheap pre-release, but re-litigating the package's name isn't this
+   > issue's job and blocking Tier 1 on it serves nobody; revisit once a
+   > second non-`@dwk/server` consumer (or the Deno Deploy Phase 1 build,
+   > #396) makes the misleading name an actual cost rather than a
+   > hypothetical one.
 2. **The external-dependency thesis question**, third appearance
    ([portability.md §6](portability.md#6-open-questions),
    [deno-deploy-design.md §7](deno-deploy-design.md#7-open-questions)): sqld
