@@ -16,7 +16,7 @@ accessor instead of setting an own property.
   most severe vector.
 - `parseJsonBody` and `asPropertyMap` (used by `parseUpdateOperations` for
   JSON `create`/`replace`/`add`/`delete`): a `"__proto__"` property/JSON key
-  reassigned the *result* object's own prototype (`Object.getPrototypeOf(properties) === Array.prototype`
+  reassigned the _result_ object's own prototype (`Object.getPrototypeOf(properties) === Array.prototype`
   was reachable), a narrower but still real type-confusion bug — JSON.parse
   itself is safe (it creates an own `"__proto__"` data property), but
   copying that key into a fresh object literal via `obj[key] = value` is not.
