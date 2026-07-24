@@ -1,7 +1,7 @@
 {
   "name": "@dwk/deno-host",
   "version": "0.0.0",
-  "description": "Deno Deploy host building blocks for the @dwk packages — external libSQL/Turso presented behind the Cloudflare D1Database and SqlStorage (Durable Object SQLite) interfaces, plus KV-backed Durable Object and Queue emulation.",
+  "description": "Deno Deploy host building blocks for the @dwk packages — external libSQL/Turso presented behind the Cloudflare D1Database and SqlStorage (Durable Object SQLite) interfaces, KV-backed Durable Object and Queue emulation, and an S3-compatible R2Bucket adapter.",
   "keywords": [
     "deno-deploy",
     "libsql",
@@ -10,6 +10,8 @@
     "d1",
     "durable-objects",
     "queue",
+    "r2",
+    "s3",
     "shim"
   ],
   "type": "module",

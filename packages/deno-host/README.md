@@ -10,16 +10,18 @@ SQLite) interfaces from the
 > **Status: exploratory/gated.** This package implements the SQL gap
 > ([#397](https://github.com/davidwkeith/workers/issues/397)), the
 > single-writer actor + alarm emulation
-> ([#398](https://github.com/davidwkeith/workers/issues/398)), and the
+> ([#398](https://github.com/davidwkeith/workers/issues/398)), the
 > KV-backed queue emulation
-> ([#399](https://github.com/davidwkeith/workers/issues/399)) — all three
+> ([#399](https://github.com/davidwkeith/workers/issues/399)), and the
+> S3-compatible object storage adapter
+> ([#400](https://github.com/davidwkeith/workers/issues/400)) — all four
 > gate overrides on demonstrated demand — of the demand-gated
 > `@dwk/deno-host` plan
 > ([#396](https://github.com/davidwkeith/workers/issues/396), designed in
-> [`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md)). The
-> object-storage gap (#400) is not implemented yet, so this package cannot
-> mount an R2-dependent endpoint package on its own — that gap is the
-> remaining blocker.
+> [`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md)). All
+> four host-contract gaps this package set out to close are now
+> implemented; whether an actual Deno Deploy app is built on top of it
+> (Phase 1) stays a separate, still-demand-gated decision.
 
 ## Why libSQL
 
@@ -184,6 +186,46 @@ message instead of requeuing it past that cap, as a dead-letter backstop —
 the production consumers (`webmention`, `microsub`, `websub`) self-limit via
 `message.attempts` already and don't depend on one existing.
 
+## `createS3Bucket(options)` — host-contract §3.4
+
+A thin `R2Bucket`-shaped adapter over an external S3-compatible provider
+(issue #400) — `put`/`get`/`head`/`delete` map onto the S3 REST verbs
+`PUT`/`GET`/`HEAD`/`DELETE`. The injected `S3ClientLike` seam is a single
+`fetch`-shaped method already configured to sign requests for the target
+endpoint; a real [`aws4fetch`](https://github.com/mhart/aws4fetch)
+`AwsClient`'s `fetch` method is assignable unmodified.
+
+```ts
+import { AwsClient } from "aws4fetch";
+import { createS3Bucket } from "@dwk/deno-host";
+
+const aws = new AwsClient({
+  accessKeyId: Deno.env.get("R2_ACCESS_KEY_ID")!,
+  secretAccessKey: Deno.env.get("R2_SECRET_ACCESS_KEY")!,
+});
+
+const env = {
+  BUCKET: createS3Bucket({
+    client: { fetch: aws.fetch.bind(aws) },
+    endpoint: `https://${Deno.env.get("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com/pod-blobs`,
+  }),
+};
+
+await env.BUCKET.put("sha256-...", body, {
+  httpMetadata: { contentType: "image/jpeg" },
+});
+```
+
+`httpMetadata.contentType` round-trips as the `Content-Type` header;
+`customMetadata` round-trips as `x-amz-meta-*` headers (lowercased on
+read-back — HTTP header names are case-insensitive, so this is a documented
+divergence from Cloudflare R2, which preserves the original casing). A
+`ReadableStream` `put` value streams through a byte-counting
+`TransformStream` rather than buffering, so the returned `R2Object.size` is
+known without reading the whole body into memory first. `list`, multipart
+uploads, conditional operations (`onlyIf`), and range reads are outside
+host-contract §3.4's required subset and are not implemented.
+
 ## What still needs live verification
 
 The colocated tests drive both SQL shims against a real SQLite engine
@@ -196,11 +238,15 @@ The KV-backed lease/alarm/queue tests drive a documented-behavior fake
 (`FakeDenoKv`), not a real `Deno.Kv` — real atomic-CAS contention, `list()`
 key-ordering, `expireIn` precision, cron tick granularity, and sustained
 `pollQueues` throughput under production traffic are separate live-
-verification items, also tracked in the spec.
+verification items, also tracked in the spec. The object-storage tests
+drive an in-memory `FakeS3Client`, not a real S3-compatible provider —
+read-after-write consistency and whether the chosen signer can sign a
+streamed request body without buffering it first are the corresponding
+live-verification items for #400.
 
 ## Spec
 
 [`spec/packages/deno-host.md`](../../spec/packages/deno-host.md) —
 authoritative requirements. Design context:
-[`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md) §3.1–§3.3,
-[`spec/host-contract.md`](../../spec/host-contract.md) §3.2/§3.5/§3.6/§4.
+[`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md) §3.1–§3.4,
+[`spec/host-contract.md`](../../spec/host-contract.md) §3.2/§3.4/§3.5/§3.6/§4.

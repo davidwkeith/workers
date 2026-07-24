@@ -12,10 +12,10 @@
  * anywhere else the composing app can supply a client.
  *
  * **Status: exploratory/gated.** This is the SQL gap (issue #397), the
- * single-writer actor + alarm emulation (issue #398), and the KV-backed
- * queue emulation (issue #399) — all three gate overrides on demonstrated
- * demand — of the demand-gated `@dwk/deno-host` plan (#396); the
- * object-storage gap (#400) is not implemented here yet.
+ * single-writer actor + alarm emulation (issue #398), the KV-backed queue
+ * emulation (issue #399), and the S3-compatible object storage adapter
+ * (issue #400) — all four gate overrides on demonstrated demand — of the
+ * demand-gated `@dwk/deno-host` plan (#396).
  *
  * @see spec/packages/deno-host.md
  */
@@ -84,3 +84,8 @@ export {
   type QueueConsumerHandler,
   type ConsumerOptions,
 } from "./queue.js";
+export {
+  createS3Bucket,
+  type S3ClientLike,
+  type S3BucketOptions,
+} from "./r2.js";

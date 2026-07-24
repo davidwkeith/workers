@@ -17,17 +17,19 @@ no Deno globals) and reaches its backing store only through injected client
 seams.
 
 > **Status: exploratory/gated.** Implements the SQL gap (issue #397), the
-> single-writer actor + alarm emulation (issue #398), and the KV-backed
-> queue emulation (issue #399) — all three gate overrides on demonstrated
-> demand — of the demand-gated `@dwk/deno-host` plan (#396;
-> [deno-deploy-design.md](../deno-deploy-design.md) §3.1, §3.2, §3.3). See
-> [below](#design-single-writer-actor--alarm-emulation-issue-398) and
-> [below](#design-kv-backed-queue-emulation-issue-399) for each design. The
-> `R2Bucket` object-storage adapter (#400) is **not** implemented, so no
-> endpoint package can mount on this host yet — per
-> [deno-deploy-design.md §6](../deno-deploy-design.md#6-decision-gate) even
-> Tier 1 ([host-contract.md §9](../host-contract.md#9-conformance-tiers-and-how-a-host-proves-compliance))
-> needs the object-storage gap closed too. #400 stays demand-gated.
+> single-writer actor + alarm emulation (issue #398), the KV-backed queue
+> emulation (issue #399), and the S3-compatible `R2Bucket` object-storage
+> adapter (issue #400) — all four gate overrides on demonstrated demand —
+> of the demand-gated `@dwk/deno-host` plan (#396;
+> [deno-deploy-design.md](../deno-deploy-design.md) §3.1–§3.4). See
+> [below](#design-single-writer-actor--alarm-emulation-issue-398),
+> [below](#design-kv-backed-queue-emulation-issue-399), and
+> [below](#design-r2bucket-shaped-object-storage-adapter-issue-400) for each
+> design. All four host-contract gaps `@dwk/deno-host` set out to close are
+> now implemented — a composed Deno app can wire every Tier 1 binding
+> ([host-contract.md §9](../host-contract.md#9-conformance-tiers-and-how-a-host-proves-compliance))
+> to a shim in this package, though the live-verification items below still
+> gate calling it a **supported** host.
 
 ## Why libSQL (and not Postgres, KV, or local disk)
 
@@ -459,6 +461,117 @@ New colocated tests in `queue.test.ts`, reusing the `FakeDenoKv` from #398:
   `pollQueues()` calls racing the same due message deliver it only once
   (the same claim race #398's alarm tests cover).
 
+## Design: `R2Bucket`-shaped object storage adapter (issue #400)
+
+> **Status: implemented.** Approved via the same demand-override posture as
+> #398/#399 — this closes out the demand-gated `@dwk/deno-host` plan (#396);
+> no further gap remains unimplemented. See
+> [issue #400](https://github.com/davidwkeith/workers/issues/400) and
+> [deno-deploy-design.md §3.4](../deno-deploy-design.md#34-object-storage-r2bucket--not-previously-scored).
+
+Deno Deploy has no bundled object store, and object storage was never
+scored in the original `portability.md` §4.1 provider table at all (§3.4's
+own opening line). The design is the "thin adapter" the design doc sketched:
+`put`/`get`/`head`/`delete` map onto the S3 REST verbs
+`PUT`/`GET`/`HEAD`/`DELETE` against `{endpoint}/{key}` on an external
+S3-compatible provider (R2 itself, MinIO, Backblaze B2, Tigris, DigitalOcean
+Spaces, ...) — no dialect gap like §3.1's SQL shim has, since S3's object
+model has no `@dwk`-specific idiom to reconcile.
+
+### New client seam: `S3ClientLike`
+
+Unlike the other three seams (`LibsqlClientLike`, `SyncSqliteDatabaseLike`,
+`DenoKvLike`), which are structural subsets of a specific real client's
+*method* surface, `S3ClientLike` is a single `fetch`-shaped method:
+
+```ts
+export interface S3ClientLike {
+  fetch(input: string | URL, init?: RequestInit): Promise<Response>;
+}
+```
+
+This shape was chosen over modeling `@aws-sdk/client-s3`'s `S3Client.send(
+Command)` pattern (the more obvious "real client" candidate) because that
+client's command/middleware type surface doesn't reduce to a small
+structural subset the way `@libsql/client`'s or `Deno.Kv`'s do, and pulling
+in the SDK's types would reintroduce the "no runtime dependency" question
+`portability.md` §6 already has open for the other three seams. A
+`fetch`-shaped seam keeps the package itself dependency-free and
+runtime-agnostic (only `fetch`/`Headers`/`ReadableStream`/`TransformStream`
+— all standard Web Platform APIs available on Deno, Node ≥18, and Workers),
+while still satisfying "the composing app injects a client, this package
+never constructs a connection or holds credentials itself": the app supplies
+an already-signing `fetch`, most naturally `aws4fetch`'s `AwsClient#fetch`
+(a small, dependency-light signer purpose-built for edge/Deno/Workers
+environments) bound to the target provider's endpoint/region/credentials. A
+real `AwsClient` instance's `fetch` method is assignable to `S3ClientLike`
+unmodified.
+
+### Storage shape (`r2.ts`)
+
+- `createS3Bucket({ client, endpoint })` returns an `R2Bucket`-shaped object.
+  `endpoint` is the path-style base URL up to and including the bucket
+  (e.g. `https://<account>.r2.cloudflarestorage.com/<bucket>`); a key is
+  requested at `${endpoint}/${encodeKey(key)}`, percent-encoding each `/`
+  -delimited segment individually so keys containing spaces, `%`, or
+  non-ASCII characters round-trip through a valid URL.
+- `put(key, value, options?)`: `options.httpMetadata.contentType` becomes
+  the `Content-Type` request header; `options.customMetadata` becomes
+  `x-amz-meta-<key>` headers, the universal S3 custom-metadata convention.
+  A `ReadableStream` value is piped through a counting `TransformStream`
+  (bytes pass through unbuffered; the running total becomes the returned
+  `R2Object.size` once the upload completes) rather than read into memory
+  first — the same no-buffering rule `@dwk/cf-shims`' filesystem shim meets
+  by hashing while it writes. `ArrayBuffer`/`ArrayBufferView`/`string`/`Blob`
+  values already know their own byte length, so no counting is needed for
+  them.
+- `get(key)` / `head(key)`: `404` maps to `null` (host-contract §3.4); any
+  other non-2xx throws. Response metadata is read directly off HTTP headers
+  — `Content-Length` → `size`, `ETag` (quotes stripped) → `etag`,
+  `Last-Modified` → `uploaded`, `Content-Type` → `httpMetadata.contentType`,
+  every `x-amz-meta-*` header → `customMetadata` — no local persistence of
+  metadata is needed, unlike `@dwk/cf-shims`' filesystem sidecar, because
+  the S3-compatible provider already stores and serves it. `get`'s
+  `R2ObjectBody.body` is `res.body` verbatim (a `ReadableStream`) so a
+  consumer streaming a blob out (`@dwk/store`'s bodies, `@dwk/micropub`
+  media) never buffers it in this shim either.
+- `delete(keys)`: idempotent — a `404` on a single-key `DELETE` is treated
+  as success (host-contract §3.4's "deleting an absent key is not an
+  error"), since not every S3-compatible provider follows AWS S3's own
+  convention of always returning `204` regardless.
+
+**Known fidelity gap, documented rather than hidden:** HTTP header names are
+case-insensitive, so `customMetadata` keys round-trip lowercased (a key
+written as `"traceId"` reads back `"traceid"`) — unlike Cloudflare R2, which
+preserves the exact casing passed to `put`. Harmless for every current
+consumer, which reads metadata by a fixed, already-lowercase key name.
+
+### Not implemented (host-contract §3.4 non-requirements)
+
+`list`, multipart uploads, conditional operations (`onlyIf`), range reads,
+and checksum options — the GC design tracks orphans in a D1 table rather
+than listing the bucket, so no production consumer needs any of these.
+
+### Testing plan (#400)
+
+New colocated tests in `r2.test.ts`, against a new `FakeS3Client` in
+`test-harness.ts` — an in-memory `S3ClientLike` reproducing the REST slice
+this shim depends on (`PUT`/`GET`/`HEAD`/`DELETE`, header storage and
+case-folding, a minted `ETag` per `PUT`, `404` for a missing key):
+
+- Round-trip: `put` → `get` returns the same bytes, size, and content type;
+  `customMetadata` round-trips (lowercased, per the documented gap above).
+- `head`/`get` of an absent key return `null`; `head` omits the body.
+- `delete` removes a key (single and batch); deleting an absent key does
+  not throw.
+- A `ReadableStream` `put` streams correctly and reports the byte count the
+  counting transform observed; `ArrayBuffer`/`Uint8Array`/`string` bodies
+  are also covered.
+- Key encoding: a key with `/`, spaces, and other characters needing
+  percent-encoding round-trips.
+- `writeHttpMetadata` writes the stored content type into a caller-supplied
+  `Headers`.
+
 ## Consistency (host-contract §4)
 
 | Contract requirement | How this design meets it |
@@ -468,6 +581,7 @@ New colocated tests in `queue.test.ts`, reusing the `FakeDenoKv` from #398:
 | DO SQLite: `transactionSync` atomicity | SQLite transaction on the sync client; BEGIN/COMMIT/ROLLBACK. |
 | DO SQLite: serialized per id | Out of scope here — #398's per-id lease provides it; these shims assume a single writer per database. |
 | Queues: durable, at-least-once | KV writes are durably replicated; claim-then-requeue (never un-delete) makes redelivery-until-acked the only path — see #399 design above. |
+| R2: read-after-write | Depends on the chosen S3-compatible provider's per-key guarantee — provider-specific, not free (see live verification below). |
 
 ## Live verification required before any host claim
 
@@ -513,10 +627,29 @@ Addendum for #399, once implemented:
    cron-tick-driven poll pass keeps up with `webmention`/`microsub`/`websub`
    production traffic without an unbounded due-index backlog.
 
+Addendum for #400, once implemented:
+
+8. **Read-after-write consistency on the chosen S3-compatible provider** —
+   host-contract §3.4 requires it, and it's a per-provider guarantee, not
+   something this shim can enforce; confirm it explicitly for whichever
+   provider a deployment actually uses before treating `@dwk/store`'s
+   blob-body writes as safe.
+9. **Streaming request-body signing** — whether the chosen signer (e.g.
+   `aws4fetch`) can sign a `PUT` whose body is a `ReadableStream` without
+   buffering the whole body first to compute a payload hash (some signers
+   require either buffering or an explicit "unsigned payload" mode); this
+   determines whether large-object `put` calls actually get the
+   no-buffering property `r2.ts`'s own code provides, end to end.
+10. **`x-amz-meta-*` header size/count limits** on the chosen provider —
+    AWS S3 caps combined metadata at 2 KiB; other S3-compatible providers
+    may differ. No current `@dwk` consumer writes metadata anywhere near
+    that ceiling, so this is a documentation item, not a design change.
+
 Also still open (unchanged from
 [deno-deploy-design.md §7](../deno-deploy-design.md#7-open-questions)):
-whether an external libSQL/Turso dependency is acceptable against the
-project's "infrastructure the user owns" thesis. Building this shim does
+whether an external libSQL/Turso dependency — now joined by an external
+S3-compatible object store dependency for #400 — is acceptable against the
+project's "infrastructure the user owns" thesis. Building these shims does
 not resolve that question; it makes the trade concrete.
 
 ## Test environment
@@ -529,27 +662,32 @@ transactional `batch`) and a strict better-sqlite3-style sync driver
 (`reader` metadata, `all()` throwing on writes). `lease.ts`, `alarms.ts`,
 and `queue.ts` (#398, #399) are instead driven by `test-harness.ts`'s
 `FakeDenoKv` — an in-memory `DenoKvLike` with real atomic-CAS semantics —
-since none of those three touch SQL at all.
+since none of those three touch SQL at all. `r2.ts` (#400) is driven by
+`test-harness.ts`'s `FakeS3Client` — an in-memory `S3ClientLike` reproducing
+the REST slice the shim depends on — since it touches neither SQL nor KV.
 
-## Non-goals (tracked separately)
+## Non-goals
 
-- `R2Bucket`-shaped adapter over an S3-compatible store — #400.
-- Any commitment to proceed with #400: the decision gate in
-  [deno-deploy-design.md §6](../deno-deploy-design.md#6-decision-gate)
-  still holds for the remainder of the plan; #398 and #399 were each
-  greenlit on a demonstrated demand signal specific to them, not a blanket
-  override of the gate.
+None remaining specific to this package: #397, #398, #399, and #400 — the
+four gaps `deno-deploy-design.md` §2 scoped — are all implemented. Whether a
+real, deployed `@dwk/deno-host`-based app (Phase 1 of `portability.md` §5)
+is ever built stays demand-gated at the `@dwk/deno-host` package level
+(#396) regardless; implementing the shims resolves the "can it be built"
+question, not the "should Phase 1 proceed" one.
 
 ## Reference links
 
 - [deno-deploy-design.md](../deno-deploy-design.md) — the re-verification
   and design sketch this implements (§3.1 for the SQL shims, §3.2 for the
-  #398 actor/alarm design, §3.3 for the #399 queue design above);
-  [host-contract.md](../host-contract.md) — the normative contract
-  (§3.2, §3.5, §3.6, §4); [portability.md](../portability.md) §5 —
-  the demand-gated Phase 1 this belongs to; [cf-shims.md](cf-shims.md) —
-  the Node-host precedent.
+  #398 actor/alarm design, §3.3 for the #399 queue design, §3.4 for the
+  #400 object-storage design above); [host-contract.md](../host-contract.md) —
+  the normative contract (§3.2, §3.4, §3.5, §3.6, §4);
+  [portability.md](../portability.md) §5 — the demand-gated Phase 1 this
+  belongs to; [cf-shims.md](cf-shims.md) — the Node-host precedent.
 - [`@libsql/client` docs](https://docs.turso.tech/sdk/ts/reference) ·
   [`libsql` (embedded replica) package](https://www.npmjs.com/package/libsql) ·
   [D1 client API](https://developers.cloudflare.com/d1/worker-api/) ·
-  [DO SQL storage](https://developers.cloudflare.com/durable-objects/api/sql-storage/)
+  [DO SQL storage](https://developers.cloudflare.com/durable-objects/api/sql-storage/) ·
+  [`aws4fetch`](https://github.com/mhart/aws4fetch) ·
+  [S3 `PutObject`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html) /
+  [`GetObject`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) API reference
