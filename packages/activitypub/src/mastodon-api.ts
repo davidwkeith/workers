@@ -235,7 +235,12 @@ export function buildMastodonBackend(options: {
         kind: "note",
         content: plainTextToHtml(input.status),
       };
-      if (input.spoilerText !== undefined) body.summary = input.spoilerText;
+      // The content warning federates as the Note's `summary`, which AP peers
+      // treat as HTML on the wire — escape it like `content` so a `<`/`&` typed
+      // into a CW never becomes literal markup on a receiving instance.
+      if (input.spoilerText !== undefined) {
+        body.summary = escapeHtml(input.spoilerText);
+      }
       if (input.sensitive !== undefined) body.sensitive = input.sensitive;
       const response = await stub().fetch(
         new Request(`${config.iris.id}/__client/publish`, {
@@ -255,17 +260,25 @@ export function buildMastodonBackend(options: {
   };
 }
 
+/** Escape the HTML metacharacters so trusted-owner plain text federates cleanly. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 /**
  * Escape a plain-text status and wrap it as the HTML an AS2 `Note` carries:
  * `\n\n` splits paragraphs, a single `\n` becomes `<br>`. Mastodon clients
  * submit plain text and expect the server to render markup.
  */
 function plainTextToHtml(text: string): string {
-  const escape = (value: string): string =>
-    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return text
     .split(/\n{2,}/)
-    .map((paragraph) => `<p>${escape(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .map(
+      (paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`,
+    )
     .join("");
 }
 
