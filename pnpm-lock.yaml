@@ -292,6 +292,9 @@ importers:
       '@dwk/cf-shims':
         specifier: workspace:*
         version: link:../cf-shims
+      '@dwk/deno-host':
+        specifier: workspace:*
+        version: link:../deno-host
       '@dwk/log':
         specifier: workspace:*
         version: link:../log
