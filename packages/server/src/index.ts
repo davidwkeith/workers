@@ -21,7 +21,12 @@
  * @packageDocumentation
  */
 
-export { createServer, DwkServer } from "./server.js";
+export {
+  createServer,
+  createCentralServer,
+  DwkServer,
+  type CentralServerProbeTargets,
+} from "./server.js";
 
 export {
   resolveOrigin,

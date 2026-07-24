@@ -15,9 +15,19 @@
  *   marker in the coordination KV, both directions: a store set is written
  *   under exactly one mode.
  * - {@link probeCentralStores} — a round-trip write/read/delete probe against
- *   the coordination KV, each D1 database, and the object store, run once at
- *   startup so an unreachable store is a clear startup error, not a
- *   first-request 500 — mirroring `assertBindings`' posture for local mode.
+ *   the coordination KV, each D1 database, and the object store, so an
+ *   unreachable store is a clear startup error, not a first-request 500.
+ *
+ * Unlike `assertBindings` (which `createServer` calls unconditionally and
+ * synchronously), these two are async and are **not** invoked automatically
+ * by `createServer` — it only runs the synchronous {@link assertNoLocalStores}
+ * check itself. Call {@link createCentralServer} (`server.ts`) instead of
+ * `createServer` directly for a central-mode deployment: it runs both checks
+ * before building the server, giving central mode the same "impossible to
+ * skip the fail-loud startup check" guarantee `assertBindings` gives local
+ * mode. Calling `createServer` directly for central mode still works, but
+ * skips these two — a misconfiguration then surfaces on the first real
+ * request instead of at startup.
  *
  * @see spec/scale-out.md §9.2, §9.3 (issue #431)
  */

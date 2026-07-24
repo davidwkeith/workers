@@ -19,7 +19,7 @@ import { createWebfinger } from "@dwk/webfinger";
 import { createHostMeta } from "@dwk/host-meta";
 import { createIndieAuthStore } from "@dwk/indieauth";
 
-import { createServer, type DwkServer } from "./server.js";
+import { createCentralServer, type DwkServer } from "./server.js";
 import { assembleCentralBindings } from "./central-bindings.js";
 import { assertModeMarker, probeCentralStores } from "./central-mode.js";
 import { LibsqlKv } from "./libsql-kv.js";
@@ -93,22 +93,27 @@ beforeAll(async () => {
         },
       },
     });
-    // The deployer's startup sequence (§9.2/§9.3): validate/write the mode
-    // marker and probe every store before serving — run once per replica,
-    // exactly as each would in a real fleet.
-    await assertModeMarker(coordinationKv);
-    await probeCentralStores({
-      kv: coordinationKv,
-      d1: { AUTH_DB: env.AUTH_DB as D1Database },
-      objectStore: env.MEDIA as R2Bucket,
-    });
-    const server = createServer({
-      baseUrl: ORIGIN,
-      dataDir,
-      mounts: mounts(),
-      env,
-      storage: { mode: "central", kv: coordinationKv },
-    });
+    // `createCentralServer` (not `createServer`) runs the §9.2/§9.3 mode
+    // marker + startup probes before serving — once per replica, exactly as
+    // each would in a real fleet — including the object-store probe it
+    // builds from `storage.objectStore` itself.
+    const server = await createCentralServer(
+      {
+        baseUrl: ORIGIN,
+        dataDir,
+        mounts: mounts(),
+        env,
+        storage: {
+          mode: "central",
+          kv: coordinationKv,
+          objectStore: {
+            client: objectStore,
+            endpoint: "https://s3.example.com/media",
+          },
+        },
+      },
+      { d1: { AUTH_DB: env.AUTH_DB as D1Database } },
+    );
     const { port } = await server.listen(0, "127.0.0.1");
     return { server, base: `http://127.0.0.1:${port}`, env };
   }
@@ -170,9 +175,9 @@ describe("central mode — two replicas sharing one primary", () => {
 
   it("the coordination KV's mode marker is consistent across both replicas' startups", async () => {
     // Each replica validated/wrote the same marker during its own startup
-    // (via createServer's central-mode path); re-asserting from the test's
-    // own handle proves both observed the *same* marker through the shared
-    // primary, not two independent local ones.
+    // (via createCentralServer); re-asserting from the test's own handle
+    // proves both observed the *same* marker through the shared primary, not
+    // two independent local ones.
     await expect(assertModeMarker(coordinationKv)).resolves.toBeUndefined();
     const marker = await coordinationKv.get<string>(["dwk_meta", "mode"]);
     expect(marker.value).toBe("central");

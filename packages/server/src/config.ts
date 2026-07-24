@@ -63,17 +63,17 @@ export interface Mount {
  */
 export interface CentralStorageConfig {
   readonly mode: "central";
-  /** Coordination store for the mode marker + (phase 3+) lease/alarm/queue state. */
+  /** Coordination store for the mode marker (and, once phase 3 lands, lease/alarm/queue state). */
   readonly kv: DenoKvLike;
-  /** The object store bindings' shared client + endpoint, for the startup probe. */
+  /**
+   * The object store bindings' shared client + endpoint. `createCentralServer`
+   * (`server.ts`) builds an `R2Bucket` from this to include in the startup
+   * probe, so a deployment with no R2 bindings can simply omit it.
+   */
   readonly objectStore?: {
     readonly client: S3ClientLike;
     readonly endpoint: string;
   };
-  /** Poll cadence for alarms + queues once phase 3/4 land (default ~1000 ms). */
-  readonly pollIntervalMs?: number;
-  readonly leaseTtlMs?: number;
-  readonly leaseAcquireTimeoutMs?: number;
 }
 
 /** The storage mode a deployment runs in. Defaults to `{ mode: "local" }`. */
