@@ -206,6 +206,32 @@ describe("QueueBroker (host-contract §3.6)", () => {
     expect(delivered.every((batch) => batch.length <= 2)).toBe(true);
   });
 
+  it("sendBatch: a message-level delaySeconds overrides the batch-level default rather than adding to it", async () => {
+    let now = 0;
+    const broker = createQueueBroker(new FakeDenoKv(), { now: () => now });
+    const producer = broker.producer<string>("q");
+    const delivered: string[] = [];
+    broker.consumer<string>("q", async (batch) => {
+      for (const m of batch.messages) {
+        delivered.push(m.body);
+        m.ack();
+      }
+    });
+
+    await producer.sendBatch(
+      [{ body: "message-level", delaySeconds: 10 }, { body: "batch-default" }],
+      { delaySeconds: 30 },
+    );
+
+    now = 10_000; // message-level delay elapsed; batch-level default has not
+    await broker.pollQueues();
+    expect(delivered).toEqual(["message-level"]);
+
+    now = 30_000; // batch-level default now elapsed too
+    await broker.pollQueues();
+    expect(delivered).toEqual(["message-level", "batch-default"]);
+  });
+
   it("does not deliver a message scheduled in the future", async () => {
     let now = 0;
     const broker = createQueueBroker(new FakeDenoKv(), { now: () => now });

@@ -243,8 +243,9 @@ export class QueueBroker {
             name,
             req.body,
             now() +
-              delayMs({ delaySeconds: req.delaySeconds }) +
-              delayMs(options),
+              delayMs({
+                delaySeconds: req.delaySeconds ?? options?.delaySeconds,
+              }),
             0,
             crypto.randomUUID(),
           );

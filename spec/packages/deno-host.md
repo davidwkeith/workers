@@ -384,7 +384,9 @@ secondary index, only a due-time-ordered index:
 - `send`/`sendBatch` write with a plain `kv.set` (no CAS needed — nothing to
   replace) and accept an iterable of any size, satisfying host-contract
   §3.6's "at least Cloudflare's limits (100 messages / 256 KiB)" floor by
-  imposing no cap of its own.
+  imposing no cap of its own. `sendBatch`'s per-message `delaySeconds`
+  overrides its batch-level `options.delaySeconds` default (not additive) —
+  the usual Cloudflare Queues precedence.
 
 ### Dispatch (`QueueBroker.pollQueues`)
 
