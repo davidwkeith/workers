@@ -20,6 +20,7 @@ import {
 import {
   dumpLocalSqlite,
   replayIntoLocalSqlite,
+  replayIntoAsyncClient,
   migrateD1ToCentral,
   migrateD1ToLocal,
   migrateDoObjectToCentral,
@@ -123,6 +124,37 @@ describe("D1 migration", () => {
       .first<{ name: string }>();
     expect(backRow?.name).toBe("Alice");
   });
+
+  it("replayIntoAsyncClient rolls back the whole dump on a mid-dump failure", async () => {
+    // Two tables; the second's rows violate its own PRIMARY KEY, so the
+    // batch fails partway through. Nothing — including the first table,
+    // which would have succeeded on its own — should be committed.
+    const dump = {
+      ddl: [
+        "CREATE TABLE t1 (id TEXT PRIMARY KEY)",
+        "CREATE TABLE t2 (id TEXT PRIMARY KEY)",
+      ],
+      tables: [
+        { name: "t1", columns: ["id"], rows: [{ id: "a" }] },
+        {
+          name: "t2",
+          columns: ["id"],
+          rows: [{ id: "b" }, { id: "b" }],
+        },
+      ],
+    };
+    const client = createFakeLibsqlClient();
+    await expect(replayIntoAsyncClient(client, dump)).rejects.toThrow();
+
+    // Neither table exists — the CREATE TABLE statements rolled back too,
+    // since they were part of the same single `batch` call.
+    await expect(
+      client.execute({ sql: "SELECT * FROM t1", args: [] }),
+    ).rejects.toThrow(/no such table/);
+    await expect(
+      client.execute({ sql: "SELECT * FROM t2", args: [] }),
+    ).rejects.toThrow(/no such table/);
+  });
 });
 
 describe("Durable Object migration + pending alarms", () => {
@@ -179,6 +211,24 @@ describe("Durable Object migration + pending alarms", () => {
       "noalarm",
     );
     expect(lifted).toBe(false);
+  });
+
+  it("propagates a real query failure instead of treating it as no pending alarm", async () => {
+    // A malformed `_host_alarm` table (missing `scheduled_time`) fails the
+    // query with "no such column", not "no such table" — liftPendingAlarm
+    // must not swallow this the way it swallows a genuinely absent table,
+    // or a real pending alarm could be silently lost.
+    const dir = workdir();
+    const localPath = join(dir, "do", "SolidPodObject", "malformed.sqlite");
+    mkdirSync(dirname(localPath), { recursive: true });
+    const db = new DatabaseSync(localPath);
+    db.exec("CREATE TABLE _host_alarm (id INTEGER PRIMARY KEY CHECK (id = 1))");
+    db.close();
+
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    await expect(
+      liftPendingAlarm(localPath, kv, "SolidPodObject", "malformed"),
+    ).rejects.toThrow(/no such column/);
   });
 
   it("migrates central DO storage back to a local file and lowers the alarm", async () => {
@@ -290,6 +340,61 @@ describe("Queue backlog import", () => {
       { url: "https://a.example" },
       { url: "https://b.example" },
     ]);
+  });
+
+  it("is idempotent — re-running it imports nothing already-migrated", async () => {
+    const dir = workdir();
+    const queuePath = join(dir, "queue.sqlite");
+    const local = new QueueBroker({ location: queuePath, now: () => 1000 });
+    await local.producer("WEBMENTION_RETRY").send({ url: "https://a.example" });
+
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    const first = await importQueueBacklog(queuePath, kv, { now: () => 1000 });
+    expect(first).toEqual({ imported: 1, dropped: 0 });
+
+    // Simulating a retry after a partial failure (or an operator mistake) —
+    // nothing should be enqueued a second time.
+    const second = await importQueueBacklog(queuePath, kv, { now: () => 1000 });
+    expect(second).toEqual({ imported: 0, dropped: 0 });
+
+    const delivered: unknown[] = [];
+    const broker = createQueueBroker(kv, { now: () => 1000 });
+    broker.consumer("WEBMENTION_RETRY", async (batch) => {
+      for (const m of batch.messages) {
+        delivered.push(m.body);
+        m.ack();
+      }
+    });
+    await broker.pollQueues({ now: 1000 });
+    expect(delivered).toEqual([{ url: "https://a.example" }]);
+  });
+
+  it("marks a dropped (unparseable) row as migrated too, so it isn't retried forever", async () => {
+    const dir = workdir();
+    const queuePath = join(dir, "queue.sqlite");
+    const db = new DatabaseSync(queuePath);
+    db.exec(
+      `CREATE TABLE queue_jobs (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         queue TEXT NOT NULL,
+         body TEXT NOT NULL,
+         attempts INTEGER NOT NULL DEFAULT 0,
+         visible_at INTEGER NOT NULL,
+         dead INTEGER NOT NULL DEFAULT 0
+       )`,
+    );
+    db.prepare(
+      "INSERT INTO queue_jobs (queue, body, visible_at) VALUES (?, ?, ?)",
+    ).run("WEBMENTION_RETRY", "not valid json", 1000);
+    db.close();
+
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    const report = await importQueueBacklog(queuePath, kv, { now: () => 1000 });
+    expect(report).toEqual({ imported: 0, dropped: 1 });
+
+    // Re-running must not re-attempt (and re-drop) the same poison-pill row.
+    const second = await importQueueBacklog(queuePath, kv, { now: () => 1000 });
+    expect(second).toEqual({ imported: 0, dropped: 0 });
   });
 });
 

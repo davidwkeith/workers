@@ -45,11 +45,10 @@ import {
   writeFileSync,
   type Dirent,
 } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
 import { noopLogger, type Logger } from "@dwk/log";
 import {
   createQueueBroker,
@@ -59,6 +58,7 @@ import {
   setAlarm,
   type DenoKvLike,
   type LibsqlClientLike,
+  type LibsqlStatementLike,
   type S3ClientLike,
   type SqlValue,
   type SyncSqliteDatabaseLike,
@@ -211,26 +211,38 @@ export function replayIntoSyncStorage(
   replayIntoSyncDatabase(db, dump);
 }
 
-/** Replay a dump into an injected async libSQL client, batching each table's
- *  rows into one write transaction. */
+/**
+ * Replay a dump into an injected async libSQL client as **one** `batch`
+ * call — DDL and every table's row inserts, in order, in the single
+ * implicit transaction `LibsqlClientLike#batch(..., "write")` guarantees
+ * (host-contract §3.5's atomic-`batch` rule). This is deliberately not one
+ * call per table: a mid-dump failure (a network blip, a constraint
+ * violation) must leave the target database exactly as it was before the
+ * call, not partially populated with tables 1..N-1 committed and nothing
+ * to retry against — a caller can safely re-run this function on failure.
+ */
 export async function replayIntoAsyncClient(
   client: LibsqlClientLike,
   dump: SqliteDump,
 ): Promise<void> {
-  for (const ddl of dump.ddl) {
-    await client.executeMultiple(ddl.trimEnd().endsWith(";") ? ddl : `${ddl};`);
-  }
+  const statements: LibsqlStatementLike[] = dump.ddl.map((sql) => ({
+    sql,
+    args: [],
+  }));
   for (const table of dump.tables) {
     if (table.rows.length === 0) continue;
     const cols = table.columns.map((c) => `"${c}"`).join(", ");
     const placeholders = table.columns.map(() => "?").join(", ");
     const sql = `INSERT INTO "${table.name}" (${cols}) VALUES (${placeholders})`;
-    const stmts = table.rows.map((row) => ({
-      sql,
-      args: table.columns.map((c) => normalizeBinding(row[c])),
-    }));
-    await client.batch(stmts, "write");
+    for (const row of table.rows) {
+      statements.push({
+        sql,
+        args: table.columns.map((c) => normalizeBinding(row[c])),
+      });
+    }
   }
+  if (statements.length === 0) return;
+  await client.batch(statements, "write");
 }
 
 function countRows(dump: SqliteDump): number {
@@ -275,6 +287,17 @@ const LOCAL_ALARM_TABLE_DDL =
   `CREATE TABLE IF NOT EXISTS ${ALARM_TABLE} ` +
   "(id INTEGER PRIMARY KEY CHECK (id = 1), scheduled_time INTEGER NOT NULL)";
 
+/** Whether `err` is `node:sqlite`'s "no such table" error for `_host_alarm`
+ *  specifically, not some other `ERR_SQLITE_ERROR` (a locked file, a
+ *  permissions issue, an unexpected schema). */
+function isMissingAlarmTableError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err as NodeJS.ErrnoException).code === "ERR_SQLITE_ERROR" &&
+    err.message.includes(`no such table: ${ALARM_TABLE}`)
+  );
+}
+
 /**
  * Lift a local DO object's pending alarm (if any) into the central
  * coordination KV's due/by-id indexes (`@dwk/deno-host`'s `setAlarm`) —
@@ -294,8 +317,13 @@ export async function liftPendingAlarm(
       .prepare(`SELECT scheduled_time AS t FROM ${ALARM_TABLE} WHERE id = 1`)
       .get() as { t: number | bigint } | undefined;
     scheduledTime = row === undefined ? null : Number(row.t);
-  } catch {
-    // No `_host_alarm` table at all: the object never set an alarm.
+  } catch (err) {
+    // No `_host_alarm` table at all means the object never set an alarm —
+    // narrowed to exactly that case (node:sqlite's ERR_SQLITE_ERROR with a
+    // "no such table" message) so a real failure (a locked/corrupt file, an
+    // unexpected schema) propagates instead of being silently read back as
+    // "no pending alarm," which would drop a real one.
+    if (!isMissingAlarmTableError(err)) throw err;
     scheduledTime = null;
   } finally {
     db.close();
@@ -402,6 +430,20 @@ interface LocalR2Meta {
 /** Sidecar suffix `@dwk/cf-shims`'s R2 shim writes metadata under. */
 const R2_META_SUFFIX = ".r2meta";
 
+/** Resolve `key` under `root`, refusing a `..`/absolute key that would
+ *  escape it — the same guard `@dwk/cf-shims`'s `FsR2Bucket#keyToPath`
+ *  applies. `key` is caller-supplied (see {@link migrateR2ToLocal}'s doc
+ *  comment on why there is no generic discovery), so this defends a future
+ *  caller that sources keys less carefully than today's trusted ones. */
+function resolveR2Path(root: string, key: string): string {
+  const resolvedRoot = resolve(root);
+  const path = resolve(resolvedRoot, key);
+  if (path !== resolvedRoot && !path.startsWith(resolvedRoot + sep)) {
+    throw new Error(`R2 key escapes the local bucket root: ${key}`);
+  }
+  return path;
+}
+
 /** Recursively collect object keys under `root` (mirrors `@dwk/cf-shims`'s
  *  `FsR2Bucket#walk`, standalone since there is no bucket instance here). */
 function walkR2Objects(root: string): string[] {
@@ -483,7 +525,7 @@ export async function migrateR2ToLocal(
   for (const key of keys) {
     const object = await source.get(key);
     if (object === null) continue;
-    const path = join(localRoot, key);
+    const path = resolveR2Path(localRoot, key);
     mkdirSync(dirname(path), { recursive: true });
     await pipeline(
       Readable.fromWeb(
@@ -514,6 +556,7 @@ export interface QueueMigrationReport {
 }
 
 interface LocalQueueRow {
+  readonly id: number;
   readonly queue: string;
   readonly body: string;
   readonly attempts: number;
@@ -527,40 +570,57 @@ interface LocalQueueRow {
  * `attempts` counter resets to 0 — safe for an at-least-once queue, and no
  * `@dwk` consumer depends on preserving it across a migration. A message
  * whose stored body fails to parse is dropped rather than imported broken.
+ *
+ * Each row is marked `dead = 1` in the local queue **immediately after** its
+ * `send` succeeds — both so a local consumer never redelivers a message that
+ * has already moved to central mode (running both would double-deliver),
+ * and so this function is safe to re-run after a partial failure: an
+ * interrupted run leaves already-sent rows marked dead (not re-sent) and
+ * picks the rest up on retry, rather than re-enqueueing every previously
+ * -imported message a second time.
  */
 export async function importQueueBacklog(
   localQueueDbPath: string,
   kv: DenoKvLike,
   options: { readonly now?: () => number } = {},
 ): Promise<QueueMigrationReport> {
-  const db = new DatabaseSync(localQueueDbPath, { readOnly: true });
+  const db = new DatabaseSync(localQueueDbPath);
+  const markMigrated = db.prepare(
+    "UPDATE queue_jobs SET dead = 1 WHERE id = ?",
+  );
   let rows: LocalQueueRow[];
   try {
     rows = db
       .prepare(
-        "SELECT queue, body, attempts, visible_at FROM queue_jobs WHERE dead = 0",
+        "SELECT id, queue, body, attempts, visible_at FROM queue_jobs WHERE dead = 0",
       )
       .all() as unknown as LocalQueueRow[];
+
+    const now = options.now?.() ?? Date.now();
+    const broker = createQueueBroker(kv, options);
+    let imported = 0;
+    let dropped = 0;
+    for (const row of rows) {
+      let body: unknown;
+      try {
+        body = JSON.parse(row.body);
+      } catch {
+        markMigrated.run(row.id);
+        dropped += 1;
+        continue;
+      }
+      const delaySeconds = Math.max(
+        0,
+        Math.round((row.visible_at - now) / 1000),
+      );
+      await broker.producer(row.queue).send(body, { delaySeconds });
+      markMigrated.run(row.id);
+      imported += 1;
+    }
+    return { imported, dropped };
   } finally {
     db.close();
   }
-  const now = options.now?.() ?? Date.now();
-  const broker = createQueueBroker(kv, options);
-  let imported = 0;
-  let dropped = 0;
-  for (const row of rows) {
-    let body: unknown;
-    try {
-      body = JSON.parse(row.body);
-    } catch {
-      dropped += 1;
-      continue;
-    }
-    const delaySeconds = Math.max(0, Math.round((row.visible_at - now) / 1000));
-    await broker.producer(row.queue).send(body, { delaySeconds });
-    imported += 1;
-  }
-  return { imported, dropped };
 }
 
 /* ---------- dataDir-scanning orchestration ---------- */
