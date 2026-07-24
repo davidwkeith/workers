@@ -8,13 +8,15 @@ SQLite) interfaces from the
 [host contract](../../spec/host-contract.md).
 
 > **Status: exploratory/gated.** This package implements the SQL gap
-> ([#397](https://github.com/davidwkeith/workers/issues/397)) of the
-> demand-gated `@dwk/deno-host` plan
+> ([#397](https://github.com/davidwkeith/workers/issues/397)) and the
+> single-writer actor + alarm emulation
+> ([#398](https://github.com/davidwkeith/workers/issues/398), gate overridden
+> on demonstrated demand) of the demand-gated `@dwk/deno-host` plan
 > ([#396](https://github.com/davidwkeith/workers/issues/396), designed in
 > [`spec/deno-deploy-design.md`](../../spec/deno-deploy-design.md)). The
-> actor/alarm (#398), queue (#399), and object-storage (#400) gaps are not
-> implemented yet, so this package cannot mount any endpoint package on its
-> own — it is the first, dependency-free increment of that plan.
+> queue (#399) and object-storage (#400) gaps are not implemented yet, so this
+> package cannot mount any endpoint package on its own — the queue gap is the
+> remaining blocker.
 
 ## Why libSQL
 
@@ -84,9 +86,61 @@ const storage = createDurableSqlite(db); // { sql, transactionSync }
 ```
 
 `createDurableSqlite` returns the `{ sql, transactionSync }` slice of
-`DurableObjectStorage`; the DO emulation layer (#398) will embed it in a
+`DurableObjectStorage`; the DO emulation layer (#398) embeds it in a
 full `DurableObjectState`. `createSqlStorage` returns just the `sql` member
 (e.g. for `@dwk/webdav`'s injected `LockStore`/`CredentialStore`).
+
+## `createDurableObjectNamespace(ctor, options)` — host-contract §3.3
+
+Single-writer actor + alarm emulation over a per-id Deno KV lease (issue
+#398). `options` takes an injected `DenoKvLike` (a structural subset of
+`Deno.Kv` — the package never constructs a connection itself), a
+`getStorageClient(idHex)` factory returning the id's libSQL embedded-replica
+client, and the composed `Env`.
+
+```ts
+import Database from "libsql";
+import {
+  createDurableObjectNamespace,
+  DurableObject,
+} from "@dwk/deno-host";
+
+class PodObject extends DurableObject<Env> {
+  async fetch(request: Request): Promise<Response> {
+    /* ... uses this.ctx.storage.sql / transactionSync / setAlarm ... */
+  }
+  async alarm(): Promise<void> {
+    /* retry logic, same shape as the Cloudflare original */
+  }
+}
+
+const POD = createDurableObjectNamespace(PodObject, {
+  kv: await Deno.openKv(),
+  className: "Pod",
+  env,
+  getStorageClient: (idHex) => {
+    const db = new Database(`/tmp/pod-${idHex}.db`, {
+      syncUrl: Deno.env.get("TURSO_DATABASE_URL")!,
+      authToken: Deno.env.get("TURSO_AUTH_TOKEN")!,
+    });
+    db.sync();
+    return db;
+  },
+});
+
+// Wire to Deno.cron() — the package never starts its own timer.
+Deno.cron("pod alarms", "* * * * *", () => POD.pollAlarms());
+```
+
+Per-id single-writer is enforced by a KV atomic-CAS lease, acquired once per
+`fetch()`/`alarm()` delivery and released after (no renewal loop) — a
+contended lease throws `LeaseContendedError` after a bounded retry, which
+the composing app maps to a 503. Alarms are indexed directly in KV (not
+inside the per-id SQLite file) so `pollAlarms()` can find due entries with
+one range scan. WebSockets (`ctx.acceptWebSocket`/`getWebSockets`) are an
+in-memory per-instance socket set, ported from `@dwk/cf-shims` — see
+[`spec/packages/deno-host.md`](../../spec/packages/deno-host.md) for the
+documented cross-process limitation on live sockets.
 
 ## What still needs live verification
 
