@@ -498,6 +498,18 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus's real-world `mkcol_over_plain` run: PUT and MKCOL name the same
+  // UTF-8 segment but with different percent-encoding hex case
+  // (`%e2%82%ac` vs `%E2%82%AC`), which RFC 3986 §2.1 says are the same
+  // octets. A naive string-keyed backend lookup misses the existing resource
+  // and lets the MKCOL through instead of 405ing.
+  it("405s a MKCOL whose percent-encoding case differs from the PUT that created the resource", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/res-%e2%82%ac", { body: "x" });
+      expect((await call("MKCOL", "/res-%E2%82%AC")).status).toBe(405);
+    });
+  });
+
   it("copies a resource and moves another, dropping the source", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/src.txt", { body: "data" });
@@ -930,6 +942,42 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
       });
       expect(move.status).toBe(423);
       expect(await move.text()).toContain("<D:lock-token-submitted>");
+    });
+  });
+
+  it("normalizes percent-encoding case in the configured mount path too, so it matches a request using different hex case", async () => {
+    // Mirrors the pathOf fix, but for the config side: `resolve()` must
+    // normalize `mountPath`/`baseUrl` the same way `pathOf` normalizes the
+    // request path, or a percent-encoded mount segment could itself drift
+    // out of sync with a differently-cased request and 404 spuriously.
+    const id = harness.WEBDAV_DO.idFromName(crypto.randomUUID());
+    const stub = harness.WEBDAV_DO.get(id);
+    await runInDurableObject(stub, async (instance) => {
+      const now = () => 1_000_000;
+      const backend = new MemBackend(instance.sql, now);
+      const cred = await backend.credentials.mint({
+        webid: WEBID,
+        label: "Finder",
+        scope: { modes: ["read", "write"] },
+        iterations: ITER,
+      });
+      const basic = `Basic ${btoa(`${cred.username}:${cred.secret}`)}`;
+      const handler = createWebdav({
+        baseUrl: "https://pod.example/caf%e9/",
+        mountPath: "/caf%e9",
+        backend: () => backend,
+        now,
+      });
+      const res = await handler(
+        new Request("https://pod.example/caf%E9/plain.txt", {
+          method: "PUT",
+          headers: { authorization: basic },
+          body: "x",
+        }),
+        {} as never,
+        createExecutionContext(),
+      );
+      expect(res.status).toBe(201);
     });
   });
 

@@ -83,13 +83,32 @@ interface Resolved {
   readonly now: () => number;
 }
 
+/**
+ * Uppercase the hex digits of every percent-encoded triplet. RFC 3986 §2.1
+ * treats `%e2` and `%E2` as the same octet, but `URL`'s parser copies an
+ * already-encoded triplet through verbatim rather than normalizing its case —
+ * so two requests naming the same UTF-8 segment with different encoder hex
+ * casing (litmus `mkcol_over_plain` reusing `put_get_utf8_segment`'s
+ * resource) resolve to different path strings and miss each other in the
+ * backend's exact-match lookup. Applied to both the resolved mount
+ * config (here, in {@link resolve}) and every request path (in
+ * {@link pathOf}) so a percent-encoded segment in `mountPath`/`baseUrl`
+ * can't itself drift out of sync with a differently-cased request path.
+ */
+function normalizePercentEncoding(pathname: string): string {
+  return pathname.replace(/%[0-9a-fA-F]{2}/g, (triplet) =>
+    triplet.toUpperCase(),
+  );
+}
+
 function resolve(config: WebdavConfig): Resolved {
   const url = new URL(config.baseUrl);
-  const rawMount = config.mountPath ?? "/";
+  const rawMount = normalizePercentEncoding(config.mountPath ?? "/");
   const mount = rawMount.endsWith("/") ? rawMount.slice(0, -1) : rawMount;
-  const storageRoot = url.pathname.endsWith("/")
-    ? url.pathname
-    : `${url.pathname}/`;
+  const rawStorageRoot = normalizePercentEncoding(url.pathname);
+  const storageRoot = rawStorageRoot.endsWith("/")
+    ? rawStorageRoot
+    : `${rawStorageRoot}/`;
   const litter =
     config.denyOsLitter === true
       ? DEFAULT_OS_LITTER
@@ -319,7 +338,7 @@ function isWithinPathPrefix(path: string, prefix: string): boolean {
 
 /** Map a request URL to a pod path, or `null` when outside the mount. */
 function pathOf(url: URL, resolved: Resolved): string | null {
-  const { pathname } = url;
+  const pathname = normalizePercentEncoding(url.pathname);
   if (resolved.mountPrefix === "") return pathname || "/";
   if (pathname === resolved.mountPrefix) return resolved.storageRoot;
   if (pathname.startsWith(`${resolved.mountPrefix}/`)) {
