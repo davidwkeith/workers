@@ -12,10 +12,11 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **29 publishable packages** — the
+**Status: implemented, unreleased.** There are **30 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`) and the
+`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`,
+`@dwk/mf2`) and the
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
@@ -30,8 +31,8 @@ Each carries real logic with colocated tests; there are no remaining `501 Not
 Implemented` stubs. Versioning is via Changesets **pre mode**
 (`.changeset/pre.json`, tag `beta`); the packages are published to npm as
 `0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds`,
-`@dwk/calendar`, `@dwk/webdav`, `@dwk/mcp`, and `@dwk/mastodon-api` are the
-most recently added). Note that in pre
+`@dwk/calendar`, `@dwk/webdav`, `@dwk/mcp`, `@dwk/mastodon-api`, and `@dwk/mf2`
+are the most recently added). Note that in pre
 mode, packages with no prior
 stable release publish to the **`latest`** dist-tag, not `beta`, so plain
 `npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
@@ -183,7 +184,13 @@ injected state.
   `<esi:comment>`/`<esi:remove>` markup in a composed Worker's outgoing
   `Response`, fetching fragments concurrently through `@dwk/safe-fetch`
   (#247); no `@dwk` endpoint package is a required consumer yet.
-- **Standard-specific lib** — `@dwk/wac` (tied to Solid/WAC by design).
+- **Standard-specific libs** — `@dwk/wac` (tied to Solid/WAC by design) and
+  `@dwk/mf2` (tied to IndieWeb microformats2 by design): HTML-embedded
+  `h-entry`/`h-card` extraction (`parseHFeed`, `matchInteraction`) plus a
+  capture-time content sanitizer (`sanitizeContentHtml`), all built on the
+  runtime's `HTMLRewriter` for zero script-size cost. Shared by
+  `@dwk/microsub` (`h-feed` polling) and `@dwk/webmention` (enriching
+  received mentions with the sender's author/content/interaction-type, #412).
 - **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
 - **Cloudflare-runtime-emulation lib** — `@dwk/cf-shims` is the one package
   that is deliberately Cloudflare-specific in the same way `@dwk/store` and
@@ -286,7 +293,9 @@ when adding a package:
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
-  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`.
+  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`, `@dwk/mf2` (no
+  bindings — it needs `workerd` solely because `HTMLRewriter` is a runtime
+  global, not because it holds any Cloudflare state).
 - **Node-native packages** also run under `environment: "node"` (no
   Miniflare) but, unlike the pure libs above, are inherently Node-specific
   rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare

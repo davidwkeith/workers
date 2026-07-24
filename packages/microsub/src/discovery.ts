@@ -18,8 +18,8 @@
  */
 
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
+import { parseHFeed } from "@dwk/mf2";
 
-import { parseHFeed } from "./hfeed.js";
 import { parseFeed, type Jf2Entry } from "./jf2.js";
 import { MicrosubLogEvent } from "./log.js";
 import {

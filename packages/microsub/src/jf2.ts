@@ -3,8 +3,9 @@
  *
  * Microsub serves a single normalised timeline regardless of a source's wire
  * format. This module turns the four feed formats a reader meets — JSON Feed,
- * Atom, RSS 2.0, and `h-feed` microformats (the last parsed upstream in
- * {@link ./hfeed}) — into [JF2](https://jf2.spec.indieweb.org/) `entry` objects.
+ * Atom, RSS 2.0, and `h-feed` microformats (the last parsed by
+ * {@link @dwk/mf2!parseHFeed}) — into [JF2](https://jf2.spec.indieweb.org/)
+ * `entry` objects.
  *
  * Everything here is **pure**: a feed body (and the format-sniffing on its
  * content type) in, an array of JF2 entries out, each carrying a stable `_id`
@@ -13,6 +14,8 @@
  *
  * @packageDocumentation
  */
+
+import { fnv1aBase36 as hash, type Jf2Author, type Jf2Entry } from "@dwk/mf2";
 
 import {
   child,
@@ -23,42 +26,7 @@ import {
   type XmlElement,
 } from "./xml.js";
 
-/** A JF2 author card. */
-export interface Jf2Author {
-  readonly type: "card";
-  readonly name?: string;
-  readonly url?: string;
-  readonly photo?: string;
-}
-
-/** Structured JF2 content (`html` and/or its plain-text rendering). */
-export interface Jf2Content {
-  readonly html?: string;
-  readonly text?: string;
-}
-
-/** A normalised JF2 timeline entry. */
-export interface Jf2Entry {
-  readonly type: "entry";
-  /**
-   * Stable per-entry identifier, derived from the source's own id/guid/url. The
-   * store keys timeline rows on this so re-polling a feed does not duplicate
-   * entries.
-   */
-  readonly _id: string;
-  readonly url?: string;
-  readonly published?: string;
-  readonly name?: string;
-  readonly summary?: string;
-  readonly content?: Jf2Content;
-  readonly author?: Jf2Author;
-  readonly category?: readonly string[];
-  readonly photo?: readonly string[];
-  readonly "in-reply-to"?: string;
-  readonly "like-of"?: string;
-  /** Read flag, attached by the store on read (never by the parser). */
-  readonly _is_read?: boolean;
-}
+export type { Jf2Author, Jf2Content, Jf2Entry } from "@dwk/mf2";
 
 /** Resolve `href` against `base`, returning an absolute URL or the input. */
 function absolute(href: string, base: string): string {
@@ -78,16 +46,6 @@ function entryId(candidate: string | undefined, fallback: string): string {
   const basis =
     candidate && candidate.trim() !== "" ? candidate.trim() : fallback;
   return basis;
-}
-
-/** A small, stable non-cryptographic hash (FNV-1a) rendered as base36. */
-function hash(input: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(36);
 }
 
 function defined<T extends object>(obj: T): T {

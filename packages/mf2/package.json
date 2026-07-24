@@ -1,22 +1,24 @@
 {
-  "name": "@dwk/microsub",
-  "version": "0.1.0-beta.4",
-  "description": "Microsub server: channel/feed subscriptions, server-side polling, and a normalised JF2 timeline. Consumes IndieAuth tokens.",
+  "name": "@dwk/mf2",
+  "version": "0.1.0-beta.0",
+  "description": "HTML-embedded microformats2 (h-entry/h-card) extraction via the Workers runtime's HTMLRewriter, plus a capture-time allowlist sanitizer for untrusted received content.",
   "keywords": [
-    "microsub",
+    "microformats2",
+    "mf2",
+    "h-entry",
+    "h-card",
     "indieweb",
     "jf2",
-    "feed-reader",
     "cloudflare-workers"
   ],
   "type": "module",
   "license": "ISC",
   "author": "David W. Keith <me@dwk.io>",
-  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/microsub#readme",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/mf2#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/davidwkeith/workers.git",
-    "directory": "packages/microsub"
+    "directory": "packages/mf2"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -30,8 +32,7 @@
   "files": [
     "dist",
     "src",
-    "!src/**/*.test.ts",
-    "!src/test-harness.ts"
+    "!src/**/*.test.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -41,12 +42,5 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@dwk/dpop": "workspace:*",
-    "@dwk/indieauth": "workspace:*",
-    "@dwk/log": "workspace:*",
-    "@dwk/mcp": "workspace:*",
-    "@dwk/mf2": "workspace:*",
-    "@dwk/safe-fetch": "workspace:*"
-  }
+  "dependencies": {}
 }

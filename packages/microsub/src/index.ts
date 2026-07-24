@@ -64,7 +64,7 @@ export {
   type Jf2Content,
 } from "./jf2.js";
 
-export { parseHFeed } from "./hfeed.js";
+export { parseHFeed } from "@dwk/mf2";
 
 export {
   discoverFeed,

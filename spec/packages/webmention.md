@@ -41,6 +41,39 @@ Receives and sends Webmentions for the user's domain.
   out of the Worker bundle. The inbox schema gains a nullable `rsvp` column;
   pre-existing inboxes are migrated with an additive `ALTER TABLE`.
 
+### Received-interaction enrichment
+
+- During the same asynchronous verification fetch, parse the source with
+  [`@dwk/mf2`](mf2.md)'s `parseHFeed` and look up `matchInteraction` against
+  the target URL. This is still zero script-size cost — `@dwk/mf2` is
+  `HTMLRewriter`-only, not a bundled parser, so it doesn't reopen the "no full
+  Microformats2 parser" constraint above; it's a shared, broader extraction
+  built the same way the RSVP read already is.
+- A match enriches the stored mention with:
+  - **`interactionType`** — `reply` / `repost` / `like` / `bookmark` from
+    which "of" property matched (precedence reply > repost > like > bookmark
+    when more than one implausibly matches), or `mention` when the source
+    links to the target without any matching entry (no author/content
+    attached in that case — it is not guessed from an unrelated entry on the
+    page).
+  - **`author`** — the matched entry's `p-author` / nested `h-card`
+    (`name`/`url`/`photo`), when present.
+  - **`content`** — the matched entry's `e-content`, already sanitized by
+    `@dwk/mf2`'s `sanitizeContentHtml` (untrusted third-party HTML; see
+    [mf2.md](mf2.md) for the allowlist and the `rel="ugc nofollow"` link
+    treatment), truncated to ~500 characters.
+  - **`published`** — the entry's `dt-published` when declared, otherwise the
+    verification timestamp (a plain reply rarely marks up an explicit
+    published time; the field must still always be present downstream).
+- The inbox schema gains nullable columns for each of the above plus a stable
+  `id` (a `wm-{hash}` derived from `(source, target)`, same FNV-1a hash
+  `@dwk/mf2`'s JF2 layer uses for its own entry `_id`s) — an additive
+  `ALTER TABLE` migration, same pattern as `rsvp`.
+- This is the data Anglesite's `ReceivedInteraction` snapshot (its C.3
+  canonicality decision) needs to render real replies/likes/reposts instead of
+  anonymous `(source, target)` pairs; see
+  [Anglesite-app#362](https://github.com/Anglesite/Anglesite-app/issues/362).
+
 ### Sender
 
 - Discover Webmention endpoints for outbound links.
@@ -77,3 +110,8 @@ Receives and sends Webmentions for the user's domain.
   removes a mention when asynchronous re-verification finds the link gone
   (including a `410 Gone` source), so the inbox stays correct on the receiving
   side. Re-sending on delete from the publishing side is deferred.
+- **`content` formatting fidelity.** `@dwk/mf2`'s capture-time sanitizer keeps
+  a fixed inline-formatting allowlist (see [mf2.md](mf2.md)); images, headings,
+  and tables in a received reply are dropped rather than preserved. Deliberate
+  scope limit, tracked in
+  [#413](https://github.com/davidwkeith/workers/issues/413).

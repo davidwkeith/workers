@@ -33,6 +33,7 @@ describe("parseHFeed", () => {
     expect(first?.url).toBe("https://author.example/post/1");
     expect(first?.published).toBe("2026-03-01T10:00:00Z");
     expect(first?.content?.text).toContain("Body");
+    expect(first?.content?.html).toBe("Body <em>text</em> here");
     expect(first?.category).toEqual(["x", "y"]);
     expect(first?.author?.name).toBe("The Author");
     expect(first?.author?.url).toBe("https://author.example/");
@@ -56,5 +57,45 @@ describe("parseHFeed", () => {
     const [entry] = await parseHFeed(html, "https://x.example/");
     expect(entry?.url).toBeUndefined();
     expect(entry?._id).toBeTruthy();
+  });
+
+  it("recognizes u-repost-of and u-bookmark-of", async () => {
+    const html = `
+      <article class="h-entry">
+        <a class="u-repost-of" href="https://reposted.example/post"></a>
+      </article>
+      <article class="h-entry">
+        <a class="u-bookmark-of" href="https://bookmarked.example/post"></a>
+      </article>`;
+    const [repost, bookmark] = await parseHFeed(html, "https://x.example/");
+    expect(repost?.["repost-of"]).toBe("https://reposted.example/post");
+    expect(bookmark?.["bookmark-of"]).toBe("https://bookmarked.example/post");
+  });
+
+  it("resolves relative e-content links against the base URL and sanitizes them", async () => {
+    const html = `
+      <article class="h-entry">
+        <div class="e-content">See <a href="/other-post">my other post</a> and
+          <a href="javascript:alert(1)">this</a>.</div>
+      </article>`;
+    const [entry] = await parseHFeed(html, "https://author.example/");
+    expect(entry?.content?.html).toBe(
+      'See <a href="https://author.example/other-post" rel="ugc nofollow">my other post</a> and\n          this.',
+    );
+  });
+
+  it("drops disallowed elements from e-content but keeps their text, and drops script content entirely", async () => {
+    const html = `
+      <article class="h-entry">
+        <div class="e-content"><h2>Heading</h2><p>Para <b>bold</b> <script>evil()</script>text</p></div>
+      </article>`;
+    const [entry] = await parseHFeed(html, "https://x.example/");
+    expect(entry?.content?.html).toBe("Heading<p>Para <b>bold</b> text</p>");
+  });
+
+  it("has no use for matchInteraction/html content beyond text in a plain entry with no e-content", async () => {
+    const html = `<article class="h-entry"><p class="p-name">No body</p></article>`;
+    const [entry] = await parseHFeed(html, "https://x.example/");
+    expect(entry?.content).toBeUndefined();
   });
 });

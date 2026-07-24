@@ -654,6 +654,7 @@
     "@dwk/ldn": "Linked Data Notifications primitives \u2014 consumed by endpoint packages, not mountable.",
     "@dwk/log": "Injectable structured-logging seam \u2014 consumed by every package, not mountable.",
     "@dwk/mcp": "MCP server core the composed Worker embeds \u2014 its endpoint surface is composed by the app, not a standalone catalog worker (revisit with #240).",
+    "@dwk/mf2": "HTML-embedded microformats2 (h-entry/h-card) extraction \u2014 consumed by @dwk/microsub and @dwk/webmention, not mountable.",
     "@dwk/oauth": "OAuth 2.0 server building blocks \u2014 consumed by endpoint packages, not mountable.",
     "@dwk/rdf": "Turtle/JSON-LD parse + serialize over N3.js \u2014 consumed by endpoint packages, not mountable.",
     "@dwk/safe-fetch": "SSRF-safe outbound fetch primitive \u2014 consumed by endpoint packages, not mountable.",

@@ -167,6 +167,7 @@ describe("verifySource", () => {
     expect(await verifySource(source, target, { fetch: fetchImpl })).toEqual({
       links: true,
       status: 200,
+      interactionType: "mention",
     });
   });
 
@@ -182,7 +183,73 @@ describe("verifySource", () => {
       links: true,
       status: 200,
       rsvp: "yes",
+      interactionType: "reply",
     });
+  });
+
+  it("enriches a reply with author and sanitized content", async () => {
+    const html =
+      `<article class="h-entry">` +
+      `<a class="u-in-reply-to" href="${target}"></a>` +
+      `<div class="p-author h-card"><span class="p-name">Jane</span>` +
+      `<a class="u-url" href="https://jane.example/"></a>` +
+      `<img class="u-photo" src="/jane.png"></div>` +
+      `<div class="e-content">Nice post <script>evil()</script><em>indeed</em></div>` +
+      `<time class="dt-published" datetime="2026-03-01T10:00:00Z"></time>` +
+      `</article>`;
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    const result = await verifySource(source, target, { fetch: fetchImpl });
+    expect(result.interactionType).toBe("reply");
+    expect(result.author).toEqual({
+      name: "Jane",
+      url: "https://jane.example/",
+      photo: "https://blog.example/jane.png",
+    });
+    expect(result.content).toBe("Nice post <em>indeed</em>");
+    expect(result.publishedAt).toBe(Date.parse("2026-03-01T10:00:00Z"));
+  });
+
+  it.each([
+    ["u-repost-of", "repost"],
+    ["u-like-of", "like"],
+    ["u-bookmark-of", "bookmark"],
+  ] as const)("recognizes a %s as a %s", async (cls, kind) => {
+    const html = `<article class="h-entry"><a class="${cls}" href="${target}"></a></article>`;
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    const result = await verifySource(source, target, { fetch: fetchImpl });
+    expect(result.interactionType).toBe(kind);
+  });
+
+  it("truncates content to 500 characters", async () => {
+    const html =
+      `<article class="h-entry"><a class="u-like-of" href="${target}"></a>` +
+      `<div class="e-content">${"x".repeat(600)}</div></article>`;
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    const result = await verifySource(source, target, { fetch: fetchImpl });
+    expect(result.content).toHaveLength(500);
+  });
+
+  it("has no author/content/publishedAt for a bare link mention", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(`<a href="${target}">x</a>`, {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    const result = await verifySource(source, target, { fetch: fetchImpl });
+    expect(result.interactionType).toBe("mention");
+    expect(result.author).toBeUndefined();
+    expect(result.content).toBeUndefined();
+    expect(result.publishedAt).toBeUndefined();
   });
 
   it("omits rsvp for an ordinary mention", async () => {
@@ -229,7 +296,7 @@ describe("verifySource fetchAllowedHosts (local-dev opt-in, issue #257)", () => 
         fetch: fetchImpl,
         fetchAllowedHosts: ["localhost:4321"],
       }),
-    ).toEqual({ links: true, status: 200 });
+    ).toEqual({ links: true, status: 200, interactionType: "mention" });
   });
 
   it("still blocks a loopback source when the allowlist names another host", async () => {

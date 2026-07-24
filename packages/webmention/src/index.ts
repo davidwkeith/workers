@@ -68,6 +68,8 @@ export {
   type InboxStore,
   type VerifiedMention,
   type D1InboxOptions,
+  type MentionAuthor,
+  type WebmentionInteractionType,
 } from "./inbox.js";
 export {
   safeFetch,
@@ -316,11 +318,22 @@ export function createWebmentionQueueConsumer(
           fetchAllowedHosts: config.fetchAllowedHosts,
         });
         if (result.links) {
+          const verifiedAt = Date.now();
           await inbox.store({
             source,
             target,
-            verifiedAt: Date.now(),
+            verifiedAt,
             ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+            ...(result.interactionType !== undefined
+              ? { interactionType: result.interactionType }
+              : {}),
+            ...(result.author !== undefined ? { author: result.author } : {}),
+            ...(result.content !== undefined
+              ? { content: result.content }
+              : {}),
+            // Fall back to the verification time when the source doesn't
+            // declare its own dt-published.
+            publishedAt: result.publishedAt ?? verifiedAt,
           });
         } else {
           await inbox.remove(source, target);

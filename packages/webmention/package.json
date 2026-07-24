@@ -42,6 +42,7 @@
   "dependencies": {
     "@dwk/log": "workspace:*",
     "@dwk/mcp": "workspace:*",
+    "@dwk/mf2": "workspace:*",
     "@dwk/safe-fetch": "workspace:*"
   }
 }

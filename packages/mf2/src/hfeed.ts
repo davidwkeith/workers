@@ -1,23 +1,29 @@
 /**
- * `@dwk/microsub` — `h-feed` / `h-entry` microformats parsing.
+ * `@dwk/mf2` — `h-feed` / `h-entry` microformats parsing.
  *
- * When a followed source is an HTML page rather than a syndication feed, its
- * entries are expressed as [microformats2](https://microformats.org/wiki/h-entry)
- * `h-entry` items (usually inside an `h-feed`). This module extracts them into
- * the same JF2 shape the other formats produce, using the Workers runtime's
- * streaming `HTMLRewriter` rather than a regex or a bundled parser
+ * Extracts embedded microformats2 `h-entry` items (usually inside an
+ * `h-feed`) from a fetched HTML page into JF2 shape, using the Workers
+ * runtime's streaming `HTMLRewriter` rather than a regex or a bundled parser
  * (`HTMLRewriter` is built into the runtime — zero script-size cost; see
- * `spec/non-functional-requirements.md`). Because `HTMLRewriter` is a `workerd`
- * global, this parser is async and exercised under the Workers test pool.
+ * `spec/non-functional-requirements.md`). Because `HTMLRewriter` is a
+ * `workerd` global, this parser is async and exercised under the Workers test
+ * pool.
  *
  * It is a pragmatic extractor of the common `h-entry` properties — `u-url`,
  * `p-name`, `e-content`, `dt-published`, `p-author` / nested `h-card`,
- * `u-photo`, `p-category`, `u-in-reply-to`, `u-like-of` — not a full mf2 engine.
+ * `u-photo`, `p-category`, `u-in-reply-to`, `u-like-of`, `u-repost-of`,
+ * `u-bookmark-of` — not a full mf2 engine.
  *
  * @packageDocumentation
  */
 
+import { decodeHtmlEntities } from "./entities.js";
+import { escapeHtmlAttr, escapeHtmlText } from "./escape.js";
+import { fnv1aBase36 } from "./hash.js";
 import type { Jf2Author, Jf2Content, Jf2Entry } from "./jf2.js";
+import { sanitizeContentHtml } from "./sanitize.js";
+import { resolveAbsoluteOrOriginal } from "./url.js";
+import { VOID_ELEMENTS } from "./void-elements.js";
 
 interface MutableCard {
   name?: string;
@@ -29,11 +35,15 @@ interface MutableEntry {
   url?: string;
   name?: string;
   content?: string;
+  /** Raw (unsanitized) inner HTML of `e-content`, captured verbatim during the walk. */
+  contentRawHtml?: string;
   published?: string;
   photo: string[];
   category: string[];
   inReplyTo?: string;
   likeOf?: string;
+  repostOf?: string;
+  bookmarkOf?: string;
   author?: MutableCard;
 }
 
@@ -44,51 +54,18 @@ interface PropFrame {
   readonly format: PropFormat;
   readonly target: MutableEntry | MutableCard;
   buf: string;
+  /**
+   * Raw markup accumulator, present only for the `e-content` frame. Nested
+   * elements encountered while this frame is active are re-serialized here
+   * (see the `element`/`text` handlers below) rather than ignored, since
+   * `e-*` means "take this subtree as embedded markup", unlike `p-*`/`u-*`
+   * text-valued properties.
+   */
+  raw?: string[];
 }
 
 function classes(value: string | null): string[] {
   return value === null ? [] : value.trim().split(/\s+/).filter(Boolean);
-}
-
-/**
- * HTML void elements have no end tag, so `HTMLRewriter#onEndTag` throws on them.
- * They also carry no text content — a `u-photo` / `dt-published` on one always
- * takes its value from an attribute — so we commit immediately and never
- * register an end-tag handler for them.
- */
-const VOID_ELEMENTS = new Set([
-  "area",
-  "base",
-  "br",
-  "col",
-  "embed",
-  "hr",
-  "img",
-  "input",
-  "link",
-  "meta",
-  "param",
-  "source",
-  "track",
-  "wbr",
-]);
-
-function absolute(href: string, base: string): string {
-  try {
-    return new URL(href, base).toString();
-  } catch {
-    return href;
-  }
-}
-
-/** FNV-1a hash (base36), matching {@link ./jf2}'s fallback id derivation. */
-function hash(input: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return (h >>> 0).toString(36);
 }
 
 /** The first `(p|u|e|dt)-name` microformats class on an element, if any. */
@@ -104,27 +81,51 @@ function propertyClass(
   return null;
 }
 
-function commitEntry(entry: MutableEntry, baseUrl: string): Jf2Entry {
-  const url = entry.url ? absolute(entry.url, baseUrl) : undefined;
-  const content: Jf2Content | undefined = entry.content
-    ? { text: entry.content }
+function serializeOpenTag(tag: string, el: Element): string {
+  const attrs: string[] = [];
+  for (const pair of el.attributes) {
+    const [name, value] = pair;
+    if (name === undefined || value === undefined) continue;
+    attrs.push(`${name}="${escapeHtmlAttr(decodeHtmlEntities(value))}"`);
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  return `<${tag}${attrStr}>`;
+}
+
+async function commitEntry(
+  entry: MutableEntry,
+  baseUrl: string,
+): Promise<Jf2Entry> {
+  const url = entry.url
+    ? resolveAbsoluteOrOriginal(entry.url, baseUrl)
     : undefined;
+  const html =
+    entry.contentRawHtml !== undefined
+      ? await sanitizeContentHtml(entry.contentRawHtml, baseUrl)
+      : undefined;
+  const content: Jf2Content | undefined =
+    entry.content || html
+      ? {
+          ...(html ? { html } : {}),
+          ...(entry.content ? { text: entry.content } : {}),
+        }
+      : undefined;
   const author: Jf2Author | undefined = entry.author
     ? (() => {
         const card: Jf2Author = {
           type: "card",
           ...(entry.author.name ? { name: entry.author.name } : {}),
           ...(entry.author.url
-            ? { url: absolute(entry.author.url, baseUrl) }
+            ? { url: resolveAbsoluteOrOriginal(entry.author.url, baseUrl) }
             : {}),
           ...(entry.author.photo
-            ? { photo: absolute(entry.author.photo, baseUrl) }
+            ? { photo: resolveAbsoluteOrOriginal(entry.author.photo, baseUrl) }
             : {}),
         };
         return card.name || card.url || card.photo ? card : undefined;
       })()
     : undefined;
-  const id = url ?? hash(`${entry.name ?? ""}${entry.content ?? ""}`);
+  const id = url ?? fnv1aBase36(`${entry.name ?? ""}${entry.content ?? ""}`);
 
   const out: Record<string, unknown> = { type: "entry", _id: id };
   if (url) out.url = url;
@@ -134,9 +135,15 @@ function commitEntry(entry: MutableEntry, baseUrl: string): Jf2Entry {
   if (author) out.author = author;
   if (entry.category.length > 0) out.category = entry.category;
   if (entry.photo.length > 0)
-    out.photo = entry.photo.map((p) => absolute(p, baseUrl));
-  if (entry.inReplyTo) out["in-reply-to"] = absolute(entry.inReplyTo, baseUrl);
-  if (entry.likeOf) out["like-of"] = absolute(entry.likeOf, baseUrl);
+    out.photo = entry.photo.map((p) => resolveAbsoluteOrOriginal(p, baseUrl));
+  if (entry.inReplyTo)
+    out["in-reply-to"] = resolveAbsoluteOrOriginal(entry.inReplyTo, baseUrl);
+  if (entry.likeOf)
+    out["like-of"] = resolveAbsoluteOrOriginal(entry.likeOf, baseUrl);
+  if (entry.repostOf)
+    out["repost-of"] = resolveAbsoluteOrOriginal(entry.repostOf, baseUrl);
+  if (entry.bookmarkOf)
+    out["bookmark-of"] = resolveAbsoluteOrOriginal(entry.bookmarkOf, baseUrl);
   return out as unknown as Jf2Entry;
 }
 
@@ -150,7 +157,7 @@ export async function parseHFeed(
 ): Promise<Jf2Entry[]> {
   if (html === "") return [];
 
-  const entries: Jf2Entry[] = [];
+  const rawEntries: MutableEntry[] = [];
   const entryStack: MutableEntry[] = [];
   const cardStack: MutableCard[] = [];
   const propStack: PropFrame[] = [];
@@ -159,15 +166,34 @@ export async function parseHFeed(
 
   const rewriter = new HTMLRewriter().on("*", {
     element(el) {
+      // Captured up front: `el` (a "content token") is only valid during this
+      // synchronous callback, not inside an `onEndTag` closure fired later —
+      // every closure below closes over this `tag`/`isVoid`, never `el` itself.
+      const tag = el.tagName;
+      const isVoid = VOID_ELEMENTS.has(tag);
+
+      // Inside an active `e-content` capture, every descendant is re-serialized
+      // as raw markup rather than interpreted as mf2 — nested classes mean
+      // nothing to the outer entry once we're inside "embedded content".
+      const activeContent = top(propStack);
+      if (activeContent?.raw !== undefined) {
+        activeContent.raw.push(serializeOpenTag(tag, el));
+        if (!isVoid) {
+          el.onEndTag(() => {
+            activeContent.raw?.push(`</${tag}>`);
+          });
+        }
+        return;
+      }
+
       const classList = classes(el.getAttribute("class"));
-      const isVoid = VOID_ELEMENTS.has(el.tagName);
 
       if (classList.includes("h-entry") && !isVoid) {
         const entry: MutableEntry = { photo: [], category: [] };
         entryStack.push(entry);
         el.onEndTag(() => {
           const finished = entryStack.pop();
-          if (finished) entries.push(commitEntry(finished, baseUrl));
+          if (finished) rawEntries.push(finished);
         });
         return;
       }
@@ -194,6 +220,7 @@ export async function parseHFeed(
         format: prop.format,
         target,
         buf: "",
+        raw: prop.format === "e" && prop.name === "content" ? [] : undefined,
       };
 
       // u-* and dt-* take their value from an attribute when present; that value
@@ -205,13 +232,13 @@ export async function parseHFeed(
           el.getAttribute("data") ??
           el.getAttribute("poster");
         if (attr !== null) {
-          assignProperty(frame, attr);
+          assignProperty(frame, decodeHtmlEntities(attr));
           return;
         }
       } else if (prop.format === "dt") {
         const attr = el.getAttribute("datetime") ?? el.getAttribute("value");
         if (attr !== null) {
-          assignProperty(frame, attr);
+          assignProperty(frame, decodeHtmlEntities(attr));
           return;
         }
       }
@@ -222,17 +249,26 @@ export async function parseHFeed(
       propStack.push(frame);
       el.onEndTag(() => {
         const finished = propStack.pop();
-        if (finished) assignProperty(finished, finished.buf.trim());
+        if (!finished) return;
+        assignProperty(finished, finished.buf.trim());
+        if (finished.raw !== undefined && !isCard(finished.target)) {
+          finished.target.contentRawHtml ??= finished.raw.join("");
+        }
       });
     },
     text(chunk) {
       const frame = top(propStack);
-      if (frame) frame.buf += chunk.text;
+      if (!frame || chunk.text === "") return;
+      const text = decodeHtmlEntities(chunk.text);
+      frame.buf += text;
+      if (frame.raw !== undefined) {
+        frame.raw.push(escapeHtmlText(text));
+      }
     },
   });
 
   await rewriter.transform(new Response(html)).text();
-  return entries;
+  return Promise.all(rawEntries.map((entry) => commitEntry(entry, baseUrl)));
 }
 
 /** Write a resolved property value onto its target entry or card. */
@@ -276,6 +312,12 @@ function assignProperty(frame: PropFrame, value: string): void {
       break;
     case "like-of":
       target.likeOf ??= value;
+      break;
+    case "repost-of":
+      target.repostOf ??= value;
+      break;
+    case "bookmark-of":
+      target.bookmarkOf ??= value;
       break;
     default:
       break;

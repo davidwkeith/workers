@@ -4,9 +4,12 @@
  * After the receiver has returned `202 Accepted`, a queued worker fetches the
  * `source` and confirms it actually links to `target` (Webmention §3.2.1).
  * Verification is link-level: the source document must contain a link
- * (`href`/`src`) that resolves to the target. Full Microformats2 extraction is
- * intentionally out of scope here — it would pull a parser into the Worker
- * bundle the runtime budget rules out. See `spec/packages/webmention.md`.
+ * (`href`/`src`) that resolves to the target. A *bundled* Microformats2
+ * parser remains out of scope (the runtime budget rules it out of the Worker
+ * bundle) — but this same fetch also runs `@dwk/mf2`'s `HTMLRewriter`-based
+ * extraction (zero script-size cost, like {@link extractRsvp}) to enrich a
+ * matched mention with its sender's interaction type/author/content. See
+ * `spec/packages/webmention.md`.
  *
  * @packageDocumentation
  */
@@ -18,12 +21,14 @@ import {
   type Logger,
   type Metrics,
 } from "@dwk/log";
+import { matchInteraction, parseHFeed } from "@dwk/mf2";
 import {
   isHtmlContentType,
   isJsonContentType,
   resolveUrl,
   scanElements,
 } from "./html.js";
+import type { MentionAuthor, WebmentionInteractionType } from "./inbox.js";
 import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
 import { WebmentionLogEvent } from "./log.js";
 import { extractRsvp, type RsvpValue } from "./rsvp.js";
@@ -225,11 +230,19 @@ function recordVerifyOutcome(
     // The rsvp value (yes/no/maybe/interested) is a closed, non-sensitive set,
     // so it is safe to surface for observability when a mention is an RSVP.
     ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+    // Likewise interactionType (reply/repost/like/bookmark/mention) is a
+    // closed set; unlike author/content it carries no third-party free text.
+    ...(result.interactionType !== undefined
+      ? { interactionType: result.interactionType }
+      : {}),
   };
   logger.info(WebmentionLogEvent.VerifyCompleted, fields);
   metrics.count(WebmentionLogEvent.VerifyCompleted, fields);
   return result;
 }
+
+/** Received `e-content` beyond this length is truncated (a summary, not the full remote page). */
+const MAX_CONTENT_CHARS = 500;
 
 /** Outcome of fetching and checking a source document. */
 export interface VerifyResult {
@@ -243,6 +256,24 @@ export interface VerifyResult {
    * {@link extractRsvp}.
    */
   readonly rsvp?: RsvpValue;
+  /**
+   * What kind of interaction the source's `h-entry` represents, when one
+   * could be matched against the target (`@dwk/mf2`'s `matchInteraction`) —
+   * `"mention"` when the source links to the target with no matching entry;
+   * omitted for a non-HTML or unlinking source. See
+   * {@link WebmentionInteractionType}.
+   */
+  readonly interactionType?: WebmentionInteractionType;
+  /** The matched entry's `p-author`/`h-card`, when present. */
+  readonly author?: MentionAuthor;
+  /** The matched entry's `e-content`, sanitized HTML, truncated to `MAX_CONTENT_CHARS`. */
+  readonly content?: string;
+  /**
+   * When the source published the entry (`dt-published`), epoch
+   * milliseconds; omitted when the source doesn't declare one (the caller
+   * falls back to the verification time).
+   */
+  readonly publishedAt?: number;
 }
 
 /**
@@ -309,15 +340,58 @@ export async function verifySource(
   }
 
   const links = await sourceLinksTo(body, target, base, contentType);
-  // Only an HTML source that genuinely links to the target can be an RSVP; a
-  // `u-in-reply-to` is itself a link, so RSVP detection presupposes `links`.
-  const rsvp =
-    links && isHtmlContentType(contentType)
-      ? await extractRsvp(body, base, target)
-      : null;
+  // Only an HTML source that genuinely links to the target can be an RSVP or
+  // carry a matchable h-entry; a `u-in-reply-to` is itself a link, so both
+  // presuppose `links`.
+  const isHtmlLink = links && isHtmlContentType(contentType);
+  const rsvp = isHtmlLink ? await extractRsvp(body, base, target) : null;
+  const enrichment = isHtmlLink
+    ? enrichFromEntries(matchInteraction(await parseHFeed(body, base), target))
+    : null;
   return recordVerifyOutcome(logger, metrics, source, target, {
     links,
     status: response.status,
     ...(rsvp !== null ? { rsvp } : {}),
+    // A bare link with no matching entry is still a "mention" — only a
+    // non-HTML or non-linking source gets no interactionType at all.
+    ...(isHtmlLink
+      ? { interactionType: enrichment?.interactionType ?? "mention" }
+      : {}),
+    ...(enrichment?.author ? { author: enrichment.author } : {}),
+    ...(enrichment?.content !== undefined
+      ? { content: enrichment.content }
+      : {}),
+    ...(enrichment?.publishedAt !== undefined
+      ? { publishedAt: enrichment.publishedAt }
+      : {}),
   });
+}
+
+/** Derive a `VerifyResult`'s enrichment fields from a matched `h-entry`, if any. */
+function enrichFromEntries(
+  match: ReturnType<typeof matchInteraction>,
+): Pick<
+  VerifyResult,
+  "interactionType" | "author" | "content" | "publishedAt"
+> {
+  if (match === null) return {};
+
+  const author: MentionAuthor = {
+    ...(match.entry.author?.name ? { name: match.entry.author.name } : {}),
+    ...(match.entry.author?.url ? { url: match.entry.author.url } : {}),
+    ...(match.entry.author?.photo ? { photo: match.entry.author.photo } : {}),
+  };
+  const content = match.entry.content?.html;
+  const publishedMs = match.entry.published
+    ? Date.parse(match.entry.published)
+    : Number.NaN;
+
+  return {
+    interactionType: match.kind,
+    ...(Object.keys(author).length > 0 ? { author } : {}),
+    ...(content !== undefined
+      ? { content: content.slice(0, MAX_CONTENT_CHARS) }
+      : {}),
+    ...(Number.isFinite(publishedMs) ? { publishedAt: publishedMs } : {}),
+  };
 }

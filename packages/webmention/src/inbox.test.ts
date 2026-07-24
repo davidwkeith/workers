@@ -19,6 +19,7 @@ describe("createD1Inbox", () => {
     const all = await inbox.list();
     expect(all).toEqual([
       {
+        id: expect.stringMatching(/^wm-/),
         source: "https://a.example/p",
         target: "https://example.com/x",
         verifiedAt: 1000,
@@ -88,6 +89,7 @@ describe("createD1Inbox", () => {
     });
     expect(await inbox.list()).toEqual([
       {
+        id: expect.stringMatching(/^wm-/),
         source: "https://a.example/rsvp",
         target: "https://example.com/party",
         verifiedAt: 5,
@@ -107,6 +109,45 @@ describe("createD1Inbox", () => {
     const all = await inbox.list();
     expect(all).toHaveLength(1);
     expect(all[0]?.rsvp).toBeUndefined();
+  });
+
+  it("persists and lists interactionType, author, content, and publishedAt", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_enriched" });
+    await inbox.store({
+      source: "https://a.example/reply",
+      target: "https://example.com/post",
+      verifiedAt: 100,
+      interactionType: "reply",
+      author: { name: "Jane", url: "https://jane.example/" },
+      content: "Nice post!",
+      publishedAt: 50,
+    });
+    expect(await inbox.list()).toEqual([
+      {
+        id: expect.stringMatching(/^wm-/),
+        source: "https://a.example/reply",
+        target: "https://example.com/post",
+        verifiedAt: 100,
+        interactionType: "reply",
+        author: { name: "Jane", url: "https://jane.example/" },
+        content: "Nice post!",
+        publishedAt: 50,
+      },
+    ]);
+  });
+
+  it("assigns the same id across re-verification (keyed on source+target)", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_stable_id" });
+    const mention = {
+      source: "https://a.example/p",
+      target: "https://example.com/x",
+    };
+    await inbox.store({ ...mention, verifiedAt: 1 });
+    const first = (await inbox.list())[0]?.id;
+    await inbox.store({ ...mention, verifiedAt: 2 });
+    const second = (await inbox.list())[0]?.id;
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
   });
 
   it("rejects an unsafe table name", () => {
