@@ -34,8 +34,11 @@ stand alone for any third-party developer.
 ## 3. Non-goals (v1)
 
 - A hosted / managed offering or multi-tenant central service.
-- A full Solid-OIDC **Identity Provider** — v1 implements the Resource Server
-  only and delegates issuance (see [open-questions.md](open-questions.md)).
+- ~~A full Solid-OIDC **Identity Provider**~~ — now provided by
+  [`@dwk/solid-oidc`](packages/solid-oidc.md) (first increment: the
+  authorization-code + PKCE + DPoP flow issuing WebID access tokens the pod
+  accepts). The Resource Server can still delegate to a third-party provider;
+  running your own is now an option (see [open-questions.md](open-questions.md) §1).
 - A SPARQL **query** endpoint — Solid requires only PATCH semantics.
 - Sharding a single pod across Durable Objects (see
   [open-questions.md](open-questions.md)).

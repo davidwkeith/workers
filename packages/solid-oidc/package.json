@@ -1,0 +1,51 @@
+{
+  "name": "@dwk/solid-oidc",
+  "version": "0.1.0-beta.0",
+  "description": "Solid-OIDC OpenID Provider: authorization-code + PKCE + DPoP-bound, ES256-signed WebID access tokens.",
+  "keywords": [
+    "solid",
+    "solid-oidc",
+    "openid-connect",
+    "oauth2",
+    "pkce",
+    "dpop",
+    "webid",
+    "cloudflare-workers"
+  ],
+  "type": "module",
+  "license": "ISC",
+  "author": "David W. Keith <me@dwk.io>",
+  "homepage": "https://github.com/davidwkeith/workers/tree/main/packages/solid-oidc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidwkeith/workers.git",
+    "directory": "packages/solid-oidc"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@dwk/dpop": "workspace:*",
+    "@dwk/log": "workspace:*",
+    "@dwk/oauth": "workspace:*"
+  }
+}

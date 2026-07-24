@@ -4,11 +4,17 @@ These are tracked from [issue #1](https://github.com/davidwkeith/workers/issues/
 §9. They are deliberately **out of scope for v1** but recorded so the
 architecture does not foreclose them.
 
-## 1. Solid-OIDC OP
+## 1. Solid-OIDC OP — resolved
 
-v1 is **Resource Server only**, delegating token issuance to an existing
-provider. Open: when do we own the OpenID Provider, and is it a separate
-package or part of `@dwk/indieauth`?
+v1 was **Resource Server only**, delegating token issuance to an existing
+provider. **Resolved:** the OP is now a **separate package**,
+[`@dwk/solid-oidc`](packages/solid-oidc.md), that **composes `@dwk/oauth`'s
+primitives** rather than growing inside `@dwk/indieauth` — the direction
+`spec/packages/oauth.md` anticipated. Its first increment implements the
+authorization-code + PKCE (S256) + DPoP flow issuing ES256-signed WebID access
+tokens a `@dwk/solid-pod` accepts (see the package spec for the deferred
+follow-ups: client-document validation, refresh tokens, DCR/PAR/introspection
+wiring, DPoP-nonce).
 
 ## 2. Pod write ceiling
 

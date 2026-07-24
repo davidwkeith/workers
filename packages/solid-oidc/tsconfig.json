@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No `rootDir`: the `paths` mapping resolves workspace imports to source so
+    // `typecheck` works before the workspace is built (CI typechecks ahead of
+    // build). This config is `noEmit`, so rootDir is moot.
+    "paths": {
+      "@dwk/dpop": ["../dpop/src/index.ts"],
+      "@dwk/log": ["../log/src/index.ts"],
+      "@dwk/oauth": ["../oauth/src/index.ts"]
+    },
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
+    "noEmit": true
+  },
+  "include": ["src"]
+}

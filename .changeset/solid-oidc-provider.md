@@ -1,0 +1,5 @@
+---
+"@dwk/solid-oidc": minor
+---
+
+New package `@dwk/solid-oidc`: a Solid-OIDC OpenID Provider so a site owner can run their own identity provider instead of delegating token issuance to a third party. First increment implements the authorization-code + PKCE (S256) + DPoP flow, minting ES256-signed access tokens whose claims (`iss`, `webid`, `aud`, `cnf.jkt`, `typ: at+jwt`) are exactly what `@dwk/solid-pod` validates, plus OIDC ID tokens, an OIDC discovery document (`solid_oidc_supported`), and a JWKS endpoint. Codes are single-use (D1, conditional `UPDATE … RETURNING`, hashed at rest); the DPoP proof at the token endpoint binds `cnf.jkt`; the injected `approveAuthorization` hook keeps owner login/consent out of the library; the ES256 signing key is a composer-injected secret. This resolves `spec/open-questions.md` §1 toward a separate package composing `@dwk/oauth`'s primitives. Deferred to follow-ups: client-identifier document validation, refresh tokens, DCR/PAR/introspection wiring, DPoP server nonce, and UserInfo.
