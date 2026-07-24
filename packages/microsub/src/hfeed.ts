@@ -14,17 +14,45 @@
  * @packageDocumentation
  */
 
-import { parseHEntries } from "@dwk/mf2";
+import { parseHEntries, sanitizeHtml } from "@dwk/mf2";
 
 import type { Jf2Entry } from "./jf2.js";
 
 /**
  * Extract JF2 entries from an HTML document's `h-entry` microformats. Entries
  * are returned in document order. Returns `[]` when the document has none.
+ *
+ * `@dwk/mf2` documents its captured `content.html` as **unsanitized**; a feed
+ * page is untrusted third-party HTML, and timeline entries flow to storage and
+ * the `microsub_get_timeline` MCP tool, so the capture is reduced to the
+ * shared allowlist (`sanitizeHtml`) here — before it leaves this module —
+ * matching what `@dwk/webmention` does with the same field.
  */
 export async function parseHFeed(
   html: string,
   baseUrl: string,
 ): Promise<Jf2Entry[]> {
-  return await parseHEntries(html, baseUrl);
+  const entries = await parseHEntries(html, baseUrl);
+  return Promise.all(
+    entries.map((entry) => sanitizeEntryContent(entry, baseUrl)),
+  );
+}
+
+async function sanitizeEntryContent(
+  entry: Jf2Entry,
+  baseUrl: string,
+): Promise<Jf2Entry> {
+  const raw = entry.content?.html;
+  if (!raw) return entry;
+  const html = await sanitizeHtml(raw, { baseUrl });
+  const text = entry.content?.text;
+  const { content: _unsanitized, ...rest } = entry;
+  const content =
+    html !== "" || text
+      ? {
+          ...(html !== "" ? { html } : {}),
+          ...(text ? { text } : {}),
+        }
+      : undefined;
+  return content !== undefined ? { ...rest, content } : rest;
 }

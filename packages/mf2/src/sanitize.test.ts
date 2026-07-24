@@ -71,6 +71,12 @@ describe("sanitizeHtml", () => {
     expect(out).toBe("<p>aaaa…</p>");
   });
 
+  it("does not sever a surrogate pair at the truncation point", async () => {
+    // The cap lands between the emoji's two UTF-16 code units.
+    const out = await sanitizeHtml("<p>ab😀cd</p>", { maxTextLength: 3 });
+    expect(out).toBe("<p>ab…</p>");
+  });
+
   it("closes tags the source leaves unclosed", async () => {
     const out = await sanitizeHtml("<p>one <em>two");
     expect(out).toBe("<p>one <em>two</em></p>");

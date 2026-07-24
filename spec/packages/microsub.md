@@ -66,7 +66,11 @@ host cannot do:
   extraction behind `parseHFeed` lives in the shared [`@dwk/mf2`](mf2.md) lib
   (extracted from this package's `hfeed.ts`, issue #412) — this package is a
   consumer, not the owner. RSS / Atom / JSON Feed normalisation to JF2 is the
-  surface this package adds itself.
+  surface this package adds itself. `@dwk/mf2`'s captured `content.html` is
+  **unsanitized by contract**; `parseHFeed` reduces it to the shared
+  `sanitizeHtml` allowlist before an entry reaches the store or the
+  `microsub_get_timeline` MCP output, since a feed page is untrusted
+  third-party HTML.
 - **Complements, does not duplicate, [`@dwk/websub`](websub.md):** where a
   followed source advertises a `rel="hub"`, the poller MAY subscribe via WebSub
   for push instead of polling that source — WebSub is the user as *subscriber*

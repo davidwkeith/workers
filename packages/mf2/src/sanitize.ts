@@ -99,10 +99,15 @@ function resolveHttpUrl(href: string | null, baseUrl?: string): string | null {
 
 /**
  * Truncate already-encoded text to `length` characters without leaving a
- * severed entity (`&am`) at the cut point.
+ * severed entity (`&am`) or a severed surrogate pair (half an emoji) at the
+ * cut point.
  */
 function truncateEncodedText(text: string, length: number): string {
   let cut = text.slice(0, Math.max(0, length));
+  const last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    cut = cut.slice(0, -1);
+  }
   const amp = cut.lastIndexOf("&");
   if (amp !== -1 && !cut.slice(amp).includes(";")) {
     cut = cut.slice(0, amp);
