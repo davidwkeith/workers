@@ -33,7 +33,7 @@ mode (spec/scale-out.md, phase 5 of the horizontal scale-out plan, #434).
   signing, sqld under sustained multi-writer lease traffic) and the hosted
   conformance run against a ≥2-replica target (item 5).
 - README guidance ("Central mode: horizontal scale-out (experimental)") on
-  when — and, more importantly, when *not* — to reach for central mode over
+  when — and, more importantly, when _not_ — to reach for central mode over
   the local-mode default, echoed with a one-line pointer from the repo root
   README.
 
