@@ -36,6 +36,7 @@ export type {
   BackendPageQuery,
   BackendEntry,
   BackendActorProfile,
+  BackendPublishInput,
 } from "./backend.js";
 export { mastodonError } from "./errors.js";
 export {

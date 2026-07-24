@@ -20,6 +20,7 @@ import {
   type BackendEntry,
   type BackendPage,
   type BackendPageQuery,
+  type BackendPublishInput,
   type MastodonApiConfig,
   type MastodonApiEnv,
   type MastodonBackend,
@@ -266,7 +267,63 @@ export function buildMastodonBackend(options: {
       if (!response.ok) return null;
       return (await response.json()) as BackendActorProfile;
     },
+
+    async publishStatus(input: BackendPublishInput): Promise<BackendEntry> {
+      // Render the client's plain-text status into the HTML an AS2 Note
+      // carries. The DO's outbox stores it verbatim and the read path
+      // re-sanitizes on the way out, so escaping here is belt-and-suspenders.
+      const headers = internalHeaders();
+      headers.set(INTERNAL_HEADERS.publish, "1");
+      headers.set("content-type", "application/json");
+      const body: Record<string, unknown> = {
+        kind: "note",
+        content: plainTextToHtml(input.status),
+      };
+      // The content warning federates as the Note's `summary`, which AP peers
+      // treat as HTML on the wire — escape it like `content` so a `<`/`&` typed
+      // into a CW never becomes literal markup on a receiving instance.
+      if (input.spoilerText !== undefined) {
+        body.summary = escapeHtml(input.spoilerText);
+      }
+      if (input.sensitive !== undefined) body.sensitive = input.sensitive;
+      const response = await stub().fetch(
+        new Request(`${config.iris.id}/__client/publish`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        }),
+      );
+      if (!response.ok) {
+        throw new Error(
+          `__client/publish failed (${response.status}): ${await response.text()}`,
+        );
+      }
+      const row = (await response.json()) as ClientEntryRow;
+      return toBackendEntry(row);
+    },
   };
+}
+
+/** Escape the HTML metacharacters so trusted-owner plain text federates cleanly. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Escape a plain-text status and wrap it as the HTML an AS2 `Note` carries:
+ * `\n\n` splits paragraphs, a single `\n` becomes `<br>`. Mastodon clients
+ * submit plain text and expect the server to render markup.
+ */
+function plainTextToHtml(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map(
+      (paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`,
+    )
+    .join("");
 }
 
 /**

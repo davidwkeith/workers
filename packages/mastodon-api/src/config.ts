@@ -93,6 +93,15 @@ export interface MastodonApiConfig {
   readonly pageSize?: { readonly default: number; readonly max: number };
   /** Live-count + timeline backend; absent in phase 1 (counts render as 0). */
   readonly backend?: MastodonBackend;
+  /**
+   * Opt-in owner write surface. Default (absent / `false`) keeps the API
+   * read-only — every write route answers `404`, so the plain-bearer token
+   * exception stays strictly read-only as documented. Setting it `true`
+   * extends that documented DPoP-everywhere exception to **owner-scoped
+   * writes**: a `write`-scoped bearer for the single owner account may author
+   * on this deployment. See `spec/packages/mastodon-api.md` § Write surface.
+   */
+  readonly allowWrites?: boolean;
 }
 
 /** The one local account id this deployment ever mints (single-owner). */

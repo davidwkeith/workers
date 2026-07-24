@@ -24,3 +24,13 @@ export function recordNotFound(): Response {
 export function accountRequired(): Response {
   return mastodonError(422, "This method requires an authenticated user.");
 }
+
+/** `403` — the token's granted scopes do not cover this write. */
+export function insufficientScope(): Response {
+  return mastodonError(403, "This action is outside the authorized scopes.");
+}
+
+/** `422` — a syntactically valid request that fails validation. */
+export function unprocessable(message: string): Response {
+  return mastodonError(422, message);
+}

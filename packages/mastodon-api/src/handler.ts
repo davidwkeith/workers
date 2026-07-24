@@ -19,6 +19,7 @@ import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
 import { handleNotifications } from "./notifications.js";
 import { handleAuthorize, handleRevoke, handleToken } from "./oauth-flow.js";
 import { handleGetStatus } from "./statuses.js";
+import { handleCreateStatus } from "./statuses-write.js";
 import { stubRouteEntries } from "./stubs.js";
 import { handleHomeTimeline } from "./timelines.js";
 
@@ -43,6 +44,7 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["GET /api/v1/markers", handleGetMarkers],
     ["POST /api/v1/markers", handleSaveMarkers],
     ["GET /api/v1/timelines/home", handleHomeTimeline],
+    ["POST /api/v1/statuses", handleCreateStatus],
     ["GET /api/v1/notifications", handleNotifications],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],

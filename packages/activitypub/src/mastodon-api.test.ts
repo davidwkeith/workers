@@ -844,6 +844,23 @@ describe("buildMastodonBackend", () => {
     expect(fetched!.receivedAt).toBe(wanted!.receivedAt);
   });
 
+  it("publishStatus() escapes HTML metacharacters in both content and the CW summary", async () => {
+    const config = freshConfig();
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const entry = await backend.publishStatus!({
+      status: "a <b> & c",
+      spoilerText: "cw <x> & y",
+      sensitive: true,
+    });
+    const object = (entry.activity as { object: Record<string, unknown> })
+      .object;
+    // The federated Note carries escaped HTML in content and summary alike, so
+    // a `<`/`&` never becomes literal markup on a receiving instance.
+    expect(object.content).toBe("<p>a &lt;b&gt; &amp; c</p>");
+    expect(object.summary).toBe("cw &lt;x&gt; &amp; y");
+    expect(entry.source).toBe(1);
+  });
+
   it("resolves inReplyTo to the owner's outbox post (in_reply_to snowflake + owner author)", async () => {
     const config = freshConfig();
     const ownerPost = `${config.iris.outbox}/reply-target/object`;

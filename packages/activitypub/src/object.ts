@@ -43,6 +43,7 @@ import {
   buildPostActivity,
   classifyActivity,
   parsePostInput,
+  type PostInput,
 } from "./objects.js";
 import { INTERNAL_HEADERS, type ForwardedConfig } from "./config.js";
 import {
@@ -381,6 +382,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         return text(404, "not found");
       }
       return this.#clientActor(request);
+    }
+    // Owner-write path for the Mastodon client API (`POST /api/v1/statuses`).
+    // Internal + publish markers required, exactly like `/publish`; the
+    // mastodon-api layer enforces the owner bearer + `write` scope upstream.
+    if (path === `${pathOf(iris.id)}/__client/publish`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#clientPublish(request);
     }
 
     if (path === pathOf(iris.followers)) {
@@ -1237,7 +1247,6 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * authorized the request via the publish token.
    */
   async #publishPost(request: Request): Promise<Response> {
-    const config = this.#config!;
     if (request.headers.get(INTERNAL_HEADERS.publish) !== "1") {
       return text(403, "Publishing is not enabled");
     }
@@ -1250,17 +1259,39 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const parsed = parsePostInput(body);
     if (!parsed.ok) return text(400, parsed.error);
 
+    const stored = await this.#storePost(parsed.input);
+    return json(201, stored.activity as JsonValue, {
+      location: stored.activityId,
+    });
+  }
+
+  /**
+   * Build a `Create(Note|Article|Page)` from a parsed {@link PostInput}, store
+   * it to the outbox, and fan it out to followers (and any community
+   * `audience`) exactly like the AS2 publish path — returning the stored row's
+   * outbox coordinates so a caller that needs the Mastodon-shaped snowflake
+   * (the `__client/publish` write path) can build it. Shared by `#publishPost`
+   * and `#clientPublish`.
+   */
+  async #storePost(input: PostInput): Promise<{
+    activityId: string;
+    activity: Record<string, JsonValue>;
+    seq: number;
+    publishedAt: number;
+  }> {
+    const config = this.#config!;
     const activityId = `${config.iris.outbox}/${crypto.randomUUID()}`;
-    const activity = buildPostActivity(parsed.input, config.iris, {
+    const activity = buildPostActivity(input, config.iris, {
       activityId,
       objectId: `${activityId}/object`,
       published: new Date().toISOString(),
     });
+    const publishedAt = Date.now();
     this.#sql.exec(
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       activityId,
       JSON.stringify(activity),
-      Date.now(),
+      publishedAt,
     );
 
     const json_ = JSON.stringify(activity);
@@ -1271,12 +1302,50 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       .toArray()) {
       if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
     }
-    if (parsed.input.audience) {
-      this.#deliverToAudience(parsed.input.audience, json_);
+    if (input.audience) {
+      this.#deliverToAudience(input.audience, json_);
     }
     await this.#armAlarm();
 
-    return json(201, activity as JsonValue, { location: activityId });
+    const seq = this.#sql
+      .exec<{ seq: number }>(`SELECT seq FROM outbox WHERE id = ?`, activityId)
+      .one().seq;
+    return { activityId, activity, seq, publishedAt };
+  }
+
+  /**
+   * Internal owner-write path for the Mastodon client API (`POST
+   * /api/v1/statuses`, #349 phase-4 writes): publish a status and return it in
+   * the `__client/*` row shape (`{seq, receivedAt, activity, source: 1}`) so
+   * the adapter renders it with the same `statusEntity` mapper the read path
+   * uses. The mastodon-api layer has already authenticated the owner and
+   * enforced the `write` scope before setting the publish marker; this route
+   * requires both the internal and publish markers, exactly like `/publish`.
+   */
+  async #clientPublish(request: Request): Promise<Response> {
+    if (request.headers.get(INTERNAL_HEADERS.publish) !== "1") {
+      return text(403, "Publishing is not enabled");
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return text(400, "Malformed post JSON");
+    }
+    const parsed = parsePostInput(body);
+    if (!parsed.ok) return text(400, parsed.error);
+    const stored = await this.#storePost(parsed.input);
+    return json(200, {
+      seq: stored.seq,
+      receivedAt: stored.publishedAt,
+      activity: stored.activity,
+      // Owner-authored, never group-relayed — set explicitly so the row's
+      // declared `relayedBy: string | null` holds, matching every other
+      // `__client/*` producer (an omitted field would reach `toBackendEntry`
+      // as `undefined`).
+      relayedBy: null,
+      source: 1,
+    } as unknown as JsonValue);
   }
 
   /** Wrap a bare object in a `Create`, assign ids/audience, and timestamp it. */

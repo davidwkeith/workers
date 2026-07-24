@@ -80,10 +80,48 @@ object). Everything else under `/api/` (including `/api/v1/push/subscription`
   `scope`, `client_id`, `account_id`, `created_at`, `revoked` — the repo's
   documented, mitigated **exception to DPoP-everywhere**
   ([non-functional-requirements.md](../non-functional-requirements.md)):
-  read-only surface, isolated audience (no other package accepts them),
-  hashed at rest, RFC 7009 revocable. Scopes are recorded as requested and
-  **echoed as granted, never narrowed**; enforcement is that no write
-  endpoint exists.
+  isolated audience (no other package accepts them), hashed at rest, RFC 7009
+  revocable. Scopes are recorded as requested and **echoed as granted, never
+  narrowed**; enforcement of a scope is at the endpoint, not by narrowing the
+  grant. The exception's blast radius is **read-only by default** — see the
+  Write surface below for how it widens when a deployment opts in.
+
+## Write surface (opt-in; `config.allowWrites`)
+
+Off-the-shelf Mastodon clients cannot do DPoP, so any write route they can use
+inherently extends the plain-bearer exception above from read-only to writes.
+That extension is therefore **opt-in and owner-scoped**, not on by default:
+
+- **Default is read-only.** With `allowWrites` absent/`false`, every write
+  route answers `404` (as if it does not exist), so the token exception stays
+  strictly read-only exactly as originally documented. `enforcement is that no
+  write endpoint exists` still holds for the default configuration.
+- **When enabled**, the exception widens to **owner-scoped write**: a write
+  route requires a bearer that (a) is bound to the single owner account
+  (`account_id` non-null — an app-level `client_credentials` token is `422`,
+  as on the read account endpoints) and (b) carries the `write` scope (a broad
+  `write` grant, or the granular `write:statuses`; `read` alone is `403`
+  `insufficient_scope`). Every other mitigation is unchanged — tokens stay
+  opaque, hashed at rest, isolated to this package's routes, and RFC 7009
+  revocable. The accepted blast radius: a leaked write token can author as the
+  owner until revoked, matching how any Mastodon instance treats an access
+  token.
+- **v1 endpoint:** `POST /api/v1/statuses` (create). The plain-text `status`
+  is rendered to the HTML an AS2 `Note` carries (`\n\n`→paragraph, `\n`→`<br>`,
+  escaped), with `spoiler_text`→`summary` and `sensitive` carried through; it
+  is published through the actor DO's existing outbox/fan-out path and returned
+  as the owner-attributed `Status`. Over the 500-character ceiling or a blank
+  body is `422`. **Not yet in v1** (a follow-up increment): delete
+  (`DELETE /api/v1/statuses/:id`), the interaction verbs
+  (`favourite`/`reblog`/`bookmark` and their undos), `follow`/`unfollow`, and
+  `in_reply_to_id` on create (the write path does not yet resolve a reply
+  target snowflake back to its object IRI).
+- **Backend seam:** `MastodonBackend.publishStatus?` (optional — a backend
+  without it leaves the route `404` even when `allowWrites` is set).
+  `@dwk/activitypub`'s adapter implements it over a new internal
+  `POST <actor>/__client/publish` DO route that shares the outbox-write path
+  with the AS2 `/publish` endpoint and returns the stored row's snowflake
+  coordinates.
 
 ## Entity fields emitted (phase 1)
 

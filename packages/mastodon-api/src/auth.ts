@@ -59,3 +59,20 @@ export async function authenticateBearer(
   const record = await store.getToken(await sha256Hex(token));
   return record && !record.revoked ? record : null;
 }
+
+/**
+ * Whether a granted token scope string satisfies a required Mastodon scope.
+ * A granted broad scope (`write`) covers its granular children
+ * (`write:statuses`), matching Mastodon's hierarchy — but not the reverse
+ * (`write:statuses` does not grant `write`, nor does `read` grant `write`).
+ */
+export function tokenHasScope(
+  granted: string,
+  required: `${"read" | "write"}${"" | `:${string}`}`,
+): boolean {
+  const [requiredTop] = required.split(":");
+  return granted
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((scope) => scope === required || scope === requiredTop);
+}
