@@ -373,11 +373,24 @@ export function statusEntity(
   const sensitive =
     typeof object.sensitive === "boolean" ? object.sensitive : false;
 
+  // A reply whose target the backend resolved to a locally-held post carries
+  // that post's snowflake id; its author id is the owner account (when the
+  // target is the owner's own post) or a synthesized remote account, mirroring
+  // how `account` above is chosen. Unresolved targets stay null.
+  const inReplyToId = entry.inReplyTo?.id ?? null;
+  const inReplyToAccountId = entry.inReplyTo
+    ? entry.inReplyTo.authorIsOwner && opts.ownerAccount
+      ? (opts.ownerAccount.id ?? null)
+      : entry.inReplyTo.authorIri
+        ? encodeRemoteAccountId(entry.inReplyTo.authorIri)
+        : null
+    : null;
+
   const inner: Record<string, unknown> = {
     id: entry.id,
     created_at: published ?? new Date(entry.receivedAt).toISOString(),
-    in_reply_to_id: null,
-    in_reply_to_account_id: null,
+    in_reply_to_id: inReplyToId,
+    in_reply_to_account_id: inReplyToAccountId,
     sensitive,
     spoiler_text: summary,
     visibility: "public",
@@ -415,6 +428,40 @@ export function statusEntity(
         entry.actorProfiles?.[entry.relayedBy],
       ),
       reblog: inner,
+    };
+  }
+
+  // A bare-IRI boost the backend hydrated from a locally-held post: render the
+  // reblog's inner `Status` from that object (with real content/author), and
+  // keep the outer shell content-less — Mastodon's boost shape. `inner` here is
+  // the content-less Announce wrapper; its `account` is already the booster.
+  if (
+    typeof activity.type === "string" &&
+    activity.type === "Announce" &&
+    entry.boost
+  ) {
+    const boostedStatus = statusEntity(
+      {
+        id: entry.boost.id,
+        activity: {
+          type: "Create",
+          actor: entry.boost.authorIri ?? "",
+          object: entry.boost.object,
+        },
+        receivedAt: entry.receivedAt,
+        objectType: null,
+        relayedBy: null,
+        source: entry.boost.authorIsOwner ? 1 : 0,
+        actorProfiles: entry.actorProfiles,
+      },
+      opts,
+    );
+    return {
+      ...inner,
+      content: "",
+      spoiler_text: "",
+      media_attachments: [],
+      reblog: boostedStatus,
     };
   }
   return inner;

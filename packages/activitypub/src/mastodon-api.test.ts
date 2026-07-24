@@ -844,6 +844,126 @@ describe("buildMastodonBackend", () => {
     expect(fetched!.receivedAt).toBe(wanted!.receivedAt);
   });
 
+  it("resolves inReplyTo to the owner's outbox post (in_reply_to snowflake + owner author)", async () => {
+    const config = freshConfig();
+    const ownerPost = `${config.iris.outbox}/reply-target/object`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${config.iris.outbox}/reply-target`,
+        JSON.stringify({
+          id: `${config.iris.outbox}/reply-target`,
+          type: "Create",
+          actor: config.iris.id,
+          object: { id: ownerPost, type: "Note", content: "owner post" },
+        }),
+        Date.now(),
+      );
+    });
+    // A remote reply addressing that owner post lands as a notification-shaped
+    // inbox Create (inReplyTo targets our actor's post).
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/reply-to-owner",
+      type: "Create",
+      actor: "https://remote.example/users/carol",
+      object: {
+        id: "https://remote.example/objects/reply-to-owner",
+        type: "Note",
+        content: "nice post",
+        inReplyTo: ownerPost,
+      },
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const page = await backend.notifications({ limit: 10 });
+    const reply = page.entries.find(
+      (e) =>
+        e.activity["id"] === "https://remote.example/activities/reply-to-owner",
+    );
+    expect(reply?.inReplyTo).toBeDefined();
+    expect(reply?.inReplyTo?.authorIsOwner).toBe(true);
+    expect(reply?.inReplyTo?.authorIri).toBe(config.iris.id);
+    expect(decodeSnowflake(reply!.inReplyTo!.id)?.source).toBe(1);
+  });
+
+  it("leaves inReplyTo undefined when the reply target is not held locally", async () => {
+    const config = freshConfig();
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/orphan-reply",
+      type: "Create",
+      actor: "https://remote.example/users/carol",
+      object: {
+        id: "https://remote.example/objects/orphan-reply",
+        type: "Note",
+        content: "reply to nobody we have",
+        inReplyTo: "https://elsewhere.example/notes/999",
+      },
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    // This reply targets our actor only nominally; it won't classify as a
+    // notification (inReplyTo isn't our actor id prefix), so read it via the
+    // timeline is also wrong (it's a reply). Fetch it directly by id.
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    let receivedAt = 0;
+    let seq = 0;
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ received_at: number; seq: number }>(
+          `SELECT received_at, seq FROM inbox WHERE id = ?`,
+          "https://remote.example/activities/orphan-reply",
+        )
+        .toArray()[0]!;
+      receivedAt = row.received_at;
+      seq = row.seq;
+    });
+    const fetched = await backend.entry(encodeSnowflake(receivedAt, seq, 0));
+    expect(fetched).not.toBeNull();
+    expect(fetched?.inReplyTo).toBeUndefined();
+  });
+
+  it("hydrates a bare-IRI Announce of the owner's post via boost", async () => {
+    const config = freshConfig();
+    const ownerPost = `${config.iris.outbox}/boosted/object`;
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${config.iris.outbox}/boosted`,
+        JSON.stringify({
+          id: `${config.iris.outbox}/boosted`,
+          type: "Create",
+          actor: config.iris.id,
+          object: { id: ownerPost, type: "Note", content: "boost me" },
+        }),
+        Date.now(),
+      );
+    });
+    // A remote bare-IRI boost of the owner's post arrives on the timeline.
+    await seedActivity(config, {
+      "@context": "https://www.w3.org/ns/activitystreams",
+      id: "https://remote.example/activities/boost-owner",
+      type: "Announce",
+      actor: "https://remote.example/users/booster",
+      object: ownerPost,
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    // An inbound Announce classifies as a `reblog` notification, so read the
+    // entry (carrying the hydrated `boost`) from the notifications page.
+    const page = await backend.notifications({ limit: 10 });
+    const boost = page.entries.find(
+      (e) =>
+        e.activity["id"] === "https://remote.example/activities/boost-owner",
+    );
+    expect(boost?.boost).toBeDefined();
+    expect(boost?.boost?.authorIsOwner).toBe(true);
+    expect(
+      (boost?.boost?.object as { content?: string } | undefined)?.content,
+    ).toBe("boost me");
+    expect(decodeSnowflake(boost!.boost!.id)?.source).toBe(1);
+  });
+
   it("entry() returns null for an unparseable id", async () => {
     const config = freshConfig();
     const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });

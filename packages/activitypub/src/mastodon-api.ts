@@ -59,6 +59,21 @@ interface ClientEntryRow {
   readonly source?: 0 | 1;
   readonly interactions?: BackendEntry["interactions"];
   readonly actorProfiles?: BackendEntry["actorProfiles"];
+  /** Reply target resolved to a local row by the DO (`#resolveLocalObject`). */
+  readonly replyTo?: {
+    readonly receivedAt: number;
+    readonly seq: number;
+    readonly source: 0 | 1;
+    readonly authorIri: string | null;
+  };
+  /** Boosted object hydrated from a local row by the DO (`#resolveLocalObject`). */
+  readonly boost?: {
+    readonly receivedAt: number;
+    readonly seq: number;
+    readonly source: 0 | 1;
+    readonly authorIri: string | null;
+    readonly object: Record<string, unknown>;
+  };
 }
 
 /**
@@ -78,6 +93,35 @@ function toBackendEntry(row: ClientEntryRow): BackendEntry {
     source: row.source ?? 0,
     interactions: row.interactions,
     actorProfiles: row.actorProfiles,
+    // Encode the DO's raw snowflake coordinates here (the DO stays codec-free,
+    // like the top-level `id`); `authorIsOwner` is the source-1 (outbox) bit.
+    ...(row.replyTo
+      ? {
+          inReplyTo: {
+            id: encodeSnowflake(
+              row.replyTo.receivedAt,
+              row.replyTo.seq,
+              row.replyTo.source,
+            ),
+            authorIri: row.replyTo.authorIri,
+            authorIsOwner: row.replyTo.source === 1,
+          },
+        }
+      : {}),
+    ...(row.boost
+      ? {
+          boost: {
+            id: encodeSnowflake(
+              row.boost.receivedAt,
+              row.boost.seq,
+              row.boost.source,
+            ),
+            authorIri: row.boost.authorIri,
+            authorIsOwner: row.boost.source === 1,
+            object: row.boost.object,
+          },
+        }
+      : {}),
   };
 }
 
