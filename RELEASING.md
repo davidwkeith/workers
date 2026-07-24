@@ -34,6 +34,11 @@ the full suite list and:
 - [`conformance/webdav-qa.md`](./conformance/webdav-qa.md) — litmus
 - [`conformance/pixelfed-qa.md`](./conformance/pixelfed-qa.md) / [`conformance/lemmy-qa.md`](./conformance/lemmy-qa.md) — ActivityPub fediverse interop
 - [`conformance/mastodon-client-qa.md`](./conformance/mastodon-client-qa.md) — Mastodon-compatible client API
+- [`conformance/scale-out-qa.md`](./conformance/scale-out-qa.md) — central
+  mode (`@dwk/server`) live verification, if a release touches central
+  mode's mechanism; not gated by `status.json` since `@dwk/server` is
+  private/unpublished, but central mode stays experimental until this one
+  passes
 
 Record each result in `conformance/status.json` per that runbook's last
 section before proceeding to the version bump below.

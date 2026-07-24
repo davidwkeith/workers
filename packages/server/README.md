@@ -139,6 +139,70 @@ A reference `systemd` unit (`examples/dwk-serve.service`) hardens it and maps
 SIGTERM to a clean drain. On Node 22 `node:sqlite` prints an experimental
 warning; Node ≥ 24 runs it flag-free.
 
+## Central mode: horizontal scale-out (experimental)
+
+**Local mode (above) is the default and the recommended path for a
+single-owner deployment** — one process, local SQLite + filesystem, strictly
+serializable, and simpler to operate. Reach for **central mode**
+(spec/scale-out.md) only when you actually need one of the things local mode
+explicitly can't give you:
+
+- **Horizontal scale** for genuinely high request volume — a popular blog's
+  webmention/micropub endpoints, a fediverse account under an inbox delivery
+  storm, a Solid pod serving many concurrent agents — where one Node process
+  is the throughput ceiling.
+- **High availability across deploys/crashes/node drains** — local mode's
+  single-writer lockfile means exactly one process, so any restart is
+  downtime; central mode's per-request lease lets N replicas coexist and a
+  load balancer route around a dead one.
+- **A disk-less platform** (Cloud Run without a mounted volume, and similar)
+  where the local-mode single-writer filesystem invariant simply doesn't
+  hold.
+
+None of that is true for most self-hosters. If you're running this for
+yourself (or a small group) on a VPS/homelab/NAS, central mode trades
+**lower single-request latency for aggregate throughput and availability you
+probably don't need** (spec/scale-out.md §11) — every D1 query becomes a
+network round-trip to a libSQL primary instead of an in-process
+`node:sqlite` call, and you take on operating two more services (sqld/Turso,
+an S3-compatible store) for no benefit. Stay on local mode unless one of the
+three bullets above is a real, current constraint, not a hypothetical one.
+
+**Status: experimental, not yet conformance-verified** (host-contract §9).
+The mechanism is implemented and unit/integration-tested against fakes
+(`central-bindings.ts`, `central-mode.ts`, `central-durable-object.ts`,
+`central-do-poller.ts`, `libsql-kv.ts`), but it has not yet passed the
+[live-verification checklist and hosted-suite run](../../conformance/scale-out-qa.md)
+against real sqld/MinIO services — don't deploy it for anything you depend
+on until that runbook records a pass.
+
+If central mode does fit your deployment:
+
+- **`docker-compose.yml`** in this directory is the reference topology: sqld
+  (libSQL primary + the coordination KV) + MinIO (S3-compatible object
+  store) + 2 stateless `@dwk/server` replicas behind an nginx proxy.
+
+  ```sh
+  docker compose -f packages/server/docker-compose.yml up --build
+  ```
+
+  It builds both replicas from `examples/central-composition.mjs` (WebFinger
+  + IndieAuth + WebAuthn over centralized D1/R2/KV) via the same
+  `Dockerfile`, parameterized with a `BUNDLE_ENTRY` build arg — point it at
+  your own central-mode composition module. See `.env.example` for the
+  overridable settings and `nginx.conf` for the WebSocket session-affinity
+  note (a live socket stays pinned to the replica that terminated it —
+  spec/scale-out.md §6.4).
+- **`k8s-notes.md`** covers the same topology on Kubernetes: `Deployment`
+  vs `StatefulSet`, readiness/liveness probe shape, WebSocket affinity via
+  ingress annotations, `emptyDir` scratch volumes for the embedded-replica
+  cache, and where sqld/the object store live (managed vs. in-cluster).
+- **Backups centralize** (spec/scale-out.md §12): back up sqld/Turso via its
+  own snapshot mechanism and the object store via its lifecycle rules —
+  there is no data directory to `tar` the way local mode's is, and replica
+  scratch disks (`DWK_REPLICA_DIR`) need no backup at all, since they're
+  rebuildable caches.
+
 ## Deploying to AWS, GCP, or any other cloud
 
 There is no AWS- or GCP-native `@dwk` host, and none is planned — the Docker
@@ -205,6 +269,52 @@ migration is a copy in either direction: **D1 ⇄ `node:sqlite` file**,
 (`<dataDir>/do/<class>/<id>.sqlite`). Moving between Cloudflare and self-hosted
 is export-then-import, no schema change.
 
+### Local ↔ central migration (`dwk migrate`)
+
+Local mode and [central mode](#central-mode-horizontal-scale-out-experimental)
+store the same logical data in the same SQLite dialect too, so moving between
+them is likewise mechanical (spec/scale-out.md §13) — the `dwk-migrate` bin
+(`@dwk/server`'s second CLI entry, alongside `dwk-serve`) does the copy:
+
+```sh
+dwk-migrate to-central ./dwk.migrate.js --data-dir ./data
+dwk-migrate to-local   ./dwk.migrate.js --data-dir ./data
+```
+
+The config module (mirroring `dwk-serve`'s composition-root module) default-
+exports a `CentralMigrationTarget` (`to-central`) or `LocalMigrationTarget`
+(`to-local`) — the injected libSQL/S3/KV clients and DO storage-client
+factories to migrate into or out of, by binding name. `to-central` scans
+`dataDir` the same way `assembleBindings` laid it out and migrates whatever
+the config declares a client for, reporting any `dataDir` entry with no
+matching binding as `skipped` rather than silently dropping it; `to-local`
+has no directory to scan on the central side (there is no generic `list` —
+see `@dwk/deno-host`'s R2 shim doc), so it takes an explicit list of what to
+pull down instead. `@dwk/server/migrate` also exports every step as a plain
+function (`migrateD1ToCentral`, `migrateR2ToCentral`, `migrateDoObjectToCentral`,
+`importQueueBacklog`, …) for scripting a migration you don't want to drive
+through the CLI's directory-scanning conventions.
+
+Two edges spec/scale-out.md §13 calls out by name, both handled automatically
+rather than left as a footgun:
+
+- **Pending alarms** — `@dwk/cf-shims` persists a Durable Object's pending
+  alarm *inside* its own SQLite file; central mode keeps it *outside*, in the
+  coordination KV's due/by-id indexes. Every DO-object migration lifts (or
+  lowers) the alarm as part of the same call — there's no separate step to
+  forget.
+- **Queue backlog** — drain the local queue before migrating (the simplest
+  option: let it empty naturally, since nothing more is needed), or import
+  the pending backlog into the coordination KV as due entries via
+  `importQueueBacklog`/`dwk-migrate`; each message's delivery-attempt counter
+  resets to 0 on import (safe for an at-least-once queue).
+
+R2 migration streams objects (no full-body buffering) and preserves
+content-type/custom metadata both ways; the `to-local` direction needs the
+object keys named explicitly (same "no generic `list`" reason as above) —
+pull them from wherever your composition already tracks its own R2 keys
+(e.g. `@dwk/store`'s D1 registry).
+
 ## Status
 
 **Experimental, unreleased (`0.0.0`).** This package implements the host
@@ -222,6 +332,18 @@ bundle + Dockerfile). Wiring a Node
 conformance column into `conformance/status.json` and publishing versioned image
 tags are the remaining self-hosting tasks; the package stays experimental until
 its conformance column is green.
+
+**Central mode** (horizontal scale-out, spec/scale-out.md) is a separate,
+opt-in mode layered on top of the same host: the mechanism (Tier 1 D1/R2,
+Tier 2 Durable Objects, the fleet lifecycle pollers) is implemented and
+unit/integration-tested against fakes, and phase 5 (#434) adds the packaging
+around it — the `docker-compose.yml` reference deployment, `k8s-notes.md`,
+and the `dwk-migrate` bin for local ↔ central data migration. It remains
+**experimental**, not supported, until the
+[live-verification checklist and hosted-suite run](../../conformance/scale-out-qa.md)
+pass against real sqld/MinIO — see
+["Central mode: horizontal scale-out"](#central-mode-horizontal-scale-out-experimental)
+above for when (and when not) to reach for it.
 
 ## Requirements
 

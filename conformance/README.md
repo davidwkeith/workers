@@ -203,6 +203,22 @@ below is the quick reference:
 5. Record `activitypub-federation` -> `targets` -> `lemmy` as `passing` with
    the run date.
 
+## Central mode (scale-out) live verification
+
+Central mode (spec/scale-out.md) is packaging/tooling-complete but
+**experimental, not supported** (host-contract §9) until its own
+live-verification checklist and hosted-suite run pass against a real ≥2-replica
+deployment — the in-memory fakes the colocated `@dwk/server` tests use can't
+prove real-service behavior (hrana read-your-writes, sqld under concurrent
+writers, MinIO read-after-write, …). See
+[`scale-out-qa.md`](./scale-out-qa.md) for the fillable runbook, run against
+[`packages/server/docker-compose.yml`](../packages/server/docker-compose.yml)
+(sqld + MinIO + 2 replicas + nginx) — that compose file doubles as the test
+bed and the central-mode deployment example. Re-run it before every release
+that touches central mode's mechanism (`central-bindings.ts`,
+`central-mode.ts`, `central-durable-object.ts`, `central-do-poller.ts`,
+`libsql-kv.ts`, or `@dwk/deno-host`'s D1/R2/lease/alarm/queue modules).
+
 ## Integration lifecycle tests
 
 The four verb-lifecycle cases the spec requires live as colocated integration

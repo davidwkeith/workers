@@ -193,6 +193,15 @@ it as a private volume (`0700`) and back it up. See the
 security posture, and Cloudflare ⇄ self-host data portability. Design notes:
 [`spec/self-hosting.md`](spec/self-hosting.md).
 
+This single-process mode is the recommended default for a single-owner
+deployment. If you outgrow it — real horizontal scale or HA across a fleet of
+replicas — there's an **experimental, opt-in central mode**
+([`spec/scale-out.md`](spec/scale-out.md), `packages/server/docker-compose.yml`
++ `k8s-notes.md`) trading single-request latency for throughput/availability;
+see the [`@dwk/server` README](packages/server/README.md#central-mode-horizontal-scale-out-experimental)
+for when it's (and isn't) worth reaching for, and `dwk-migrate` for moving
+between the two modes.
+
 **On AWS, GCP, or any other cloud.** There is no AWS- or GCP-native `@dwk`
 host, and none is planned — the same Docker image above **is** the supported
 answer everywhere else, because it needs only a long-lived process with a
