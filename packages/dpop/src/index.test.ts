@@ -52,6 +52,16 @@ const SIGNERS: Record<string, SignerSpec> = {
     sign: { name: "ECDSA", hash: "SHA-256" },
     alg: "ES256",
   },
+  ES512: {
+    generate: { name: "ECDSA", namedCurve: "P-521" },
+    sign: { name: "ECDSA", hash: "SHA-512" },
+    alg: "ES512",
+  },
+  EdDSA: {
+    generate: { name: "Ed25519" },
+    sign: { name: "Ed25519" },
+    alg: "EdDSA",
+  },
   RS256: {
     generate: {
       name: "RSASSA-PKCS1-v1_5",
@@ -133,10 +143,14 @@ async function makeProof(
 }
 
 let es256: KeyMaterial;
+let es512: KeyMaterial;
+let eddsa: KeyMaterial;
 let rs256: KeyMaterial;
 
 beforeAll(async () => {
   es256 = await makeKey("ES256");
+  es512 = await makeKey("ES512");
+  eddsa = await makeKey("EdDSA");
   rs256 = await makeKey("RS256");
 });
 
@@ -157,6 +171,33 @@ describe("verifyDpopProof — happy path", () => {
     const result = await verifyDpopProof({ ...base(), proof });
     expect(result.valid).toBe(true);
     expect(result.jkt).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("verifies a valid ES512 proof (P-521 + SHA-512 path)", async () => {
+    const proof = await makeProof(es512);
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result.valid).toBe(true);
+    expect(result.jkt).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("verifies a valid EdDSA proof (RFC 8037 OKP thumbprint + Ed25519 path)", async () => {
+    const proof = await makeProof(eddsa);
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result.valid).toBe(true);
+    expect(result.jti).toBe("unique-id-123");
+    expect(result.jkt).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("computes a stable OKP jkt for the same Ed25519 key", async () => {
+    const a = await verifyDpopProof({
+      ...base(),
+      proof: await makeProof(eddsa),
+    });
+    const b = await verifyDpopProof({
+      ...base(),
+      proof: await makeProof(eddsa),
+    });
+    expect(a.jkt).toBe(b.jkt);
   });
 
   it("matches htm case-insensitively and normalizes htu", async () => {
@@ -265,6 +306,30 @@ describe("verifyDpopProof — header checks", () => {
     const proof = await makeProof(weak);
     const result = await verifyDpopProof({ ...base(), proof });
     expect(result).toMatchObject({ valid: false, reason: "rsa_key_too_small" });
+  });
+
+  it("rejects an OKP jwk whose crv is not Ed25519 (Ed448 unsupported)", async () => {
+    const proof = await makeProof(eddsa, {
+      header: { jwk: { ...eddsa.publicJwk, crv: "Ed448" } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "crv_mismatch" });
+  });
+
+  it("rejects an OKP jwk carrying private key material (RFC 8037 d)", async () => {
+    const proof = await makeProof(eddsa, {
+      header: { jwk: { ...eddsa.publicJwk, d: "private-scalar" } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "jwk_private" });
+  });
+
+  it("treats a missing OKP x as jwk_invalid, not crv_mismatch", async () => {
+    const proof = await makeProof(eddsa, {
+      header: { jwk: { ...eddsa.publicJwk, x: undefined } },
+    });
+    const result = await verifyDpopProof({ ...base(), proof });
+    expect(result).toMatchObject({ valid: false, reason: "jwk_invalid" });
   });
 
   it("treats a missing EC crv as jwk_invalid, not crv_mismatch", async () => {
