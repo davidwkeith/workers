@@ -1,5 +1,15 @@
 # @dwk/safe-fetch
 
+## 0.1.0-beta.4
+
+### Patch Changes
+
+- 4cd36af: Add a `bugs` field to every publishable package manifest, so the npm package
+  page links to the repository issue tracker instead of omitting the "report
+  issues" link entirely. Metadata only — no runtime or API change.
+- Updated dependencies [4cd36af]
+  - @dwk/log@0.1.0-beta.5
+
 ## 0.1.0-beta.3
 
 ### Minor Changes

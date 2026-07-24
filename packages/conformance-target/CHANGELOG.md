@@ -1,5 +1,37 @@
 # @dwk/conformance-target
 
+## 0.0.1-beta.2
+
+### Patch Changes
+
+- Updated dependencies [49e29f8]
+- Updated dependencies [20c4e9e]
+- Updated dependencies [dc59912]
+- Updated dependencies [07fc404]
+- Updated dependencies [77d929a]
+- Updated dependencies [427064c]
+- Updated dependencies [55fa4c3]
+- Updated dependencies [bf41d27]
+- Updated dependencies [4cd36af]
+- Updated dependencies [8f14f4d]
+- Updated dependencies [8f14f4d]
+- Updated dependencies [dc59912]
+- Updated dependencies [f34b247]
+  - @dwk/activitypub@0.1.0-beta.6
+  - @dwk/mastodon-api@0.1.0-beta.1
+  - @dwk/webmention@0.1.0-beta.5
+  - @dwk/microsub@0.1.0-beta.5
+  - @dwk/micropub@0.1.0-beta.5
+  - @dwk/atproto-pds@0.1.0-beta.3
+  - @dwk/host-meta@0.1.0-beta.5
+  - @dwk/indieauth@0.1.0-beta.5
+  - @dwk/remotestorage@0.1.0-beta.5
+  - @dwk/solid-pod@0.1.0-beta.5
+  - @dwk/vc@0.1.0-beta.5
+  - @dwk/webauthn@0.1.0-beta.5
+  - @dwk/webfinger@0.1.0-beta.5
+  - @dwk/websub@0.1.0-beta.5
+
 ## 0.0.1-beta.1
 
 ### Patch Changes

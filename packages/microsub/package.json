@@ -1,6 +1,6 @@
 {
   "name": "@dwk/microsub",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "Microsub server: channel/feed subscriptions, server-side polling, and a normalised JF2 timeline. Consumes IndieAuth tokens.",
   "keywords": [
     "microsub",

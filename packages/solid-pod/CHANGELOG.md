@@ -1,5 +1,58 @@
 # @dwk/solid-pod
 
+## 0.1.0-beta.5
+
+### Patch Changes
+
+- 4cd36af: Add a `bugs` field to every publishable package manifest, so the npm package
+  page links to the repository issue tracker instead of omitting the "report
+  issues" link entirely. Metadata only — no runtime or API change.
+- 8f14f4d: Address code-review follow-ups on the litmus conformance fixes:
+
+  - `verifyAppPassword` now returns `false` instead of throwing when a
+    record's `iterations` exceeds workerd's PBKDF2 ceiling, restoring its
+    documented "never throws" contract for any record regardless of
+    provenance (imported/migrated data, or anything minted outside
+    `mintAppPassword`).
+  - `COPY`/`MOVE` onto a destination whose immediate parent collection
+    doesn't exist now `409`s instead of auto-vivifying it, closing the same
+    RFC 4918 §9.8.5/§9.9.4 gap already fixed for `MKCOL`/`PUT`.
+
+- 8f14f4d: Fix four RFC 4918 conformance bugs surfaced by a real litmus run against
+  `conformance.dwk.io`:
+
+  - `MKCOL`/`PUT` with a missing intermediate collection silently succeeded
+    instead of `409 Conflict` (litmus `mkcol_no_parent`/`put_no_parent`) —
+    the WebDAV door was calling into `@dwk/solid-pod`'s LDP write path, which
+    auto-vivifies missing ancestor containers by design; the WebDAV backend
+    now checks the immediate parent exists first and throws `ResourceConflict`
+    when it doesn't, leaving the LDP door's own auto-vivify behavior untouched.
+  - `MKCOL` over an existing plain resource silently succeeded instead of
+    refusing (litmus `mkcol_over_plain`) — the existing-resource check only
+    looked up the collection-path variant (with a trailing slash appended),
+    missing a plain resource stored under the un-slashed name.
+  - `DELETE` of a resource that never existed silently succeeded instead of
+    `404` (litmus `delete_null`) — the router didn't check existence before
+    calling into the backend's remove.
+
+- Updated dependencies [dc59912]
+- Updated dependencies [4cd36af]
+- Updated dependencies [a20ddcf]
+- Updated dependencies [8f14f4d]
+- Updated dependencies [8f14f4d]
+- Updated dependencies [e6eab17]
+- Updated dependencies [c55669e]
+  - @dwk/dpop@0.1.0-beta.4
+  - @dwk/calendar@0.1.0-beta.3
+  - @dwk/ldn@0.1.0-beta.4
+  - @dwk/log@0.1.0-beta.5
+  - @dwk/mcp@0.1.0-beta.1
+  - @dwk/rdf@0.1.0-beta.4
+  - @dwk/safe-fetch@0.1.0-beta.4
+  - @dwk/store@0.1.0-beta.5
+  - @dwk/wac@0.1.0-beta.4
+  - @dwk/webdav@0.1.0-beta.2
+
 ## 0.1.0-beta.4
 
 ### Minor Changes

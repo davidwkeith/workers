@@ -1,6 +1,6 @@
 {
   "name": "@dwk/mcp",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Model Context Protocol server core: dependency-free JSON-RPC 2.0 + Streamable HTTP, tools-only v1 subset. Cross-standard reusable; no Workers runtime dependency.",
   "keywords": [
     "mcp",
