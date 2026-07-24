@@ -20,9 +20,6 @@
     "url": "git+https://github.com/davidwkeith/workers.git",
     "directory": "packages/server"
   },
-  "bugs": {
-    "url": "https://github.com/davidwkeith/workers/issues"
-  },
   "engines": {
     "node": ">=22"
   },
