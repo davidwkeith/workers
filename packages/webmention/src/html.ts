@@ -14,6 +14,8 @@
  * @packageDocumentation
  */
 
+import { decodeEntities } from "@dwk/mf2";
+
 /** A parsed `Link` header entry: its target URI and `rel` tokens. */
 export interface LinkHeaderEntry {
   readonly uri: string;
@@ -195,7 +197,10 @@ export async function scanElements(
     element(el) {
       const attrs: Record<string, string | null> = {};
       for (const name of attrNames) {
-        attrs[name] = el.getAttribute(name);
+        // Attribute values arrive raw (entities as written); decode so an
+        // href of `…?a=1&amp;b=2` compares equal to the target `…?a=1&b=2`.
+        const value = el.getAttribute(name);
+        attrs[name] = value === null ? null : decodeEntities(value);
       }
       elements.push({ name: el.tagName, attrs });
     },

@@ -4,9 +4,11 @@
  * After the receiver has returned `202 Accepted`, a queued worker fetches the
  * `source` and confirms it actually links to `target` (Webmention §3.2.1).
  * Verification is link-level: the source document must contain a link
- * (`href`/`src`) that resolves to the target. Full Microformats2 extraction is
- * intentionally out of scope here — it would pull a parser into the Worker
- * bundle the runtime budget rules out. See `spec/packages/webmention.md`.
+ * (`href`/`src`) that resolves to the target. A verified HTML source is then
+ * read once more for its microformats — via the shared, `HTMLRewriter`-based
+ * `@dwk/mf2` extractor, not a bundled parser (which the runtime budget rules
+ * out) — to enrich the mention with its interaction type, author, content,
+ * and publication time ({@link ./enrich}). See `spec/packages/webmention.md`.
  *
  * @packageDocumentation
  */
@@ -25,6 +27,12 @@ import {
   scanElements,
 } from "./html.js";
 import { readBodyCapped, safeFetch, type FetchLike } from "@dwk/safe-fetch";
+import {
+  extractEnrichment,
+  type InteractionType,
+  type MentionAuthor,
+  type MentionEnrichment,
+} from "./enrich.js";
 import { WebmentionLogEvent } from "./log.js";
 import { extractRsvp, type RsvpValue } from "./rsvp.js";
 
@@ -222,9 +230,12 @@ function recordVerifyOutcome(
     targetHost: hostFromUrl(target),
     links: result.links,
     status: result.status,
-    // The rsvp value (yes/no/maybe/interested) is a closed, non-sensitive set,
-    // so it is safe to surface for observability when a mention is an RSVP.
+    // The rsvp and interaction-type values are closed, non-sensitive sets, so
+    // they are safe to surface for observability (author/content are not).
     ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+    ...(result.interactionType !== undefined
+      ? { interactionType: result.interactionType }
+      : {}),
   };
   logger.info(WebmentionLogEvent.VerifyCompleted, fields);
   metrics.count(WebmentionLogEvent.VerifyCompleted, fields);
@@ -243,6 +254,19 @@ export interface VerifyResult {
    * {@link extractRsvp}.
    */
   readonly rsvp?: RsvpValue;
+  /**
+   * How the source interacts with the target, from the mf2 of the one
+   * `h-entry` responding to it (see {@link extractEnrichment}); a verified
+   * source with no such entry — including a non-HTML source — is a plain
+   * `"mention"`. Omitted only when the source does not link at all.
+   */
+  readonly interactionType?: InteractionType;
+  /** The responding entry's author, when it declares one. */
+  readonly author?: MentionAuthor;
+  /** Sanitized, truncated HTML of the responding entry's content. */
+  readonly content?: string;
+  /** The responding entry's declared `dt-published` value, verbatim. */
+  readonly published?: string;
 }
 
 /**
@@ -309,15 +333,21 @@ export async function verifySource(
   }
 
   const links = await sourceLinksTo(body, target, base, contentType);
+  const isHtml = isHtmlContentType(contentType);
   // Only an HTML source that genuinely links to the target can be an RSVP; a
   // `u-in-reply-to` is itself a link, so RSVP detection presupposes `links`.
-  const rsvp =
-    links && isHtmlContentType(contentType)
-      ? await extractRsvp(body, base, target)
-      : null;
+  const rsvp = links && isHtml ? await extractRsvp(body, base, target) : null;
+  // Same precondition for enrichment; a verified non-HTML source has no mf2
+  // to read, so it is a plain mention.
+  const enrichment: MentionEnrichment | null = links
+    ? isHtml
+      ? await extractEnrichment(body, base, target)
+      : { interactionType: "mention" }
+    : null;
   return recordVerifyOutcome(logger, metrics, source, target, {
     links,
     status: response.status,
     ...(rsvp !== null ? { rsvp } : {}),
+    ...(enrichment ?? {}),
   });
 }

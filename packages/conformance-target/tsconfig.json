@@ -21,6 +21,7 @@
       "@dwk/ldn/discovery": ["../ldn/src/discovery.ts"],
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
+      "@dwk/mf2": ["../mf2/src/index.ts"],
       "@dwk/rdf": ["../rdf/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"],
       "@dwk/wac": ["../wac/src/index.ts"],

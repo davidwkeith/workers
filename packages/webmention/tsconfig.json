@@ -13,6 +13,7 @@
       "@dwk/dpop": ["../dpop/src/index.ts"],
       "@dwk/log": ["../log/src/index.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
+      "@dwk/mf2": ["../mf2/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"]
     },
     "types": [

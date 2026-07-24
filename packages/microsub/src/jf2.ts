@@ -56,6 +56,8 @@ export interface Jf2Entry {
   readonly photo?: readonly string[];
   readonly "in-reply-to"?: string;
   readonly "like-of"?: string;
+  readonly "repost-of"?: string;
+  readonly "bookmark-of"?: string;
   /** Read flag, attached by the store on read (never by the parser). */
   readonly _is_read?: boolean;
 }

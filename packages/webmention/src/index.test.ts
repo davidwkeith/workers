@@ -185,7 +185,43 @@ describe("createWebmentionQueueConsumer", () => {
     const stored = await inbox.list();
     expect(stored).toHaveLength(1);
     expect(stored[0]?.source).toBe("https://other.example/p");
+    // A bare link is a plain mention; published falls back to verification.
+    expect(stored[0]?.interactionType).toBe("mention");
+    expect(stored[0]?.publishedAt).toBe(stored[0]?.verifiedAt);
     expect(acks).toEqual([0]);
+  });
+
+  it("stores enrichment from the source's h-entry, with declared published", async () => {
+    const inbox = new MemoryInbox();
+    const html =
+      '<div class="h-entry">' +
+      '<a class="u-in-reply-to" href="https://example.com/article">re</a>' +
+      '<time class="dt-published" datetime="2026-07-01T10:00:00Z">Jul 1</time>' +
+      '<div class="e-content">Nice <em>post</em></div>' +
+      '<div class="p-author h-card"><span class="p-name">Replier</span></div>' +
+      "</div>";
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response(html, { headers: { "content-type": "text/html" } }),
+    );
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/reply",
+        target: "https://example.com/article",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.interactionType).toBe("reply");
+    expect(stored?.author).toEqual({ name: "Replier" });
+    expect(stored?.content).toBe("Nice <em>post</em>");
+    expect(stored?.publishedAt).toBe(Date.parse("2026-07-01T10:00:00Z"));
   });
 
   it("removes a mention whose source no longer links", async () => {

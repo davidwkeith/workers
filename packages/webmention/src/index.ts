@@ -64,7 +64,17 @@ export {
   type RsvpValue,
 } from "./rsvp.js";
 export {
+  extractEnrichment,
+  isInteractionType,
+  INTERACTION_TYPES,
+  CONTENT_MAX_TEXT_LENGTH,
+  type InteractionType,
+  type MentionAuthor,
+  type MentionEnrichment,
+} from "./enrich.js";
+export {
   createD1Inbox,
+  mentionId,
   type InboxStore,
   type VerifiedMention,
   type D1InboxOptions,
@@ -316,10 +326,25 @@ export function createWebmentionQueueConsumer(
           fetchAllowedHosts: config.fetchAllowedHosts,
         });
         if (result.links) {
+          const verifiedAt = Date.now();
+          // `dt-published` when the entry declares (and we can parse) it,
+          // else the verification time — the field is always populated.
+          const publishedMs =
+            result.published !== undefined
+              ? Date.parse(result.published)
+              : Number.NaN;
           await inbox.store({
             source,
             target,
-            verifiedAt: Date.now(),
+            verifiedAt,
+            interactionType: result.interactionType ?? "mention",
+            ...(result.author !== undefined ? { author: result.author } : {}),
+            ...(result.content !== undefined
+              ? { content: result.content }
+              : {}),
+            publishedAt: Number.isFinite(publishedMs)
+              ? publishedMs
+              : verifiedAt,
             ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
           });
         } else {

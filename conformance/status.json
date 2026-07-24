@@ -538,6 +538,14 @@
         "cases": []
       }
     },
+    "@dwk/mf2": {
+      "standard": "Microformats2",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": []
+      }
+    },
     "@dwk/oauth": {
       "standard": null,
       "suites": {},
