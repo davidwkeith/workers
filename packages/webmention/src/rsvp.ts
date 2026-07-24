@@ -16,6 +16,8 @@
  * @packageDocumentation
  */
 
+import { decodeEntities } from "@dwk/mf2";
+
 import { resolveUrl } from "./html.js";
 
 /** The recognized Indie RSVP values (mf2 `p-rsvp`). */
@@ -83,7 +85,8 @@ export async function extractRsvp(
         if (href === null || href === "") {
           return;
         }
-        if (resolveUrl(href, baseUrl) === normalizedTarget) {
+        // Attribute values arrive raw; decode so `…?a=1&amp;b=2` matches.
+        if (resolveUrl(decodeEntities(href), baseUrl) === normalizedTarget) {
           repliesToTarget = true;
         }
       },

@@ -89,6 +89,16 @@ describe("extractEnrichment", () => {
     });
   });
 
+  it("matches an entity-encoded response URL with a query string", async () => {
+    const queryTarget = "https://example.com/article?a=1&b=2";
+    const html =
+      `<div class="h-entry">` +
+      `<a class="u-in-reply-to" href="https://example.com/article?a=1&amp;b=2">re</a>` +
+      `</div>`;
+    const enrichment = await extractEnrichment(html, base, queryTarget);
+    expect(enrichment.interactionType).toBe("reply");
+  });
+
   it("resolves relative response URLs against the base before matching", async () => {
     const html = `<div class="h-entry"><a class="u-in-reply-to" href="/article">x</a></div>`;
     const enrichment = await extractEnrichment(

@@ -18,6 +18,7 @@
  * @packageDocumentation
  */
 
+import { decodeEntities } from "./entities.js";
 import { fnv1aBase36 } from "./jf2.js";
 import type { Jf2Author, Jf2Content, Jf2Entry } from "./jf2.js";
 import { VOID_ELEMENTS } from "./void-elements.js";
@@ -88,7 +89,7 @@ function propertyClass(
   return null;
 }
 
-/** Re-encode a parser-decoded attribute value for serialization. */
+/** Encode a decoded attribute value for serialization. */
 function escapeAttribute(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -96,11 +97,15 @@ function escapeAttribute(value: string): string {
     .replaceAll("<", "&lt;");
 }
 
-/** Serialize an element's start tag (attribute values re-encoded). */
+/**
+ * Serialize an element's start tag. Attribute values arrive raw (entities as
+ * written), so they are decoded before re-encoding — escaping the raw value
+ * directly would double-escape `&amp;` into `&amp;amp;`.
+ */
 function serializeStartTag(el: Element, tagName: string): string {
   let out = `<${tagName}`;
   for (const [name, value] of el.attributes) {
-    out += ` ${name}="${escapeAttribute(value ?? "")}"`;
+    out += ` ${name}="${escapeAttribute(decodeEntities(value ?? ""))}"`;
   }
   return out + ">";
 }
@@ -237,7 +242,8 @@ export async function parseHEntries(
 
         // u-* and dt-* take their value from an attribute when present; that
         // value is committed immediately, so no text capture (or end tag) is
-        // needed.
+        // needed. Attribute values arrive raw, so they are decoded here — a
+        // `u-in-reply-to` href of `…?a=1&amp;b=2` must yield `…?a=1&b=2`.
         if (prop.format === "u") {
           const attr =
             el.getAttribute("href") ??
@@ -245,13 +251,13 @@ export async function parseHEntries(
             el.getAttribute("data") ??
             el.getAttribute("poster");
           if (attr !== null) {
-            assignProperty(frame, attr);
+            assignProperty(frame, decodeEntities(attr));
             return;
           }
         } else if (prop.format === "dt") {
           const attr = el.getAttribute("datetime") ?? el.getAttribute("value");
           if (attr !== null) {
-            assignProperty(frame, attr);
+            assignProperty(frame, decodeEntities(attr));
             return;
           }
         }
@@ -291,9 +297,14 @@ export async function parseHEntries(
   return entries;
 }
 
-/** Commit a text-collecting frame's value(s) onto its target at its end tag. */
+/**
+ * Commit a text-collecting frame's value(s) onto its target at its end tag.
+ * Text chunks accrue raw; decoding happens once here, on the whole buffer, so
+ * an entity split across two chunks still decodes. The HTML capture stays
+ * encoded as written — it is HTML, not plain text.
+ */
 function commitFrame(frame: PropFrame): void {
-  const text = frame.buf.trim();
+  const text = decodeEntities(frame.buf).trim();
   // `e-content` commits both the text and the captured inner HTML; the first
   // content value on an entry wins, matching the plain-text properties below.
   if (

@@ -38,6 +38,14 @@ global.
   attacker-sized page cannot balloon memory). The HTML is **unsanitized** —
   consumers MUST run it through `sanitizeHtml` (or equivalent) before
   persisting or serving it.
+- **Entity decoding on interpreted values:** this runtime's `HTMLRewriter`
+  hands back raw, undecoded text and attribute values, so every value the
+  extractor *interprets* — URL-valued properties (a `u-in-reply-to` of
+  `…?a=1&amp;b=2` MUST yield `…?a=1&b=2`), `dt-*` values, and plain-text
+  properties — is decoded via `decodeEntities` (exported; the five predefined
+  named entities plus numeric references, no bundled HTML5 entity table).
+  Captured HTML stays encoded as written; re-serialized attributes decode
+  then re-encode so they never double-escape.
 - URL-valued properties resolve against `baseUrl` (the fetched document's
   final URL).
 - Every entry carries a stable `_id`: its own `u-url`, else an
@@ -71,7 +79,9 @@ global.
   vocabularies beyond `e-content`, rel parsing). The runtime budget rules a
   full engine out of the Worker bundle; consumers needing full fidelity parse
   off-worker.
-- HTML entity decoding: text is surfaced as written in the source.
+- The full HTML5 named-entity table: `decodeEntities` covers the predefined
+  five plus numeric references; an exotic named reference (`&hellip;`) is
+  left as written rather than pulling a data blob into the bundle.
 
 ## Testing
 

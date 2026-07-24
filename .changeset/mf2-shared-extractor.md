@@ -13,7 +13,11 @@ and use it to enrich received Webmentions (#412).
   HTML alongside its text. Ships `sanitizeHtml`, an allowlist sanitizer for
   that captured UGC (formatting tags only, all attributes stripped except a
   validated `a[href]`, `rel="ugc nofollow"` forced onto surviving links,
-  text-length truncation), and `fnv1aBase36`, the stable-id hash.
+  text-length truncation), `decodeEntities` (this runtime's `HTMLRewriter`
+  hands back raw, undecoded values, so URL/date/plain-text properties decode
+  before they are interpreted — an `href` of `…?a=1&amp;b=2` matches the
+  target `…?a=1&b=2` — while captured HTML stays encoded), and
+  `fnv1aBase36`, the stable-id hash.
 - **`@dwk/microsub`:** consumes `@dwk/mf2` for `parseHFeed` instead of owning
   the extractor; behavior and public surface unchanged (`Jf2Entry` gains
   optional `repost-of` / `bookmark-of`).

@@ -16,6 +16,7 @@
  * @packageDocumentation
  */
 
+import { decodeEntities } from "./entities.js";
 import { VOID_ELEMENTS } from "./void-elements.js";
 
 /** The formatting tags {@link sanitizeHtml} lets through. */
@@ -84,9 +85,14 @@ function escapeAttribute(value: string): string {
     .replaceAll("<", "&lt;");
 }
 
-/** Resolve `href` to an absolute `http(s)` URL, or `null` to strip the link. */
+/**
+ * Resolve `href` to an absolute `http(s)` URL, or `null` to strip the link.
+ * The raw attribute value is decoded first, so an entity-obfuscated scheme
+ * (`java&#115;cript:`) is recognized — and rejected — as `javascript:`.
+ */
 function resolveHttpUrl(href: string | null, baseUrl?: string): string | null {
   if (href === null || href === "") return null;
+  href = decodeEntities(href);
   try {
     const url = baseUrl === undefined ? new URL(href) : new URL(href, baseUrl);
     return url.protocol === "http:" || url.protocol === "https:"

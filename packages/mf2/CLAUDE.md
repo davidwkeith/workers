@@ -24,7 +24,11 @@ before persistence, and the FNV-1a/base36 stable-id hash.
   workerd global: the API is async, tests run under the Workers pool, and
   Node hosts rely on `@dwk/cf-shims`'s `installHTMLRewriter()`.
 - **Pragmatic, not a full mf2 engine.** Only the properties the consumers
-  need; no implied properties, no `value-class`, no entity decoding.
+  need; no implied properties, no `value-class`.
+- **Entities decode on interpreted values only.** `HTMLRewriter` hands back
+  raw, undecoded text/attribute values, so URL/date/plain-text properties go
+  through `decodeEntities` (predefined five + numeric refs — never the full
+  HTML5 table); captured/emitted HTML stays encoded as written.
 - **Captured content HTML is unsanitized by design** — extraction and
   sanitization are separate passes; consumers sanitize at capture time.
 - **Consumers' behavior is the contract.** `@dwk/microsub`'s `hfeed`/timeline
@@ -46,6 +50,7 @@ src/index.ts         # public surface
 src/jf2.ts           # Jf2Entry/Jf2Author/Jf2Content shapes + fnv1aBase36
 src/hentry.ts        # parseHEntries (h-entry/h-card extraction)
 src/sanitize.ts      # sanitizeHtml (allowlist UGC sanitizer)
+src/entities.ts      # decodeEntities (minimal named + numeric references)
 src/void-elements.ts # shared HTML void-element set
 src/*.test.ts        # colocated tests
 ```

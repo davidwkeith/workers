@@ -29,9 +29,22 @@ describe("sanitizeHtml", () => {
   it("unwraps links with unsafe or unresolvable hrefs", async () => {
     expect(await sanitizeHtml('<a href="javascript:alert(1)">x</a>')).toBe("x");
     expect(await sanitizeHtml('<a href="data:text/html,hi">x</a>')).toBe("x");
+    // Entity-obfuscated scheme is decoded before validation.
+    expect(await sanitizeHtml('<a href="java&#115;cript:alert(1)">x</a>')).toBe(
+      "x",
+    );
     // Relative href with no base URL to resolve against.
     expect(await sanitizeHtml('<a href="/rel">x</a>')).toBe("x");
     expect(await sanitizeHtml("<a>x</a>")).toBe("x");
+  });
+
+  it("round-trips an entity-encoded href without double-escaping", async () => {
+    const out = await sanitizeHtml(
+      '<a href="https://a.example/?x=1&amp;y=2">x</a>',
+    );
+    expect(out).toBe(
+      '<a href="https://a.example/?x=1&amp;y=2" rel="ugc nofollow">x</a>',
+    );
   });
 
   it("resolves relative hrefs against baseUrl", async () => {

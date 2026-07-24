@@ -81,6 +81,14 @@ const RESPONSE_PROPERTIES: ReadonlyArray<
   ["bookmark-of", "bookmark"],
 ];
 
+/** Encode decoded plain text as HTML text content. */
+function escapeText(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function classify(
   entry: Jf2Entry,
   normalizedTarget: string,
@@ -129,9 +137,11 @@ export async function extractEnrichment(
         : undefined;
 
     // `e-content` HTML preferred; a text-only capture (e.g. a `p-summary`
-    // fallback) is still routed through the sanitizer, which passes encoded
-    // text through and applies the same truncation.
-    const raw = entry.content?.html ?? entry.content?.text;
+    // fallback) is decoded plain text, so it is re-encoded before being
+    // routed through the sanitizer for the same truncation treatment.
+    const raw =
+      entry.content?.html ??
+      (entry.content?.text ? escapeText(entry.content.text) : undefined);
     const content = raw
       ? await sanitizeHtml(raw, {
           baseUrl,

@@ -22,6 +22,11 @@ Provides:
   all attributes are stripped except a validated absolute `http(s)` `a[href]`,
   `rel="ugc nofollow"` is forced onto every surviving link, and output can be
   truncated on text length with open tags closed.
+- `decodeEntities(input)` — minimal entity decoding (the predefined five plus
+  numeric references). This runtime's `HTMLRewriter` hands back raw,
+  undecoded text/attribute values, so the extractor and sanitizer decode
+  every value they interpret (URLs, dates, plain text) while leaving
+  captured HTML encoded as written.
 - `fnv1aBase36(input)` — the small stable hash behind JF2 fallback `_id`s,
   exported so consumers can derive matching stable ids.
 

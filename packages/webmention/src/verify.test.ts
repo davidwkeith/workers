@@ -50,6 +50,14 @@ describe("sourceLinksTo", () => {
     ).toBe(true);
   });
 
+  it("matches an entity-encoded href against a target with a query string", async () => {
+    const queryTarget = "https://example.com/article?a=1&b=2";
+    const html = '<a href="https://example.com/article?a=1&amp;b=2">x</a>';
+    expect(await sourceLinksTo(html, queryTarget, source, "text/html")).toBe(
+      true,
+    );
+  });
+
   it("is false when the source does not link to the target", async () => {
     const html = '<a href="https://elsewhere.example/">x</a>';
     expect(await sourceLinksTo(html, target, source, "text/html")).toBe(false);

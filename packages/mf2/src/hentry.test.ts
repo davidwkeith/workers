@@ -80,9 +80,32 @@ describe("parseHEntries", () => {
         <div class="e-content"><p>Nice <em>post</em> &amp; thanks!</p><img src="/pic.png"></div>
       </div>`;
     const [entry] = await parseHEntries(html, "https://x.example/");
-    expect(entry?.content?.text).toBe("Nice post &amp; thanks!");
+    // Plain-text properties are entity-decoded; the HTML capture stays
+    // encoded as written.
+    expect(entry?.content?.text).toBe("Nice post & thanks!");
     expect(entry?.content?.html).toBe(
       '<p>Nice <em>post</em> &amp; thanks!</p><img src="/pic.png">',
+    );
+  });
+
+  it("decodes entities in attribute-valued and text-valued properties", async () => {
+    const html = `
+      <div class="h-entry">
+        <a class="u-in-reply-to" href="https://t.example/?a=1&amp;b=2">re</a>
+        <p class="p-name">O&#39;Brien &amp; friends</p>
+      </div>`;
+    const [entry] = await parseHEntries(html, "https://x.example/");
+    expect(entry?.["in-reply-to"]).toBe("https://t.example/?a=1&b=2");
+    expect(entry?.name).toBe("O'Brien & friends");
+  });
+
+  it("does not double-escape raw attribute values in the HTML capture", async () => {
+    const html =
+      `<div class="h-entry"><div class="e-content">` +
+      `<a href="https://t.example/?a=1&amp;b=2">x</a></div></div>`;
+    const [entry] = await parseHEntries(html, "https://x.example/");
+    expect(entry?.content?.html).toBe(
+      '<a href="https://t.example/?a=1&amp;b=2">x</a>',
     );
   });
 

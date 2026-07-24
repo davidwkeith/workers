@@ -16,6 +16,7 @@
  */
 
 export { parseHEntries } from "./hentry.js";
+export { decodeEntities } from "./entities.js";
 export {
   sanitizeHtml,
   SANITIZE_ALLOWED_TAGS,
