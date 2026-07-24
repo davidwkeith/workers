@@ -323,6 +323,23 @@ Cloudflare shims lived in `@dwk/server` until a second consumer justified the
 `@dwk/cf-shims` extraction (#381). If the Deno host (or a future host) wants
 it, extraction is mechanical.
 
+> **Update (issue #428): implemented** as
+> `packages/server/src/libsql-kv.ts` (`LibsqlKv`, plus the exported
+> `encodeKvKey`/`decodeKvKey` codec), with the §14-item-1 unit tests and the
+> §14 integration posture's first slice (the real `@dwk/deno-host`
+> lease/alarm/queue-broker code driven against `LibsqlKv`, including the
+> two-replica claim race) colocated in `libsql-kv.test.ts`. Two design
+> refinements from the sketch above, both invisible to the seam's consumers
+> (equality-only CAS): the versionstamp is a **store-wide** monotonic
+> sequence rather than per-key (`kv_meta.seq` — a per-key counter could
+> reissue a stamp after a sweep deletes and a later write recreates the key,
+> letting a stale CAS wrongly succeed), and all `set`s in one atomic commit
+> share one stamp. Checks are evaluated into a scratch column
+> (`kv_meta.ok`) **before** any mutation in the same `batch(...,"write")`
+> transaction, so mutations are guarded by pre-mutation state exactly as the
+> seam's reference semantics require. Phases 2+ (wiring it into a `central`
+> mode) remain unimplemented.
+
 **Alternatives considered and rejected:**
 
 - *Redis/Valkey* — adds a third centralized service and a new client

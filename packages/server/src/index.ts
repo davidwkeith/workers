@@ -53,6 +53,17 @@ export {
 
 export { installRequestDuplex } from "./request-duplex.js";
 
+// Scale-out coordination store (spec/scale-out.md §8, #428): @dwk/deno-host's
+// `DenoKvLike` seam over a centralized libSQL database, so the lease/alarm/
+// queue machinery can span replicas. Standalone for now — nothing in the
+// local-storage host composes it yet.
+export {
+  LibsqlKv,
+  encodeKvKey,
+  decodeKvKey,
+  type LibsqlKvOptions,
+} from "./libsql-kv.js";
+
 export {
   acquireWriterLock,
   DataDirectoryLockedError,

@@ -72,6 +72,9 @@ src/bindings.ts               # assembleBindings (shims → Env, on-disk layout)
 src/context.ts                # WaitUntilTracker, HostExecutionContext
 src/lifecycle.ts              # queue/scheduled handler adapters (bind Env + ctx)
 src/lock.ts                   # acquireWriterLock, data directory locking
+src/libsql-kv.ts              # LibsqlKv: @dwk/deno-host's DenoKvLike over a
+                              #   centralized libSQL DB (scale-out §8, #428);
+                              #   standalone — not composed into the host yet
 src/request-duplex.ts         # installRequestDuplex for streaming request bodies
 src/web-socket-upgrade.ts     # bridges a real HTTP Upgrade socket to a mount's DO
                               #   (the one shim-adjacent piece that stays here — see above)
@@ -87,6 +90,9 @@ The Cloudflare binding shims and runtime-global polyfills themselves
 ## Dependencies (runtime)
 
 - `@dwk/cf-shims` — the Cloudflare binding shims and runtime-global seams.
+- `@dwk/deno-host` — the `DenoKvLike`/`LibsqlClientLike` seams `LibsqlKv`
+  implements/consumes (type-only in production code today; its runtime
+  lease/alarm/queue machinery arrives with the scale-out `central` mode).
 - `@dwk/log` — structured logging.
 - `express` (5.x) — HTTP server.
 - `helmet` — baseline security-header middleware (nosniff, frame-options,
