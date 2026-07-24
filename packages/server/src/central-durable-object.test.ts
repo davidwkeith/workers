@@ -89,6 +89,72 @@ describe("createCentralDurableObjectNamespace (spec/scale-out.md §6.2)", () => 
     expect(fetchRan).toBe(false);
   });
 
+  it("logs sync duration on success and a warning on sync failure (spec/scale-out.md §12, #433)", async () => {
+    const kv = fakeKv();
+    const debugs: Array<[string, Record<string, unknown>]> = [];
+    const warnings: Array<[string, Record<string, unknown>]> = [];
+    const logger = {
+      debug: (event: string, fields?: Record<string, unknown>) =>
+        debugs.push([event, fields ?? {}]),
+      info: () => {},
+      warn: (event: string, fields?: Record<string, unknown>) =>
+        warnings.push([event, fields ?? {}]),
+      error: () => {},
+    };
+
+    class OkObject extends DurableObject<Record<string, never>> {
+      async fetch(): Promise<Response> {
+        return new Response("ok");
+      }
+    }
+    const ok = createCentralDurableObjectNamespace(OkObject, {
+      kv,
+      className: "Ok",
+      env: {},
+      getStorageClient: createFakeEmbeddedReplicaFactory(
+        createFakeEmbeddedReplicaPrimaries(),
+      ),
+      logger,
+    });
+    await ok.get(ok.idFromName("alice")).fetch(new Request("http://x/"));
+    expect(debugs).toHaveLength(1);
+    expect(debugs[0]?.[0]).toBe("central_do.sync_duration_ms");
+    expect(debugs[0]?.[1]?.["className"]).toBe("Ok");
+    expect(typeof debugs[0]?.[1]?.["durationMs"]).toBe("number");
+
+    class FailingSyncObject extends DurableObject<Record<string, never>> {
+      async fetch(): Promise<Response> {
+        return new Response("ok");
+      }
+    }
+    const failing = createCentralDurableObjectNamespace(FailingSyncObject, {
+      kv,
+      className: "Failing",
+      env: {},
+      getStorageClient: () => ({
+        exec: () => undefined,
+        prepare: () => ({ all: () => [], run: () => ({ changes: 0 }) }),
+        sync: async () => {
+          throw new Error("primary unreachable");
+        },
+      }),
+      logger,
+    });
+    await expect(
+      failing.get(failing.idFromName("alice")).fetch(new Request("http://x/")),
+    ).rejects.toThrow("primary unreachable");
+    expect(warnings).toEqual([
+      [
+        "central_do.sync_error",
+        {
+          className: "Failing",
+          idHex: failing.idFromName("alice").toString(),
+          error: "primary unreachable",
+        },
+      ],
+    ]);
+  });
+
   it("fake embedded-replica client: writes land on the shared primary immediately, reads stay local until sync()", () => {
     const primaries = createFakeEmbeddedReplicaPrimaries();
     const factory = createFakeEmbeddedReplicaFactory(primaries);

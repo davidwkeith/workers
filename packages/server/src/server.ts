@@ -143,6 +143,44 @@ export class DwkServer {
     this.#release?.();
     this.#logger.info("server.closed");
   }
+
+  /**
+   * Central-mode graceful drain (spec/scale-out.md §12), in the order the
+   * spec requires: stop accepting new connections → stop `fleetPollers`
+   * (the `CentralFleetPoller`/`CentralCronScheduler` instances a central-mode
+   * deployment runs alongside this server — claimed-but-unfinished work
+   * redelivers by contract; in-flight polls finish) → drain the
+   * `WaitUntilTracker` → close WebSockets with a going-away code → release
+   * any held leases via the normal `finally` paths (already true by
+   * construction — a lease is released or expires on its own once its
+   * holding request/poll completes) → exit.
+   *
+   * This is a **separate method from {@link close}**, not a parameterized
+   * variant of it: `close()`'s order (websockets first) is unchanged and
+   * still exactly right for local mode, which has no cross-replica leases to
+   * respect and no fleet pollers to stop. Central-mode deployments call this
+   * instead of `close()`.
+   */
+  async closeCentral(
+    fleetPollers: readonly { stop(): Promise<void> }[] = [],
+  ): Promise<void> {
+    const server = this.#httpServer;
+    if (server !== null) {
+      await new Promise<void>((resolvePromise) => {
+        server.close(() => resolvePromise());
+        server.closeIdleConnections?.();
+      });
+      this.#httpServer = null;
+    }
+    await Promise.all(fleetPollers.map((poller) => poller.stop()));
+    await this.#cron?.stop();
+    await this.#queue?.stop();
+    await this.#tracker.drain();
+    this.#wsCleanup?.();
+    this.#wsCleanup = null;
+    this.#release?.();
+    this.#logger.info("server.closed");
+  }
 }
 
 /**

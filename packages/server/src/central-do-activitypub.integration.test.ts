@@ -8,7 +8,7 @@
  * differs (a `@dwk/deno-host`-backed namespace instead of `@dwk/cf-shims`'s).
  *
  * Unlike local mode, `@dwk/deno-host`'s namespace never auto-arms a timer for
- * a scheduled alarm — each replica must run a `DurableObjectAlarmPoller`
+ * a scheduled alarm — each replica must run a `CentralFleetPoller`
  * (spec/scale-out.md §6.3) for the delivery retry to ever fire, exactly as a
  * real deployment would.
  *
@@ -29,7 +29,7 @@ import {
 
 import { createCentralServer, type DwkServer } from "./server.js";
 import { createCentralDurableObjectNamespace } from "./central-durable-object.js";
-import { DurableObjectAlarmPoller } from "./central-do-poller.js";
+import { CentralFleetPoller } from "./central-fleet-poller.js";
 import { LibsqlKv } from "./libsql-kv.js";
 import {
   createFakeEmbeddedReplicaFactory,
@@ -42,7 +42,7 @@ const BASE = "https://social.example";
 const REMOTE = "https://remote.example/users/alice";
 
 const tempDirs: string[] = [];
-const pollers: DurableObjectAlarmPoller[] = [];
+const pollers: CentralFleetPoller[] = [];
 
 function dataDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "dwk-central-ap-"));
@@ -143,7 +143,7 @@ async function startReplica(
   const { port } = await server.listen(0, "127.0.0.1");
   const origin = `http://127.0.0.1:${port}`;
 
-  const poller = new DurableObjectAlarmPoller({
+  const poller = new CentralFleetPoller({
     namespaces: [namespace],
     intervalMs: 20,
     jitterMs: 0,

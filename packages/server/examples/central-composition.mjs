@@ -23,7 +23,7 @@ import {
   assembleCentralBindings,
   createCentralDurableObjectNamespace,
   createCentralServer,
-  DurableObjectAlarmPoller,
+  CentralFleetPoller,
   LibsqlKv,
 } from "@dwk/server";
 import { createWebfinger } from "@dwk/webfinger";
@@ -136,9 +136,18 @@ process.stdout.write(`dwk-serve (central mode) listening on :${port}\n`);
 // Every replica MUST run this: @dwk/deno-host's Durable Object namespace
 // never arms a timer of its own (spec/scale-out.md §6.3) — without a poller,
 // `env.WEBAUTHN`'s scheduled alarms (and the coordination KV's expired-row
-// sweep) never fire on this replica.
-const alarmPoller = new DurableObjectAlarmPoller({
+// sweep) never fire on this replica. (No queue bindings in this example, so
+// `queues` is omitted — see spec/scale-out.md §7.1 for a queue-bearing
+// composition.)
+const fleetPoller = new CentralFleetPoller({
   namespaces: [env.WEBAUTHN],
   kv: coordinationKv,
 });
-alarmPoller.start();
+fleetPoller.start();
+
+// Graceful drain (spec/scale-out.md §12): stop accepting connections, stop
+// the fleet poller, drain outstanding waitUntil work, close WebSockets, then
+// exit — in that order. Wire this to SIGTERM/SIGINT in a real deployment.
+process.once("SIGTERM", () => {
+  void server.closeCentral([fleetPoller]).then(() => process.exit(0));
+});

@@ -49,6 +49,7 @@ import {
   type DurableObjectNamespaceLike,
   type SyncSqliteDatabaseLike,
 } from "@dwk/deno-host";
+import { noopLogger, type Logger } from "@dwk/log";
 
 /**
  * The synchronous embedded-replica client shape central-mode DO storage
@@ -77,6 +78,8 @@ export interface CentralDurableObjectNamespaceOptions<Env> {
   readonly getStorageClient: (idHex: string) => EmbeddedReplicaClientLike;
   readonly leaseTtlMs?: number;
   readonly leaseAcquireTimeoutMs?: number;
+  /** Observability (spec/scale-out.md §12, #433): logs `central_do.sync_duration_ms`/`central_do.sync_error`. Defaults to a no-op. */
+  readonly logger?: Logger;
 }
 
 /**
@@ -94,6 +97,7 @@ export function createCentralDurableObjectNamespace<
   ctor: DurableObjectClass<T>,
   options: CentralDurableObjectNamespaceOptions<Env>,
 ): DurableObjectNamespaceLike<T> {
+  const logger = options.logger ?? noopLogger;
   return createDurableObjectNamespace<Env, T>(ctor, {
     kv: options.kv,
     className: options.className,
@@ -101,8 +105,23 @@ export function createCentralDurableObjectNamespace<
     getStorageClient: options.getStorageClient,
     leaseTtlMs: options.leaseTtlMs,
     leaseAcquireTimeoutMs: options.leaseAcquireTimeoutMs,
-    onLeaseAcquired: async (_idHex, client) => {
-      await (client as EmbeddedReplicaClientLike).sync();
+    onLeaseAcquired: async (idHex, client) => {
+      const startedAt = Date.now();
+      try {
+        await (client as EmbeddedReplicaClientLike).sync();
+        logger.debug("central_do.sync_duration_ms", {
+          className: options.className,
+          idHex,
+          durationMs: Date.now() - startedAt,
+        });
+      } catch (err) {
+        logger.warn("central_do.sync_error", {
+          className: options.className,
+          idHex,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     },
   });
 }

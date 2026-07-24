@@ -301,3 +301,76 @@ describe("createCentralServer", () => {
     ).rejects.toThrow(StartupProbeError);
   });
 });
+
+describe("DwkServer.closeCentral", () => {
+  it("stops accepting connections, stops every fleet poller, and drains outstanding work before resolving", async () => {
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    const tracker = new WaitUntilTracker();
+    server = await createCentralServer({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [webfingerMount],
+      env: {},
+      storage: { mode: "central", kv },
+      tracker,
+    });
+    const { port } = await server.listen(0, "127.0.0.1");
+    base = `http://127.0.0.1:${port}`;
+
+    const order: string[] = [];
+    let releaseBackgroundWork: (() => void) | undefined;
+    tracker.add(
+      new Promise<void>((resolve) => {
+        releaseBackgroundWork = () => {
+          order.push("background-work-settled");
+          resolve();
+        };
+      }),
+    );
+    const pollerA = {
+      stop: async () => {
+        order.push("pollerA-stopped");
+      },
+    };
+    const pollerB = {
+      stop: async () => {
+        order.push("pollerB-stopped");
+      },
+    };
+
+    // Resolve the tracked background work shortly after close begins, so the
+    // ordering assertion below actually exercises the drain (rather than the
+    // tracker already being empty by the time closeCentral runs).
+    setTimeout(() => releaseBackgroundWork?.(), 5);
+
+    await server.closeCentral([pollerA, pollerB]);
+
+    // Every fleet poller is stopped, and stopped before the drain settles.
+    expect(order).toContain("pollerA-stopped");
+    expect(order).toContain("pollerB-stopped");
+    expect(order.indexOf("pollerA-stopped")).toBeLessThan(
+      order.indexOf("background-work-settled"),
+    );
+    expect(order.indexOf("pollerB-stopped")).toBeLessThan(
+      order.indexOf("background-work-settled"),
+    );
+
+    // No longer accepting connections.
+    await expect(fetch(base)).rejects.toBeTruthy();
+    server = null; // already closed; afterEach's close() would be a harmless no-op regardless
+  });
+
+  it("works with no fleet pollers given", async () => {
+    const kv = new LibsqlKv(createFakeLibsqlClient());
+    server = await createCentralServer({
+      baseUrl: "http://localhost",
+      dataDir: dataDir(),
+      mounts: [webfingerMount],
+      env: {},
+      storage: { mode: "central", kv },
+    });
+    await server.listen(0, "127.0.0.1");
+    await expect(server.closeCentral()).resolves.toBeUndefined();
+    server = null;
+  });
+});
