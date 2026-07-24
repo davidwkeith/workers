@@ -5,7 +5,7 @@
 | **Type** | endpoint |
 | **Ships a DO?** | no |
 | **Standard** | [Microsub](https://indieweb.org/Microsub-spec) |
-| **Status** | proposed — tracked in [#91](https://github.com/davidwkeith/workers/issues/91) |
+| **Status** | implemented (unreleased) — tracked in [#91](https://github.com/davidwkeith/workers/issues/91) |
 
 A Microsub server: the **read side** of the IndieWeb, completing the loop the
 other endpoint packages leave open. [`@dwk/micropub`](micropub.md) is the write

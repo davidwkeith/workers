@@ -34,6 +34,44 @@ A single source of truth for every workspace package:
 
 `status` is one of `pending`, `failing`, `passing`, `not-applicable`.
 
+### When `integration` is `not-applicable`
+
+`integration` describes a **deployed lifecycle** — a package brought up behind
+its bindings and exercised over the wire. The cross-standard reusable libs that
+take plain-data inputs and declare no bindings have no such lifecycle to run:
+their colocated unit tests _are_ the whole story, and leaving them `pending`
+would block a stable release on a run that can never happen. Those packages
+carry `integration.status = "not-applicable"`:
+
+`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
+`@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
+`@dwk/esi`, `@dwk/mf2`.
+
+This exempts **only** the integration lifecycle. A lib that has a conformance
+suite still has to pass it (`@dwk/ldn`'s `ldn-test-suite`, for one), and every
+endpoint package — plus the binding-bound libs (`@dwk/store`, `@dwk/cf-shims`,
+`@dwk/deno-host`) — stays gated on a real run.
+
+It is also **not** on its own enough to let one of these libs go stable. The
+gate refuses a stable package whose `suites` are empty _and_ whose integration
+is `not-applicable`, because that combination would pass vacuously — zero
+recorded evidence:
+
+```
+@dwk/dpop@1.0.0: stable package with no conformance suites and integration
+"not-applicable" — mark at least one suite as "not-applicable" to gate the release.
+```
+
+So stabilising `@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/oauth`,
+`@dwk/http-signatures`, `@dwk/safe-fetch`, `@dwk/esi`, `@dwk/calendar`, or
+`@dwk/mf2` still needs a deliberate per-package call on the **suites** side —
+naming an external suite and running it (RFC test vectors for
+`@dwk/http-signatures`, the microformats2 parser tests for `@dwk/mf2`, an
+iCalendar validator for `@dwk/calendar`), or recording an explicit
+`not-applicable` suite entry saying no external suite exists for it. That is a
+judgment call per package, deliberately left to the release owner rather than
+defaulted here.
+
 ## Targets: Cloudflare (primary) and the Node self-host
 
 Conformance is tracked per **target**, declared at the top of `status.json`:
@@ -72,9 +110,9 @@ status is not `passing`/`not-applicable` blocks the release:
 - It runs in CI on every PR/push (`.github/workflows/conformance.yml`).
 - `pnpm release:gate -- --report` prints the status table without enforcing.
 
-Because every package is currently `0.0.0`, nothing is gated yet — but the wiring
-is live, so the first attempt to bump a package to `1.0.0` without recording its
-conformance green will fail.
+Because every package is still on a `0.1.0-beta.N` prerelease, nothing is gated
+yet — but the wiring is live, so the first attempt to bump a package to `1.0.0`
+without recording its conformance green will fail.
 
 ## Suites per standard
 

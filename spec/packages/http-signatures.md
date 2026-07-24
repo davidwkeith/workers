@@ -6,7 +6,7 @@
 | **Ships a DO?** | no |
 | **Standard** | [HTTP Message Signatures (RFC 9421)](https://www.rfc-editor.org/rfc/rfc9421) (+ legacy `draft-cavage` profile) |
 | **Used by** | [`@dwk/activitypub`](activitypub.md) server-to-server delivery |
-| **Status** | proposed — tracked in [#59](https://github.com/davidwkeith/workers/issues/59) |
+| **Status** | implemented (unreleased) — tracked in [#59](https://github.com/davidwkeith/workers/issues/59) |
 
 Sign and verify HTTP messages. A **cross-standard reusable** sitting alongside
 [`@dwk/dpop`](dpop.md): it MUST stay free of IndieWeb / Solid / ActivityPub
