@@ -590,6 +590,19 @@
         "status": "not-applicable",
         "cases": []
       }
+    },
+    "@dwk/solid-oidc": {
+      "standard": "Solid-OIDC",
+      "suites": {},
+      "integration": {
+        "status": "pending",
+        "cases": [],
+        "targets": {
+          "node": {
+            "status": "passing"
+          }
+        }
+      }
     }
   }
 }

@@ -58,6 +58,63 @@
       ]
     },
     {
+      "id": "solid-oidc",
+      "package": "@dwk/solid-oidc",
+      "displayName": "Solid-OIDC Provider",
+      "description": "Run your own OpenID Provider: issue DPoP-bound WebID tokens your Solid pod accepts, so identity lives on your domain.",
+      "group": "identity",
+      "binding": {
+        "kind": "settingsActivated"
+      },
+      "resources": [
+        {
+          "type": "d1",
+          "binding": "AUTH_DB"
+        },
+        {
+          "type": "secret",
+          "binding": "OIDC_SIGNING_KEY"
+        }
+      ],
+      "routes": [
+        {
+          "path": "/.well-known/openid-configuration",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createSolidOidc",
+          "authorityBound": true,
+          "authorityBinding": true,
+          "specificationURL": "https://solidproject.org/TR/solid-oidc"
+        },
+        {
+          "path": "/oidc/jwks",
+          "match": "exact",
+          "methods": ["GET"],
+          "head": true,
+          "handler": "createSolidOidc",
+          "authorityBinding": true,
+          "specificationURL": "https://solidproject.org/TR/solid-oidc"
+        },
+        {
+          "path": "/oidc/authorize",
+          "match": "exact",
+          "methods": ["GET"],
+          "handler": "createSolidOidc",
+          "authorityBinding": true,
+          "specificationURL": "https://solidproject.org/TR/solid-oidc"
+        },
+        {
+          "path": "/oidc/token",
+          "match": "exact",
+          "methods": ["POST"],
+          "handler": "createSolidOidc",
+          "authorityBinding": true,
+          "specificationURL": "https://solidproject.org/TR/solid-oidc"
+        }
+      ]
+    },
+    {
       "id": "micropub",
       "package": "@dwk/micropub",
       "displayName": "Micropub",

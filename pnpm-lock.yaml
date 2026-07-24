@@ -372,6 +372,18 @@ importers:
         specifier: 0.28.1
         version: 0.28.1
 
+  packages/solid-oidc:
+    dependencies:
+      '@dwk/dpop':
+        specifier: workspace:*
+        version: link:../dpop
+      '@dwk/log':
+        specifier: workspace:*
+        version: link:../log
+      '@dwk/oauth':
+        specifier: workspace:*
+        version: link:../oauth
+
   packages/solid-pod:
     dependencies:
       '@dwk/calendar':
