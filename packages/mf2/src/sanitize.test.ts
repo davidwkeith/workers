@@ -147,6 +147,26 @@ describe("sanitizeHtml", () => {
     );
   });
 
+  it("keeps only the label text for an img nested inside a link", async () => {
+    // The "linked photo" pattern: nested <a> is invalid HTML, so the inner
+    // image contributes its label to the outer link instead.
+    const out = await sanitizeHtml(
+      '<a href="https://a.example/full.jpg"><img src="https://a.example/thumb.jpg" alt="photo"></a>',
+    );
+    expect(out).toBe(
+      '<a href="https://a.example/full.jpg" rel="ugc nofollow">photo</a>',
+    );
+  });
+
+  it("still links an img when its wrapping link was unwrapped", async () => {
+    const out = await sanitizeHtml(
+      '<a href="javascript:x()"><img src="https://a.example/p.jpg" alt="photo"></a>',
+    );
+    expect(out).toBe(
+      '<a href="https://a.example/p.jpg" rel="ugc nofollow">photo</a>',
+    );
+  });
+
   it("counts img labels toward maxTextLength", async () => {
     const out = await sanitizeHtml(
       '<p>abcde<img src="https://a.example/p.jpg" alt="0123456789"></p>',

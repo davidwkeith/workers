@@ -167,6 +167,10 @@ export async function sanitizeHtml(
   let textLength = 0;
   let truncated = false;
   let droppedDepth = 0;
+  // Links currently open in the output — an <img> inside one must not emit a
+  // second <a> (nested anchors are invalid HTML; browsers auto-close the
+  // outer one, mangling the surrounding structure).
+  let openLinks = 0;
   // Tags emitted but not yet closed. `onEndTag` never fires for an element the
   // source leaves unclosed, so whatever remains here is closed after the parse
   // — stored output must not leak formatting past the fragment. Each entry
@@ -209,7 +213,7 @@ export async function sanitizeHtml(
           if (label === "") return;
           const text = emitText(label);
           out +=
-            resolved === null
+            resolved === null || openLinks > 0
               ? text
               : `<a href="${escapeAttribute(resolved)}" rel="${SANITIZE_LINK_REL}">${text}</a>`;
           return;
@@ -237,11 +241,13 @@ export async function sanitizeHtml(
         }
         const token = { close };
         open.push(token);
+        if (tag === "a") openLinks++;
         el.onEndTag(() => {
           const index = open.lastIndexOf(token);
           if (index !== -1) {
             open.splice(index, 1);
             out += close;
+            if (tag === "a") openLinks--;
           }
         });
       },
