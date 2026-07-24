@@ -19,6 +19,9 @@
     "url": "git+https://github.com/davidwkeith/workers.git",
     "directory": "packages/indieauth"
   },
+  "bugs": {
+    "url": "https://github.com/davidwkeith/workers/issues"
+  },
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

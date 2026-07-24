@@ -12,7 +12,7 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **30 publishable packages** — the
+**Status: implemented, unreleased.** There are **31 publishable packages** — the
 reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
 `@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`,
@@ -20,7 +20,8 @@ reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
 endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
 `@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
 `@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
-`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`) —
+`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`,
+`@dwk/solid-oidc`) —
 plus two private
 packages that are never published: `@dwk/server`, the Node/Express
 self-hosting host (marked `"private": true`, ships only as a Docker image),
@@ -37,7 +38,12 @@ mode, packages with no prior
 stable release publish to the **`latest`** dist-tag, not `beta`, so plain
 `npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
 full release runbook. The hosted conformance suites tracked in
-`conformance/status.json` are all `pending` (see the release gate below). `@dwk/atproto-pds` is a Workers-native
+`conformance/status.json` are still `pending` — except `@dwk/activitypub`'s
+federation suite (`passing` against the `fedify` and `pixelfed` targets) and
+`@dwk/webdav`'s litmus run (`failing`; see `conformance/webdav-qa.md`). The
+plain-data libs that declare no bindings carry `integration: not-applicable`,
+since they have no deployed lifecycle to run (see the release gate below).
+`@dwk/atproto-pds` is a Workers-native
 AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
 P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
 neither `@dwk/store` nor `@dwk/rdf`. `@dwk/webdav` is still
@@ -167,7 +173,8 @@ injected state.
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`,
   `@dwk/mastodon-api` (named for the de-facto Mastodon client API standard;
   reads `@dwk/activitypub`'s DO only through its injected `MastodonBackend`
-  seam).
+  seam), `@dwk/solid-oidc` (the Solid-OIDC provider, composed from
+  `@dwk/oauth`'s primitives per `spec/open-questions.md` §1).
   `@dwk/atproto-pds` is the strategic outlier: it is the AT Protocol PDS endpoint
   but shares neither `@dwk/store` nor `@dwk/rdf` (its repository is an MST of
   DAG-CBOR records), so its storage core is self-contained.
@@ -303,9 +310,9 @@ when adding a package:
   `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
   `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
   `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
-  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`, and — the one lib
-  in this group — `@dwk/mf2` (its extractor/sanitizer run on the
-  `HTMLRewriter` global; no bindings).
+  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`, `@dwk/solid-oidc`,
+  and — the one lib in this group — `@dwk/mf2` (its extractor/sanitizer run on
+  the `HTMLRewriter` global; no bindings).
 - **Node-native packages** also run under `environment: "node"` (no
   Miniflare) but, unlike the pure libs above, are inherently Node-specific
   rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare

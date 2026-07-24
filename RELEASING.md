@@ -147,10 +147,10 @@ To start a _new_ prerelease line later: `pnpm changeset pre enter beta` (or
 
 ```bash
 # Each package on the expected dist-tag (registry is authoritative):
-for p in dpop rdf log store wac solid-pod activitypub micropub microsub \
-         indieauth webmention websub webfinger host-meta webauthn vc ldn \
-         oauth http-signatures remotestorage atproto-pds calendar webdav \
-         esi safe-fetch mcp; do
+for p in dpop rdf log store wac solid-pod solid-oidc activitypub micropub \
+         microsub indieauth webmention websub webfinger host-meta webauthn \
+         vc ldn oauth http-signatures remotestorage atproto-pds calendar \
+         webdav esi safe-fetch mcp mastodon-api mf2 cf-shims deno-host; do
   printf '%-22s beta=%s latest=%s\n' "@dwk/$p" \
     "$(npm view @dwk/$p dist-tags.beta 2>/dev/null)" \
     "$(npm view @dwk/$p dist-tags.latest 2>/dev/null)"
@@ -160,7 +160,7 @@ done
 npm view @dwk/server version            # expect E404
 
 # Git tags reached origin:
-git ls-remote --tags origin | grep -c '@dwk'   # expect 26 (one per publishable package)
+git ls-remote --tags origin | grep -c '@dwk'   # >= 31, one per publishable package per release
 ```
 
 The meaningful tag pre-1.0 is **`latest`** — it should equal the version you just
@@ -188,6 +188,23 @@ publish` sends packages that have _never had a stable release_ to the `latest`
   `npm i @dwk/<pkg>` (→ newest beta); `@dwk/<pkg>@beta` is stale — don't advertise
   it. This self-corrects on `pre exit` + `1.0.0`, when `latest` moves to the
   stable. We deliberately do **not** maintain the `beta` tag in the meantime.
+- **`@dwk/mcp`'s `latest` still points at the bad `0.0.0`** — outstanding, and
+  the one package where the rule above doesn't hold. The partial publish
+  repaired in PR #321 (see "Recovering from a bad publish" above) left `0.0.0`
+  on npm; the good `0.1.0-beta.0` landed on `beta` instead of `latest`, because
+  by then the package _did_ have a prior release for `changeset publish` to
+  treat as stable. So `npm i @dwk/mcp` currently installs the broken `0.0.0`.
+  Fix with a one-off dist-tag move (needs an npm token with publish rights to
+  the scope — it is a registry operation, not a repo change):
+
+  ```sh
+  npm dist-tag add @dwk/mcp@0.1.0-beta.0 latest
+  npm view @dwk/mcp dist-tags     # expect latest === 0.1.0-beta.0
+  ```
+
+  Verify this whenever a package's first real publish followed a bad one;
+  every other `@dwk` package's `latest` matches its local version today.
+
 - **Changeset's git tags don't survive to the push step.** `changeset publish`
   logs `New tag: ...` but those lightweight tags are not present when the next
   workflow step runs (`git push origin --tags` → "Everything up-to-date"), so the

@@ -21,6 +21,9 @@
     "url": "git+https://github.com/davidwkeith/workers.git",
     "directory": "packages/mcp"
   },
+  "bugs": {
+    "url": "https://github.com/davidwkeith/workers/issues"
+  },
   "sideEffects": false,
   "dependencies": {
     "@dwk/dpop": "workspace:*"
