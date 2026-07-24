@@ -230,6 +230,7 @@ function routedFixture() {
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
       head: true,
       handler: "createSolidPod",
+      specificationURL: "https://solidproject.org/TR/protocol",
     },
   ];
   return input;
@@ -283,6 +284,21 @@ test("an unknown match kind is rejected", () => {
   const violations = evaluateCatalog(input);
   assert.equal(violations.length, 1);
   assert.match(violations[0], /match/);
+});
+
+test("a prefix claim without a specificationURL is rejected", () => {
+  const input = routedFixture();
+  delete input.catalog.workers[1].routes[0].specificationURL;
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /prefix claim requires a "specificationURL"/);
+});
+
+test("an exact claim without a specificationURL still passes", () => {
+  const input = routedFixture();
+  // workers[0]'s /webmention exact claim carries none — recommended, not
+  // required, on exact claims.
+  assert.deepEqual(evaluateCatalog(input), []);
 });
 
 test("a prefix route path must end with a slash", () => {
@@ -410,6 +426,7 @@ test("nested prefixes across entries collide", () => {
     match: "prefix",
     methods: ["GET"],
     handler: "createWebmention",
+    specificationURL: "https://www.w3.org/TR/webmention/",
   });
   const violations = evaluateCatalog(input);
   assert.equal(violations.length, 1);
@@ -532,6 +549,7 @@ test("overlapping claims within the same entry are allowed", () => {
       methods: ["GET"],
       head: true,
       handler: "createWebmention",
+      specificationURL: "https://micropub.spec.indieweb.org/#media-endpoint",
     },
   );
   assert.deepEqual(evaluateCatalog(input), []);

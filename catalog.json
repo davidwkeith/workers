@@ -90,13 +90,15 @@
           "path": "/micropub",
           "match": "exact",
           "methods": ["GET", "POST"],
-          "handler": "createMicropub"
+          "handler": "createMicropub",
+          "specificationURL": "https://micropub.spec.indieweb.org/"
         },
         {
           "path": "/media",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createMicropub"
+          "handler": "createMicropub",
+          "specificationURL": "https://micropub.spec.indieweb.org/#media-endpoint"
         },
         {
           "path": "/media/",
@@ -142,7 +144,8 @@
           "path": "/microsub",
           "match": "exact",
           "methods": ["GET", "POST"],
-          "handler": "createMicrosub"
+          "handler": "createMicrosub",
+          "specificationURL": "https://indieweb.org/Microsub-spec"
         }
       ]
     },
@@ -172,7 +175,8 @@
           "path": "/webmention",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebmention"
+          "handler": "createWebmention",
+          "specificationURL": "https://www.w3.org/TR/webmention/"
         }
       ]
     },
@@ -201,7 +205,8 @@
           "path": "/websub",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebSub"
+          "handler": "createWebSub",
+          "specificationURL": "https://www.w3.org/TR/websub/"
         }
       ]
     },
@@ -228,13 +233,15 @@
           "match": "prefix",
           "methods": ["GET", "POST"],
           "head": true,
-          "handler": "createActivityPub"
+          "handler": "createActivityPub",
+          "specificationURL": "https://www.w3.org/TR/activitypub/"
         },
         {
           "path": "/inbox",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createActivityPub"
+          "handler": "createActivityPub",
+          "specificationURL": "https://www.w3.org/TR/activitypub/"
         },
         {
           "path": "/.well-known/nodeinfo",
@@ -242,14 +249,16 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createActivityPub",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://nodeinfo.diaspora.software/protocol.html"
         },
         {
           "path": "/nodeinfo/",
           "match": "prefix",
           "methods": ["GET"],
           "head": true,
-          "handler": "createActivityPub"
+          "handler": "createActivityPub",
+          "specificationURL": "https://nodeinfo.diaspora.software/protocol.html"
         }
       ]
     },
@@ -295,20 +304,23 @@
           "match": "exact",
           "methods": ["GET"],
           "handler": "createMastodonApi",
-          "authorityBinding": true
+          "authorityBinding": true,
+          "specificationURL": "https://docs.joinmastodon.org/spec/oauth/"
         },
         {
           "path": "/oauth/token",
           "match": "exact",
           "methods": ["POST"],
           "handler": "createMastodonApi",
-          "authorityBinding": true
+          "authorityBinding": true,
+          "specificationURL": "https://docs.joinmastodon.org/spec/oauth/"
         },
         {
           "path": "/oauth/revoke",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createMastodonApi"
+          "handler": "createMastodonApi",
+          "specificationURL": "https://docs.joinmastodon.org/spec/oauth/"
         }
       ]
     },
@@ -329,7 +341,8 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createWebfinger",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc7033"
         }
       ]
     },
@@ -350,7 +363,8 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createHostMeta",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc6415"
         },
         {
           "path": "/.well-known/host-meta.json",
@@ -358,7 +372,8 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createHostMeta",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc6415"
         }
       ]
     },
@@ -384,25 +399,29 @@
           "path": "/webauthn/register/options",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebAuthn"
+          "handler": "createWebAuthn",
+          "specificationURL": "https://www.w3.org/TR/webauthn-3/"
         },
         {
           "path": "/webauthn/register/verify",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebAuthn"
+          "handler": "createWebAuthn",
+          "specificationURL": "https://www.w3.org/TR/webauthn-3/"
         },
         {
           "path": "/webauthn/authenticate/options",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebAuthn"
+          "handler": "createWebAuthn",
+          "specificationURL": "https://www.w3.org/TR/webauthn-3/"
         },
         {
           "path": "/webauthn/authenticate/verify",
           "match": "exact",
           "methods": ["POST"],
-          "handler": "createWebAuthn"
+          "handler": "createWebAuthn",
+          "specificationURL": "https://www.w3.org/TR/webauthn-3/"
         }
       ]
     },
@@ -459,14 +478,16 @@
           "match": "exact",
           "methods": ["GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
           "head": true,
-          "handler": "createSolidPod"
+          "handler": "createSolidPod",
+          "specificationURL": "https://solidproject.org/TR/protocol"
         },
         {
           "path": "/pod/",
           "match": "prefix",
           "methods": ["GET", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
           "head": true,
-          "handler": "createSolidPod"
+          "handler": "createSolidPod",
+          "specificationURL": "https://solidproject.org/TR/protocol"
         }
       ],
       "triggers": [
@@ -523,7 +544,8 @@
             "OPTIONS"
           ],
           "head": true,
-          "handler": "createSolidPodWebdav"
+          "handler": "createSolidPodWebdav",
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc4918"
         },
         {
           "path": "/dav/",
@@ -542,7 +564,8 @@
             "OPTIONS"
           ],
           "head": true,
-          "handler": "createSolidPodWebdav"
+          "handler": "createSolidPodWebdav",
+          "specificationURL": "https://www.rfc-editor.org/rfc/rfc4918"
         },
         {
           "path": "/dav-credentials",
@@ -584,7 +607,8 @@
           "match": "prefix",
           "methods": ["GET", "PUT", "DELETE", "OPTIONS"],
           "head": true,
-          "handler": "createRemoteStorage"
+          "handler": "createRemoteStorage",
+          "specificationURL": "https://datatracker.ietf.org/doc/html/draft-dejong-remotestorage"
         }
       ],
       "triggers": [
@@ -623,7 +647,8 @@
           "path": "/xrpc/",
           "match": "prefix",
           "methods": ["GET", "POST"],
-          "handler": "createAtprotoPds"
+          "handler": "createAtprotoPds",
+          "specificationURL": "https://atproto.com/specs/xrpc"
         },
         {
           "path": "/.well-known/atproto-did",
@@ -631,7 +656,8 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createAtprotoPds",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://atproto.com/specs/handle"
         },
         {
           "path": "/.well-known/did.json",
@@ -639,7 +665,8 @@
           "methods": ["GET"],
           "head": true,
           "handler": "createAtprotoPds",
-          "authorityBound": true
+          "authorityBound": true,
+          "specificationURL": "https://w3c-ccg.github.io/did-method-web/"
         }
       ]
     }

@@ -336,6 +336,13 @@ function checkRoutes(entry, label, violations) {
           );
         }
       }
+    } else if (route.match === "prefix") {
+      // Anglesite-app's consumer (WorkerRouteClaims.validate) requires a
+      // governing specification on every prefix claim — only a specification
+      // can approve child paths (spec/catalog.md, Anglesite-app#829).
+      violations.push(
+        `${where}: a prefix claim requires a "specificationURL" (only a specification can approve child paths).`,
+      );
     }
 
     const key = `${route.match} ${route.path}`;

@@ -168,10 +168,12 @@ unrecognized JSON keys, so adding them is backward-compatible.
   them elsewhere). Defaults to `false` when omitted.
 - `specificationURL` — the governing protocol specification. Anglesite-app's
   consumer requires this on every `prefix` claim (only a specification can
-  approve child paths); recommended on `exact` claims too. Not yet
-  back-filled onto this repo's pre-existing `prefix` claims (`/users/`,
-  `/nodeinfo/`, `/pod/`, `/dav/`, `/storage/`, `/xrpc/`) — tracked as a
-  follow-up rather than bundled into an unrelated change.
+  approve child paths); recommended on `exact` claims too. Back-filled onto
+  every claim in `catalog.json`, and the catalog gate now enforces the
+  prefix-claim requirement mechanically. One deliberate exception:
+  `webdav`'s `/dav-credentials` is a package-defined admin endpoint with no
+  governing external specification, and as an `exact` claim the field is
+  optional there.
 
 **Mount-prefix contract.** The composition contract lets a composer mount any
 handler under an arbitrary path prefix. Route claims are static data, so they
