@@ -6,20 +6,29 @@
 #
 #   docker build -f packages/server/Dockerfile -t dwk-server .
 #
-# To run your own composition, point `bundle` at your entry and rebuild. Identity
-# is HTTPS-rooted: set DWK_BASE_URL to your public https origin and terminate TLS
-# at a reverse proxy (Caddy/nginx/Traefik) in front of this container.
-# @see spec/self-hosting.md §3, §10, §12
+# To run your own composition, point `bundle` at your entry and rebuild — or
+# override BUNDLE_ENTRY at build time (`docker-compose.yml`'s `central`-mode
+# reference does this to bundle `examples/central-composition.mjs` instead):
+#
+#   docker build -f packages/server/Dockerfile \
+#     --build-arg BUNDLE_ENTRY=packages/server/examples/central-composition.mjs \
+#     -t dwk-server-central .
+#
+# Identity is HTTPS-rooted: set DWK_BASE_URL to your public https origin and
+# terminate TLS at a reverse proxy (Caddy/nginx/Traefik) in front of this
+# container.
+# @see spec/self-hosting.md §3, §10, §12; spec/scale-out.md §14/§15 (central mode)
 
 FROM node:24-bookworm-slim AS builder
+ARG BUNDLE_ENTRY=packages/server/examples/serve.mjs
 WORKDIR /repo
 RUN corepack enable
 COPY . .
 # Build all workspace packages (the bundle resolves @dwk/* deps from their dist),
-# then bundle @dwk/server into the single-file image payload.
+# then bundle the composition entry into the single-file image payload.
 RUN pnpm install --frozen-lockfile \
  && pnpm build \
- && pnpm --filter @dwk/server bundle
+ && pnpm --filter @dwk/server bundle "/repo/${BUNDLE_ENTRY}"
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production \

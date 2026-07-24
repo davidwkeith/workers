@@ -7,10 +7,15 @@
 // runnable script (`node examples/central-composition.mjs`), not a
 // `dwk-serve` config module — `dwk-serve`'s `startServer` calls `createServer`
 // directly and doesn't yet know about `createCentralServer`'s preflight
-// sequence (a follow-up). It is not bundled/run by this package's own build or
-// tests, and the libSQL/S3 client libraries it references (`@libsql/client`,
-// `libsql`, `aws4fetch`) are the deployer's own dependencies to add, not
-// `@dwk/server`'s.
+// sequence (a follow-up). It is not run by this package's own tests, and the
+// libSQL/S3 client libraries it references (`@libsql/client`, `libsql`,
+// `aws4fetch`) stay out of `@dwk/server`'s runtime `dependencies` — a
+// deployer's own composition-root choice, per every other central-mode
+// seam's "the composing app injects an already-connected client" posture —
+// but are `devDependencies` here (phase 5, #434) so this script can double as
+// the docker-compose reference's bundled entry (`../docker-compose.yml`,
+// `pnpm --filter @dwk/server bundle examples/central-composition.mjs`) and a
+// live-verification test bed, not just a documentation snippet.
 //
 // Composition order matters here (spec/scale-out.md §9.2/§9.3): build the
 // coordination KV client, assemble the Env, then call `createCentralServer`
@@ -43,9 +48,14 @@ const libsql = createClient({
 });
 const coordinationKv = new LibsqlKv(libsql);
 
+// `service`/`region` are required (not inferable) for a non-AWS S3-compatible
+// endpoint such as MinIO or Backblaze B2 — aws4fetch's own inference only
+// works for `*.amazonaws.com`-shaped hostnames.
 const s3 = new AwsClient({
   accessKeyId: process.env.DWK_S3_ACCESS_KEY_ID,
   secretAccessKey: process.env.DWK_S3_SECRET_ACCESS_KEY,
+  service: "s3",
+  region: process.env.DWK_S3_REGION ?? "us-east-1",
 });
 
 const env = assembleCentralBindings({

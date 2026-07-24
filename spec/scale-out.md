@@ -626,6 +626,41 @@ Mechanical in both directions, extending the
 A `dwk migrate` subcommand covering local ↔ central (and, combined with the
 existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
 
+> **Update (issue #434): implemented** as `packages/server/src/migrate.ts`
+> (the `dwk-migrate` bin, `@dwk/server`'s second CLI entry alongside
+> `dwk-serve`, also exported as plain functions from `@dwk/server/migrate`
+> for scripting). D1/DO-SQLite dump-and-replay is genuinely dialect-identical
+> (schema DDL from `sqlite_master` + a full-table `SELECT`, replayed as one
+> write transaction/batch on the other side) and runs in both directions;
+> R2 migration streams each object (no full-body buffering) and preserves
+> content-type/custom metadata both ways. The two sharp edges above are
+> handled structurally, not left as a manual step: every DO-object migration
+> function (`migrateDoObjectToCentral`/`migrateDoObjectToLocal`) calls
+> `liftPendingAlarm`/its lowering counterpart as part of the same call, so a
+> pending alarm can't be silently dropped by forgetting a separate step; and
+> `importQueueBacklog` imports a local queue's non-dead backlog into the
+> coordination KV as due entries (the documented alternative to draining),
+> resetting each message's attempt counter to 0 on import — safe for an
+> at-least-once queue, and no `@dwk` consumer depends on preserving it across
+> a migration.
+>
+> **One asymmetry, deliberate rather than an oversight:** `to-central`
+> (`migrateLocalToCentral`) scans `dataDir` the same way `bindings.ts`
+> assembles one and migrates whatever binding the caller's
+> `CentralMigrationTarget` declares a client for, reporting any `dataDir`
+> entry with no matching binding as `skipped` (never silently dropped).
+> `to-local` (`migrateCentralToLocal`) cannot do the equivalent discovery —
+> central mode has no directory to list (each D1 binding is one opaque
+> logical database; each DO object is its own database; and
+> `@dwk/deno-host`'s `S3ClientLike` deliberately has no `list`, per its own
+> doc comment — no production consumer needs it) — so `to-local` takes an
+> explicit `LocalMigrationTarget` naming exactly what to pull down (R2
+> migration in this direction needs its key set supplied the same way, e.g.
+> from `@dwk/store`'s own D1 registry of the keys it wrote). This mirrors
+> the same "no generic list" posture the R2 shim itself already documents,
+> rather than inventing bespoke S3 `ListObjectsV2` handling this package
+> doesn't otherwise need.
+
 ## 14. Testing plan
 
 1. **`LibsqlKv` unit tests** — CAS under interleaving, absence checks, TTL
@@ -657,6 +692,28 @@ existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
    a scale-out deployment earns "supported" only after the hosted suites run
    against a ≥2-replica target.
 
+   > **Update (issue #434): the runbook and its test bed are implemented**,
+   > the runs themselves are not — central mode stays **experimental**, not
+   > supported, until they're recorded passing.
+   > `packages/server/docker-compose.yml` is the sqld + MinIO + 2-replica
+   > topology this item calls for (both replicas building from
+   > `examples/central-composition.mjs` via the existing `Dockerfile`,
+   > parameterized with a new `BUNDLE_ENTRY` build arg); the fillable
+   > checklist for both this item and item 5 lives at
+   > [`conformance/scale-out-qa.md`](../conformance/scale-out-qa.md), which
+   > `conformance/README.md` now links from a dedicated "Central mode
+   > (scale-out) live verification" section. Every item above maps to a
+   > numbered, concretely-actionable step in that runbook (e.g. item 3's
+   > "embedded-replica transaction forwarding under concurrent replicas"
+   > maps to "write via `server1`, immediately read via `server2`, confirm
+   > no lag" — the same assertion `central-do.integration.test.ts` already
+   > proves against fakes, restated against the real services). `packages/
+   > server/k8s-notes.md` is the phase 5 packaging deliverable for
+   > production topologies beyond the compose reference itself
+   > (`Deployment` vs `StatefulSet`, readiness/liveness probe shape,
+   > WebSocket affinity via ingress annotations, `emptyDir` scratch volumes
+   > for `replicaDir`).
+
 ## 15. Phased implementation plan
 
 1. **`LibsqlKv`** in `@dwk/server` (+ unit tests, key-encoding property
@@ -680,6 +737,22 @@ existing story, Cloudflare ↔ either) is the natural follow-on deliverable.
 5. **Packaging & docs**: docker-compose reference (sqld + MinIO + N
    replicas), k8s notes (affinity for WS paths, scratch volumes), `dwk
    migrate` local↔central, README guidance on when *not* to use this mode.
+
+   > **Update (issue #434): implemented.** `packages/server/docker-compose.yml`
+   > (sqld + MinIO + 2 `@dwk/server` replicas + an nginx proxy) and
+   > `packages/server/k8s-notes.md` cover §14 item 4's packaging half;
+   > `packages/server/src/migrate.ts` (the `dwk-migrate` bin) covers `dwk
+   > migrate` (see the §13 update note above); `packages/server/README.md`'s
+   > new "Central mode: horizontal scale-out (experimental)" section is the
+   > "when not to use this mode" guidance, echoed with a one-line pointer
+   > from the root `README.md`'s "Running it" section. What phase 5
+   > explicitly does **not** close: the live-verification runs and the
+   > hosted-suite conformance run against the compose reference (§14 items 4
+   > and 5) — the runbook to execute them now exists
+   > ([`conformance/scale-out-qa.md`](../conformance/scale-out-qa.md)), but
+   > running it against real sqld/MinIO services is unfinished work, so
+   > central mode remains **experimental, not supported** per host-contract
+   > §9 until that runbook is recorded passing.
 6. **v2 (separate decision, demand-gated)**: residency leases + internal
    forwarding (§6.5).
 
