@@ -269,6 +269,141 @@ describe("statusEntity", () => {
     expect((status.reblog as { content: string }).content).toBe("<p>bird</p>");
   });
 
+  it("fills in_reply_to_id/account from a resolved reply target (remote author)", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_050, 1),
+      receivedAt: 1_753_000_000_050,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/reply",
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/reply",
+          type: "Note",
+          content: "<p>re</p>",
+          inReplyTo: "https://other.example/notes/1",
+        },
+      },
+      inReplyTo: {
+        id: encodeSnowflake(1_753_000_000_010, 3),
+        authorIri: "https://other.example/users/dan",
+        authorIsOwner: false,
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.in_reply_to_id).toBe(encodeSnowflake(1_753_000_000_010, 3));
+    // Remote reply author → reversible remote account id.
+    expect(status.in_reply_to_account_id).toBe(
+      encodeRemoteAccountId("https://other.example/users/dan"),
+    );
+  });
+
+  it("uses the owner account id for in_reply_to_account_id when replying to the owner's post", () => {
+    const ownerAccount = { id: "1", acct: "owner" } as Record<string, unknown>;
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_051, 1),
+      receivedAt: 1_753_000_000_051,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/reply2",
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/reply2",
+          type: "Note",
+          content: "<p>re owner</p>",
+          inReplyTo: `${baseUrl}/users/owner/posts/1`,
+        },
+      },
+      inReplyTo: {
+        id: encodeSnowflake(1_753_000_000_005, 1, 1),
+        authorIri: `${baseUrl}/users/owner`,
+        authorIsOwner: true,
+      },
+    };
+    const status = statusEntity(entry, { baseUrl, ownerAccount });
+    expect(status.in_reply_to_account_id).toBe("1");
+  });
+
+  it("leaves in_reply_to_id null when the reply target was not resolved", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_052, 1),
+      receivedAt: 1_753_000_000_052,
+      objectType: "Note",
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/reply3",
+        type: "Create",
+        actor: "https://remote.example/users/carol",
+        object: {
+          id: "https://remote.example/objects/reply3",
+          type: "Note",
+          content: "<p>orphan reply</p>",
+          inReplyTo: "https://unknown.example/notes/9",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.in_reply_to_id).toBeNull();
+    expect(status.in_reply_to_account_id).toBeNull();
+  });
+
+  it("hydrates a bare-IRI Announce boost from the resolved object", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_053, 1),
+      receivedAt: 1_753_000_000_053,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/boost",
+        type: "Announce",
+        actor: "https://remote.example/users/booster",
+        object: "https://origin.example/notes/42",
+      },
+      boost: {
+        id: encodeSnowflake(1_753_000_000_020, 7),
+        authorIri: "https://origin.example/users/author",
+        authorIsOwner: false,
+        object: {
+          id: "https://origin.example/notes/42",
+          type: "Note",
+          content: "<p>original</p>",
+        },
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    // The outer boost shell is content-less; the account is the booster.
+    expect(status.content).toBe("");
+    expect((status.account as { acct: string }).acct).toContain("booster");
+    // The reblog carries the hydrated original with its real author.
+    const reblog = status.reblog as Record<string, unknown>;
+    expect(reblog).not.toBeNull();
+    expect(reblog.content).toBe("<p>original</p>");
+    expect(reblog.id).toBe(encodeSnowflake(1_753_000_000_020, 7));
+    expect((reblog.account as { acct: string }).acct).toContain("author");
+  });
+
+  it("leaves a bare-IRI Announce content-less when the boost was not resolved", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_054, 1),
+      receivedAt: 1_753_000_000_054,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/boost2",
+        type: "Announce",
+        actor: "https://remote.example/users/booster",
+        object: "https://origin.example/notes/unknown",
+      },
+    };
+    const status = statusEntity(entry, { baseUrl });
+    expect(status.content).toBe("");
+    expect(status.reblog).toBeNull();
+  });
+
   it("does not throw and produces safe empty content when object.content is a number", () => {
     const entry: BackendEntry = {
       id: encodeSnowflake(1_753_000_000_002, 1),

@@ -329,6 +329,24 @@ function mediaAttachments(raw: unknown): Record<string, unknown>[] {
 }
 
 /**
+ * Whether rendering this entry may need the real owner account (id) rather
+ * than a synthesized remote one. True when the entry *is* the owner's own
+ * post (`source === 1`), *replies to* one (`inReplyTo.authorIsOwner`), or
+ * *boosts* one (`boost.authorIsOwner`) — the reply/boost cases matter because
+ * `in_reply_to_account_id` / `reblog.account.id` must resolve to the owner's
+ * real id, not a fallback `r_...`. A caller passes `ownerAccount` into
+ * `statusEntity`/`notificationEntity` iff this is true for the entry (or any
+ * entry on the page).
+ */
+export function entryNeedsOwnerAccount(entry: BackendEntry): boolean {
+  return (
+    entry.source === 1 ||
+    entry.inReplyTo?.authorIsOwner === true ||
+    entry.boost?.authorIsOwner === true
+  );
+}
+
+/**
  * `Create`/`Announce` row → `Status`. A `relayed_by` row is wrapped as a
  * reblog attributed to the relaying group's account (FEP-1b12 provenance —
  * spec/mastodon-client-api.md Decision 3's MCP-spec provenance requirement).
@@ -373,11 +391,24 @@ export function statusEntity(
   const sensitive =
     typeof object.sensitive === "boolean" ? object.sensitive : false;
 
+  // A reply whose target the backend resolved to a locally-held post carries
+  // that post's snowflake id; its author id is the owner account (when the
+  // target is the owner's own post) or a synthesized remote account, mirroring
+  // how `account` above is chosen. Unresolved targets stay null.
+  const inReplyToId = entry.inReplyTo?.id ?? null;
+  const inReplyToAccountId = entry.inReplyTo
+    ? entry.inReplyTo.authorIsOwner && opts.ownerAccount
+      ? (opts.ownerAccount.id ?? null)
+      : entry.inReplyTo.authorIri
+        ? encodeRemoteAccountId(entry.inReplyTo.authorIri)
+        : null
+    : null;
+
   const inner: Record<string, unknown> = {
     id: entry.id,
     created_at: published ?? new Date(entry.receivedAt).toISOString(),
-    in_reply_to_id: null,
-    in_reply_to_account_id: null,
+    in_reply_to_id: inReplyToId,
+    in_reply_to_account_id: inReplyToAccountId,
     sensitive,
     spoiler_text: summary,
     visibility: "public",
@@ -417,6 +448,40 @@ export function statusEntity(
       reblog: inner,
     };
   }
+
+  // A bare-IRI boost the backend hydrated from a locally-held post: render the
+  // reblog's inner `Status` from that object (with real content/author), and
+  // keep the outer shell content-less — Mastodon's boost shape. `inner` here is
+  // the content-less Announce wrapper; its `account` is already the booster.
+  if (
+    typeof activity.type === "string" &&
+    activity.type === "Announce" &&
+    entry.boost
+  ) {
+    const boostedStatus = statusEntity(
+      {
+        id: entry.boost.id,
+        activity: {
+          type: "Create",
+          actor: entry.boost.authorIri ?? "",
+          object: entry.boost.object,
+        },
+        receivedAt: entry.receivedAt,
+        objectType: null,
+        relayedBy: null,
+        source: entry.boost.authorIsOwner ? 1 : 0,
+        actorProfiles: entry.actorProfiles,
+      },
+      opts,
+    );
+    return {
+      ...inner,
+      content: "",
+      spoiler_text: "",
+      media_attachments: [],
+      reblog: boostedStatus,
+    };
+  }
   return inner;
 }
 
@@ -429,7 +494,12 @@ export function statusEntity(
  */
 export function notificationEntity(
   entry: BackendEntry,
-  opts: { readonly baseUrl: string },
+  opts: {
+    readonly baseUrl: string;
+    /** Passed through to the mention's status so a reply to the owner's own
+     * post resolves `in_reply_to_account_id` to the real owner id. */
+    readonly ownerAccount?: Record<string, unknown>;
+  },
 ): Record<string, unknown> | null {
   // Same discipline as statusEntity: every field read off entry.activity is
   // attacker-controlled remote AS2 JSON (from the inbox of a remote

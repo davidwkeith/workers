@@ -1796,15 +1796,167 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
     }
 
-    const items = matches.map((entry) => ({
-      ...entry,
-      interactions: this.#clientInteractions(entry.activity),
-      actorProfiles: this.#clientActorProfiles(entry.activity, entry.relayedBy),
-    }));
+    const items = matches.map((entry) => {
+      const resolved = this.#clientResolved(entry.activity);
+      return {
+        ...entry,
+        interactions: this.#clientInteractions(entry.activity),
+        // Enrich the resolved reply/boost authors too, so a hydrated reblog's
+        // `account` renders from the cached profile (a free DO-local read)
+        // rather than the IRI-derived fallback.
+        actorProfiles: this.#clientActorProfiles(
+          entry.activity,
+          entry.relayedBy,
+          [resolved.boost?.authorIri, resolved.replyTo?.authorIri],
+        ),
+        ...resolved,
+      };
+    });
     return json(200, {
       items,
       combinedNewestFirst,
     } as unknown as JsonValue);
+  }
+
+  /**
+   * Read-time resolution of an entry's cross-references against rows we hold
+   * locally, so the Mastodon client API can thread replies and render boosts.
+   * Pure SQL, never a network fetch (resolving a target we do not hold stays
+   * a documented gap): a reply whose `inReplyTo` names a locally-stored post
+   * carries that post's snowflake coordinates + author (`replyTo`), and a
+   * bare-IRI `Announce` of a locally-stored post carries that post's embedded
+   * object so the reblog renders with real content (`boost`).
+   */
+  #clientResolved(activity: JsonValue): {
+    replyTo?: {
+      receivedAt: number;
+      seq: number;
+      source: 0 | 1;
+      authorIri: string | null;
+    };
+    boost?: {
+      receivedAt: number;
+      seq: number;
+      source: 0 | 1;
+      authorIri: string | null;
+      object: JsonValue;
+    };
+  } {
+    const record = activity as Record<string, JsonValue>;
+    const type = record.type;
+    if (type === "Create" || type === "Update") {
+      const object = record.object;
+      const inReplyTo =
+        object && typeof object === "object" && !Array.isArray(object)
+          ? (object as Record<string, JsonValue>).inReplyTo
+          : undefined;
+      if (typeof inReplyTo === "string") {
+        const target = this.#resolveLocalObject(inReplyTo);
+        if (target) {
+          return {
+            replyTo: {
+              receivedAt: target.receivedAt,
+              seq: target.seq,
+              source: target.source,
+              authorIri: target.authorIri,
+            },
+          };
+        }
+      }
+      return {};
+    }
+    if (type === "Announce") {
+      // Only a bare-IRI boost needs hydration — an embedded object already
+      // renders. `objectId` returns the IRI for both the bare-string and
+      // embedded-with-id shapes, but we only hydrate when the stored `object`
+      // is the bare string (an embedded object is self-sufficient).
+      const object = record.object;
+      if (typeof object === "string") {
+        const target = this.#resolveLocalObject(object);
+        if (target && target.object !== null) {
+          return {
+            boost: {
+              receivedAt: target.receivedAt,
+              seq: target.seq,
+              source: target.source,
+              authorIri: target.authorIri,
+              object: target.object,
+            },
+          };
+        }
+      }
+      return {};
+    }
+    return {};
+  }
+
+  /**
+   * Find a locally-stored post by its AS2 object IRI — the owner's outbox
+   * (source 1) first, then the inbox (source 0) — returning the row's
+   * snowflake coordinates, its author IRI, and the embedded object JSON.
+   * `null` when we hold no copy. Pure SQL; the caller never fetches the IRI.
+   */
+  #resolveLocalObject(iri: string): {
+    receivedAt: number;
+    seq: number;
+    source: 0 | 1;
+    authorIri: string | null;
+    object: JsonValue | null;
+  } | null {
+    if (!iri) return null;
+    const parseObject = (json: string): JsonValue | null => {
+      try {
+        const activity = JSON.parse(json) as Record<string, JsonValue>;
+        const object = activity.object;
+        return object === undefined ? null : object;
+      } catch {
+        return null;
+      }
+    };
+    // Owner outbox: the post is the owner's own, so its author is this actor.
+    const outboxRow = this.#sql
+      .exec<{ seq: number; published_at: number; json: string }>(
+        `SELECT seq, published_at, json FROM outbox
+           WHERE json_extract(json, '$.object.id') = ? ORDER BY seq LIMIT 1`,
+        iri,
+      )
+      .toArray()[0];
+    if (outboxRow) {
+      return {
+        receivedAt: outboxRow.published_at,
+        seq: outboxRow.seq,
+        source: 1,
+        authorIri: this.#config!.iris.id,
+        object: parseObject(outboxRow.json),
+      };
+    }
+    // Inbox: a peer's post we have stored (and not tombstoned / failed).
+    const inboxRow = this.#sql
+      .exec<{ seq: number; received_at: number; json: string }>(
+        `SELECT seq, received_at, json FROM inbox
+           WHERE json_extract(json, '$.object.id') = ?
+             AND removed_at IS NULL AND verify_state IS NOT 'failed'
+           ORDER BY seq LIMIT 1`,
+        iri,
+      )
+      .toArray()[0];
+    if (inboxRow) {
+      const activity = (() => {
+        try {
+          return JSON.parse(inboxRow.json) as Record<string, JsonValue>;
+        } catch {
+          return null;
+        }
+      })();
+      return {
+        receivedAt: inboxRow.received_at,
+        seq: inboxRow.seq,
+        source: 0,
+        authorIri: activity ? (actorIri(activity.actor) ?? null) : null,
+        object: activity?.object ?? null,
+      };
+    }
+    return null;
   }
 
   /** Extract interaction counts from the stored inbox without any network I/O. */
@@ -1844,17 +1996,25 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     };
   }
 
-  /** Return cached AS2 actor fields for the activity's author and relay group. */
+  /**
+   * Return cached AS2 actor fields for the activity's author, its relay group,
+   * and any additionally-resolved actors (a hydrated boost's / reply target's
+   * author, so the nested reblog account enriches). Purely cache reads — never
+   * a network fetch.
+   */
   #clientActorProfiles(
     activity: JsonValue,
     relayedBy: string | null,
+    extraActors: ReadonlyArray<string | null | undefined> = [],
   ): Record<string, Record<string, string>> {
     const actors = [
       actorIri((activity as ActivityObject).actor),
       relayedBy,
+      ...extraActors,
     ].filter((value): value is string => !!value);
     const profiles: Record<string, Record<string, string>> = {};
     for (const actor of actors) {
+      if (profiles[actor]) continue;
       const profile = this.#cachedActorProfile(actor);
       if (profile) profiles[actor] = profile;
     }
@@ -1935,17 +2095,20 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         ? (rows.find((r) => r.seq % 32768 === Number(seqLow)) ?? rows[0])
         : rows[0];
     if (!row) return json(404, { error: "not found" } as JsonValue);
+    const parsed = JSON.parse(row.json) as JsonValue;
+    const resolved = this.#clientResolved(parsed);
     return json(200, {
       seq: row.seq,
       receivedAt: row.received_at,
-      activity: JSON.parse(row.json) as JsonValue,
+      activity: parsed,
       relayedBy: row.relayed_by,
       source: source === "1" ? 1 : 0,
-      interactions: this.#clientInteractions(JSON.parse(row.json) as JsonValue),
-      actorProfiles: this.#clientActorProfiles(
-        JSON.parse(row.json) as JsonValue,
-        row.relayed_by,
-      ),
+      interactions: this.#clientInteractions(parsed),
+      actorProfiles: this.#clientActorProfiles(parsed, row.relayed_by, [
+        resolved.boost?.authorIri,
+        resolved.replyTo?.authorIri,
+      ]),
+      ...resolved,
     } as unknown as JsonValue);
   }
 
