@@ -40,12 +40,28 @@ export interface UpdateOperations {
 const RESERVED_FORM_KEYS = new Set(["access_token", "action", "url", "h"]);
 
 /**
- * Property/sub-key names that would reach `Object.prototype` through a plain
- * `obj[key] = ...` assignment (`"__proto__"` is an accessor on every plain
- * object, not a own-property key). A form field named e.g. `__proto__[x]`
- * must never reach {@link parseFormBody}'s `nested`/`properties` maps.
+ * Property/sub-key names that hit an accessor rather than an own-property
+ * slot on a plain `obj[key] = ...` assignment: `"__proto__"` reassigns the
+ * object's own prototype (or, read via `obj[key] ??= …`, returns the shared
+ * `Object.prototype` itself for a further assignment to mutate);
+ * `"constructor"`/`"prototype"` are similarly load-bearing. Every place in
+ * this module that copies a form field name, a JSON request body's own
+ * property names, or a query-string `properties[]` filter value into a
+ * plain object checks this set first.
  */
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Assign `map[key] = value`, refusing an {@link UNSAFE_KEYS} name instead of
+ * writing it. Every place in this module that copies an externally-derived
+ * key (a JSON request body's own property names, or query-string `properties[]`
+ * filter values) into a plain object literal goes through this, so
+ * `"__proto__"` can only ever reach the accessor it names, never create data.
+ */
+function setOwn<T>(map: Record<string, T>, key: string, value: T): void {
+  if (UNSAFE_KEYS.has(key)) return;
+  map[key] = value;
+}
 
 /**
  * Whether a key is an `mp-*` Micropub command rather than a stored property.
@@ -67,7 +83,7 @@ function stripCommandKeys(
 ): Record<string, unknown[]> {
   const out: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(map)) {
-    if (!isCommandKey(key)) out[key] = values;
+    if (!isCommandKey(key)) setOwn(out, key, values);
   }
   return out;
 }
@@ -115,7 +131,7 @@ function extractCommands(properties: Record<string, unknown[]>): {
       continue;
     }
     if (key.startsWith("mp-")) continue; // unknown command: accept and ignore
-    cleaned[key] = values;
+    setOwn(cleaned, key, values);
   }
   return {
     properties: cleaned,
@@ -221,7 +237,7 @@ export function parseJsonBody(body: unknown): ParsedBody {
     if (!Array.isArray(value)) {
       throw new Mf2ParseError(`property \`${key}\` must be an array`);
     }
-    properties[key] = [...value];
+    setOwn(properties, key, [...value]);
   }
   const token =
     typeof body.access_token === "string" ? body.access_token : undefined;
@@ -280,7 +296,7 @@ function asPropertyMap(
     if (!Array.isArray(val)) {
       throw new Mf2ParseError(`\`${label}.${key}\` must be an array`);
     }
-    out[key] = [...val];
+    setOwn(out, key, [...val]);
   }
   return out;
 }
@@ -370,7 +386,7 @@ export function normalizeProposedVocabulary(
 ): Record<string, unknown[]> {
   const normalized: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(properties)) {
-    normalized[key] = [...values];
+    setOwn(normalized, key, [...values]);
   }
 
   const audience = properties.audience;
@@ -452,24 +468,29 @@ export function applyUpdate(
 ): Record<string, unknown[]> {
   const next: Record<string, unknown[]> = {};
   for (const [key, values] of Object.entries(properties)) {
-    next[key] = [...values];
+    setOwn(next, key, [...values]);
   }
 
   if (ops.replace) {
     for (const [key, values] of Object.entries(ops.replace)) {
+      if (UNSAFE_KEYS.has(key)) continue;
       next[key] = [...values];
     }
   }
   if (ops.add) {
     for (const [key, values] of Object.entries(ops.add)) {
+      if (UNSAFE_KEYS.has(key)) continue;
       next[key] = [...(next[key] ?? []), ...values];
     }
   }
   if (ops.delete) {
     if (Array.isArray(ops.delete)) {
-      for (const key of ops.delete) delete next[key];
+      for (const key of ops.delete) {
+        if (!UNSAFE_KEYS.has(key)) delete next[key];
+      }
     } else {
       for (const [key, values] of Object.entries(ops.delete)) {
+        if (UNSAFE_KEYS.has(key)) continue;
         const remaining = (next[key] ?? []).filter(
           (existing) => !values.some((v) => sameValue(existing, v)),
         );
@@ -493,6 +514,7 @@ export function sourceView(
   if (filter && filter.length > 0) {
     const properties: Record<string, readonly unknown[]> = {};
     for (const key of filter) {
+      if (UNSAFE_KEYS.has(key)) continue;
       const values = post.properties[key];
       if (values !== undefined) properties[key] = values;
     }
