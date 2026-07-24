@@ -106,8 +106,9 @@ for the full rules.
 ## Running it
 
 **Cloudflare first.** Cloudflare Workers is the primary, recommended deployment
-target; self-hosting runs the **same protocol logic byte-for-byte** on your own
-box. Pick one:
+target. Two secondary paths run the **same protocol logic byte-for-byte**
+elsewhere: self-hosting the `@dwk/server` Docker image on your own box or any
+other cloud, or — exploratory, with real gaps — Deno Deploy. Pick one:
 
 ### On Cloudflare (primary)
 
@@ -161,14 +162,17 @@ rejects `.onion` URLs up front as `blocked_host` — a `.onion` Webmention
 source, WebSub callback, or ActivityPub inbox is dropped cleanly rather than
 failing as an opaque network error.
 
-### Self-hosted (Node: Docker or the `dwk-serve` bin)
+### Self-hosted (Node: Docker or the `dwk-serve` bin) — VPS, homelab, or NAS
 
 [`@dwk/server`](packages/server/README.md) runs every package on a single
 Node.js/[Express](https://expressjs.com/) process that serves the endpoints
 **and** static files from one domain, emulating the Cloudflare primitives
 (Durable Objects, R2, D1, KV, queues/cron, WebSockets) on **SQLite + the local
-filesystem** — no extra services. Write a composition-root config module (the
-"Worker entry + `wrangler.toml`" you'd otherwise hand-write; see
+filesystem** — no extra services. That means no cloud account is required at
+all: a home server, NAS, Raspberry Pi, or any other box under your desk works
+exactly the same as a VPS, as long as it's a single long-lived process with a
+persistent disk. Write a composition-root config module (the "Worker entry +
+`wrangler.toml`" you'd otherwise hand-write; see
 [`examples/`](packages/server/examples/)), then either:
 
 ```sh
@@ -188,6 +192,47 @@ it as a private volume (`0700`) and back it up. See the
 [`@dwk/server` README](packages/server/README.md) for the config format,
 security posture, and Cloudflare ⇄ self-host data portability. Design notes:
 [`spec/self-hosting.md`](spec/self-hosting.md).
+
+**On AWS, GCP, or any other cloud.** There is no AWS- or GCP-native `@dwk`
+host, and none is planned — the same Docker image above **is** the supported
+answer everywhere else, because it needs only a long-lived process with a
+persistent, single-writer filesystem:
+
+- **AWS**: ECS/Fargate with an attached EFS/EBS volume, or plain EC2 running
+  `docker run` directly. (Lambda / Lambda@Edge do **not** work — no
+  persistent disk, and not even fetch-shaped.)
+- **GCP**: a GCE VM with a persistent disk, or a single always-on Cloud Run
+  service pinned to exactly one instance (`minInstances`/`maxInstances = 1`)
+  so autoscaling never breaks the single-writer invariant.
+- **Top indie hosts**: Fly.io, DigitalOcean, Hetzner, Linode, a homelab box,
+  bare metal — same `docker run` + volume + reverse-proxy shape as the
+  quickstart above, no code changes.
+
+See [`@dwk/server`'s "Deploying to AWS, GCP, or any other
+cloud"](packages/server/README.md#deploying-to-aws-gcp-or-any-other-cloud)
+for the full per-provider notes.
+
+### Deno Deploy (exploratory — not yet a supported host)
+
+[`@dwk/deno-host`](spec/packages/deno-host.md) is building-block Cloudflare-
+interface emulation for Deno Deploy — the most credible *native* (non-
+container) target beyond Cloudflare, but **not yet usable to compose any
+`@dwk` package**. So far it implements the D1/DO-SQLite shim over an external
+libSQL/Turso database and single-writer actor + alarm emulation over a Deno
+KV lease. Two gaps remain unimplemented and demand-gated: a durable
+at-least-once **queue** and an **object-storage** (`R2Bucket`-equivalent)
+adapter — without the queue shim, no endpoint package can mount even at the
+lowest conformance tier. It also depends on an external libSQL/Turso service,
+a trade-off against this project's "data and keys live only on
+infrastructure the user owns" thesis that isn't resolved yet. Track progress
+in [`spec/deno-deploy-design.md`](spec/deno-deploy-design.md) and
+[`spec/packages/deno-host.md`](spec/packages/deno-host.md).
+
+Fastly Compute, AWS Lambda@Edge, and Puter were also investigated and are
+explicit **non-goals** for now — each lacks a strongly-consistent store
+and/or actor primitive the stateful packages require. See
+[`spec/portability.md`](spec/portability.md) for the full per-provider
+feasibility writeup and re-evaluation triggers.
 
 ## Status
 
@@ -213,6 +258,10 @@ The [`spec/`](spec/) directory holds the technical requirements:
 - [Conformance & testing](spec/conformance-and-testing.md) — the test bars.
 - [Self-hosting](spec/self-hosting.md) — the Cloudflare-first stance and the
   Node/Express + Docker self-host host ([`@dwk/server`](packages/server/README.md)).
+- [Portability](spec/portability.md) — the multi-provider feasibility
+  investigation (Docker/AWS/GCP viable now, Deno Deploy exploratory, Fastly
+  Compute/Lambda@Edge/Puter non-goals) behind the [Running it](#running-it)
+  section above.
 - [Open questions](spec/open-questions.md) — deferred decisions.
 - [`spec/packages/`](spec/packages/) — one detailed spec per package.
 
