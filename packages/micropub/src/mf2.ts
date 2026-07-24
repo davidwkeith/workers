@@ -40,6 +40,14 @@ export interface UpdateOperations {
 const RESERVED_FORM_KEYS = new Set(["access_token", "action", "url", "h"]);
 
 /**
+ * Property/sub-key names that would reach `Object.prototype` through a plain
+ * `obj[key] = ...` assignment (`"__proto__"` is an accessor on every plain
+ * object, not a own-property key). A form field named e.g. `__proto__[x]`
+ * must never reach {@link parseFormBody}'s `nested`/`properties` maps.
+ */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
  * Whether a key is an `mp-*` Micropub command rather than a stored property.
  * Create strips these via {@link extractCommands}; update operands run through
  * the same gate so an update cannot persist a command a create would reject.
@@ -147,6 +155,9 @@ export function parseFormBody(entries: Iterable<[string, string]>): ParsedBody {
     }
     const { key, sub } = parseFormKey(rawKey);
     if (RESERVED_FORM_KEYS.has(key)) continue;
+    if (UNSAFE_KEYS.has(key) || (sub !== undefined && UNSAFE_KEYS.has(sub))) {
+      continue;
+    }
     if (sub !== undefined) {
       (nested[key] ??= {})[sub] = value;
     } else {
