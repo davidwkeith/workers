@@ -164,7 +164,12 @@ class S3Bucket {
 
   constructor(options: S3BucketOptions) {
     this.#client = options.client;
-    this.#endpoint = options.endpoint.replace(/\/+$/, "");
+    // Avoid an unanchored regex here (`/\/+$/` is worst-case O(n^2) on a
+    // backtracking engine for a pathological all-slashes input) — a plain
+    // loop strips the same trailing slashes in O(n).
+    let endpoint = options.endpoint;
+    while (endpoint.endsWith("/")) endpoint = endpoint.slice(0, -1);
+    this.#endpoint = endpoint;
   }
 
   #url(key: string): string {
