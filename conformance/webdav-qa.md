@@ -165,6 +165,27 @@ curl -sS -X DELETE "https://conformance.dwk.io/dav-credentials?id=<credentialId>
 | Invocation path    | ☐ Local / ☑ CI ([run 30052950880](https://github.com/davidwkeith/workers/actions/runs/30052950880))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Notes / follow-ups | This run followed #407 (fixed `mintAppPassword`'s PBKDF2 iteration count exceeding workerd's ceiling, which blocked credential minting entirely) and #409 (fixed four RFC 4918 conformance bugs: `MKCOL`/`PUT`/`COPY`/`MOVE` onto a missing parent silently succeeding instead of `409`, `MKCOL` over a plain resource silently succeeding instead of `405`, `DELETE` of a nonexistent resource silently succeeding instead of `404`). `basic` now passes 15/16 (up from 12/16 pre-#409, and 0/16 pre-#407); the one remaining failure is a narrower UTF-8-segment-reuse edge case in `mkcol_over_plain` — see the Step 3 table. `copymove`/`props`/`locks` are still unrun since litmus stops after the first group with failures. Filed as a residual gap, not a fresh regression — worth its own follow-up increment. |
 
+## Follow-up: 2026-07-24 fix, re-run still needed
+
+The `mkcol_over_plain` failure from the 2026-07-23 run (see **Result** →
+Notes above) was root-caused without needing litmus's `debug.log`: `pathOf`
+resolved each request's path straight from `URL#pathname`, which passes an
+already-percent-encoded triplet through verbatim rather than normalizing its
+case. `put_get_utf8_segment` and `mkcol_over_plain` name the same UTF-8
+segment but litmus's own request construction gives the two requests
+different percent-encoding hex case for it (e.g. `%e2%82%ac` vs
+`%E2%82%AC`) — RFC 3986 §2.1 says these are the same octets, but the
+backend's exact-string-match lookup didn't treat them that way, so the
+`stat()` check in `mkcol()` missed the existing resource and let the
+`MKCOL` through instead of 405ing. Fixed by uppercasing every
+percent-encoded triplet in `pathOf` before the resolved path is used
+anywhere downstream; covered by a new colocated unit test
+(`webdav.test.ts`) reproducing the case-mismatch directly. Not yet
+re-verified against the hosted target — this doc's **Result** table and
+`status.json` stay at `failing`/`pending` until a fresh litmus run
+(Step 3) confirms `basic` passes and `copymove`/`props`/`locks` get to run
+for the first time.
+
 ## Recording the result
 
 Fill in the **Result** table above first — date, tester, and which path was

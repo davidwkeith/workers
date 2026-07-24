@@ -317,9 +317,25 @@ function isWithinPathPrefix(path: string, prefix: string): boolean {
 // Path helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Uppercase the hex digits of every percent-encoded triplet. RFC 3986 §2.1
+ * treats `%e2` and `%E2` as the same octet, but `URL`'s parser copies an
+ * already-encoded triplet through verbatim rather than normalizing its case —
+ * so two requests naming the same UTF-8 segment with different encoder hex
+ * casing (litmus `mkcol_over_plain` reusing `put_get_utf8_segment`'s
+ * resource) resolve to different path strings and miss each other in the
+ * backend's exact-match lookup. Normalizing once here, ahead of every
+ * downstream use of the resolved path, keeps them identical.
+ */
+function normalizePercentEncoding(pathname: string): string {
+  return pathname.replace(/%[0-9a-fA-F]{2}/g, (triplet) =>
+    triplet.toUpperCase(),
+  );
+}
+
 /** Map a request URL to a pod path, or `null` when outside the mount. */
 function pathOf(url: URL, resolved: Resolved): string | null {
-  const { pathname } = url;
+  const pathname = normalizePercentEncoding(url.pathname);
   if (resolved.mountPrefix === "") return pathname || "/";
   if (pathname === resolved.mountPrefix) return resolved.storageRoot;
   if (pathname.startsWith(`${resolved.mountPrefix}/`)) {

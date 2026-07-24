@@ -498,6 +498,18 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus's real-world `mkcol_over_plain` run: PUT and MKCOL name the same
+  // UTF-8 segment but with different percent-encoding hex case
+  // (`%e2%82%ac` vs `%E2%82%AC`), which RFC 3986 §2.1 says are the same
+  // octets. A naive string-keyed backend lookup misses the existing resource
+  // and lets the MKCOL through instead of 405ing.
+  it("405s a MKCOL whose percent-encoding case differs from the PUT that created the resource", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/res-%e2%82%ac", { body: "x" });
+      expect((await call("MKCOL", "/res-%E2%82%AC")).status).toBe(405);
+    });
+  });
+
   it("copies a resource and moves another, dropping the source", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/src.txt", { body: "data" });
