@@ -34,6 +34,7 @@ import { HostExecutionContext, WaitUntilTracker } from "./context.js";
 import { installRequestDuplex } from "./request-duplex.js";
 import { attachWebSocketUpgrade } from "./web-socket-upgrade.js";
 import { acquireWriterLock, type ReleaseLock } from "./lock.js";
+import { assertNoLocalStores } from "./central-mode.js";
 import {
   assertBindings,
   isReservedPath,
@@ -154,8 +155,18 @@ export function createServer(config: HostConfig): DwkServer {
   installWebSocketGlobals();
   installCryptoDigestStream();
 
+  // Central mode: replicas are supposed to coexist (the per-id lease, once
+  // Durable Objects land in phase 3, is the single-writer mechanism there),
+  // so the local-writer lockfile is never acquired — but a `dataDir` still
+  // holding local-mode authoritative stores means a half-migrated deployment,
+  // which is refused loudly rather than silently corrupted (spec/scale-out.md
+  // §9.3).
+  const centralMode = config.storage?.mode === "central";
+  if (centralMode) assertNoLocalStores(config.dataDir);
   const release =
-    (config.lock ?? true) ? acquireWriterLock(config.dataDir) : null;
+    !centralMode && (config.lock ?? true)
+      ? acquireWriterLock(config.dataDir)
+      : null;
   const tracker = config.tracker ?? new WaitUntilTracker();
 
   const app = express();

@@ -18,6 +18,7 @@
 import type { Logger } from "@dwk/log";
 import type { RequestHandler } from "express";
 import type { QueueBroker, CronScheduler } from "@dwk/cf-shims";
+import type { DenoKvLike, S3ClientLike } from "@dwk/deno-host";
 import type { WaitUntilTracker } from "./context.js";
 
 /**
@@ -49,6 +50,35 @@ export interface Mount {
   readonly requires?: readonly string[];
 }
 
+/**
+ * The `central` storage mode (spec/scale-out.md §9.1): every replica in a
+ * fleet shares the same coordination KV and object store, so `createServer`
+ * skips the local-writer lockfile (`central` replicas are supposed to
+ * coexist) and instead runs the §9.2 startup probes / §9.3 mode guard — see
+ * `central-mode.ts`. `kv` is an already-constructed `DenoKvLike` (typically a
+ * `LibsqlKv` over an injected libSQL client, `libsql-kv.ts`), matching the
+ * "composing app injects a client" seam philosophy `@dwk/deno-host` uses
+ * everywhere else — `@dwk/server` never constructs a network connection on a
+ * deployer's behalf.
+ */
+export interface CentralStorageConfig {
+  readonly mode: "central";
+  /** Coordination store for the mode marker + (phase 3+) lease/alarm/queue state. */
+  readonly kv: DenoKvLike;
+  /** The object store bindings' shared client + endpoint, for the startup probe. */
+  readonly objectStore?: {
+    readonly client: S3ClientLike;
+    readonly endpoint: string;
+  };
+  /** Poll cadence for alarms + queues once phase 3/4 land (default ~1000 ms). */
+  readonly pollIntervalMs?: number;
+  readonly leaseTtlMs?: number;
+  readonly leaseAcquireTimeoutMs?: number;
+}
+
+/** The storage mode a deployment runs in. Defaults to `{ mode: "local" }`. */
+export type StorageConfig = { readonly mode: "local" } | CentralStorageConfig;
+
 /** Top-level host configuration. */
 export interface HostConfig {
   /**
@@ -75,6 +105,14 @@ export interface HostConfig {
   readonly devMode?: boolean;
   /** Acquire the single-writer data-directory lock at startup (default true). */
   readonly lock?: boolean;
+  /**
+   * The storage mode this deployment runs in. Defaults to `{ mode: "local" }`
+   * — today's single-process, local-SQLite-and-filesystem behavior, entirely
+   * unchanged. `{ mode: "central" }` opts into the horizontal scale-out mode
+   * (spec/scale-out.md): `createServer` skips the writer lockfile and instead
+   * enforces the mode guard (`central-mode.ts`) against `dataDir`.
+   */
+  readonly storage?: StorageConfig;
   /** Structured logger; defaults to a no-op. */
   readonly logger?: Logger;
   /** Queue broker to run for the host lifecycle (Phase 3 consumers). */
