@@ -242,7 +242,10 @@ SQLite/file-backed shims and the single-writer lockfile invariant (and GCS
 FUSE is not safe for SQLite). A native host would mean Firestore- or
 Cloud-SQL-backed shims (Firestore is strongly consistent with transactions,
 so it passes the consistency bar) — again a large rewrite. The pragmatic
-answer is the Docker image on a GCE VM.
+answer is the Docker image on a GCE VM — or, once the proposed scale-out
+mode ([scale-out.md](scale-out.md)) lands, the same image on Cloud Run with
+centralized stores, since that design removes exactly the two blockers named
+here (local-disk state and the single-writer lockfile).
 
 ### 4.5 Puter — revisit later
 
