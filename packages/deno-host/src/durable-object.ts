@@ -408,6 +408,7 @@ export class DurableObjectNamespaceLike<
   ): Promise<void> {
     const id = new DenoDurableObjectId(idHex);
     let lease: Lease | undefined;
+    let handlerStarted = false;
     try {
       lease = await acquireLease(
         this.#options.kv,
@@ -435,7 +436,12 @@ export class DurableObjectNamespaceLike<
       // Same sync-before-serve rule as #dispatch (see its comment), applied
       // just before the handler actually runs — skipped above for a
       // superseded/no-op claim so an alarm that won't fire never pays for it.
+      // A rejection here is not the handler's fault (the handler never got a
+      // chance to run) — `handlerStarted` staying false routes it to the
+      // same not-counted-against-the-retry-budget recovery as a lease
+      // acquisition failure, below.
       await this.#options.onLeaseAcquired?.(idHex, instance.db);
+      handlerStarted = true;
       const run = instance.chain
         .then(() => instance.state.concurrencyGate)
         .then(async () => {
@@ -463,6 +469,21 @@ export class DurableObjectNamespaceLike<
         // alarm is lost. Not the handler's fault, so this doesn't count
         // against the retry budget: re-post at `now` (immediately due) with
         // the same retryCount, so the next poll simply retries acquisition.
+        await scheduleRetry(
+          this.#options.kv,
+          this.#options.className,
+          idHex,
+          now,
+          retryCount,
+        );
+      } else if (!handlerStarted) {
+        // The lease was acquired, but something before the handler ran threw
+        // — in practice `onLeaseAcquired` (the sync-before-serve hook) or
+        // `getStorageClient`/construction inside `#materialize`. Same
+        // rationale as the `lease === undefined` branch above: the handler
+        // never got a chance to run, so a transient failure here (e.g. the
+        // primary is briefly unreachable) must not burn down the retry
+        // budget — re-post at `now` with the same retryCount instead.
         await scheduleRetry(
           this.#options.kv,
           this.#options.className,

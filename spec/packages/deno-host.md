@@ -391,6 +391,17 @@ actually constructs and call that type's own sync method there — for
 running the event, and the lease is still released in the namespace's normal
 `finally` path.
 
+**On the alarm path, a rejecting hook does not consume a retry.** `#fireAlarm`
+tracks whether the handler actually started; a hook rejection (or any other
+failure before the handler runs, e.g. `getStorageClient` itself throwing)
+takes the same recovery path as a lease-acquisition failure — re-post the
+alarm at `now` with the **same** `retryCount`, not `now +
+backoffMs(retryCount)` with an incremented one — since the handler never got
+a chance to run and a transient sync failure (the primary briefly
+unreachable) is not the handler's fault to answer for. Only a throw from
+*inside* the handler itself advances `retryCount` and can eventually exhaust
+`ALARM_RETRY_MAX`.
+
 This is opt-in and additive: omitting `onLeaseAcquired` (every existing
 caller, including `@dwk/cf-shims`' local-mode Node host, which has no replica
 to sync from) is unchanged behavior. No other documented host needs it today

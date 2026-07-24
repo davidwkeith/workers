@@ -171,6 +171,37 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
     expect(synced).toEqual([idHex]);
   });
 
+  it("a rejecting onLeaseAcquired reschedules immediately without consuming a retry, and never runs the handler", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    let failSync = true;
+    const ns = createDurableObjectNamespace(AlarmObject, {
+      kv,
+      className: "AlarmObject",
+      env: {},
+      getStorageClient: () => db,
+      onLeaseAcquired: () => {
+        if (failSync) throw new Error("primary unreachable");
+      },
+    });
+    const id = ns.idFromName("alice");
+    const idHex = id.toString();
+    await setAlarm(kv, "AlarmObject", idHex, 1000);
+
+    await ns.pollAlarms({ now: 1000 });
+    expect(fireLog).toEqual([]); // the handler never got a chance to run
+    // Not counted against the retry budget: re-posted at the same `now`
+    // (immediately due) with retryCount still 0, exactly like a lease
+    // acquisition failure — not `now + backoffMs(0)` with retryCount 1.
+    expect(await getAlarm(kv, "AlarmObject", idHex)).toBe(1000);
+
+    failSync = false;
+    await ns.pollAlarms({ now: 1000 });
+    // Fires with retryCount 0 — the failed sync attempt above did not
+    // advance it, unlike a genuine handler-throw retry.
+    expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]);
+  });
+
   it("does not delete a concurrently-rescheduled future alarm when a stale fire attempt finally acquires the lease", async () => {
     const kv = new FakeDenoKv();
     const db = createStrictSyncSqlite();

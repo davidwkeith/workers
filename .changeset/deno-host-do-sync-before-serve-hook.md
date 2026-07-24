@@ -16,4 +16,7 @@ sees it. This package still takes no dependency on any richer client
 capability — `client`'s static type stays the plain `SyncSqliteDatabaseLike`
 seam, and it is the host's job to narrow it to whatever concrete type its own
 `getStorageClient` constructs and call that type's sync method there.
-Omitting the option (every existing caller) is unchanged behavior.
+Omitting the option (every existing caller) is unchanged behavior. On the
+alarm path, a rejecting hook does not consume a retry attempt — it's treated
+like a lease-acquisition failure (re-posted at `now` with the same
+`retryCount`), since the handler never got a chance to run.
