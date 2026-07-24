@@ -45,6 +45,15 @@ export interface SolidOidcAuthorizationRequest {
  * {@link SolidOidcApproval} to mint a code and redirect, or a `Response` to
  * take over (render a login/consent page); the returned `Response` is served
  * unchanged.
+ *
+ * **Security — the host owns `redirect_uri` validation in v1.** The OP checks
+ * that `request.redirectUri` is a syntactically valid absolute URL, but does
+ * **not** yet fetch the `request.clientId` document to confirm the
+ * `redirect_uri` is one the client registered there (Solid client
+ * identifiers / RFC 9449). Until that hardening lands, this hook is the gate:
+ * an implementation MUST authenticate the owner and present the `clientId` +
+ * `redirectUri` for consent (and MAY refuse mismatches it can detect), so an
+ * approval is never granted for a `redirect_uri` the owner did not see.
  */
 export type ApproveSolidOidcAuthorization = (
   request: SolidOidcAuthorizationRequest,
