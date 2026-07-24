@@ -144,4 +144,42 @@ describe("pollAlarms (host-contract §3.3 rule 2)", () => {
     await ns.pollAlarms({ now: 1000 });
     expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]); // now fires normally
   });
+
+  it("does not delete a concurrently-rescheduled future alarm when a stale fire attempt finally acquires the lease", async () => {
+    const kv = new FakeDenoKv();
+    const db = createStrictSyncSqlite();
+    const ns = createDurableObjectNamespace(AlarmObject, {
+      kv,
+      className: "AlarmObject",
+      env: {},
+      getStorageClient: () => db,
+      leaseAcquireTimeoutMs: 2000,
+    });
+    const id = ns.idFromName("alice");
+    const idHex = id.toString();
+    await setAlarm(kv, "AlarmObject", idHex, 1000);
+
+    // Simulate a concurrent fetch() holding the id's lease.
+    const holderLease = await acquireLease(
+      kv,
+      ["dwk_lease", "AlarmObject", idHex],
+      { ttlMs: 10_000 },
+    );
+    const pollPromise = ns.pollAlarms({ now: 1000 });
+    await new Promise((r) => setTimeout(r, 10)); // let pollAlarms block in acquireLease
+    // The concurrent fetch()'s handler legitimately reschedules the alarm
+    // before releasing the lease.
+    await setAlarm(kv, "AlarmObject", idHex, 5000);
+    await releaseLease(kv, holderLease);
+    await pollPromise;
+
+    // The stale fire attempt (claimed the old epochMs=1000 entry) must not
+    // fire the handler or delete the fresh reschedule out from under it.
+    expect(fireLog).toEqual([]);
+    expect(await getAlarm(kv, "AlarmObject", idHex)).toBe(5000);
+
+    // The fresh schedule still fires normally once it's actually due.
+    await ns.pollAlarms({ now: 5000 });
+    expect(fireLog).toEqual([{ id: idHex, retryCount: 0 }]);
+  });
 });

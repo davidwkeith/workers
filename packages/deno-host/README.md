@@ -99,7 +99,6 @@ Single-writer actor + alarm emulation over a per-id Deno KV lease (issue
 client, and the composed `Env`.
 
 ```ts
-import { openKv } from "node:process"; // illustrative — use Deno.openKv() on Deno Deploy
 import Database from "libsql";
 import {
   createDurableObjectNamespace,

@@ -119,6 +119,7 @@ export interface DueAlarmEntry {
   readonly key: KvKey;
   readonly versionstamp: string;
   readonly idHex: string;
+  readonly epochMs: number;
   readonly retryCount: number;
 }
 
@@ -142,6 +143,7 @@ export async function listDueAlarms(
       key: entry.key,
       versionstamp: entry.versionstamp as string,
       idHex: entry.key[3] as string,
+      epochMs: entry.key[2] as number,
       retryCount: entry.value.retryCount,
     });
   }
@@ -161,6 +163,44 @@ export async function claimDueAlarm(
     .atomic()
     .check({ key: entry.key, versionstamp: entry.versionstamp })
     .delete(entry.key)
+    .commit();
+  return result.ok;
+}
+
+/**
+ * Atomically clear the by-id record for `idHex`, but only if it currently
+ * still equals `{expectedEpochMs, expectedRetryCount}` — the record a
+ * `#fireAlarm` invocation claimed via {@link listDueAlarms}/
+ * {@link claimDueAlarm}. Returns `false` without changing anything if the
+ * by-id record has since been overwritten (e.g. a concurrent
+ * `ctx.storage.setAlarm()` call legitimately rescheduled it while this
+ * invocation was waiting to acquire its lease): the caller must not fire
+ * the handler or touch KV further in that case — the alarm has been
+ * superseded, and the new schedule is untouched.
+ */
+export async function clearClaimedAlarm(
+  kv: DenoKvLike,
+  className: string,
+  idHex: string,
+  expectedEpochMs: number,
+  expectedRetryCount: number,
+): Promise<boolean> {
+  const existing = await kv.get<AlarmRecord>(byIdKey(className, idHex));
+  if (
+    existing.versionstamp === null ||
+    existing.value.epochMs !== expectedEpochMs ||
+    existing.value.retryCount !== expectedRetryCount
+  ) {
+    return false;
+  }
+  const result = await kv
+    .atomic()
+    .check({
+      key: byIdKey(className, idHex),
+      versionstamp: existing.versionstamp,
+    })
+    .delete(dueKey(className, expectedEpochMs, idHex))
+    .delete(byIdKey(className, idHex))
     .commit();
   return result.ok;
 }

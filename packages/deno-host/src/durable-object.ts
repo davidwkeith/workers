@@ -24,6 +24,7 @@ import {
   scheduleRetry,
   listDueAlarms,
   claimDueAlarm,
+  clearClaimedAlarm,
 } from "./alarms.js";
 
 /* ---------- id ---------- */
@@ -342,7 +343,12 @@ export class DurableObjectNamespaceLike<
       );
       return await run;
     } finally {
-      await releaseLease(this.#options.kv, lease);
+      try {
+        await releaseLease(this.#options.kv, lease);
+      } catch {
+        // A release failure must not mask `run`'s real result/error above —
+        // the lease's TTL is the crash safety net and frees it eventually.
+      }
     }
   }
 
@@ -366,13 +372,14 @@ export class DurableObjectNamespaceLike<
     for (const entry of due) {
       const claimed = await claimDueAlarm(this.#options.kv, entry);
       if (!claimed) continue;
-      await this.#fireAlarm(entry.idHex, entry.retryCount, now);
+      await this.#fireAlarm(entry.idHex, entry.retryCount, entry.epochMs, now);
     }
   }
 
   async #fireAlarm(
     idHex: string,
     retryCount: number,
+    epochMs: number,
     now: number,
   ): Promise<void> {
     const id = new DenoDurableObjectId(idHex);
@@ -385,11 +392,21 @@ export class DurableObjectNamespaceLike<
       );
       // Firing consumes the alarm slot: `claimDueAlarm` only removed the
       // due-index entry, so the by-id record (what `getAlarm`/`setAlarm`
-      // read/write) still holds the pre-fire schedule. Clear it before
-      // invoking the handler so the catch block's "did the handler set its
-      // own new alarm?" check below is meaningful instead of always seeing
-      // the stale pre-fire value.
-      await deleteAlarmKv(this.#options.kv, this.#options.className, idHex);
+      // read/write) still holds the pre-fire schedule. Clear it — but only
+      // if it still matches what this invocation claimed: while this call
+      // was waiting to acquire the lease, a concurrent fetch() holding the
+      // lease could have legitimately rescheduled the alarm via
+      // ctx.storage.setAlarm(). If so, this invocation is stale/superseded
+      // — don't touch KV further and don't fire the handler; the new
+      // schedule is untouched and a future poll will pick it up on its own.
+      const stillClaimed = await clearClaimedAlarm(
+        this.#options.kv,
+        this.#options.className,
+        idHex,
+        epochMs,
+        retryCount,
+      );
+      if (!stillClaimed) return;
       const instance = this.#materialize(id);
       const run = instance.chain
         .then(() => instance.state.concurrencyGate)
@@ -447,7 +464,15 @@ export class DurableObjectNamespaceLike<
         }
       }
     } finally {
-      if (lease !== undefined) await releaseLease(this.#options.kv, lease);
+      if (lease !== undefined) {
+        try {
+          await releaseLease(this.#options.kv, lease);
+        } catch {
+          // Same rationale as #dispatch: don't let a release failure mask
+          // whatever this attempt already decided (fired, superseded, or
+          // scheduled a retry above) — the lease TTL frees it eventually.
+        }
+      }
     }
   }
 }

@@ -6,6 +6,7 @@ import {
   scheduleRetry,
   listDueAlarms,
   claimDueAlarm,
+  clearClaimedAlarm,
 } from "./alarms.js";
 import { FakeDenoKv } from "./test-harness.js";
 
@@ -32,6 +33,7 @@ describe("KV-indexed alarm schedule (host-contract §3.3 rule 2)", () => {
         key: ["dwk_alarm_due", "Pod", 2000, "abc"],
         versionstamp: expect.any(String),
         idHex: "abc",
+        epochMs: 2000,
         retryCount: 0,
       },
     ]);
@@ -84,5 +86,37 @@ describe("KV-indexed alarm schedule (host-contract §3.3 rule 2)", () => {
     expect(await getAlarm(kv, "Pod", "abc")).toBe(3000);
     const [entry] = await listDueAlarms(kv, "Pod", 3000, 10);
     expect(entry?.retryCount).toBe(2);
+  });
+
+  it("clearClaimedAlarm clears the by-id record when it still matches the claim", async () => {
+    const kv = new FakeDenoKv();
+    await setAlarm(kv, "Pod", "abc", 1000);
+    const cleared = await clearClaimedAlarm(kv, "Pod", "abc", 1000, 0);
+    expect(cleared).toBe(true);
+    expect(await getAlarm(kv, "Pod", "abc")).toBeNull();
+  });
+
+  it("clearClaimedAlarm is a no-op and returns false when the record was superseded (different epochMs)", async () => {
+    const kv = new FakeDenoKv();
+    await setAlarm(kv, "Pod", "abc", 1000);
+    await setAlarm(kv, "Pod", "abc", 5000); // a concurrent legitimate reschedule
+    const cleared = await clearClaimedAlarm(kv, "Pod", "abc", 1000, 0);
+    expect(cleared).toBe(false);
+    expect(await getAlarm(kv, "Pod", "abc")).toBe(5000); // untouched
+  });
+
+  it("clearClaimedAlarm is a no-op and returns false when the record was superseded (different retryCount)", async () => {
+    const kv = new FakeDenoKv();
+    await scheduleRetry(kv, "Pod", "abc", 1000, 0);
+    await scheduleRetry(kv, "Pod", "abc", 1000, 1); // same time, different retry attempt
+    const cleared = await clearClaimedAlarm(kv, "Pod", "abc", 1000, 0);
+    expect(cleared).toBe(false);
+    expect(await getAlarm(kv, "Pod", "abc")).toBe(1000);
+  });
+
+  it("clearClaimedAlarm returns false when there is no alarm at all", async () => {
+    const kv = new FakeDenoKv();
+    const cleared = await clearClaimedAlarm(kv, "Pod", "abc", 1000, 0);
+    expect(cleared).toBe(false);
   });
 });
