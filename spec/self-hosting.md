@@ -112,6 +112,9 @@ the Docker self-host image following close behind.
   multiple Node processes (PM2 cluster, k8s replicas) behind a load balancer is
   explicitly out of scope for the default design (see
   [§7.4](#74-durable-objects-the-hard-part) and [§8](#8-consistency--correctness)).
+  An **opt-in scale-out mode** over centralized data stores is designed
+  separately in [scale-out.md](scale-out.md); this non-goal continues to hold
+  for the default local-storage mode.
 - **Matching Cloudflare's edge features.** TLS termination, DDoS protection,
   global anycast, and built-in rate limiting are platform features the user now
   owns themselves (reverse proxy / firewall). See [§12](#12-security).
@@ -361,7 +364,9 @@ data directory.** Two Node processes sharing a SQLite file and a DO mutex would
 each believe they are the single writer for a pod and corrupt the
 consistency/authz model. Mitigations: a directory lockfile acquired at startup;
 documentation that clustering is unsupported; (future) an opt-in advisory-lock
-or leader-election driver for those who insist on HA.
+or leader-election driver for those who insist on HA — now designed as the
+lease-based scale-out mode in [scale-out.md](scale-out.md) (proposed, not
+adopted).
 
 The runtime-budget rules (128 MB, 10 MB script, stream don't buffer) are
 **Cloudflare platform limits**, not correctness requirements; on a user's own
@@ -529,6 +534,12 @@ The six questions this study opened have been decided (tracking issue
    HA is out of scope. The DO-namespace shim stays behind a clean interface as a
    future placement-driver seam, but no HA code is built. (See
    [§8](#8-consistency--correctness).)
+
+   **Update:** a design for that future seam now exists —
+   [scale-out.md](scale-out.md) proposes an opt-in `central` storage mode
+   (N replicas over libSQL + an S3-compatible store, per-id leases replacing
+   the lockfile). Decision 4's single-process **default** stands; adopting
+   the scale-out mode is a separate decision.
 5. **Static hosting → `express.static` + a configurable fallback-handler hook**
    (default 404 or SPA `index.html` rewrite). No built-in template engine;
    dynamic rendering stays a pluggable consumer concern, matching the Cloudflare
