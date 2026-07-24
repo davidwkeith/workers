@@ -21,7 +21,11 @@ Provides:
   everything else is unwrapped (script/style-like subtrees dropped entirely),
   all attributes are stripped except a validated absolute `http(s)` `a[href]`,
   `rel="ugc nofollow"` is forced onto every surviving link, and output can be
-  truncated on text length with open tags closed.
+  truncated on text length with open tags closed. Two element kinds rewrite
+  rather than unwrap: `<img>` becomes a link to its `src` labeled by its
+  `alt` text (nothing in stored content auto-fetches on render), and headings
+  demote to bold paragraphs (a reply never joins the embedding page's
+  document outline).
 - `decodeEntities(input)` — minimal entity decoding (the predefined five plus
   numeric references). This runtime's `HTMLRewriter` hands back raw,
   undecoded text/attribute values, so the extractor and sanitizer decode

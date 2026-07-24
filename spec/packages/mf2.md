@@ -62,6 +62,18 @@ global.
   `javascript:`/`data:`/unresolvable link is unwrapped. Every surviving link
   gets `rel="ugc nofollow"` forced onto it: received content is untrusted
   UGC, and this closes the SEO/spam-link vector.
+- **Two element kinds are rewritten rather than unwrapped** (issue #413):
+  - `<img>` becomes `<a href="src">alt</a>` — the same `href` validation and
+    forced `rel` as any link, labeled by the decoded `alt` text (the resolved
+    URL itself when `alt` is empty). An embedded image auto-fetches on every
+    render of the stored snapshot, so a pass-through `src` would let received
+    content beacon to attacker-controlled infrastructure; a link defers the
+    fetch to a reader's click while keeping the photo reachable — and a
+    photo-only reply no longer sanitizes to `""`. An `<img>` with no safe
+    `src` keeps only its `alt` text; with neither, it is dropped.
+  - Headings `h1`–`h6` demote to `<p><strong>…</strong></p>`: the emphasis
+    survives, but a reply's markup can never claim a slot in — or out-rank —
+    the embedding page's own heading hierarchy.
 - `options.maxTextLength` truncates on text length with an ellipsis, never
   severing an entity, and closes any still-open tags; tags the *source* left
   unclosed are closed too, so stored fragments cannot leak formatting.
