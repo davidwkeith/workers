@@ -66,6 +66,34 @@ relative URLs resolved against the (post-redirect) document URL — honoring a
 `http://webmention.org/` rel is also accepted. The sender refuses to POST a
 discovered endpoint that is not `http(s)`.
 
+### Re-sending after a delete (§3.1.5)
+
+When a published page is later deleted, the spec asks the publisher to
+re-send its Webmentions so each receiver re-verifies, sees the `410 Gone`,
+and drops the stored mention. That requires remembering who was notified —
+opt in by passing a sent log:
+
+```ts
+import {
+  createD1SentLog,
+  sendWebmentions,
+  resendForDeletedSource,
+} from "@dwk/webmention";
+
+const sentLog = createD1SentLog(env.WEBMENTION_INBOX); // own table: webmentions_sent
+
+// On publish — accepted notifications are recorded:
+await sendWebmentions(myPostUrl, outboundLinks, { sentLog });
+
+// After the page is deleted and serving 410 Gone:
+await resendForDeletedSource(myPostUrl, { sentLog });
+```
+
+Re-send the mentions only once the deletion is live — a receiver re-verifying
+against a still-`200` source keeps the mention. Rows are cleared for targets
+that accept the re-send (or no longer declare an endpoint); failed targets
+keep their row so a later call retries them.
+
 ## Bindings (`Env` fragment)
 
 | Binding            | Type         | Required | Purpose                                  |

@@ -47,9 +47,16 @@ export {
 export {
   sendWebmention,
   sendWebmentions,
+  resendForDeletedSource,
   type SendOptions,
   type SendResult,
+  type ResendOptions,
 } from "./sender.js";
+export {
+  createD1SentLog,
+  type SentLog,
+  type D1SentLogOptions,
+} from "./sent-log.js";
 export {
   verifySource,
   sourceLinksTo,
