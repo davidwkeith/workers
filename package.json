@@ -35,7 +35,8 @@
     "overrides": {
       "vite": "^8.1.5",
       "@opentelemetry/core": "^2.9.0",
-      "body-parser": "^2.3.0"
+      "body-parser": "^2.3.0",
+      "sharp": "^0.35.3"
     }
   },
   "devDependencies": {
