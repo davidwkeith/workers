@@ -352,6 +352,16 @@ losers skip silently. A winner that crashes mid-run is covered by handler
 idempotency plus the next tick (missed-tick coalescing is already permitted
 by host-contract §3.7).
 
+Each replica computes `tickBucket` from its **own** clock, not a
+coordinator's — the tick lease needs no clock-sync assumption beyond what
+orchestrators already provide (NTP-disciplined host clocks), but under
+meaningful skew two replicas ticking near a bucket boundary could compute
+adjacent buckets and both win a lease, running the handler twice in close
+succession. This is the same class of event as the crash-recovery case above
+and is covered by the same requirement: scheduled handlers MUST be
+idempotent, so an occasional double-run under skew is a harmless redundant
+execution, not a correctness bug.
+
 > **Update (issue #433): implemented.** `CentralFleetPoller`
 > (`packages/server/src/central-fleet-poller.ts`) is issue #432's
 > `DurableObjectAlarmPoller`, renamed and extended: it now polls every
