@@ -1,4 +1,4 @@
-/** `GET /api/v1/notifications` — favourite/reblog/mention only in phase 2 (Follow deferred to #350). */
+/** `GET /api/v1/notifications` — favourite/reblog/mention, plus follow once the backend stores inbound Follows. */
 
 import { authenticateBearer } from "./auth.js";
 import { notificationEntity } from "./entities.js";

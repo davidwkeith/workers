@@ -202,9 +202,11 @@ for the full cursor contract (`max_received_at`/`since_received_at`/
   `tags: []`, `emojis: []`, `card: null`, `poll: null`.
 - **`Notification`**: `Like` → `favourite`, `Announce` → `reblog`, a
   `Create` whose `inReplyTo` targets this instance → `mention` (with the
-  full mapped `Status` attached); any other row maps to `null` and is
-  omitted from the page. **`Follow` has no case in phase 2** — see Known
-  gaps below.
+  full mapped `Status` attached); `Follow` (or its FEP-1b12 `Group`
+  membership synonym `Join`) → `follow` — `@dwk/activitypub`'s `#onFollow`
+  stores the activity in `inbox` for each *new* follower, so a re-Follow
+  from an existing follower is not a fresh notification; any other row maps
+  to `null` and is omitted from the page.
 - **Remote `Account`** (embedded in `Status.account` /
   `Notification.account`): synthesized purely from the actor IRI, no
   backend call and no outbound fetch (`spec/mastodon-client-api.md`:
@@ -230,15 +232,6 @@ text is correct behavior, not a bug.
 
 ## Known gaps (phase 2)
 
-- **Follow notifications are deferred to phase 3 (#350).** `#onFollow`
-  writes only to the `followers`/`pending_accept` tables — inbound
-  `Follow` activities never reach `inbox`, so `GET /api/v1/notifications`
-  has no data to classify as `follow` and never emits one. This was a
-  scope decision (confirmed with the repo owner), not an oversight —
-  phase 2 was scoped as additive DO routes only, and teaching `#onFollow`
-  to also write an `inbox` row (or merging a second `followers`-sourced
-  stream into the notification cursor) is real federation-write-path
-  surgery.
 - **Bare-IRI `Announce` objects render as empty statuses.** A plain
   (non-relayed) boost's `object` is often just the boosted post's IRI as
   a string, not an embedded object; `statusEntity` reads object fields
@@ -263,7 +256,8 @@ counters from stored inbox activity. The Pixelfed and Tusky runs remain the
 acceptance gate in `conformance/mastodon-client-qa.md`; record/fix client
 quirks there before marking the conformance suite passing.
 
-Follow notifications and `in_reply_to_id` threading remain known fidelity
-gaps: inbound `Follow` activities are intentionally not persisted in the
-inbox, and a remote reply target cannot yet be reliably translated to a local
-snowflake id.
+`in_reply_to_id` threading remains a known fidelity gap: a remote reply
+target cannot yet be reliably translated to a local snowflake id. Follow
+notifications are implemented — `@dwk/activitypub` stores each new
+follower's `Follow`/`Join` in the inbox and the notifications read maps it
+to `type: "follow"`.

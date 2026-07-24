@@ -583,11 +583,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Record the follower first (inbox filled in on the auto-accept path), so a
     // manually-approved actor never triggers an outbound actor fetch here.
     const now = Date.now();
+    const alreadyFollowing =
+      this.#sql
+        .exec(`SELECT 1 FROM followers WHERE actor = ?`, follower)
+        .toArray().length > 0;
     this.#sql.exec(
       `INSERT OR IGNORE INTO followers (actor, inbox, added_at) VALUES (?, NULL, ?)`,
       follower,
       now,
     );
+    // A *new* follower is also stored in `inbox` so the Mastodon client API's
+    // notifications read surfaces it as a `follow` (see #classifyClientEntry);
+    // a re-Follow from an existing follower is not a fresh notification. This
+    // also queues the follower's actor-profile fetch, so the notification
+    // renders with a real display name/avatar.
+    if (!alreadyFollowing) {
+      await this.#storeInbox(activity);
+    }
 
     if (config.manuallyApprovesFollowers) return;
     // An unsafe target is rejected synchronously (no network, no queue row) —
@@ -608,9 +620,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   /** Handle `Undo` of a `Follow` (unfollow); other undos are ignored. */
   #onUndo(activity: ActivityObject): void {
     // Only an embedded `Follow` object is an unfollow. A bare string `object`
-    // is an activity IRI we cannot classify (we do not store inbound `Follow`s),
-    // so treating it as a `Follow` would let an `Undo Like`/`Undo Announce`
-    // carrying a string id silently drop a follower. Require the typed form.
+    // is an activity IRI this handler does not resolve, so treating it as a
+    // `Follow` would let an `Undo Like`/`Undo Announce` carrying a string id
+    // silently drop a follower. Require the typed form.
     if (objectType(activity.object) !== "Follow") return;
     const follower = actorIri(activity.actor);
     if (follower)
@@ -1464,12 +1476,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * Read-time, over the parsed activity JSON — `object_type` alone can't
    * distinguish these (it reflects the *embedded object's* type, not the
    * activity's own, and is null for bare-IRI objects like most `Like`s).
-   * `Follow` is deliberately absent: inbound Follows never reach `inbox`
-   * (see docs/superpowers/specs/2026-07-21-mastodon-phase2-implementation-notes.md).
+   * A `Follow` (or a FEP-1b12 membership `Join`, its synonym on a `Group`
+   * actor) reaches `inbox` only when `#onFollow` recorded a *new* follower,
+   * so every stored one is a `follow` notification.
    */
   #classifyClientEntry(
     activity: ActivityObject,
-  ): "timeline" | "favourite" | "reblog" | "mention" | null {
+  ): "timeline" | "favourite" | "reblog" | "mention" | "follow" | null {
     const type = activity.type;
     if (type === "Create" || type === "Update") {
       // A reply/mention targeting this actor is a notification, not a
@@ -1499,6 +1512,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     }
     if (type === "Like") return "favourite";
     if (type === "Announce") return "reblog";
+    if (type === "Follow" || type === "Join") return "follow";
     return null;
   }
 
@@ -1666,7 +1680,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
             ? classification === "timeline"
             : classification === "favourite" ||
               classification === "reblog" ||
-              classification === "mention";
+              classification === "mention" ||
+              classification === "follow";
         if (wanted) {
           matches.push({
             seq: row.seq,
