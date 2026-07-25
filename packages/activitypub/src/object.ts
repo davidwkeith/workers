@@ -1474,7 +1474,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (kind === "outbox") {
       return this.#sql
         .exec<{ json: string }>(
-          `SELECT json FROM outbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
+          `SELECT json FROM outbox ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
           pageSize,
           offset,
         )

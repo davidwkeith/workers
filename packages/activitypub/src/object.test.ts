@@ -1228,6 +1228,43 @@ describe("shaped post publish endpoint", () => {
   });
 });
 
+describe("outbox ordering by published_at (#451)", () => {
+  it("orders the outbox OrderedCollection by published_at, not insertion order", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Insert the more-recently-published row first (lower seq) and the
+      // backdated row second (higher seq), so a pure `seq DESC` order would
+      // put the backdated row first — the wrong order relative to its
+      // historical `published_at`.
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${iris.outbox}/recent`,
+        JSON.stringify({ id: `${iris.outbox}/recent`, type: "Create" }),
+        Date.parse("2024-01-01T00:00:00.000Z"),
+      );
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${iris.outbox}/backfilled`,
+        JSON.stringify({ id: `${iris.outbox}/backfilled`, type: "Create" }),
+        Date.parse("2019-01-01T00:00:00.000Z"),
+      );
+
+      const res = await instance.fetch(
+        new Request(`${iris.outbox}?page=1`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      const page = (await res.json()) as {
+        orderedItems: Array<{ id: string }>;
+      };
+      expect(page.orderedItems.map((item) => item.id)).toEqual([
+        `${iris.outbox}/recent`,
+        `${iris.outbox}/backfilled`,
+      ]);
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Inbox classification columns (fediverse interop phase 1 #274)
 // ---------------------------------------------------------------------------
