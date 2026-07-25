@@ -214,6 +214,13 @@ export const INTERNAL_HEADERS = {
   /** Marks an owner-authorized publish request (`POST <actor>/outbox`). */
   publish: "x-ap-publish",
   /**
+   * Marks an owner-authorized quiet-insert publish (`?skipDelivery=1` on
+   * `POST <actor>/outbox` or `POST <actor>/publish`): insert into the outbox
+   * without follower fan-out, relationship routing, community delivery, or
+   * arming the delivery alarm — the backfill seam (#451).
+   */
+  skipDelivery: "x-ap-skip-delivery",
+  /**
    * Marks a request for an owner-only **internal** DO route (`__inbox`,
    * `__following`) that has no public front-door equivalent. Set only by the
    * composing Worker's own trusted callers (the MCP tool / syndication

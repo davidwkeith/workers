@@ -42,6 +42,7 @@ import {
   buildAnnounceActivity,
   buildPostActivity,
   classifyActivity,
+  isValidPublished,
   parsePostInput,
   type PostInput,
 } from "./objects.js";
@@ -1123,6 +1124,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     } catch {
       return text(400, "Malformed activity JSON");
     }
+    if (input.published !== undefined && !isValidPublished(input.published)) {
+      return text(400, "`published` must be a valid ISO-8601 timestamp");
+    }
 
     const activity = this.#asOutboxActivity(input, config.iris);
     const id = activity.id as string;
@@ -1130,8 +1134,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       id,
       JSON.stringify(activity),
-      Date.now(),
+      Date.parse(activity.published as string),
     );
+
+    // Quiet-insert mode (#451, backfill): write the historical activity to
+    // the outbox and stop — no follower fan-out, no relationship routing (a
+    // backfilled Follow shouldn't record a live relationship), no community
+    // delivery, no alarm. Set only by an owner request the front door
+    // already authorized (`?skipDelivery=1` on this endpoint).
+    if (request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1") {
+      return json(201, activity as JsonValue, { location: id });
+    }
 
     const body = JSON.stringify(activity);
     // An owner Follow (or Undo-Follow) targets one actor, not our followers:
@@ -1348,7 +1361,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     } as unknown as JsonValue);
   }
 
-  /** Wrap a bare object in a `Create`, assign ids/audience, and timestamp it. */
+  /**
+   * Wrap a bare object in a `Create`, assign ids/audience, and timestamp it.
+   * A caller-supplied `published` (already validated by `#publish`) is
+   * preserved instead of stamped to `now` — the backfill seam (#451).
+   */
   #asOutboxActivity(
     input: ActivityObject,
     iris: ActorIris,
@@ -1365,7 +1382,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         "Follow",
         "Undo",
       ].includes(input.type);
-    const published = new Date().toISOString();
+    const published = isValidPublished(input.published)
+      ? input.published
+      : new Date().toISOString();
     const activityId = `${iris.outbox}/${crypto.randomUUID()}`;
 
     if (isActivity) {
