@@ -31,7 +31,11 @@ This is the second `@dwk` package to ship a Durable Object.
   mostly-static `nodeinfo/2.1` document (live `usage` counts pulled from the DO).
 - **Owner publish endpoint** (`POST <actor>/outbox`, bearer-token gated) — the
   publish → `Create` fan-out seam for [`@dwk/micropub`](../micropub/README.md).
-  Full client-to-server authoring is **out of scope for v1**.
+  Full client-to-server authoring is **out of scope for v1**. `?skipDelivery=1`
+  on `POST <actor>/outbox` or `POST <actor>/publish` inserts the activity into
+  the outbox without follower fan-out, and a caller-supplied `published`
+  (ISO-8601) is preserved instead of stamped to `now` — the backfill seam for
+  syncing pre-existing content (#451).
 
 ## Usage
 

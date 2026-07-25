@@ -86,6 +86,11 @@ export interface PostInput {
   readonly to?: readonly string[];
   /** Advanced addressing override — mentions / secondary audiences (`cc`). */
   readonly cc?: readonly string[];
+  /**
+   * ISO-8601 publish timestamp override. Defaults to `now`; used to backdate
+   * backfilled historical content so it doesn't sort as newly posted (#451).
+   */
+  readonly published?: string;
 }
 
 /**
@@ -121,6 +126,24 @@ function isHttpUrl(value: string): boolean {
 
 function isAddressable(value: string): boolean {
   return value === PUBLIC_AUDIENCE || isHttpUrl(value);
+}
+
+/**
+ * Whether `value` is a non-empty string `Date.parse` can interpret — the
+ * shared validity check for a caller-supplied `published` override on both
+ * the raw-AS2 and shaped-post publish paths (#451). Deliberately
+ * `Date.parse`-permissive rather than a strict ISO-8601 validator (callers
+ * are asked for ISO-8601 in error text, but e.g. `"2019"` or
+ * `"March 1 2019"` also pass here) — every accepted value is renormalized to
+ * canonical `xsd:dateTime` via `.toISOString()` before it's stored or
+ * served, so looseness here never reaches the outbox unnormalized.
+ */
+export function isValidPublished(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    !Number.isNaN(Date.parse(value))
+  );
 }
 
 function optionalString(
@@ -216,6 +239,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     tags?: string[];
     to?: string[];
     cc?: string[];
+    published?: string;
   } = { kind: kind as PostKind, content };
 
   for (const key of ["name", "summary"] as const) {
@@ -237,6 +261,17 @@ export function parsePostInput(value: unknown): ParsedPostInput {
       return { ok: false, error: "`sensitive` must be a boolean" };
     }
     input.sensitive = record.sensitive;
+  }
+
+  if (record.published !== undefined) {
+    const published = record.published;
+    if (!isValidPublished(published)) {
+      return {
+        ok: false,
+        error: "`published` must be a valid date-time (ISO-8601 recommended)",
+      };
+    }
+    input.published = published;
   }
 
   for (const key of ["inReplyTo", "audience"] as const) {

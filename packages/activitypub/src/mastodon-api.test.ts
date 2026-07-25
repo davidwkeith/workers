@@ -847,6 +847,15 @@ describe("buildMastodonBackend", () => {
   it("publishStatus() escapes HTML metacharacters in both content and the CW summary", async () => {
     const config = freshConfig();
     const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        "https://remote.example/users/bob",
+        "https://remote.example/users/bob/inbox",
+        1,
+      );
+    });
     const entry = await backend.publishStatus!({
       status: "a <b> & c",
       spoilerText: "cw <x> & y",
@@ -859,6 +868,14 @@ describe("buildMastodonBackend", () => {
     expect(object.content).toBe("<p>a &lt;b&gt; &amp; c</p>");
     expect(object.summary).toBe("cw &lt;x&gt; &amp; y");
     expect(entry.source).toBe(1);
+    // #clientPublish never sets skipDelivery, so live posting still fans out
+    // to existing followers (guards against a future default-parameter slip).
+    await runInDurableObject(stub, async (_instance, state) => {
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(1);
+    });
   });
 
   it("resolves inReplyTo to the owner's outbox post (in_reply_to snowflake + owner author)", async () => {

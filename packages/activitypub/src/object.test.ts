@@ -776,6 +776,7 @@ function outboxRequest(
   username: string,
   body: string,
   publish: boolean,
+  skipDelivery = false,
 ): Request {
   const iris = deriveIris(BASE, username);
   const headers: Record<string, string> = {
@@ -783,6 +784,7 @@ function outboxRequest(
     [INTERNAL_HEADERS.config]: cfgHeader(username),
   };
   if (publish) headers[INTERNAL_HEADERS.publish] = "1";
+  if (skipDelivery) headers[INTERNAL_HEADERS.skipDelivery] = "1";
   return new Request(iris.outbox, { method: "POST", headers, body });
 }
 
@@ -897,6 +899,122 @@ describe("publish endpoint", () => {
       expect(queued).toBe(1);
     });
   });
+
+  it("preserves a caller-supplied published timestamp on a bare object", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Note",
+            content: "old post",
+            published: "2019-03-01T12:00:00.000Z",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+      const object = activity.object as Record<string, unknown>;
+      expect(object.published).toBe("2019-03-01T12:00:00.000Z");
+      const row = state.storage.sql
+        .exec<{ published_at: number }>(
+          `SELECT published_at FROM outbox WHERE id = ?`,
+          activity.id,
+        )
+        .one();
+      expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
+    });
+  });
+
+  it("preserves a caller-supplied published timestamp on a pre-wrapped activity", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Announce",
+            object: "https://remote.example/notes/1",
+            published: "2018-01-01T00:00:00.000Z",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      expect(activity.published).toBe("2018-01-01T00:00:00.000Z");
+    });
+  });
+
+  it("400s an unparseable published timestamp", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Note", content: "x", published: "nope" }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(400);
+    });
+  });
+
+  it("skipDelivery inserts into the outbox without fan-out or arming the alarm", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Note", content: "backfilled" }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const outboxCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxCount).toBe(1);
+      const deliveryCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(deliveryCount).toBe(0);
+      expect(await state.storage.getAlarm()).toBeNull();
+    });
+  });
+
+  it("skipDelivery on a Follow does not record a relationship or queue delivery", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Follow", object: REMOTE }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const followingCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
+        .one().n;
+      expect(followingCount).toBe(0);
+      const pendingCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+        .one().n;
+      expect(pendingCount).toBe(0);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -908,6 +1026,7 @@ function publishRequest(
   username: string,
   body: string,
   publish = true,
+  skipDelivery = false,
 ): Request {
   const iris = deriveIris(BASE, username);
   const headers: Record<string, string> = {
@@ -915,6 +1034,7 @@ function publishRequest(
     [INTERNAL_HEADERS.config]: cfgHeader(username),
   };
   if (publish) headers[INTERNAL_HEADERS.publish] = "1";
+  if (skipDelivery) headers[INTERNAL_HEADERS.skipDelivery] = "1";
   return new Request(`${iris.id}/publish`, { method: "POST", headers, body });
 }
 
@@ -1010,6 +1130,78 @@ describe("shaped post publish endpoint", () => {
     });
   });
 
+  it("preserves a caller-supplied published timestamp", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "note",
+            content: "old post",
+            published: "2019-03-01T12:00:00.000Z",
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      const object = activity.object as Record<string, unknown>;
+      expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+      expect(object.published).toBe("2019-03-01T12:00:00.000Z");
+      const row = state.storage.sql
+        .exec<{ published_at: number }>(
+          `SELECT published_at FROM outbox WHERE id = ?`,
+          activity.id,
+        )
+        .one();
+      expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
+    });
+  });
+
+  it("400s an unparseable published timestamp", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "note", content: "x", published: "nope" }),
+        ),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.text()).toMatch(/`published`/);
+    });
+  });
+
+  it("skipDelivery inserts a shaped post without fan-out or arming the alarm", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "note", content: "backfilled" }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const outboxed = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxed).toBe(1);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(0);
+      expect(await state.storage.getAlarm()).toBeNull();
+    });
+  });
+
   it("publishes a titled Page carrying the community audience", async () => {
     const { username, stub } = freshUser();
     await runInDurableObject(stub, async (instance) => {
@@ -1033,6 +1225,43 @@ describe("shaped post publish endpoint", () => {
       expect(activity.to).toEqual([
         "https://lemmy.example/c/birding",
         "https://www.w3.org/ns/activitystreams#Public",
+      ]);
+    });
+  });
+});
+
+describe("outbox ordering by published_at (#451)", () => {
+  it("orders the outbox OrderedCollection by published_at, not insertion order", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Insert the more-recently-published row first (lower seq) and the
+      // backdated row second (higher seq), so a pure `seq DESC` order would
+      // put the backdated row first — the wrong order relative to its
+      // historical `published_at`.
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${iris.outbox}/recent`,
+        JSON.stringify({ id: `${iris.outbox}/recent`, type: "Create" }),
+        Date.parse("2024-01-01T00:00:00.000Z"),
+      );
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        `${iris.outbox}/backfilled`,
+        JSON.stringify({ id: `${iris.outbox}/backfilled`, type: "Create" }),
+        Date.parse("2019-01-01T00:00:00.000Z"),
+      );
+
+      const res = await instance.fetch(
+        new Request(`${iris.outbox}?page=1`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+      const page = (await res.json()) as {
+        orderedItems: Array<{ id: string }>;
+      };
+      expect(page.orderedItems.map((item) => item.id)).toEqual([
+        `${iris.outbox}/recent`,
+        `${iris.outbox}/backfilled`,
       ]);
     });
   });

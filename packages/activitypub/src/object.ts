@@ -42,6 +42,7 @@ import {
   buildAnnounceActivity,
   buildPostActivity,
   classifyActivity,
+  isValidPublished,
   parsePostInput,
   type PostInput,
 } from "./objects.js";
@@ -172,6 +173,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `CREATE TABLE IF NOT EXISTS outbox (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE, json TEXT NOT NULL,
          published_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_outbox_published_at ON outbox (published_at, seq)`,
     );
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS delivery (
@@ -1123,6 +1127,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     } catch {
       return text(400, "Malformed activity JSON");
     }
+    if (input.published !== undefined && !isValidPublished(input.published)) {
+      return text(
+        400,
+        "`published` must be a valid date-time (ISO-8601 recommended)",
+      );
+    }
 
     const activity = this.#asOutboxActivity(input, config.iris);
     const id = activity.id as string;
@@ -1130,8 +1140,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       id,
       JSON.stringify(activity),
-      Date.now(),
+      Date.parse(activity.published as string),
     );
+
+    // Quiet-insert mode (#451, backfill): write the historical activity to
+    // the outbox and stop — no follower fan-out, no relationship routing (a
+    // backfilled Follow shouldn't record a live relationship), no community
+    // delivery, no alarm. Set only by an owner request the front door
+    // already authorized (`?skipDelivery=1` on this endpoint).
+    if (request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1") {
+      return json(201, activity as JsonValue, { location: id });
+    }
 
     const body = JSON.stringify(activity);
     // An owner Follow (or Undo-Follow) targets one actor, not our followers:
@@ -1259,7 +1278,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const parsed = parsePostInput(body);
     if (!parsed.ok) return text(400, parsed.error);
 
-    const stored = await this.#storePost(parsed.input);
+    const skipDelivery =
+      request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1";
+    const stored = await this.#storePost(parsed.input, { skipDelivery });
     return json(201, stored.activity as JsonValue, {
       location: stored.activityId,
     });
@@ -1273,7 +1294,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * (the `__client/publish` write path) can build it. Shared by `#publishPost`
    * and `#clientPublish`.
    */
-  async #storePost(input: PostInput): Promise<{
+  async #storePost(
+    input: PostInput,
+    opts: { skipDelivery?: boolean } = {},
+  ): Promise<{
     activityId: string;
     activity: Record<string, JsonValue>;
     seq: number;
@@ -1281,12 +1305,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }> {
     const config = this.#config!;
     const activityId = `${config.iris.outbox}/${crypto.randomUUID()}`;
+    const published = isValidPublished(input.published)
+      ? new Date(input.published).toISOString()
+      : new Date().toISOString();
     const activity = buildPostActivity(input, config.iris, {
       activityId,
       objectId: `${activityId}/object`,
-      published: new Date().toISOString(),
+      published,
     });
-    const publishedAt = Date.now();
+    const publishedAt = Date.parse(published);
     this.#sql.exec(
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       activityId,
@@ -1294,18 +1321,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       publishedAt,
     );
 
-    const json_ = JSON.stringify(activity);
-    for (const row of this.#sql
-      .exec<{
-        inbox: string | null;
-      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
-      .toArray()) {
-      if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+    // Quiet-insert mode (#451, backfill): store the row and stop — no
+    // follower fan-out, no community delivery, no alarm. `#clientPublish`
+    // never sets this, so its live-posting behavior is unchanged.
+    if (!opts.skipDelivery) {
+      const json_ = JSON.stringify(activity);
+      for (const row of this.#sql
+        .exec<{
+          inbox: string | null;
+        }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+        .toArray()) {
+        if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+      }
+      if (input.audience) {
+        this.#deliverToAudience(input.audience, json_);
+      }
+      await this.#armAlarm();
     }
-    if (input.audience) {
-      this.#deliverToAudience(input.audience, json_);
-    }
-    await this.#armAlarm();
 
     const seq = this.#sql
       .exec<{ seq: number }>(`SELECT seq FROM outbox WHERE id = ?`, activityId)
@@ -1348,7 +1380,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     } as unknown as JsonValue);
   }
 
-  /** Wrap a bare object in a `Create`, assign ids/audience, and timestamp it. */
+  /**
+   * Wrap a bare object in a `Create`, assign ids/audience, and timestamp it.
+   * A caller-supplied `published` (already validated by `#publish`) is
+   * preserved instead of stamped to `now` — the backfill seam (#451).
+   */
   #asOutboxActivity(
     input: ActivityObject,
     iris: ActorIris,
@@ -1365,7 +1401,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         "Follow",
         "Undo",
       ].includes(input.type);
-    const published = new Date().toISOString();
+    const published = isValidPublished(input.published)
+      ? new Date(input.published).toISOString()
+      : new Date().toISOString();
     const activityId = `${iris.outbox}/${crypto.randomUUID()}`;
 
     if (isActivity) {
@@ -1442,7 +1480,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (kind === "outbox") {
       return this.#sql
         .exec<{ json: string }>(
-          `SELECT json FROM outbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
+          `SELECT json FROM outbox ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
           pageSize,
           offset,
         )

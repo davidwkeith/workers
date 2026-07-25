@@ -7,6 +7,7 @@ import {
   buildPostActivity,
   buildPostObject,
   classifyActivity,
+  isValidPublished,
   parsePostInput,
   postAddressing,
 } from "./objects.js";
@@ -132,6 +133,18 @@ describe("parsePostInput", () => {
     expect(rejected({ kind: "note", content: "x", sensitive: "yes" })).toMatch(
       /`sensitive`/,
     );
+  });
+
+  it("validates published as an ISO-8601 timestamp", () => {
+    expect(
+      rejected({ kind: "note", content: "x", published: "not-a-date" }),
+    ).toMatch(/`published`/);
+    const input = parsed({
+      kind: "note",
+      content: "x",
+      published: "2019-03-01T12:00:00.000Z",
+    });
+    expect(input.published).toBe("2019-03-01T12:00:00.000Z");
   });
 });
 
@@ -327,5 +340,15 @@ describe("classifyActivity", () => {
       classifyActivity({ type: "Like", object: "https://x.example/1" }),
     ).toEqual({});
     expect(classifyActivity({ type: "Weird" })).toEqual({});
+  });
+});
+
+describe("isValidPublished", () => {
+  it("accepts parseable ISO-8601 strings and rejects everything else", () => {
+    expect(isValidPublished("2019-03-01T12:00:00.000Z")).toBe(true);
+    expect(isValidPublished("not-a-date")).toBe(false);
+    expect(isValidPublished("")).toBe(false);
+    expect(isValidPublished(undefined)).toBe(false);
+    expect(isValidPublished(12345)).toBe(false);
   });
 });

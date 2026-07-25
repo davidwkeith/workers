@@ -130,6 +130,24 @@ design; summary:
 - C2S authoring is **out of scope for v1**; [`@dwk/micropub`](micropub.md)
   already covers authoring, and a publish → `Create` fan-out is the integration
   seam.
+- **Backfill / quiet-insert (#451).** `POST <actor>/outbox` and
+  `POST <actor>/publish` accept `?skipDelivery=1`, gated by the same
+  bearer-token publish check as an ordinary owner publish. When set, the
+  activity is written to the outbox and the response returns immediately —
+  follower fan-out, `Follow`/`Undo` relationship routing, community
+  (`audience`) delivery, and arming the delivery alarm are all skipped. Any
+  other value (including an empty `?skipDelivery=`) is rejected with `400`
+  rather than silently falling through to a live, notification-fanning
+  publish. This is the seam a trusted owner script uses to sync
+  pre-existing content into its own outbox without notification-blasting
+  current followers.
+- **Backdated `published`.** Both endpoints accept a caller-supplied
+  `published` (a `Date.parse`-interpretable string, renormalized to
+  canonical `xsd:dateTime` via `.toISOString()`) instead of always stamping
+  the activity with `now`; an unparseable value is rejected with `400`. The
+  outbox `OrderedCollection` orders by `published_at` (backed by
+  `idx_outbox_published_at`) rather than insertion order, so a backfilled
+  post sorts into its historical position among already-synced content.
 
 ## Bindings (declared `Env` fragment)
 
