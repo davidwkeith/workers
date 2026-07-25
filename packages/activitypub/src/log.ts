@@ -45,7 +45,10 @@ export const ActivityPubLogEvent = {
   DeliveryFailed: "activitypub.delivery.failed",
   /** A delivery target was refused on SSRF grounds. Field: `reason`. */
   DeliveryBlocked: "activitypub.delivery.blocked",
-  /** An owner publish request was refused (bad/absent token). */
+  /**
+   * An owner-authorized request was refused (bad/absent token): a publish, or
+   * the owner blocklist read that shares the same token gate.
+   */
   PublishRejected: "activitypub.publish.rejected",
   /**
    * A pending counter delta could not be recorded under its own `(event,

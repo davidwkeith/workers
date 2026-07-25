@@ -1691,6 +1691,409 @@ describe("outbound relationship activities", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Owner follower control: remove / block a follower (#447)
+// ---------------------------------------------------------------------------
+
+/** The queued targeted deliveries (`pending_accept` kind 'deliver'), newest last. */
+function targetedDeliveries(state: DurableObjectState): {
+  actor: string;
+  activity: Record<string, unknown>;
+}[] {
+  return state.storage.sql
+    .exec<{
+      actor: string;
+      json: string;
+    }>(
+      `SELECT actor, json FROM pending_accept WHERE kind = 'deliver' ORDER BY seq`,
+    )
+    .toArray()
+    .map((row) => ({
+      actor: row.actor,
+      activity: JSON.parse(row.json) as Record<string, unknown>,
+    }));
+}
+
+function counts(state: DurableObjectState, table: string): number {
+  return state.storage.sql
+    .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}`)
+    .one().n;
+}
+
+/** Seed a follower with a resolved inbox, as an accepted inbound Follow leaves it. */
+function seedFollower(
+  state: DurableObjectState,
+  actor = REMOTE,
+  followId: string | null = `${REMOTE}/activities/follow-1`,
+): void {
+  state.storage.sql.exec(
+    `INSERT INTO followers (actor, inbox, added_at, follow_id) VALUES (?, ?, 1, ?)`,
+    actor,
+    `${actor}/inbox`,
+    followId,
+  );
+}
+
+describe("owner follower control (#447)", () => {
+  it("records the inbound Follow's id so a later Reject can name it", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const followId = `${REMOTE}/activities/follow-9`;
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: followId,
+            type: "Follow",
+            actor: REMOTE,
+            object: deriveIris(BASE, username).id,
+          },
+          REMOTE,
+          { manuallyApprovesFollowers: true },
+        ),
+      );
+      const row = state.storage.sql
+        .exec<{
+          follow_id: string | null;
+        }>(`SELECT follow_id FROM followers WHERE actor = ?`, REMOTE)
+        .one();
+      expect(row.follow_id).toBe(followId);
+    });
+  });
+
+  it("drops the follower and delivers a canonical Reject(Follow) to them alone", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      // A second follower must not see the Reject.
+      seedFollower(state, "https://other.example/users/carol", null);
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Reject",
+            object: { type: "Follow", actor: REMOTE, object: iris.id },
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+
+      const followers = state.storage.sql
+        .exec<{ actor: string }>(`SELECT actor FROM followers`)
+        .toArray()
+        .map((row) => row.actor);
+      expect(followers).toEqual(["https://other.example/users/carol"]);
+
+      // Targeted at the removed follower only — never the follower fan-out.
+      expect(counts(state, "delivery")).toBe(0);
+      const queued = targetedDeliveries(state);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.actor).toBe(REMOTE);
+      expect(queued[0]?.activity.type).toBe("Reject");
+      expect(queued[0]?.activity.actor).toBe(iris.id);
+      expect(queued[0]?.activity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+
+      // A moderation decision never lands in the publicly served outbox.
+      expect(counts(state, "outbox")).toBe(0);
+    });
+  });
+
+  it("accepts the actor-IRI shorthand and the stored Follow id as the Reject target", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      const byActor = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Reject", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(byActor.status).toBe(202);
+      expect(counts(state, "followers")).toBe(0);
+      expect(
+        ((await byActor.json()) as { object: Record<string, unknown> }).object
+          .actor,
+      ).toBe(REMOTE);
+
+      // The same request phrased as "reject this Follow activity".
+      seedFollower(state);
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Reject",
+            object: `${REMOTE}/activities/follow-1`,
+          }),
+          true,
+        ),
+      );
+      expect(counts(state, "followers")).toBe(0);
+      const queued = targetedDeliveries(state);
+      expect(queued.map((row) => row.actor)).toEqual([REMOTE, REMOTE]);
+      expect(queued[1]?.activity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+    });
+  });
+
+  it("blocks: severs both relationship rows, records the block, and delivers only to the target", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      state.storage.sql.exec(
+        `INSERT INTO following (actor, state, added_at) VALUES (?, 'accepted', 1)`,
+        REMOTE,
+      );
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Block", object: { id: REMOTE } }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      // The embedded actor object is normalized to its IRI on the wire.
+      expect(((await res.json()) as Record<string, unknown>).object).toBe(
+        REMOTE,
+      );
+
+      expect(counts(state, "followers")).toBe(0);
+      expect(counts(state, "following")).toBe(0);
+      expect(counts(state, "outbox")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+      const queued = targetedDeliveries(state);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.actor).toBe(REMOTE);
+      expect(queued[0]?.activity.type).toBe("Block");
+      expect(
+        state.storage.sql
+          .exec<{ actor: string }>(`SELECT actor FROM blocked`)
+          .one().actor,
+      ).toBe(REMOTE);
+    });
+  });
+
+  it("re-addresses a control activity to its one recipient under a non-outbox id", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      // As if copied from an ordinary post: public `to`, followers in `cc`.
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Block",
+            object: REMOTE,
+            to: ["https://www.w3.org/ns/activitystreams#Public"],
+            cc: [iris.followers],
+          }),
+          true,
+        ),
+      );
+      const [queued] = targetedDeliveries(state);
+      expect(queued?.activity.to).toEqual([REMOTE]);
+      expect(queued?.activity.cc).toBeUndefined();
+      // Never stored in the outbox, so an outbox-namespaced id would 404 for
+      // the peer; these are fragments of the actor IRI instead.
+      expect(queued?.activity.id).toMatch(
+        new RegExp(`^${iris.id}#blocks/[0-9a-f-]+$`),
+      );
+    });
+  });
+
+  it("refuses every inbound activity from a blocked actor, including a re-Follow", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Block", object: REMOTE }),
+          true,
+        ),
+      );
+
+      const refollow = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/follow-2`,
+            type: "Follow",
+            actor: REMOTE,
+            object: iris.id,
+          },
+          REMOTE,
+        ),
+      );
+      expect(refollow.status).toBe(403);
+      expect(counts(state, "followers")).toBe(0);
+
+      const mention = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/note-1`,
+            type: "Create",
+            actor: REMOTE,
+            object: { id: `${REMOTE}/notes/1`, type: "Note", content: "hi" },
+          },
+          REMOTE,
+        ),
+      );
+      expect(mention.status).toBe(403);
+      expect(counts(state, "inbox")).toBe(0);
+      // Refused before dedup, so a blocked actor never consumes a seen row.
+      expect(counts(state, "seen")).toBe(0);
+    });
+  });
+
+  it("undoes a block, delivering the Undo and letting the actor follow again", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Block", object: REMOTE }),
+          true,
+        ),
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Undo",
+            object: { type: "Block", object: REMOTE },
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "blocked")).toBe(0);
+      const queued = targetedDeliveries(state);
+      expect(queued).toHaveLength(2);
+      expect(queued[1]?.activity.type).toBe("Undo");
+      expect(queued[1]?.actor).toBe(REMOTE);
+
+      const refollow = await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/follow-3`,
+            type: "Follow",
+            actor: REMOTE,
+            object: iris.id,
+          },
+          REMOTE,
+        ),
+      );
+      expect(refollow.status).toBe(202);
+      expect(counts(state, "followers")).toBe(1);
+    });
+  });
+
+  it("applies a block locally but sends nothing under ?skipDelivery=1", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Block", object: REMOTE }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "followers")).toBe(0);
+      expect(counts(state, "blocked")).toBe(1);
+      expect(counts(state, "pending_accept")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+      expect(counts(state, "outbox")).toBe(0);
+    });
+  });
+
+  it("drops an unroutable control activity instead of fanning it out", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      for (const body of [
+        { type: "Reject" },
+        { type: "Block" },
+        { type: "Undo", object: { type: "Block" } },
+        // An unsafe target never reaches the delivery queue.
+        { type: "Block", object: "http://127.0.0.1/users/eve" },
+      ]) {
+        const res = await instance.fetch(
+          outboxRequest(username, JSON.stringify(body), true),
+        );
+        expect(res.status).toBe(202);
+      }
+      expect(counts(state, "delivery")).toBe(0);
+      expect(counts(state, "pending_accept")).toBe(0);
+      expect(counts(state, "outbox")).toBe(0);
+      // The unsafe Block still applies locally — it just never federates.
+      expect(counts(state, "blocked")).toBe(1);
+    });
+  });
+
+  it("serves the owner blocklist only behind the owner marker", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Block", object: REMOTE }),
+          true,
+        ),
+      );
+      const headers: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+      };
+      const unmarked = await instance.fetch(
+        new Request(`${iris.id}/blocked`, { headers }),
+      );
+      expect(unmarked.status).toBe(404);
+
+      const owner = { ...headers, [INTERNAL_HEADERS.publish]: "1" };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/blocked`, { headers: owner }),
+      );
+      expect(listed.status).toBe(200);
+      const body = (await listed.json()) as {
+        total: number;
+        items: { actor: string; blockedAt: string }[];
+      };
+      expect(body.total).toBe(1);
+      expect(body.items[0]?.actor).toBe(REMOTE);
+      expect(Number.isNaN(Date.parse(body.items[0]?.blockedAt ?? ""))).toBe(
+        false,
+      );
+
+      const written = await instance.fetch(
+        new Request(`${iris.id}/blocked`, { method: "DELETE", headers: owner }),
+      );
+      expect(written.status).toBe(405);
+    });
+  });
+});
+
 describe("outbound vote delivery (Like/Dislike audience)", () => {
   it("delivers a Like to the named community's inbox when known", async () => {
     const { username, stub } = freshUser();

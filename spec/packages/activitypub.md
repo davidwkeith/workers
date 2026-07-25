@@ -98,6 +98,51 @@ one record.
   `Accept`/`Reject` is a C2S concern (out of scope for v1, as with manual
   follower approval).
 
+### Owner follower control (#447)
+
+An actor's owner MUST be able to remove and block a follower; without it the
+only remedy against an abusive follower is rotating the actor identity, which
+breaks federation with every legitimate follower. The operation rides the
+existing owner publish seam (`POST <actor>/outbox`, same bearer token) rather
+than a new endpoint, because what the owner is asking for *is* an AS2 activity.
+
+- **Follower-control activities** are `Reject` (of a `Follow`), `Block`, and
+  `Undo(Block)`. Each names **one** actor and is routed to that actor's inbox
+  alone through the targeted queue an owner `Follow` already uses — never the
+  follower fan-out, which is what an owner-published `Reject`/`Block` would
+  otherwise have got.
+- **They are private.** A follower-control activity is **never** written to the
+  outbox: the outbox is served publicly, so an outbox row would publish the
+  owner's moderation decisions. The response is `202` (no addressable resource
+  was created) carrying the normalized activity: its `id` is a fragment of the
+  actor IRI rather than an outbox IRI that would dereference to `404`, and its
+  addressing is rewritten to the single recipient, so a `cc` copied from an
+  ordinary post cannot claim an audience that was never delivered to.
+- **`Reject`** drops the `followers` row and delivers a canonical
+  `Reject(Follow)` — `object.actor` the follower, `object.object` this actor,
+  and `object.id` the original `Follow`'s IRI when one was recorded (the
+  `followers.follow_id` column, populated by the inbound `Follow`). The owner
+  may name the target as the embedded `Follow`, as the follower's actor IRI, or
+  as the recorded `Follow`'s IRI; all three normalize to the same delivered
+  body.
+- **`Block`** additionally records the actor in the durable blocklist and
+  severs the relationship in both directions (both the `followers` and the
+  `following` row), since the receiving server does the same. Every subsequent
+  inbound activity from a blocked actor is refused with `403` — not just a
+  re-`Follow`, since a block that still accepted their replies, likes, and
+  mentions would only be half a block — and the refusal precedes dedup, so a
+  blocked actor never consumes a `seen` row.
+- **`Undo(Block)`** deletes the blocklist row and tells the peer. The follow
+  relationship is not restored; re-following is the unblocked actor's own
+  decision to make again.
+- **`?skipDelivery=1`** keeps its literal meaning on these activities: the local
+  state change still applies, only the federated notification is suppressed — a
+  silent removal.
+- **`GET <actor>/blocked`** returns the blocklist (`{ items, total }`, flat JSON
+  rather than an AS2 collection, unpaged) behind the same bearer token. It is
+  never public: a block that can be created but never reviewed could not be
+  undone.
+
 ### Group actors (communities, FEP-1b12 producer side, #376)
 
 `actor.type` (default `"Person"`) may be set to `"Group"` to host a FEP-1b12

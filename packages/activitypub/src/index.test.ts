@@ -793,6 +793,137 @@ describe("publish endpoint", () => {
   });
 });
 
+describe("owner follower control (#447)", () => {
+  it("removes a follower through the owner publish seam and lists the block", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const iris = deriveIris(config.baseUrl, config.actor.username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+    });
+
+    // Outbound delivery is alarm-driven, so the stub is in place from the
+    // moment the Block is published: whichever pass runs it, the only body
+    // that leaves is the Block, addressed to the blocked actor's inbox.
+    const posted: { url: string; body: string }[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href === REMOTE) {
+        return new Response(
+          JSON.stringify({
+            id: REMOTE,
+            inbox: `${REMOTE}/inbox`,
+            publicKey: { publicKeyPem, owner: REMOTE },
+          }),
+          { headers: { "content-type": "application/activity+json" } },
+        );
+      }
+      posted.push({
+        url: href,
+        body: new TextDecoder().decode(init?.body as ArrayBufferView),
+      });
+      return new Response(null, { status: 202 });
+    }) as unknown as typeof fetch;
+    try {
+      const blocked = await handler(
+        new Request(`${actorUrl(config)}/outbox`, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer s3cret",
+            "content-type": "application/activity+json",
+          },
+          body: JSON.stringify({ type: "Block", object: REMOTE }),
+        }),
+        testEnv,
+        ctx,
+      );
+      expect(blocked.status).toBe(202);
+
+      await runInDurableObject(stub, async (instance) => {
+        await instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: {
+              [INTERNAL_HEADERS.config]: forwardedHeader(config.actor.username),
+            },
+          }),
+        );
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.url).toBe(`${REMOTE}/inbox`);
+    expect(JSON.parse(posted[0]?.body ?? "{}").type).toBe("Block");
+
+    // The follower is gone from the public collection, and the Block never
+    // appears in the public outbox.
+    const followers = (await (
+      await handler(
+        new Request(`${actorUrl(config)}/followers?page=1`),
+        testEnv,
+        ctx,
+      )
+    ).json()) as Record<string, unknown>;
+    expect(followers.orderedItems).toEqual([]);
+    const outbox = (await (
+      await handler(new Request(`${actorUrl(config)}/outbox`), testEnv, ctx)
+    ).json()) as Record<string, unknown>;
+    expect(outbox.totalItems).toBe(0);
+
+    const list = await handler(
+      new Request(`${actorUrl(config)}/blocked`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { items: { actor: string }[] };
+    expect(body.items.map((item) => item.actor)).toEqual([REMOTE]);
+  });
+
+  it("keeps the blocklist behind the owner token", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+
+    const anonymous = await handler(
+      new Request(`${actorUrl(config)}/blocked`),
+      testEnv,
+      ctx,
+    );
+    expect(anonymous.status).toBe(401);
+
+    const wrongToken = await handler(
+      new Request(`${actorUrl(config)}/blocked`, {
+        headers: { authorization: "Bearer wrong" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(wrongToken.status).toBe(401);
+
+    // With no publish token configured the route does not exist at all.
+    const openConfig = makeConfig();
+    const noToken = createActivityPub(openConfig);
+    const disabled = await noToken(
+      new Request(`${actorUrl(openConfig)}/blocked`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(disabled.status).toBe(404);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Delivery path, driven inside the DO with a stubbed outbound `fetch`.
 // ---------------------------------------------------------------------------

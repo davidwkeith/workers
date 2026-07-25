@@ -246,6 +246,7 @@ export function createActivityPub(
   const inboxPath = pathOf(iris.inbox);
   const outboxPath = pathOf(iris.outbox);
   const publishPath = `${actorPath}/publish`;
+  const blockedPath = `${actorPath}/blocked`;
   const followersPath = pathOf(iris.followers);
   const followingPath = pathOf(iris.following);
   const sharedInboxPath = resolved.sharedInbox
@@ -419,6 +420,30 @@ export function createActivityPub(
         method,
         body: forwardBody,
         extra,
+      });
+    }
+
+    // --- Owner blocklist read (#447) ----------------------------------------
+    // Who the owner has blocked, behind the same bearer token as publishing —
+    // the blocklist is private, so it is neither an AS2 collection nor served
+    // to anyone but the owner. Without it a block could be created but never
+    // reviewed or undone.
+    if (path === blockedPath && method === "GET") {
+      if (!resolved.publishToken) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "disabled",
+        });
+        return text(404, "Not Found");
+      }
+      if (!(await authorizedPublish(request, resolved.publishToken))) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "unauthorized",
+        });
+        return text(401, "Unauthorized");
+      }
+      return forwardToDo(resolved, env, request.url, {
+        method,
+        extra: { [INTERNAL_HEADERS.publish]: "1" },
       });
     }
 

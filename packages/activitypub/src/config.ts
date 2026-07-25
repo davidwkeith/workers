@@ -211,7 +211,11 @@ export const INTERNAL_HEADERS = {
   signedActor: "x-ap-signed-actor",
   /** JSON config subset the DO needs (IRIs, delivery policy, signing key). */
   config: "x-ap-config",
-  /** Marks an owner-authorized publish request (`POST <actor>/outbox`). */
+  /**
+   * Marks an owner-authorized request — one the front door only forwards after
+   * checking the publish bearer token: `POST <actor>/outbox`,
+   * `POST <actor>/publish`, and the owner blocklist read `GET <actor>/blocked`.
+   */
   publish: "x-ap-publish",
   /**
    * Marks an owner-authorized quiet-insert publish (`?skipDelivery=1` on
