@@ -40,6 +40,14 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   for fediverse software discovery (software name, version, usage counts).
 - **No WAC leakage.** This is an ActivityPub package — WAC/Solid concepts must
   not leak in, even though both share `@dwk/ldn` for inbox primitives.
+- **Owner follower control (#447).** `Reject`(Follow), `Block` and
+  `Undo(Block)` published to `POST <actor>/outbox` are _follower-control_
+  activities: they route to one actor's inbox through the targeted queue
+  (`#routeFollowerControl`), never the follower fan-out, and are never written
+  to the publicly-served outbox. A `Block` also persists to the `blocked` table,
+  and every inbound activity from a blocked actor is refused `403` — distinct
+  from `banned`, which is a `Group` moderator's decision and is not reversible
+  through this path.
 - **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
   community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
   the Group actor itself rather than one of its owned events, is the same

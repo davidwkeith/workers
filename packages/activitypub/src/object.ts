@@ -121,6 +121,45 @@ function text(status: number, body: string): Response {
   });
 }
 
+/**
+ * Whether an owner-published activity is a **follower-control** activity (#447)
+ * — one aimed at a single actor's relationship with this one, rather than
+ * content for the follower set: `Reject` (of a `Follow`), `Block`, and
+ * `Undo(Block)`.
+ *
+ * Every `Reject` qualifies, not only one carrying a well-formed `Follow`: the
+ * failure this guards against is a control activity leaking into the follower
+ * fan-out, so an unroutable one is claimed here and dropped rather than
+ * broadcast. `Reject` of an event `Join` is not a case this actor can produce —
+ * manual `Join` approval is out of scope for v1 (spec §"Events & RSVPs").
+ */
+function isFollowerControlActivity(
+  activity: Record<string, JsonValue>,
+): boolean {
+  if (activity.type === "Block" || activity.type === "Reject") return true;
+  return (
+    activity.type === "Undo" &&
+    objectType(activity.object as JsonValue) === "Block"
+  );
+}
+
+/**
+ * Address a follower-control activity to its single recipient (#447). The owner
+ * may have sent it carrying `cc: [<followers>]` or a public `to` copied from an
+ * ordinary post; delivering privately while the body claims a wider audience
+ * would misdescribe what happened to the one server that receives it.
+ */
+function addressPrivately(
+  activity: Record<string, JsonValue>,
+  target: string,
+): void {
+  activity.to = [target];
+  delete activity.cc;
+  delete activity.bto;
+  delete activity.bcc;
+  delete activity.audience;
+}
+
 /** Cheap, local (no network) check so an unsafe actor IRI never reaches the queue. */
 function isSafeTarget(actor: string): boolean {
   try {
@@ -141,10 +180,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`,
     );
+    // `follow_id` is the inbound `Follow` activity's own IRI, kept so an
+    // owner-published `Reject` can name the very activity it rejects (#447);
+    // NULL when the follower arrived without one (or via the FEP-1b12 `Join`
+    // membership synonym).
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS followers (
          actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL,
-         shared_inbox TEXT)`,
+         shared_inbox TEXT, follow_id TEXT)`,
     );
     // `actor_type` is the followed actor's AS2 type (`Person`, `Group`, …),
     // resolved from its actor document off the critical path; a `Group` row is
@@ -213,6 +256,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `CREATE TABLE IF NOT EXISTS banned (
          actor TEXT PRIMARY KEY, banned_at INTEGER NOT NULL)`,
     );
+    // Owner blocklist (#447): an actor the owner blocked through the
+    // follower-control publish path. Unlike `banned` (a `Group` moderator
+    // decision, moderator-signed over the inbox) this is the actor owner's own
+    // decision for any actor type, and it is reversible — an owner-published
+    // `Undo(Block)` deletes the row. Consulted on every inbound activity, so a
+    // blocked actor can neither re-follow nor reach the inbox at all.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS blocked (
+         actor TEXT PRIMARY KEY, blocked_at INTEGER NOT NULL)`,
+    );
     // Async origin verification of group-relayed activities (§2.2): one row
     // per stored relayed activity awaiting verification. `target` is the IRI
     // fetched from its origin; `expect` is 'present' (2xx + id match),
@@ -270,6 +323,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // non-NULL value tombstones the row for reads without deleting history.
     this.#ensureColumn("inbox", "removed_at", "INTEGER");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
+    // The rejected `Follow`'s own IRI, for owner follower-control (#447).
+    this.#ensureColumn("followers", "follow_id", "TEXT");
     this.#ensureColumn("following", "actor_type", "TEXT");
     this.#ensureColumn("following", "inbox", "TEXT");
     this.#ensureColumn("following", "shared_inbox", "TEXT");
@@ -413,6 +468,26 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       if (method === "POST") return this.#publishPost(request);
       return text(405, "Method Not Allowed");
     }
+    // Owner blocklist read (#447). Not an AS2 collection and never public: the
+    // owner's blocks are private, so this is gated by the same owner marker the
+    // publish endpoints carry — the front door only sets it after checking the
+    // publish bearer token.
+    //
+    // One rule, deliberately: anything that is not an authorized `GET` is
+    // `404`, never `405`. A `405` would confirm the route exists to anyone who
+    // probed it with the wrong verb, which is the one thing a private
+    // blocklist must not do — and it would disagree with the front door, whose
+    // fall-through answers `404` for exactly the same reason the publish
+    // endpoints do when publishing is disabled.
+    if (path === `${pathOf(iris.id)}/blocked`) {
+      if (
+        method !== "GET" ||
+        request.headers.get(INTERNAL_HEADERS.publish) !== "1"
+      ) {
+        return text(404, "Not Found");
+      }
+      return this.#listBlocked();
+    }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
       // The inbox is write-only to peers; reads are not part of S2S.
@@ -456,6 +531,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // offense — the ban itself is the enforcement point, not each activity.
     if (config.actorType === "Group" && author && this.#isBanned(author)) {
       return text(403, "Actor is banned from this group");
+    }
+    // Owner block (#447): everything a blocked actor sends is refused, not just
+    // a re-`Follow` — a block that still accepted their replies, likes and
+    // mentions into the owner's inbox would only be half a block. Checked
+    // before dedup so a blocked actor never consumes a `seen` row either.
+    if (author && this.#isBlocked(author)) {
+      return text(403, "Actor is blocked");
     }
 
     const id = activity.id;
@@ -601,10 +683,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       this.#sql
         .exec(`SELECT 1 FROM followers WHERE actor = ?`, follower)
         .toArray().length > 0;
+    // The `Follow`'s own IRI is kept so a later owner `Reject` can name the
+    // activity it rejects (#447). Only a real `Follow` contributes one — the
+    // FEP-1b12 membership `Join` synonym routes here too, and labelling its id
+    // as a `Follow` id would misname it on the wire. A re-`Follow` refreshes a
+    // NULL id without disturbing `added_at` or an already-resolved `inbox`.
+    const followId =
+      activity.type === "Follow" && typeof activity.id === "string"
+        ? activity.id
+        : null;
     this.#sql.exec(
-      `INSERT OR IGNORE INTO followers (actor, inbox, added_at) VALUES (?, NULL, ?)`,
+      `INSERT INTO followers (actor, inbox, added_at, follow_id)
+         VALUES (?, NULL, ?, ?)
+         ON CONFLICT(actor) DO UPDATE
+           SET follow_id = COALESCE(excluded.follow_id, followers.follow_id)`,
       follower,
       now,
+      followId,
     );
     // A *new* follower is also stored in `inbox` so the Mastodon client API's
     // notifications read surfaces it as a `follow` (see #classifyClientEntry);
@@ -764,6 +859,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         .exec<{
           n: number;
         }>(`SELECT COUNT(*) AS n FROM banned WHERE actor = ?`, actor)
+        .one().n > 0
+    );
+  }
+
+  /** Whether the owner has blocked an actor (#447). */
+  #isBlocked(actor: string): boolean {
+    return (
+      this.#sql
+        .exec<{
+          n: number;
+        }>(`SELECT COUNT(*) AS n FROM blocked WHERE actor = ?`, actor)
         .one().n > 0
     );
   }
@@ -1136,6 +1242,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
     const activity = this.#asOutboxActivity(input, config.iris);
     const id = activity.id as string;
+    const skipDelivery =
+      request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1";
+
+    // Owner follower control (#447): a `Reject`(Follow), `Block` or
+    // `Undo(Block)` names one actor and is a private control activity — it is
+    // never written to the outbox (which is served publicly, so an outbox row
+    // would publish the owner's moderation decisions) and never fanned out to
+    // the follower set. `?skipDelivery=1` keeps its literal meaning here: the
+    // local state change still applies, only the federated notification is
+    // suppressed — a silent removal. Answers `202` rather than `201` because
+    // no addressable resource was created.
+    if (isFollowerControlActivity(activity)) {
+      const delivered = this.#routeFollowerControl(activity, !skipDelivery);
+      if (delivered) await this.#armAlarm();
+      return json(202, activity as JsonValue);
+    }
+
     this.#sql.exec(
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       id,
@@ -1148,7 +1271,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // backfilled Follow shouldn't record a live relationship), no community
     // delivery, no alarm. Set only by an owner request the front door
     // already authorized (`?skipDelivery=1` on this endpoint).
-    if (request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1") {
+    if (skipDelivery) {
       return json(201, activity as JsonValue, { location: id });
     }
 
@@ -1220,6 +1343,137 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Apply an owner follower-control activity (#447) — `Reject`(Follow),
+   * `Block`, `Undo(Block)` — to exactly one actor: mutate the local
+   * relationship state and, unless `deliver` is false, queue the activity for
+   * that actor's inbox alone through the same targeted queue an owner `Follow`
+   * uses. `activity` is normalized in place, so the body the caller echoes back
+   * is the body the peer receives. Returns whether a delivery was queued (the
+   * caller arms the alarm).
+   *
+   * Only ever reached for an activity {@link isFollowerControlActivity} claimed,
+   * so an unroutable one (no resolvable target) is dropped rather than falling
+   * through to follower fan-out — the bug this path exists to prevent.
+   */
+  #routeFollowerControl(
+    activity: Record<string, JsonValue>,
+    deliver: boolean,
+  ): boolean {
+    const iris = this.#config!.iris;
+    const now = Date.now();
+    // These never reach the outbox, so the outbox-namespaced id
+    // `#asOutboxActivity` minted would dereference to a 404 on the peer's
+    // side. Re-mint as a fragment of the actor IRI — the same convention the
+    // other non-stored activities this package authors use (`#accepts/…`,
+    // `#undos/…`).
+    activity.id = `${iris.id}#${(activity.type as string).toLowerCase()}s/${crypto.randomUUID()}`;
+
+    if (activity.type === "Reject") {
+      const follower = this.#rejectTarget(activity);
+      if (!follower) return false;
+      // The `Follow` being rejected, named by its own IRI when we recorded one
+      // (either from the caller or from the row the inbound `Follow` wrote).
+      // Mastodon matches a `Reject` on the follow URI when present and falls
+      // back to the actor pair, so both shapes sever the relationship.
+      const row = this.#sql
+        .exec<{
+          follow_id: string | null;
+        }>(`SELECT follow_id FROM followers WHERE actor = ?`, follower)
+        .toArray()[0];
+      const embedded =
+        objectType(activity.object) === "Follow"
+          ? (activity.object as Record<string, JsonValue>)
+          : undefined;
+      const followId =
+        (typeof embedded?.id === "string" ? embedded.id : undefined) ??
+        row?.follow_id ??
+        undefined;
+      this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, follower);
+      // Normalize to the canonical `Reject(Follow)` shape whatever the caller
+      // sent (an actor-IRI shorthand, a bare `Follow` id, or a full activity):
+      // the peer needs `object.actor` = them and `object.object` = us to match
+      // the relationship on their side.
+      activity.object = {
+        ...(followId ? { id: followId } : {}),
+        type: "Follow",
+        actor: follower,
+        object: iris.id,
+      };
+      addressPrivately(activity, follower);
+      if (!deliver || !isSafeTarget(follower)) return false;
+      this.#enqueuePendingDelivery(follower, JSON.stringify(activity));
+      return true;
+    }
+
+    if (activity.type === "Block") {
+      const target = objectId(activity.object);
+      if (!target) return false;
+      // A block severs the relationship in both directions — the peer's server
+      // does the same on receipt — so our own `following` row goes too, and no
+      // separate `Undo(Follow)` is sent for it. A queued auto-`Accept` for this
+      // actor dies with the `followers` row (see `#pendingAcceptStillActive`).
+      this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, target);
+      this.#sql.exec(`DELETE FROM following WHERE actor = ?`, target);
+      this.#sql.exec(
+        `INSERT INTO blocked (actor, blocked_at) VALUES (?, ?)
+           ON CONFLICT(actor) DO UPDATE SET blocked_at = excluded.blocked_at`,
+        target,
+        now,
+      );
+      activity.object = target;
+      addressPrivately(activity, target);
+      if (!deliver || !isSafeTarget(target)) return false;
+      this.#enqueuePendingDelivery(target, JSON.stringify(activity));
+      return true;
+    }
+
+    // `Undo(Block)` — unblock, and tell the peer so their server restores the
+    // ability to interact. The follow relationship is not restored: re-following
+    // is the blocked actor's own decision to make again.
+    const inner = activity.object as Record<string, JsonValue>;
+    const target = objectId(inner.object);
+    if (!target) return false;
+    this.#sql.exec(`DELETE FROM blocked WHERE actor = ?`, target);
+    inner.object = target;
+    addressPrivately(activity, target);
+    if (!deliver || !isSafeTarget(target)) return false;
+    this.#enqueuePendingDelivery(target, JSON.stringify(activity));
+    return true;
+  }
+
+  /**
+   * The follower an owner `Reject` names. Canonically its `object` is the
+   * `Follow` being rejected (target = that activity's `actor`). As a shorthand
+   * the owner may pass a bare IRI, which is read as the stored `Follow`'s id
+   * when it matches one we recorded and as the follower's actor IRI otherwise
+   * — the two readings a client can reasonably take of "reject this follow".
+   *
+   * That last fallback deliberately does **not** require a matching `followers`
+   * row. A `Reject` is most needed exactly when our state and the peer's
+   * disagree — they believe they follow us, our row is already gone — and
+   * demanding local proof of the relationship would refuse the one message that
+   * repairs the drift. What the owner can reach this way is bounded: the target
+   * still passes the SSRF guard before anything leaves, and the delivered body
+   * asserts nothing about a third party (it tells one actor "you do not follow
+   * me", which is true however they got the message). The cost of the looseness
+   * is an owner typo sending a stray `Reject` that its recipient no-ops on;
+   * the cost of tightening it is a silent no-op in the case that matters.
+   */
+  #rejectTarget(activity: Record<string, JsonValue>): string | undefined {
+    const object = activity.object;
+    if (typeof object === "string") {
+      const row = this.#sql
+        .exec<{
+          actor: string;
+        }>(`SELECT actor FROM followers WHERE follow_id = ?`, object)
+        .toArray()[0];
+      return row?.actor ?? object;
+    }
+    if (objectType(object) !== "Follow") return undefined;
+    return actorIri((object as Record<string, JsonValue>).actor);
   }
 
   /** Queue a delivery to one actor whose inbox resolves from the alarm. */
@@ -1400,6 +1654,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         "Dislike",
         "Follow",
         "Undo",
+        // Follower control (#447): these are activities in their own right —
+        // wrapping one in a `Create` would publish "the owner created a Block
+        // object" instead of performing the block.
+        "Block",
+        "Reject",
       ].includes(input.type);
     const published = isValidPublished(input.published)
       ? new Date(input.published).toISOString()
@@ -1456,6 +1715,29 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       200,
       buildCollectionPage(collectionId, page, config.pageSize, total, items),
     );
+  }
+
+  /**
+   * The owner's blocklist, newest block first, as flat JSON (`{ items, total }`)
+   * rather than an AS2 collection — nothing federates it, and an AS2 envelope
+   * would invite exactly that. Unpaged: a personal blocklist is small, and
+   * capping it would silently hide blocks from the only view of them there is.
+   */
+  #listBlocked(): Response {
+    const items = this.#sql
+      .exec<{
+        actor: string;
+        blocked_at: number;
+      }>(`SELECT actor, blocked_at FROM blocked ORDER BY blocked_at DESC`)
+      .toArray()
+      .map(
+        (row) =>
+          ({
+            actor: row.actor,
+            blockedAt: new Date(row.blocked_at).toISOString(),
+          }) as JsonValue,
+      );
+    return json(200, { items, total: items.length });
   }
 
   #count(kind: "followers" | "following" | "outbox"): number {
