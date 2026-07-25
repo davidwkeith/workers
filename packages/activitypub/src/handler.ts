@@ -402,10 +402,16 @@ export function createActivityPub(
         }
         if (rewritten.body !== undefined) forwardBody = rewritten.body;
       }
+      const extra: Record<string, string> = {
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+      if (url.searchParams.get("skipDelivery") === "1") {
+        extra[INTERNAL_HEADERS.skipDelivery] = "1";
+      }
       return forwardToDo(resolved, env, request.url, {
         method,
         body: forwardBody,
-        extra: { [INTERNAL_HEADERS.publish]: "1" },
+        extra,
       });
     }
 

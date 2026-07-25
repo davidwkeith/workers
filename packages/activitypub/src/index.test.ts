@@ -653,6 +653,53 @@ describe("publish endpoint", () => {
     expect(outbox.totalItems).toBe(1);
   });
 
+  it("skipDelivery inserts into the outbox without queuing follower delivery", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const iris = deriveIris(config.baseUrl, config.actor.username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+    });
+
+    const created = await handler(
+      new Request(`${actorUrl(config)}/outbox?skipDelivery=1`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer s3cret",
+          "content-type": "application/activity+json",
+        },
+        body: JSON.stringify({
+          type: "Note",
+          content: "backfilled post",
+          published: "2019-03-01T12:00:00.000Z",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(created.status).toBe(201);
+    const activity = (await created.json()) as Record<string, unknown>;
+    expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const outboxCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxCount).toBe(1);
+      const deliveryCount = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(deliveryCount).toBe(0);
+    });
+  });
+
   it("rejects an oversized publish body with 413", async () => {
     const config = makeConfig({ publishToken: "s3cret" });
     const handler = createActivityPub(config);
