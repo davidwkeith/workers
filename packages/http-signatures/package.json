@@ -1,6 +1,6 @@
 {
   "name": "@dwk/http-signatures",
-  "version": "0.1.0-beta.4",
+  "version": "1.0.0-beta.1",
   "description": "HTTP Message Signatures (RFC 9421) and legacy draft-cavage sign/verify. Cross-standard reusable; no Workers runtime dependency.",
   "keywords": [
     "http-signatures",

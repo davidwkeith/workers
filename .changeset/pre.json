@@ -213,6 +213,7 @@
     "store-staging-key-outbox",
     "streaming-blob-write-path",
     "url-object-keyid",
+    "v1-beta1-synchronized-release",
     "vc-did-web-verifiable-credentials",
     "vc-safe-fetch-migration",
     "vc-verification-hardening-98",

@@ -1,5 +1,32 @@
 # @dwk/conformance-target
 
+## 1.0.0-beta.1
+
+### Major Changes
+
+- Synchronized `v1.0.0-beta.1` release: every package in the workspace is bumped
+  to the same version for this coordinated beta milestone. After this release,
+  `.changeset/config.json`'s `fixed` group is removed so packages resume
+  independent versioning and drift apart again.
+
+### Patch Changes
+
+- Updated dependencies
+  - @dwk/activitypub@1.0.0-beta.1
+  - @dwk/atproto-pds@1.0.0-beta.1
+  - @dwk/host-meta@1.0.0-beta.1
+  - @dwk/indieauth@1.0.0-beta.1
+  - @dwk/mastodon-api@1.0.0-beta.1
+  - @dwk/micropub@1.0.0-beta.1
+  - @dwk/microsub@1.0.0-beta.1
+  - @dwk/remotestorage@1.0.0-beta.1
+  - @dwk/solid-pod@1.0.0-beta.1
+  - @dwk/vc@1.0.0-beta.1
+  - @dwk/webauthn@1.0.0-beta.1
+  - @dwk/webfinger@1.0.0-beta.1
+  - @dwk/webmention@1.0.0-beta.1
+  - @dwk/websub@1.0.0-beta.1
+
 ## 0.0.1-beta.2
 
 ### Patch Changes

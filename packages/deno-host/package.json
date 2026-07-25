@@ -1,6 +1,6 @@
 {
   "name": "@dwk/deno-host",
-  "version": "0.1.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Deno Deploy host building blocks for the @dwk packages — external libSQL/Turso presented behind the Cloudflare D1Database and SqlStorage (Durable Object SQLite) interfaces, KV-backed Durable Object and Queue emulation, and an S3-compatible R2Bucket adapter.",
   "keywords": [
     "deno-deploy",
