@@ -105,6 +105,7 @@ New internal module `packages/activitypub/src/objects.ts`, exported from
     tags?: string[]; // hashtags
     to?: string[]; // advanced override; defaults derived
     cc?: string[]; // advanced override — mentions / secondary audiences
+    published?: string; // ISO-8601 override; backdates backfilled content (#451)
   }
   ```
 

@@ -402,10 +402,17 @@ export function createActivityPub(
         }
         if (rewritten.body !== undefined) forwardBody = rewritten.body;
       }
+      const skipDelivery = url.searchParams.get("skipDelivery");
+      if (skipDelivery !== null && skipDelivery !== "1") {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "invalid_skip_delivery",
+        });
+        return text(400, "`skipDelivery` must be `1` when present");
+      }
       const extra: Record<string, string> = {
         [INTERNAL_HEADERS.publish]: "1",
       };
-      if (url.searchParams.get("skipDelivery") === "1") {
+      if (skipDelivery === "1") {
         extra[INTERNAL_HEADERS.skipDelivery] = "1";
       }
       return forwardToDo(resolved, env, request.url, {

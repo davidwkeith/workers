@@ -175,6 +175,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
          published_at INTEGER NOT NULL)`,
     );
     this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_outbox_published_at ON outbox (published_at, seq)`,
+    );
+    this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS delivery (
          seq INTEGER PRIMARY KEY AUTOINCREMENT, inbox TEXT NOT NULL, json TEXT NOT NULL,
          attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL)`,
@@ -1300,7 +1303,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const config = this.#config!;
     const activityId = `${config.iris.outbox}/${crypto.randomUUID()}`;
     const published = isValidPublished(input.published)
-      ? input.published
+      ? new Date(input.published).toISOString()
       : new Date().toISOString();
     const activity = buildPostActivity(input, config.iris, {
       activityId,
@@ -1396,7 +1399,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         "Undo",
       ].includes(input.type);
     const published = isValidPublished(input.published)
-      ? input.published
+      ? new Date(input.published).toISOString()
       : new Date().toISOString();
     const activityId = `${iris.outbox}/${crypto.randomUUID()}`;
 

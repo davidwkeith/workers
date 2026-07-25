@@ -989,6 +989,7 @@ describe("publish endpoint", () => {
         .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
         .one().n;
       expect(deliveryCount).toBe(0);
+      expect(await state.storage.getAlarm()).toBeNull();
     });
   });
 
@@ -1197,6 +1198,7 @@ describe("shaped post publish endpoint", () => {
         .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
         .one().n;
       expect(queued).toBe(0);
+      expect(await state.storage.getAlarm()).toBeNull();
     });
   });
 
