@@ -131,7 +131,12 @@ function isAddressable(value: string): boolean {
 /**
  * Whether `value` is a non-empty string `Date.parse` can interpret — the
  * shared validity check for a caller-supplied `published` override on both
- * the raw-AS2 and shaped-post publish paths (#451).
+ * the raw-AS2 and shaped-post publish paths (#451). Deliberately
+ * `Date.parse`-permissive rather than a strict ISO-8601 validator (callers
+ * are asked for ISO-8601 in error text, but e.g. `"2019"` or
+ * `"March 1 2019"` also pass here) — every accepted value is renormalized to
+ * canonical `xsd:dateTime` via `.toISOString()` before it's stored or
+ * served, so looseness here never reaches the outbox unnormalized.
  */
 export function isValidPublished(value: unknown): value is string {
   return (
@@ -263,7 +268,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     if (!isValidPublished(published)) {
       return {
         ok: false,
-        error: "`published` must be a valid ISO-8601 timestamp",
+        error: "`published` must be a valid date-time (ISO-8601 recommended)",
       };
     }
     input.published = published;

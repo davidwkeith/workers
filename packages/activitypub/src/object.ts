@@ -1128,7 +1128,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return text(400, "Malformed activity JSON");
     }
     if (input.published !== undefined && !isValidPublished(input.published)) {
-      return text(400, "`published` must be a valid ISO-8601 timestamp");
+      return text(
+        400,
+        "`published` must be a valid date-time (ISO-8601 recommended)",
+      );
     }
 
     const activity = this.#asOutboxActivity(input, config.iris);
