@@ -12,126 +12,37 @@ an end user's **own** Cloudflare account. There is no hosted product and no
 central server: a developer `npm install`s the packages, composes them into one
 Worker behind one domain, and deploys to the user's account.
 
-**Status: implemented, unreleased.** There are **31 publishable packages** — the
-reusable libs (`@dwk/dpop`, `@dwk/rdf`, `@dwk/wac`, `@dwk/log`, `@dwk/ldn`,
-`@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`, `@dwk/safe-fetch`,
-`@dwk/store`, `@dwk/mcp`, `@dwk/esi`, `@dwk/cf-shims`, `@dwk/deno-host`,
-`@dwk/mf2`) and the
-endpoint/standard packages (`@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
-`@dwk/webmention`, `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`,
-`@dwk/webauthn`, `@dwk/vc`, `@dwk/activitypub`, `@dwk/remotestorage`,
-`@dwk/solid-pod`, `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`,
-`@dwk/solid-oidc`) —
-plus two private
-packages that are never published: `@dwk/server`, the Node/Express
-self-hosting host (marked `"private": true`, ships only as a Docker image),
-and `@dwk/conformance-target`, the deployed conformance Worker
-(`conformance.dwk.io`) every endpoint package composes into for the hosted
-suites.
-Each carries real logic with colocated tests; there are no remaining `501 Not
-Implemented` stubs. Versioning is via Changesets **pre mode**
-(`.changeset/pre.json`, tag `beta`); the packages are published to npm as
-`0.1.0-beta.N` prereleases (independent per package — `@dwk/atproto-pds`,
-`@dwk/calendar`, `@dwk/webdav`, `@dwk/mcp`, and `@dwk/mastodon-api` are the
-most recently added). Note that in pre
-mode, packages with no prior
-stable release publish to the **`latest`** dist-tag, not `beta`, so plain
-`npm i @dwk/<pkg>` is the channel — see [`RELEASING.md`](./RELEASING.md) for the
-full release runbook. The hosted conformance suites tracked in
-`conformance/status.json` are still `pending` — except `@dwk/activitypub`'s
-federation suite (`passing` against the `fedify` and `pixelfed` targets) and
-`@dwk/webdav`'s litmus run (`failing`; see `conformance/webdav-qa.md`). The
-plain-data libs that declare no bindings carry `integration: not-applicable`,
-since they have no deployed lifecycle to run (see the release gate below).
-`@dwk/atproto-pds` is a Workers-native
-AT Protocol Personal Data Server (MST/DAG-CBOR/CAR repository, `did:web` identity,
-P-256 commit signing); it is **exploratory/strategic** (see its spec) and shares
-neither `@dwk/store` nor `@dwk/rdf`. `@dwk/webdav` is still
-**in progress** — it ships the pure protocol core (XXE-safe XML, scoped app
-passwords, header parsing), the Class 2 verb router (`createWebdav`), and the
-lock + app-password DO-SQLite stores (`LockStore`, `CredentialStore`), all driven
-over an injected `WebdavBackend` seam. `@dwk/solid-pod` now resolves that seam
-onto the live per-pod `SolidPodObject` (via `createSolidPodWebdav` + an in-DO
-adapter over `@dwk/store`/WAC), so the pod is mountable as a network drive, with
-`COPY`/`MOVE` (resource + collection) and the owner-gated app-password
-mint/list/revoke endpoint (`createSolidPodWebdavCredentials`) now implemented,
-and `@dwk/store` tracking per-resource byte size + mtime (so PROPFIND
-`getcontentlength`/`getlastmodified` are real); the hosted litmus run is the
-remaining increment. `@dwk/mcp` is the newest — a Model Context Protocol server
-core (JSON-RPC 2.0 + Streamable HTTP, tools-only v1 subset) exposing the composed
-Worker as agent-operable tools; the protocol core (`createMcp`, tool registry
-with scope-intersection authz), the auth bridge
-(`createDpopBearerAuthenticator`: bearer + DPoP-bound token validation via
-`@dwk/dpop`, RFC 9728 protected-resource-metadata challenge on `401`), and the
-v1 endpoint-package tool contributions (`@dwk/micropub`'s
-`createMicropubMcpTools` → `micropub_publish`; `@dwk/microsub`'s
-`createMicrosubMcpTools` → `microsub_list_channels`/`microsub_get_timeline`;
-`@dwk/webmention`'s `createWebmentionMcpTools` → `webmention_list_received`)
-and the v2 contributions (`@dwk/solid-pod`'s `createSolidPodMcpTools` →
-`solid_pod_read`/`solid_pod_write`, gated by the pod's existing WAC
-authorization as a second, resource-level check beneath the MCP scope;
-`@dwk/activitypub`'s `createActivitypubMcpTools` → `activitypub_list_inbox`)
-are all implemented (see `spec/packages/mcp.md`, tracked in #240/#262).
-`@dwk/mastodon-api` is the newest — a Mastodon-compatible client API subset
-(spec/mastodon-client-api.md, #327) so off-the-shelf fediverse apps (Pixelfed,
-Tusky) can log in and browse the owner's account read-only. **Phase 1 is
-implemented** (app registration, the Mastodon app OAuth flow over `@dwk/oauth`
-with opaque hashed bearer tokens — the documented DPoP exception — instance
-documents, `verify_credentials`, markers, stub roster; #348); the DO-backed
-read surface (timelines/notifications via the `MastodonBackend` seam and
-`@dwk/activitypub`'s `createActivitypubMastodonApi` adapter) is phase 2 (#349),
-fidelity is phase 3 (#350). `@dwk/cf-shims` is the latest — Node-backed
-implementations of the Cloudflare Workers binding interfaces (D1/R2/KV/Queue/
-cron/Durable Objects) and runtime-global seams (`cloudflare:workers`,
-`HTMLRewriter`, `crypto.DigestStream`, hibernatable WebSockets), extracted
-from `@dwk/server`'s internal shim layer (#381) so any Node host can reuse
-them — `@dwk/server` is its first consumer, not its owner.
-`@dwk/deno-host` is three increments of the otherwise still
-demand-gated Deno Deploy host plan (#396), each gate-overridden on
-demonstrated demand: runtime-agnostic, dependency-free shims presenting an
-external libSQL/Turso database behind the host-contract `D1Database` (async
-remote client) and `SqlStorage`/`transactionSync` (synchronous
-embedded-replica client) surfaces (#397); `createDurableObjectNamespace`, a
-single-writer actor + alarm emulation over a per-id Deno KV atomic-CAS
-lease, with an in-memory WebSocket stub (#398); and `createQueueBroker`, a
-durable at-least-once queue emulation over the same Deno KV, since the new
-Deno Deploy platform dropped native Deno Queues (#399). The object-storage
-gap (#400) is not implemented and remains gated. `@dwk/mf2` is the newest —
-the `HTMLRewriter`-based `h-entry` → JF2 extractor moved out of
-`@dwk/microsub`'s `hfeed.ts` (#412), extended with
-`u-repost-of`/`u-bookmark-of` recognition and `e-content` inner-HTML capture,
-plus the allowlist `sanitizeHtml` for that captured UGC; `@dwk/microsub`
-consumes it for `parseHFeed` and `@dwk/webmention` uses it to enrich stored
-mentions with interaction type, author, sanitized content, and published
-time.
-When changing behaviour, the authoritative
-requirements are the per-package specs under `spec/packages/`, not guesswork.
+**Status: implemented, unreleased.** Every package under `packages/` carries real
+logic with colocated tests; there are no remaining `501 Not Implemented` stubs.
+Two packages are never published: `@dwk/server`, the Node/Express self-hosting
+host (marked `"private": true`, ships only as a Docker image), and
+`@dwk/conformance-target`, the deployed conformance Worker (`conformance.dwk.io`)
+every endpoint package composes into for the hosted suites.
+
+Versioning is via Changesets **pre mode** (`.changeset/pre.json`, tag `beta`);
+packages publish as `0.1.0-beta.N` prereleases, independent per package. Note
+that in pre mode, packages with no prior stable release publish to the
+**`latest`** dist-tag, not `beta`, so plain `npm i @dwk/<pkg>` is the channel —
+see [`RELEASING.md`](./RELEASING.md) for the full release runbook.
+
+Per-package conformance and integration status lives in
+`conformance/status.json` (`@dwk/webdav`'s litmus findings are in
+`conformance/webdav-qa.md`). Plain-data libs that declare no bindings carry
+`integration: not-applicable` — they have no deployed lifecycle to run.
+
+`@dwk/webdav` and `@dwk/mastodon-api` are the packages still landing in
+increments; each package's own `CLAUDE.md` and `spec/packages/<name>.md` state
+where it stands. When changing behaviour, the authoritative requirements are the
+per-package specs under `spec/packages/`, not guesswork.
 
 ## Commands
 
-Run from the repo root (pnpm 10, Node >=22 — `@dwk/server`'s built-in `node:sqlite` shims need it):
+Run from the repo root (pnpm 10, Node >=22 — `@dwk/server`'s built-in
+`node:sqlite` shims need it). Task scripts are in the root `package.json`; what
+isn't obvious from there is how to target a subset.
 
-| Task                    | Command                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| Install                 | `pnpm install`                                                    |
-| Build all packages      | `pnpm build` (runs `tsc -p tsconfig.build.json` per package)      |
-| Typecheck all (no emit) | `pnpm typecheck`                                                  |
-| Run full test suite     | `pnpm test` (vitest, all package projects)                        |
-| Watch tests             | `pnpm test:watch`                                                 |
-| Coverage                | `pnpm test:coverage` (vitest + istanbul)                          |
-| Integration lifecycle   | `pnpm test:integration` (`vitest run --project @dwk/solid-pod`)   |
-| Unit-test release gate  | `pnpm test:gate` (`node --test scripts/release-gate.test.mjs`)    |
-| Unit-test catalog gate  | `pnpm test:catalog` (`node --test scripts/catalog-gate.test.mjs`) |
-| Check worker catalog    | `pnpm catalog:check` (`node scripts/catalog-gate.mjs`)            |
-| Lint                    | `pnpm lint`                                                       |
-| Format (write)          | `pnpm format`                                                     |
-| Format check (CI gate)  | `pnpm format:check`                                               |
-| Record a release        | `pnpm changeset`                                                  |
-| Check release gate      | `pnpm release:gate` (`node scripts/release-gate.mjs`)             |
-| Publish (gated)         | `pnpm release` (gate → build → `changeset publish`)               |
-
-Targeting a subset (this is a multi-project vitest setup, so always scope with
-`--project`; a bare file/name filter errors against projects that don't match):
+This is a multi-project vitest setup, so always scope with `--project`; a bare
+file/name filter errors against projects that don't match:
 
 ```bash
 # One package's tests by its vitest project name (see vitest.config.ts `name`)
@@ -167,61 +78,40 @@ injected state.
 
 ### Package taxonomy
 
-- **Endpoint / standard packages** — named for the standard:
-  `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`, `@dwk/webmention`,
-  `@dwk/websub`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/webauthn`, `@dwk/vc`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`, `@dwk/atproto-pds`,
-  `@dwk/mastodon-api` (named for the de-facto Mastodon client API standard;
-  reads `@dwk/activitypub`'s DO only through its injected `MastodonBackend`
-  seam), `@dwk/solid-oidc` (the Solid-OIDC provider, composed from
-  `@dwk/oauth`'s primitives per `spec/open-questions.md` §1).
-  `@dwk/atproto-pds` is the strategic outlier: it is the AT Protocol PDS endpoint
-  but shares neither `@dwk/store` nor `@dwk/rdf` (its repository is an MST of
-  DAG-CBOR records), so its storage core is self-contained.
+Four buckets. Each package's own `packages/<name>/CLAUDE.md` describes it
+individually; what follows is only the classification and the constraints that
+ride on it.
+
+- **Endpoint / standard packages** — named for the standard they implement.
+  `@dwk/atproto-pds` is the strategic outlier: it shares neither `@dwk/store`
+  nor `@dwk/rdf` (its repository is an MST of DAG-CBOR records), so its storage
+  core is self-contained, and it is **exploratory/strategic** rather than
+  committed — see its spec. `@dwk/mastodon-api` reads `@dwk/activitypub`'s DO
+  only through its injected `MastodonBackend` seam; `@dwk/solid-oidc` is
+  composed from `@dwk/oauth`'s primitives per `spec/open-questions.md` §1.
 - **Cross-standard reusable libs** — `@dwk/rdf`, `@dwk/dpop`, `@dwk/log`,
   `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`, `@dwk/calendar`,
   `@dwk/safe-fetch`, `@dwk/esi`. These MUST stay free of IndieWeb/Solid
-  assumptions so future `@dwk` standards adopt them unchanged. This is a hard
-  constraint, not a preference. `@dwk/log` is the
-  injectable structured-logging seam (see `spec/observability.md`). `@dwk/ldn`
-  holds the RDF-only Linked Data Notifications primitives (inbox discovery,
-  notification validation, listing) shared by `@dwk/solid-pod` and
-  `@dwk/activitypub`; its discovery helpers are reachable n3-free as
-  `@dwk/ldn/discovery` for Workers-runtime consumers. `@dwk/http-signatures`
-  (RFC 9421 + draft-cavage) and `@dwk/oauth` (RFC 8414/7662/7009/9126/7591
-  building blocks) are likewise protocol-agnostic and Workers-runtime-free.
-  `@dwk/safe-fetch` is the SSRF-safe outbound fetch and capped-body-read
-  primitive shared by every package that fetches an attacker- or
-  user-supplied URL (`@dwk/webmention`, `@dwk/websub`, `@dwk/microsub`,
-  `@dwk/vc`, `@dwk/atproto-pds`).
-  `@dwk/calendar` holds the canonical JSCalendar (RFC 8984)-shaped event model
-  and the RFC 5545 iCalendar / JSCalendar serializers (the calendar/events epic,
-  #167); the per-standard adapters (e.g. `h-event → CalendarEvent`) live in the
-  endpoint packages, never in the lib. `@dwk/esi` is a streaming Edge Side
-  Includes processor (`processEsi`) that resolves `<esi:include>`/
-  `<esi:comment>`/`<esi:remove>` markup in a composed Worker's outgoing
-  `Response`, fetching fragments concurrently through `@dwk/safe-fetch`
-  (#247); no `@dwk` endpoint package is a required consumer yet.
+  assumptions so future `@dwk` standards adopt them unchanged. **This is a hard
+  constraint, not a preference.** Corollaries that are easy to get wrong:
+  `@dwk/ldn`'s discovery helpers must stay reachable n3-free as
+  `@dwk/ldn/discovery` for Workers-runtime consumers, and per-standard calendar
+  adapters (e.g. `h-event → CalendarEvent`) live in the endpoint packages, never
+  in `@dwk/calendar`. `@dwk/log` is the injectable structured-logging seam (see
+  `spec/observability.md`).
 - **Standard-specific libs** — `@dwk/wac` (tied to Solid/WAC by design) and
-  `@dwk/mf2` (microformats2, an IndieWeb building block; also the one lib
-  that is runtime-bound — it is built on the `HTMLRewriter` global — so its
-  tests run under workerd, not Node).
-- **Storage lib** — `@dwk/store` confines all Cloudflare storage specifics.
-- **Cloudflare-runtime-emulation lib** — `@dwk/cf-shims` is the one package
-  that is deliberately Cloudflare-specific in the same way `@dwk/store` and
-  the endpoint packages are: it implements the Cloudflare binding interfaces
-  (D1/R2/KV/Queue/cron/Durable Objects) and runtime-global seams
-  (`cloudflare:workers`, `HTMLRewriter`, `crypto.DigestStream`, hibernatable
-  WebSockets) on Node, so `@dwk/server` — and any other Node host — can reuse
-  them without copying source. Extracted from `@dwk/server`'s internal
-  `./shims` (#381); see `spec/self-hosting.md` §16 and `spec/portability.md`.
-- **Deno-host lib** — `@dwk/deno-host` is Cloudflare-interface emulation in
-  the same deliberate sense, but for the (gated, #396) Deno Deploy host:
-  libSQL/Turso behind `D1Database`/`SqlStorage` (#397), a KV-lease Durable
-  Object emulation (#398), and a KV-backed Queue emulation (#399). Unlike
-  `@dwk/cf-shims` its code is runtime-agnostic — no `node:` imports, only
-  injected client seams — so it runs on Deno, Node, or anywhere the app
-  supplies a client.
+  `@dwk/mf2` (microformats2, an IndieWeb building block).
+- **Storage and runtime-emulation libs** — `@dwk/store` confines all Cloudflare
+  storage specifics. `@dwk/cf-shims` (Node) and `@dwk/deno-host` (Deno) are
+  deliberately Cloudflare-_interface_-shaped for the same reason: they implement
+  the binding contracts so a non-Cloudflare host runs the same packages
+  unchanged. `@dwk/cf-shims` may use `node:` imports; `@dwk/deno-host` MUST NOT
+  — it takes injected client seams only, so it runs anywhere. See
+  `spec/self-hosting.md` §16 and `spec/portability.md`.
+
+**Any package that fetches an attacker- or user-supplied URL MUST go through
+`@dwk/safe-fetch`** (SSRF-safe outbound fetch + capped body read) — never a bare
+`fetch`.
 
 ### Composition contract (`spec/composition-contract.md`)
 
@@ -256,73 +146,23 @@ These rules are load-bearing; follow them when adding or changing packages:
   is offloaded to R2 as an opaque body.
 - **DPoP everywhere** tokens are used; least-privilege bindings.
 
-## Per-package layout & conventions
+## Code conventions
 
-Every package follows the same shape:
-
-```
-packages/<name>/
-  src/index.ts          # public surface; *.ts siblings for internal modules
-  src/*.test.ts         # colocated tests (excluded from the published build)
-  package.json          # ESM-only, sideEffects:false, exports map to dist/
-  tsconfig.json         # typecheck (noEmit), extends ../../tsconfig.base.json
-  tsconfig.build.json   # build to dist/, excludes *.test.ts
-  vitest.config.ts      # per-package vitest project
-  README.md
-```
+These apply to every package. For the procedure and file shape when **adding** a
+new package, use the `add-package` skill.
 
 - **ESM-only**, tree-shakeable, fully typed (`.d.ts` shipped). `package.json`
-  uses `"type": "module"`, `"sideEffects": false`, an `exports` map pointing at
-  `dist/`, and publishes `dist` + `src` (minus tests). Dependencies are
-  **minimized and pinned** to exact versions.
-- **Internal workspace deps** use `"workspace:*"` (e.g. `@dwk/solid-pod` depends
-  on `@dwk/dpop`, `@dwk/rdf`, `@dwk/store`, and `@dwk/wac`).
-- **TypeScript is strict** via `tsconfig.base.json`: `strict`,
-  `noUncheckedIndexedAccess`, `noUnusedLocals`/`noUnusedParameters`,
-  `verbatimModuleSyntax`, `isolatedModules`. Use `import type` for type-only
-  imports. ESLint flags unused vars unless prefixed with `_`.
+  uses `"type": "module"`, `"sideEffects": false`, and an `exports` map pointing
+  at `dist/`. Dependencies are **minimized and pinned** to exact versions.
+- **Internal workspace deps** use `"workspace:*"`.
 - **`index.ts` carries a doc comment** stating the package's role, whether it is
   pure/protocol-agnostic, and a `@see spec/packages/<name>.md` pointer. Match
   this style. `index.ts` is the public surface and mostly re-exports from named
-  internal modules; the endpoint packages decompose into the same shape —
-  `config.ts` (the injected config + `Env` fragment), `handler.ts` (the
-  `createX` factory), and feature modules (`auth.ts`, `store.ts`, plus
-  standard-specific ones like `pkce.ts`/`token.ts`, `mf2.ts`, `ldp.ts`/`patch.ts`/
-  `negotiation.ts`, `inbox.ts`/`sender.ts`). `workerd`-bound
-  packages that need Miniflare setup (`@dwk/store`, `@dwk/solid-pod`,
-  `@dwk/activitypub`, `@dwk/microsub`, `@dwk/remotestorage`, `@dwk/webauthn`,
-  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`) keep a
-  `test-harness.ts` (excluded from
-  both the build and the published `files`). `@dwk/solid-pod` additionally exports the `SolidPodObject` Durable
-  Object (from `pod.ts`) and a GC handler (`gc.ts`).
-
-### Test environment split (important)
-
-Each package's `vitest.config.ts` picks one of two environments — get this right
-when adding a package:
-
-- **Pure libs run under Node** (`environment: "node"`): `@dwk/dpop`, `@dwk/rdf`,
-  `@dwk/wac`, `@dwk/log`, `@dwk/ldn`, `@dwk/http-signatures`, `@dwk/oauth`,
-  `@dwk/calendar`, `@dwk/webfinger`, `@dwk/host-meta`, `@dwk/safe-fetch`,
-  `@dwk/esi`. They take plain-data inputs and need no Workers runtime.
-- **Runtime/binding-bound packages run under `workerd`** via
-  `@cloudflare/vitest-pool-workers` (`cloudflareTest({ miniflare: {...} })`):
-  `@dwk/store`, `@dwk/indieauth`, `@dwk/micropub`, `@dwk/microsub`,
-  `@dwk/webmention`, `@dwk/websub`, `@dwk/vc`, `@dwk/webauthn`,
-  `@dwk/activitypub`, `@dwk/remotestorage`, `@dwk/solid-pod`,
-  `@dwk/atproto-pds`, `@dwk/webdav`, `@dwk/mastodon-api`, `@dwk/solid-oidc`,
-  and — the one lib in this group — `@dwk/mf2` (its extractor/sanitizer run on
-  the `HTMLRewriter` global; no bindings).
-- **Node-native packages** also run under `environment: "node"` (no
-  Miniflare) but, unlike the pure libs above, are inherently Node-specific
-  rather than protocol-agnostic: `@dwk/cf-shims` (emulates the Cloudflare
-  binding interfaces on Node) and `@dwk/server` (composes those shims behind
-  Express). `@dwk/deno-host` also runs under `environment: "node"` — its
-  production code is runtime-agnostic, but its tests drive the client seams
-  with `node:sqlite`-backed fakes (`src/test-harness.ts`).
-
-The root `vitest.config.ts` aggregates all package projects so `pnpm test` runs
-both groups in one pass.
+  internal modules; endpoint packages decompose into `config.ts` (the injected
+  config + `Env` fragment), `handler.ts` (the `createX` factory), and feature
+  modules (`auth.ts`, `store.ts`, plus standard-specific ones).
+- **TypeScript is strict** via `tsconfig.base.json` — use `import type` for
+  type-only imports, and prefix deliberately-unused vars with `_`.
 
 ## Conventions
 
@@ -330,8 +170,8 @@ both groups in one pass.
   canonical onboarding doc (setup, the local CI gate, test targeting,
   changesets, adding a package, security reporting). Keep it in sync when
   commands or conventions in this file change.
-- **Formatting (Prettier):** semicolons, double quotes, trailing commas (`all`),
-  80-column print width. `pnpm format:check` is a CI gate.
+- **Formatting:** Prettier, config at the repo root; `pnpm format:check` is a CI
+  gate.
 - **Commit messages & PR titles:** [Conventional Commits](https://www.conventionalcommits.org/) —
   `<type>(<scope>): <subject>`, lowercase type, subject not capitalized, scope
   in parentheses (the package name minus the `@dwk/` prefix, comma-separated
@@ -357,46 +197,33 @@ both groups in one pass.
   change, run `pnpm changeset`, select the affected packages and bump, and commit
   the generated markdown in `.changeset/` alongside the code. `commit: false` —
   changesets does not auto-commit.
-- **Conformance is the release bar** (`spec/conformance-and-testing.md`): a
-  package MUST NOT publish a stable (`>=1.0.0`) version until it passes the
-  conformance suite for its standard (micropub.rocks, webmention.rocks, Solid
-  conformance) and its integration lifecycle tests are green. This is now
-  **enforced mechanically**, not just by convention — see below.
 - **License:** ISC.
 
 ## Conformance & release gate
 
-**For the step-by-step publish runbook (Changesets pre mode, the gated Release
-workflow, verification, and the npm gotchas), see [`RELEASING.md`](./RELEASING.md).**
+**Conformance is the release bar** (`spec/conformance-and-testing.md`): a
+package MUST NOT publish a stable (`>=1.0.0`) version until it passes the
+conformance suite for its standard (micropub.rocks, webmention.rocks, Solid
+conformance) and its integration lifecycle tests are green. This is enforced
+mechanically by `pnpm release:gate`, which `pnpm release` runs first — see
+[`RELEASING.md`](./RELEASING.md) for the step-by-step publish runbook and
+`node scripts/release-gate.mjs --report` for the current status table.
 
-`conformance/status.json` is the single source of truth for per-package
-conformance + integration status, validated against `conformance/status.schema.json`.
+`conformance/status.json` (schema: `conformance/status.schema.json`) is the
+single source of truth for per-package conformance + integration status.
 
-- **`scripts/release-gate.mjs`** (`pnpm release:gate`) reads every workspace
-  package's version and cross-checks it against `status.json`. Any package at a
-  stable version (`major >= 1`, no prerelease tag) whose suites or integration
-  status is neither `"passing"` nor `"not-applicable"` is a violation and the
-  gate exits non-zero, so
-  `pnpm release` refuses to proceed. `evaluateReleaseGate` is pure/importable and
-  unit-tested by `scripts/release-gate.test.mjs` (`pnpm test:gate`). Run
-  `node scripts/release-gate.mjs --report` to print the status table only.
-- **`catalog.json`** at the repo root (issue #255) is the machine-readable
-  manifest of every mountable worker, consumed by composing apps (Anglesite's
-  Workers tab / wrangler-config generation) over the same raw-file channel as
-  `status.json`. Shape: `catalog.schema.json` + `spec/catalog.md`. Worker `id`s
-  are **forever-stable** (apps persist state against them).
-  **`scripts/catalog-gate.mjs`** (`pnpm catalog:check`, unit tests via
-  `pnpm test:catalog`) validates it and enforces that every publishable package
-  has a catalog decision (a worker entry or a `libraries` exclusion), wired
-  into the `release-gate` CI job.
-- **`scripts/conformance/run-suite.mjs`** drives the hosted suites
-  (micropub/webmention/solid) against a deployed `--target` URL; it is a
-  documented no-op when no target is supplied.
-- **`.github/workflows/conformance.yml`** wires this into CI: the cheap
-  `release-gate` and `integration` jobs run on every PR/push (and gate stable
-  releases); the `hosted-suite` job needs a deployed, publicly reachable Worker,
-  so it runs only on `workflow_dispatch` or the weekly Monday schedule. This is a
-  separate workflow from `ci.yml` (the lint→format→typecheck→build→test gate).
+`catalog.json` at the repo root is the machine-readable manifest of every
+mountable worker, consumed by composing apps (Anglesite's Workers tab /
+wrangler-config generation) over the same raw-file channel as `status.json`;
+shape in `catalog.schema.json` + `spec/catalog.md`. **Worker `id`s are
+forever-stable** — apps persist state against them, so never rename one.
+`pnpm catalog:check` enforces that every publishable package has a catalog
+decision (a worker entry or a `libraries` exclusion).
+
+`.github/workflows/conformance.yml` is separate from `ci.yml`: the cheap
+`release-gate` and `integration` jobs run on every PR/push, while `hosted-suite`
+needs a deployed, publicly reachable Worker and so runs only on
+`workflow_dispatch` or the weekly Monday schedule.
 
 ## Where the requirements live
 

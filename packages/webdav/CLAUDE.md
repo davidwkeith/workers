@@ -50,38 +50,3 @@ implementation; the four load-bearing decisions live there).
   resource). Generic/missing `Content-Type` is inferred from the extension;
   an explicit specific type wins. `.acl`/`.meta` are `404` to every verb and
   omitted from listings.
-
-## Test environment
-
-Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
-
-- Main: `src/test-harness.ts` (test-only `WebdavTestObject` DO)
-- DO: `WEBDAV_DO` → `WebdavTestObject`, `useSQLite: true` — the stores and
-  router run against real DO SQLite, not an in-memory fake
-
-```bash
-pnpm test --project @dwk/webdav
-```
-
-## File layout
-
-```
-src/index.ts            # public surface: protocol core + createWebdav + stores
-src/config.ts           # WebdavConfig, Env fragment, WebdavBackend seam
-src/webdav.ts           # createWebdav — the Class 2 verb router
-src/xml.ts              # bounded XXE-safe XML generator + parser
-src/if-header.ts        # strict-subset If: precondition parser
-src/credentials.ts      # app-password mint/verify crypto (pure, WebCrypto)
-src/credential-store.ts # CredentialStore — hash-at-rest + throttling, DO SQLite
-src/locks.ts            # LockStore — exclusive locks + pruning, DO SQLite
-src/content-type.ts     # extension-based Content-Type inference for OS clients
-src/litter.ts           # OS-litter matcher (.DS_Store etc.), off by default
-src/test-harness.ts     # test-only SQLite-backed DO (excluded from publish)
-src/*.test.ts           # colocated tests
-```
-
-## Dependencies
-
-None (runtime). Pure protocol core plus DO-SQLite stores over the workerd
-built-in `SqlStorage`; the concrete pod adapter lives in `@dwk/solid-pod`,
-which depends on this package — never the reverse.

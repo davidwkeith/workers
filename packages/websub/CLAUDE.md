@@ -42,37 +42,3 @@ publish-ping entry point for atomicity with Anglesite site builds.
   binding is absent, the fan-out fails loudly rather than truncating the push.
   Stage objects are transient — give the bucket an R2 lifecycle expiration rule
   (≥ the queue's message-retention window); the delivery path never deletes them.
-
-## Test environment
-
-Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
-
-- D1: `WEBSUB_DB`
-- Queue: `WEBSUB_QUEUE` (fan-out of per-subscriber deliver jobs)
-- R2: `WEBSUB_CONTENT` (optional; stages snapshots too large to inline)
-
-```bash
-pnpm test --project @dwk/websub
-```
-
-## File layout
-
-```
-src/index.ts          # public surface: createWebSub, publishNotifier, queue consumer, types
-src/config.ts         # WebSubConfig type and Env fragment
-src/handler.ts        # createWebSub factory (subscribe/unsubscribe/publish routes)
-src/store.ts          # createD1SubscriptionStore (D1-backed subscription persistence)
-src/validate.ts       # request parameter validation
-src/verify.ts         # intent verification (hub.challenge callback)
-src/distribute.ts     # content fetching, HMAC signing, subscriber delivery
-src/queue.ts          # queued job shapes (verify + distribute kinds)
-src/consumer.ts       # createWebSubQueueConsumer (verification + fan-out delivery)
-src/log.ts            # structured observability event taxonomy (@dwk/log vocabulary)
-src/*.test.ts         # colocated tests
-```
-
-## Dependencies
-
-- `@dwk/log` — structured logging.
-- `@dwk/safe-fetch` — SSRF-safe fetch, capped body reads, and cross-origin
-  header stripping for intent verification and content distribution.

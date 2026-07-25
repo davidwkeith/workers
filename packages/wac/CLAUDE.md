@@ -24,26 +24,3 @@ Write = any mutation including delete).
   store layer. The caller (`solid-pod` DO) evaluates fresh on every request.
 - **Append ≠ Write.** Append grants insert-only access; deleting triples
   requires Write. This distinction is load-bearing for Solid compliance.
-
-## Test environment
-
-Node (`environment: "node"`). No Miniflare.
-
-```bash
-pnpm test --project @dwk/wac
-```
-
-## File layout
-
-```
-src/index.ts       # public surface: evaluateAccess, AclQuad, AccessMode, AccessRequest, AccessDecision
-src/*.test.ts      # colocated tests
-```
-
-## Dependencies
-
-- `@dwk/rdf` — quad types.
-
-## Depended on by
-
-`@dwk/solid-pod`

@@ -47,34 +47,3 @@ and bridges real HTTP `Upgrade` sockets to the WebSocket globals here
   type it stands in for exactly (including quirks like D1's
   `{ results, success, meta }` envelope) — a consuming package must run
   unchanged against it.
-
-## Test environment
-
-Node (`environment: "node"`). No Miniflare — these modules run under Node
-whether or not a Workers runtime is present.
-
-```bash
-pnpm test --project @dwk/cf-shims
-```
-
-## File layout
-
-```
-src/index.ts                     # public surface
-src/d1.ts                        # D1Database -> node:sqlite
-src/r2.ts                        # R2Bucket -> filesystem
-src/kv.ts                        # KVNamespace -> SQLite or in-memory
-src/queue.ts                     # in-process durable Queue (QueueBroker)
-src/cron.ts                      # scheduled/cron timer (CronScheduler)
-src/durable-object.ts            # Durable Object emulation (SqlStorage, alarms, hibernation)
-src/cloudflare-workers.ts        # cloudflare:workers module stand-in ({ DurableObject })
-src/cloudflare-workers-loader.ts # registerCloudflareWorkers ESM loader hook
-src/html-rewriter.ts             # installHTMLRewriter polyfill
-src/crypto-digest-stream.ts      # installCryptoDigestStream polyfill
-src/web-socket.ts                # installWebSocketGlobals, WebSocketPair, EmulatedWebSocket
-src/*.test.ts                    # colocated tests
-```
-
-## Depended on by
-
-`@dwk/server` (via `workspace:*`).

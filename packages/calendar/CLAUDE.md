@@ -28,27 +28,3 @@ serializations of one `CalendarEvent`.
 - **Dates are RFC 3339 strings.** Offset/`Z` → UTC instant; date-only →
   all-day; floating → optional IANA `timeZone`. `now`/`DTSTAMP` injectable for
   deterministic output.
-
-## Test environment
-
-Node (`environment: "node"`) — plain-data inputs, no Workers runtime.
-
-```bash
-pnpm test --project @dwk/calendar
-```
-
-## File layout
-
-```
-src/index.ts        # public surface
-src/model.ts        # CalendarEvent canonical model + assertSerializable
-src/datetime.ts     # RFC 3339 ↔ iCalendar/UTC date-time helpers
-src/icalendar.ts    # toICalendar / toICalendarFeed (RFC 5545)
-src/jscalendar.ts   # toJSCalendar (RFC 8984)
-src/feed.ts         # createCalendarFeed stateless feed handler
-src/*.test.ts       # colocated tests
-```
-
-## Dependencies
-
-None (runtime). Pure serialization.
