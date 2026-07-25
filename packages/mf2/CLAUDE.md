@@ -33,29 +33,3 @@ before persistence, and the FNV-1a/base36 stable-id hash.
   sanitization are separate passes; consumers sanitize at capture time.
 - **Consumers' behavior is the contract.** `@dwk/microsub`'s `hfeed`/timeline
   tests must keep passing unchanged against this extractor.
-
-## Test environment
-
-Workerd via `@cloudflare/vitest-pool-workers` (no bindings — only the
-`HTMLRewriter` global is needed).
-
-```bash
-pnpm test --project @dwk/mf2
-```
-
-## File layout
-
-```
-src/index.ts         # public surface
-src/jf2.ts           # Jf2Entry/Jf2Author/Jf2Content shapes + fnv1aBase36
-src/hentry.ts        # parseHEntries (h-entry/h-card extraction)
-src/sanitize.ts      # sanitizeHtml (allowlist UGC sanitizer)
-src/entities.ts      # decodeEntities (minimal named + numeric references)
-src/void-elements.ts # shared HTML void-element set
-src/*.test.ts        # colocated tests
-```
-
-## Depended on by
-
-`@dwk/microsub` (parseHFeed) and `@dwk/webmention` (mention enrichment), via
-`workspace:*`.

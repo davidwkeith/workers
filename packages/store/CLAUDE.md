@@ -34,36 +34,3 @@ refreshed on every write) so WebDAV PROPFIND can serve `getcontentlength` /
   orphan table after safety window (≥ max write duration). The `collectGarbage`
   and `forwardOrphans` functions implement this; `d1OrphanSink` bridges to D1
   for cross-DO coordination.
-
-## Test environment
-
-Workerd via `@cloudflare/vitest-pool-workers`. Miniflare config:
-
-- DO: `StoreTestObject` (useSQLite)
-- R2: `BLOBS`
-- D1: `GC_DB`
-
-Has `test-harness.ts` (excluded from build and published files).
-
-```bash
-pnpm test --project @dwk/store
-```
-
-## File layout
-
-```
-src/index.ts         # public surface: createStore, collectGarbage, forwardOrphans, types
-src/store.ts         # the Store interface + createStore (quads, blobs, ETags, outbox)
-src/sql.ts           # DO-SQLite schema and the quad ↔ row codec
-src/gc.ts            # out-of-band blob GC: forwardOrphans, collectGarbage, d1OrphanSink
-src/test-harness.ts  # Miniflare DO class for tests (not published)
-src/*.test.ts        # colocated tests
-```
-
-## Dependencies
-
-- `@dwk/rdf` — quad types and stored-term conversion.
-
-## Depended on by
-
-`@dwk/solid-pod`, `@dwk/remotestorage`
