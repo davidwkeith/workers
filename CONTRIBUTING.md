@@ -192,8 +192,8 @@ the ones most often relevant to a PR:
 
 1. Write (or update) its spec in `spec/packages/<name>.md` first.
 2. Follow the standard per-package layout (see the tree in
-   [`CLAUDE.md`](./CLAUDE.md) → "Per-package layout & conventions"): `src/`
-   with colocated `*.test.ts`, `tsconfig.json` + `tsconfig.build.json`,
+   [`.claude/skills/add-package/SKILL.md`](./.claude/skills/add-package/SKILL.md)):
+   `src/` with colocated `*.test.ts`, `tsconfig.json` + `tsconfig.build.json`,
    `vitest.config.ts`, `README.md`.
 3. Pick the correct vitest environment (Node vs `workerd`, above).
 4. Give it a **catalog decision**: either a worker entry in
