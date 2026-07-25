@@ -1025,6 +1025,7 @@ function publishRequest(
   username: string,
   body: string,
   publish = true,
+  skipDelivery = false,
 ): Request {
   const iris = deriveIris(BASE, username);
   const headers: Record<string, string> = {
@@ -1032,6 +1033,7 @@ function publishRequest(
     [INTERNAL_HEADERS.config]: cfgHeader(username),
   };
   if (publish) headers[INTERNAL_HEADERS.publish] = "1";
+  if (skipDelivery) headers[INTERNAL_HEADERS.skipDelivery] = "1";
   return new Request(`${iris.id}/publish`, { method: "POST", headers, body });
 }
 
@@ -1124,6 +1126,77 @@ describe("shaped post publish endpoint", () => {
         .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
         .one().n;
       expect(queued).toBe(1);
+    });
+  });
+
+  it("preserves a caller-supplied published timestamp", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({
+            kind: "note",
+            content: "old post",
+            published: "2019-03-01T12:00:00.000Z",
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+      const activity = (await res.json()) as Record<string, unknown>;
+      const object = activity.object as Record<string, unknown>;
+      expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+      expect(object.published).toBe("2019-03-01T12:00:00.000Z");
+      const row = state.storage.sql
+        .exec<{ published_at: number }>(
+          `SELECT published_at FROM outbox WHERE id = ?`,
+          activity.id,
+        )
+        .one();
+      expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
+    });
+  });
+
+  it("400s an unparseable published timestamp", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "note", content: "x", published: "nope" }),
+        ),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.text()).toMatch(/`published`/);
+    });
+  });
+
+  it("skipDelivery inserts a shaped post without fan-out or arming the alarm", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        publishRequest(
+          username,
+          JSON.stringify({ kind: "note", content: "backfilled" }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(201);
+      const outboxed = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+        .one().n;
+      expect(outboxed).toBe(1);
+      const queued = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+        .one().n;
+      expect(queued).toBe(0);
     });
   });
 

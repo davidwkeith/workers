@@ -1272,7 +1272,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const parsed = parsePostInput(body);
     if (!parsed.ok) return text(400, parsed.error);
 
-    const stored = await this.#storePost(parsed.input);
+    const skipDelivery =
+      request.headers.get(INTERNAL_HEADERS.skipDelivery) === "1";
+    const stored = await this.#storePost(parsed.input, { skipDelivery });
     return json(201, stored.activity as JsonValue, {
       location: stored.activityId,
     });
@@ -1286,7 +1288,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * (the `__client/publish` write path) can build it. Shared by `#publishPost`
    * and `#clientPublish`.
    */
-  async #storePost(input: PostInput): Promise<{
+  async #storePost(
+    input: PostInput,
+    opts: { skipDelivery?: boolean } = {},
+  ): Promise<{
     activityId: string;
     activity: Record<string, JsonValue>;
     seq: number;
@@ -1294,12 +1299,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }> {
     const config = this.#config!;
     const activityId = `${config.iris.outbox}/${crypto.randomUUID()}`;
+    const published = isValidPublished(input.published)
+      ? input.published
+      : new Date().toISOString();
     const activity = buildPostActivity(input, config.iris, {
       activityId,
       objectId: `${activityId}/object`,
-      published: new Date().toISOString(),
+      published,
     });
-    const publishedAt = Date.now();
+    const publishedAt = Date.parse(published);
     this.#sql.exec(
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       activityId,
@@ -1307,18 +1315,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       publishedAt,
     );
 
-    const json_ = JSON.stringify(activity);
-    for (const row of this.#sql
-      .exec<{
-        inbox: string | null;
-      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
-      .toArray()) {
-      if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+    // Quiet-insert mode (#451, backfill): store the row and stop — no
+    // follower fan-out, no community delivery, no alarm. `#clientPublish`
+    // never sets this, so its live-posting behavior is unchanged.
+    if (!opts.skipDelivery) {
+      const json_ = JSON.stringify(activity);
+      for (const row of this.#sql
+        .exec<{
+          inbox: string | null;
+        }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+        .toArray()) {
+        if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+      }
+      if (input.audience) {
+        this.#deliverToAudience(input.audience, json_);
+      }
+      await this.#armAlarm();
     }
-    if (input.audience) {
-      this.#deliverToAudience(input.audience, json_);
-    }
-    await this.#armAlarm();
 
     const seq = this.#sql
       .exec<{ seq: number }>(`SELECT seq FROM outbox WHERE id = ?`, activityId)
