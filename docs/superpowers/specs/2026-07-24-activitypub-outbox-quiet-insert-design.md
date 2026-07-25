@@ -19,11 +19,11 @@ unconditionally does two things a **backfill** use case can't tolerate:
 
 **Concrete use case:** Anglesite issue
 [Anglesite/Anglesite-app#926](https://github.com/Anglesite/Anglesite-app/issues/926)
-— syncing a site's *existing* content (posts that predate ActivityPub being
+— syncing a site's _existing_ content (posts that predate ActivityPub being
 turned on) into its own outbox, so a Mastodon follower sees the site's real
 history, not just posts made after activation. A literal backfill against the
 current API notification-blasts every historical post to whoever follows the
-site *today* — a non-starter.
+site _today_ — a non-starter.
 
 ## Non-goals
 
@@ -116,7 +116,7 @@ complexity for no safety benefit.
   value through.
 - **Validation**: a supplied `published` that fails `Number.isNaN(Date.parse(value))`
   is rejected with `400` and a precise message (`` `published` must be a valid
-  ISO-8601 timestamp ``) on both endpoints — never silently defaulted to `now`
+ISO-8601 timestamp ``) on both endpoints — never silently defaulted to `now`
   when the caller supplied something unparseable.
 
 ### 3. Ordering nice-to-have: outbox by `published_at`

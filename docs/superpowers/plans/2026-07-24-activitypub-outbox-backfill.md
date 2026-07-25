@@ -23,10 +23,12 @@
 ### Task 1: `isValidPublished` + `PostInput.published` + `parsePostInput` validation
 
 **Files:**
+
 - Modify: `packages/activitypub/src/objects.ts`
 - Test: `packages/activitypub/src/objects.test.ts`
 
 **Interfaces:**
+
 - Produces: `export function isValidPublished(value: unknown): value is string` — true iff `value` is a non-empty string `Date.parse` can interpret. `PostInput.published?: string`. `parsePostInput` rejects an unparseable `published` with a client-facing error and otherwise carries it into the returned `input`.
 - Consumed by: Task 2 (`object.ts` `#asOutboxActivity`/`#publish`) and Task 3 (`object.ts` `#storePost`).
 
@@ -49,17 +51,17 @@ import {
 Add this test inside the existing `describe("parsePostInput", ...)` block, right after the `it("rejects a non-boolean sensitive flag", ...)` test (before the block's closing `});`):
 
 ```ts
-  it("validates published as an ISO-8601 timestamp", () => {
-    expect(
-      rejected({ kind: "note", content: "x", published: "not-a-date" }),
-    ).toMatch(/`published`/);
-    const input = parsed({
-      kind: "note",
-      content: "x",
-      published: "2019-03-01T12:00:00.000Z",
-    });
-    expect(input.published).toBe("2019-03-01T12:00:00.000Z");
+it("validates published as an ISO-8601 timestamp", () => {
+  expect(
+    rejected({ kind: "note", content: "x", published: "not-a-date" }),
+  ).toMatch(/`published`/);
+  const input = parsed({
+    kind: "note",
+    content: "x",
+    published: "2019-03-01T12:00:00.000Z",
   });
+  expect(input.published).toBe("2019-03-01T12:00:00.000Z");
+});
 ```
 
 Add a new top-level `describe` block at the end of the file (after the last existing `describe` block):
@@ -136,38 +138,38 @@ export function isValidPublished(value: unknown): value is string {
 Add `published?: string;` to the inline `input` object type inside `parsePostInput` (find):
 
 ```ts
-  const input: {
-    kind: PostKind;
-    content: string;
-    name?: string;
-    summary?: string;
-    sensitive?: boolean;
-    attachments?: PostAttachment[];
-    inReplyTo?: string;
-    audience?: string;
-    tags?: string[];
-    to?: string[];
-    cc?: string[];
-  } = { kind: kind as PostKind, content };
+const input: {
+  kind: PostKind;
+  content: string;
+  name?: string;
+  summary?: string;
+  sensitive?: boolean;
+  attachments?: PostAttachment[];
+  inReplyTo?: string;
+  audience?: string;
+  tags?: string[];
+  to?: string[];
+  cc?: string[];
+} = { kind: kind as PostKind, content };
 ```
 
 Replace with:
 
 ```ts
-  const input: {
-    kind: PostKind;
-    content: string;
-    name?: string;
-    summary?: string;
-    sensitive?: boolean;
-    attachments?: PostAttachment[];
-    inReplyTo?: string;
-    audience?: string;
-    tags?: string[];
-    to?: string[];
-    cc?: string[];
-    published?: string;
-  } = { kind: kind as PostKind, content };
+const input: {
+  kind: PostKind;
+  content: string;
+  name?: string;
+  summary?: string;
+  sensitive?: boolean;
+  attachments?: PostAttachment[];
+  inReplyTo?: string;
+  audience?: string;
+  tags?: string[];
+  to?: string[];
+  cc?: string[];
+  published?: string;
+} = { kind: kind as PostKind, content };
 ```
 
 Add the validation block right after the `sensitive` check and before the `inReplyTo`/`audience` loop (find):
@@ -224,11 +226,13 @@ git commit -m "feat(activitypub): accept a validated published override on PostI
 ### Task 2: raw-AS2 publish path — preserve `published`, add quiet-insert
 
 **Files:**
+
 - Modify: `packages/activitypub/src/config.ts`
 - Modify: `packages/activitypub/src/object.ts`
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `isValidPublished` from Task 1 (`./objects.js`).
 - Produces: `INTERNAL_HEADERS.skipDelivery = "x-ap-skip-delivery"` — consumed by Task 3 (`#storePost`/`#publishPost`) and Task 5 (`handler.ts`).
 
@@ -277,120 +281,120 @@ function outboxRequest(
 Add these tests inside `describe("publish endpoint", ...)`, right after the `it("fans a published Note out to followers with a known inbox", ...)` test (before the block's closing `});`):
 
 ```ts
-  it("preserves a caller-supplied published timestamp on a bare object", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance, state) => {
-      const res = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({
-            type: "Note",
-            content: "old post",
-            published: "2019-03-01T12:00:00.000Z",
-          }),
-          true,
-        ),
-      );
-      expect(res.status).toBe(201);
-      const activity = (await res.json()) as Record<string, unknown>;
-      expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
-      const object = activity.object as Record<string, unknown>;
-      expect(object.published).toBe("2019-03-01T12:00:00.000Z");
-      const row = state.storage.sql
-        .exec<{ published_at: number }>(
-          `SELECT published_at FROM outbox WHERE id = ?`,
-          activity.id,
-        )
-        .one();
-      expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
-    });
+it("preserves a caller-supplied published timestamp on a bare object", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance, state) => {
+    const res = await instance.fetch(
+      outboxRequest(
+        username,
+        JSON.stringify({
+          type: "Note",
+          content: "old post",
+          published: "2019-03-01T12:00:00.000Z",
+        }),
+        true,
+      ),
+    );
+    expect(res.status).toBe(201);
+    const activity = (await res.json()) as Record<string, unknown>;
+    expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+    const object = activity.object as Record<string, unknown>;
+    expect(object.published).toBe("2019-03-01T12:00:00.000Z");
+    const row = state.storage.sql
+      .exec<{ published_at: number }>(
+        `SELECT published_at FROM outbox WHERE id = ?`,
+        activity.id,
+      )
+      .one();
+    expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
   });
+});
 
-  it("preserves a caller-supplied published timestamp on a pre-wrapped activity", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance) => {
-      const res = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({
-            type: "Announce",
-            object: "https://remote.example/notes/1",
-            published: "2018-01-01T00:00:00.000Z",
-          }),
-          true,
-        ),
-      );
-      expect(res.status).toBe(201);
-      const activity = (await res.json()) as Record<string, unknown>;
-      expect(activity.published).toBe("2018-01-01T00:00:00.000Z");
-    });
+it("preserves a caller-supplied published timestamp on a pre-wrapped activity", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance) => {
+    const res = await instance.fetch(
+      outboxRequest(
+        username,
+        JSON.stringify({
+          type: "Announce",
+          object: "https://remote.example/notes/1",
+          published: "2018-01-01T00:00:00.000Z",
+        }),
+        true,
+      ),
+    );
+    expect(res.status).toBe(201);
+    const activity = (await res.json()) as Record<string, unknown>;
+    expect(activity.published).toBe("2018-01-01T00:00:00.000Z");
   });
+});
 
-  it("400s an unparseable published timestamp", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance) => {
-      const res = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({ type: "Note", content: "x", published: "nope" }),
-          true,
-        ),
-      );
-      expect(res.status).toBe(400);
-    });
+it("400s an unparseable published timestamp", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance) => {
+    const res = await instance.fetch(
+      outboxRequest(
+        username,
+        JSON.stringify({ type: "Note", content: "x", published: "nope" }),
+        true,
+      ),
+    );
+    expect(res.status).toBe(400);
   });
+});
 
-  it("skipDelivery inserts into the outbox without fan-out or arming the alarm", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
-        REMOTE,
-        `${REMOTE}/inbox`,
-        1,
-      );
-      const res = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({ type: "Note", content: "backfilled" }),
-          true,
-          true,
-        ),
-      );
-      expect(res.status).toBe(201);
-      const outboxCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
-        .one().n;
-      expect(outboxCount).toBe(1);
-      const deliveryCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
-        .one().n;
-      expect(deliveryCount).toBe(0);
-    });
+it("skipDelivery inserts into the outbox without fan-out or arming the alarm", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+      REMOTE,
+      `${REMOTE}/inbox`,
+      1,
+    );
+    const res = await instance.fetch(
+      outboxRequest(
+        username,
+        JSON.stringify({ type: "Note", content: "backfilled" }),
+        true,
+        true,
+      ),
+    );
+    expect(res.status).toBe(201);
+    const outboxCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+      .one().n;
+    expect(outboxCount).toBe(1);
+    const deliveryCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+      .one().n;
+    expect(deliveryCount).toBe(0);
   });
+});
 
-  it("skipDelivery on a Follow does not record a relationship or queue delivery", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance, state) => {
-      const res = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({ type: "Follow", object: REMOTE }),
-          true,
-          true,
-        ),
-      );
-      expect(res.status).toBe(201);
-      const followingCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
-        .one().n;
-      expect(followingCount).toBe(0);
-      const pendingCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
-        .one().n;
-      expect(pendingCount).toBe(0);
-    });
+it("skipDelivery on a Follow does not record a relationship or queue delivery", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance, state) => {
+    const res = await instance.fetch(
+      outboxRequest(
+        username,
+        JSON.stringify({ type: "Follow", object: REMOTE }),
+        true,
+        true,
+      ),
+    );
+    expect(res.status).toBe(201);
+    const followingCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM following`)
+      .one().n;
+    expect(followingCount).toBe(0);
+    const pendingCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+      .one().n;
+    expect(pendingCount).toBe(0);
   });
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -587,10 +591,12 @@ git commit -m "feat(activitypub): quiet-insert and backdated published on the ra
 ### Task 3: shaped-post publish path — preserve `published`, add quiet-insert
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts`
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PostInput.published` and `isValidPublished` from Task 1; `INTERNAL_HEADERS.skipDelivery` from Task 2.
 - Produces: `#storePost(input: PostInput, opts?: { skipDelivery?: boolean })` — `opts` defaults to `{}`, so the existing `#clientPublish` call site (unchanged, no `opts` argument) keeps its current live-publish behavior.
 
@@ -639,76 +645,76 @@ function publishRequest(
 Add these tests inside `describe("shaped post publish endpoint", ...)`, right after the `it("publishes a media note: minted ids, outbox row, follower fan-out", ...)` test (before `it("publishes a titled Page carrying the community audience", ...)`):
 
 ```ts
-  it("preserves a caller-supplied published timestamp", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance, state) => {
-      const res = await instance.fetch(
-        publishRequest(
-          username,
-          JSON.stringify({
-            kind: "note",
-            content: "old post",
-            published: "2019-03-01T12:00:00.000Z",
-          }),
-        ),
-      );
-      expect(res.status).toBe(201);
-      const activity = (await res.json()) as Record<string, unknown>;
-      const object = activity.object as Record<string, unknown>;
-      expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
-      expect(object.published).toBe("2019-03-01T12:00:00.000Z");
-      const row = state.storage.sql
-        .exec<{ published_at: number }>(
-          `SELECT published_at FROM outbox WHERE id = ?`,
-          activity.id,
-        )
-        .one();
-      expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
-    });
+it("preserves a caller-supplied published timestamp", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance, state) => {
+    const res = await instance.fetch(
+      publishRequest(
+        username,
+        JSON.stringify({
+          kind: "note",
+          content: "old post",
+          published: "2019-03-01T12:00:00.000Z",
+        }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    const activity = (await res.json()) as Record<string, unknown>;
+    const object = activity.object as Record<string, unknown>;
+    expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+    expect(object.published).toBe("2019-03-01T12:00:00.000Z");
+    const row = state.storage.sql
+      .exec<{ published_at: number }>(
+        `SELECT published_at FROM outbox WHERE id = ?`,
+        activity.id,
+      )
+      .one();
+    expect(row.published_at).toBe(Date.parse("2019-03-01T12:00:00.000Z"));
   });
+});
 
-  it("400s an unparseable published timestamp", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance) => {
-      const res = await instance.fetch(
-        publishRequest(
-          username,
-          JSON.stringify({ kind: "note", content: "x", published: "nope" }),
-        ),
-      );
-      expect(res.status).toBe(400);
-      expect(await res.text()).toMatch(/`published`/);
-    });
+it("400s an unparseable published timestamp", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance) => {
+    const res = await instance.fetch(
+      publishRequest(
+        username,
+        JSON.stringify({ kind: "note", content: "x", published: "nope" }),
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/`published`/);
   });
+});
 
-  it("skipDelivery inserts a shaped post without fan-out or arming the alarm", async () => {
-    const { username, stub } = freshUser();
-    await runInDurableObject(stub, async (instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
-        REMOTE,
-        `${REMOTE}/inbox`,
-        1,
-      );
-      const res = await instance.fetch(
-        publishRequest(
-          username,
-          JSON.stringify({ kind: "note", content: "backfilled" }),
-          true,
-          true,
-        ),
-      );
-      expect(res.status).toBe(201);
-      const outboxed = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
-        .one().n;
-      expect(outboxed).toBe(1);
-      const queued = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
-        .one().n;
-      expect(queued).toBe(0);
-    });
+it("skipDelivery inserts a shaped post without fan-out or arming the alarm", async () => {
+  const { username, stub } = freshUser();
+  await runInDurableObject(stub, async (instance, state) => {
+    state.storage.sql.exec(
+      `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+      REMOTE,
+      `${REMOTE}/inbox`,
+      1,
+    );
+    const res = await instance.fetch(
+      publishRequest(
+        username,
+        JSON.stringify({ kind: "note", content: "backfilled" }),
+        true,
+        true,
+      ),
+    );
+    expect(res.status).toBe(201);
+    const outboxed = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+      .one().n;
+    expect(outboxed).toBe(1);
+    const queued = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+      .one().n;
+    expect(queued).toBe(0);
   });
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -884,10 +890,12 @@ git commit -m "feat(activitypub): quiet-insert and backdated published on the sh
 ### Task 4: order the outbox `OrderedCollection` by `published_at`
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts`
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: nothing new (internal ordering change only).
 
@@ -944,31 +952,31 @@ Expected: FAIL — `#pageItems` currently orders by `seq DESC`, so `/backfilled`
 In `packages/activitypub/src/object.ts`, find the outbox branch of `#pageItems`:
 
 ```ts
-    if (kind === "outbox") {
-      return this.#sql
-        .exec<{ json: string }>(
-          `SELECT json FROM outbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
-          pageSize,
-          offset,
-        )
-        .toArray()
-        .map((row) => JSON.parse(row.json) as JsonValue);
-    }
+if (kind === "outbox") {
+  return this.#sql
+    .exec<{ json: string }>(
+      `SELECT json FROM outbox ORDER BY seq DESC LIMIT ? OFFSET ?`,
+      pageSize,
+      offset,
+    )
+    .toArray()
+    .map((row) => JSON.parse(row.json) as JsonValue);
+}
 ```
 
 Replace with:
 
 ```ts
-    if (kind === "outbox") {
-      return this.#sql
-        .exec<{ json: string }>(
-          `SELECT json FROM outbox ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
-          pageSize,
-          offset,
-        )
-        .toArray()
-        .map((row) => JSON.parse(row.json) as JsonValue);
-    }
+if (kind === "outbox") {
+  return this.#sql
+    .exec<{ json: string }>(
+      `SELECT json FROM outbox ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
+      pageSize,
+      offset,
+    )
+    .toArray()
+    .map((row) => JSON.parse(row.json) as JsonValue);
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -988,10 +996,12 @@ git commit -m "fix(activitypub): order the outbox collection by published_at"
 ### Task 5: front door — `?skipDelivery=1` query param translation
 
 **Files:**
+
 - Modify: `packages/activitypub/src/handler.ts`
 - Test: `packages/activitypub/src/index.test.ts`
 
 **Interfaces:**
+
 - Consumes: `INTERNAL_HEADERS.skipDelivery` from Task 2; the DO-side `skipDelivery` handling from Tasks 2–3.
 - Produces: nothing new — this is the last piece wiring the public HTTP surface to the already-tested DO behavior.
 
@@ -1000,52 +1010,52 @@ git commit -m "fix(activitypub): order the outbox collection by published_at"
 Add this test to `packages/activitypub/src/index.test.ts`, inside `describe("publish endpoint", ...)`, right after the `it("requires the bearer token and publishes a Create to the outbox", ...)` test (before `it("rejects an oversized publish body with 413", ...)`):
 
 ```ts
-  it("skipDelivery inserts into the outbox without queuing follower delivery", async () => {
-    const config = makeConfig({ publishToken: "s3cret" });
-    const handler = createActivityPub(config);
-    const iris = deriveIris(config.baseUrl, config.actor.username);
-    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+it("skipDelivery inserts into the outbox without queuing follower delivery", async () => {
+  const config = makeConfig({ publishToken: "s3cret" });
+  const handler = createActivityPub(config);
+  const iris = deriveIris(config.baseUrl, config.actor.username);
+  const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
 
-    await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
-        REMOTE,
-        `${REMOTE}/inbox`,
-        1,
-      );
-    });
-
-    const created = await handler(
-      new Request(`${actorUrl(config)}/outbox?skipDelivery=1`, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer s3cret",
-          "content-type": "application/activity+json",
-        },
-        body: JSON.stringify({
-          type: "Note",
-          content: "backfilled post",
-          published: "2019-03-01T12:00:00.000Z",
-        }),
-      }),
-      testEnv,
-      ctx,
+  await runInDurableObject(stub, async (_instance, state) => {
+    state.storage.sql.exec(
+      `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+      REMOTE,
+      `${REMOTE}/inbox`,
+      1,
     );
-    expect(created.status).toBe(201);
-    const activity = (await created.json()) as Record<string, unknown>;
-    expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
-
-    await runInDurableObject(stub, async (_instance, state) => {
-      const outboxCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
-        .one().n;
-      expect(outboxCount).toBe(1);
-      const deliveryCount = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
-        .one().n;
-      expect(deliveryCount).toBe(0);
-    });
   });
+
+  const created = await handler(
+    new Request(`${actorUrl(config)}/outbox?skipDelivery=1`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer s3cret",
+        "content-type": "application/activity+json",
+      },
+      body: JSON.stringify({
+        type: "Note",
+        content: "backfilled post",
+        published: "2019-03-01T12:00:00.000Z",
+      }),
+    }),
+    testEnv,
+    ctx,
+  );
+  expect(created.status).toBe(201);
+  const activity = (await created.json()) as Record<string, unknown>;
+  expect(activity.published).toBe("2019-03-01T12:00:00.000Z");
+
+  await runInDurableObject(stub, async (_instance, state) => {
+    const outboxCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM outbox`)
+      .one().n;
+    expect(outboxCount).toBe(1);
+    const deliveryCount = state.storage.sql
+      .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM delivery`)
+      .one().n;
+    expect(deliveryCount).toBe(0);
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1107,9 +1117,11 @@ git commit -m "feat(activitypub): translate ?skipDelivery=1 into the DO quiet-in
 ### Task 6: changeset, lint, typecheck, build
 
 **Files:**
+
 - Create: `.changeset/activitypub-outbox-backfill.md`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: nothing — this is the release-bookkeeping and CI-parity task that closes out the plan.
 
