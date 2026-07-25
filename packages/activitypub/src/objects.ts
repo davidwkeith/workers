@@ -86,6 +86,11 @@ export interface PostInput {
   readonly to?: readonly string[];
   /** Advanced addressing override — mentions / secondary audiences (`cc`). */
   readonly cc?: readonly string[];
+  /**
+   * ISO-8601 publish timestamp override. Defaults to `now`; used to backdate
+   * backfilled historical content so it doesn't sort as newly posted (#451).
+   */
+  readonly published?: string;
 }
 
 /**
@@ -121,6 +126,19 @@ function isHttpUrl(value: string): boolean {
 
 function isAddressable(value: string): boolean {
   return value === PUBLIC_AUDIENCE || isHttpUrl(value);
+}
+
+/**
+ * Whether `value` is a non-empty string `Date.parse` can interpret — the
+ * shared validity check for a caller-supplied `published` override on both
+ * the raw-AS2 and shaped-post publish paths (#451).
+ */
+export function isValidPublished(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    !Number.isNaN(Date.parse(value))
+  );
 }
 
 function optionalString(
@@ -216,6 +234,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     tags?: string[];
     to?: string[];
     cc?: string[];
+    published?: string;
   } = { kind: kind as PostKind, content };
 
   for (const key of ["name", "summary"] as const) {
@@ -237,6 +256,17 @@ export function parsePostInput(value: unknown): ParsedPostInput {
       return { ok: false, error: "`sensitive` must be a boolean" };
     }
     input.sensitive = record.sensitive;
+  }
+
+  if (record.published !== undefined) {
+    const published = record.published;
+    if (!isValidPublished(published)) {
+      return {
+        ok: false,
+        error: "`published` must be a valid ISO-8601 timestamp",
+      };
+    }
+    input.published = published;
   }
 
   for (const key of ["inReplyTo", "audience"] as const) {
