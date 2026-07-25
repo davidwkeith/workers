@@ -472,11 +472,20 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // owner's blocks are private, so this is gated by the same owner marker the
     // publish endpoints carry — the front door only sets it after checking the
     // publish bearer token.
+    //
+    // One rule, deliberately: anything that is not an authorized `GET` is
+    // `404`, never `405`. A `405` would confirm the route exists to anyone who
+    // probed it with the wrong verb, which is the one thing a private
+    // blocklist must not do — and it would disagree with the front door, whose
+    // fall-through answers `404` for exactly the same reason the publish
+    // endpoints do when publishing is disabled.
     if (path === `${pathOf(iris.id)}/blocked`) {
-      if (request.headers.get(INTERNAL_HEADERS.publish) !== "1") {
+      if (
+        method !== "GET" ||
+        request.headers.get(INTERNAL_HEADERS.publish) !== "1"
+      ) {
         return text(404, "Not Found");
       }
-      if (method !== "GET") return text(405, "Method Not Allowed");
       return this.#listBlocked();
     }
     if (path === pathOf(iris.inbox)) {
@@ -1441,6 +1450,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * the owner may pass a bare IRI, which is read as the stored `Follow`'s id
    * when it matches one we recorded and as the follower's actor IRI otherwise
    * — the two readings a client can reasonably take of "reject this follow".
+   *
+   * That last fallback deliberately does **not** require a matching `followers`
+   * row. A `Reject` is most needed exactly when our state and the peer's
+   * disagree — they believe they follow us, our row is already gone — and
+   * demanding local proof of the relationship would refuse the one message that
+   * repairs the drift. What the owner can reach this way is bounded: the target
+   * still passes the SSRF guard before anything leaves, and the delivered body
+   * asserts nothing about a third party (it tells one actor "you do not follow
+   * me", which is true however they got the message). The cost of the looseness
+   * is an owner typo sending a stray `Reject` that its recipient no-ops on;
+   * the cost of tightening it is a silent no-op in the case that matters.
    */
   #rejectTarget(activity: Record<string, JsonValue>): string | undefined {
     const object = activity.object;

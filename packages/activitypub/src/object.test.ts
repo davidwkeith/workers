@@ -1849,6 +1849,31 @@ describe("owner follower control (#447)", () => {
     });
   });
 
+  it("rejects an actor with no followers row, so state drift can be repaired", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      // Nothing on file for this actor: the peer believes it follows us, our
+      // row is already gone. The Reject is the message that repairs that, so
+      // it is delivered rather than refused for lack of local proof.
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Reject", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const [queued] = targetedDeliveries(state);
+      expect(queued?.actor).toBe(REMOTE);
+      expect(queued?.activity.object).toEqual({
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+    });
+  });
+
   it("blocks: severs both relationship rows, records the block, and delivers only to the target", async () => {
     const { username, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
@@ -2086,10 +2111,12 @@ describe("owner follower control (#447)", () => {
         false,
       );
 
+      // Anything but an authorized GET is 404, never 405 — a 405 would confirm
+      // the route exists to a prober, which a private blocklist must not do.
       const written = await instance.fetch(
         new Request(`${iris.id}/blocked`, { method: "DELETE", headers: owner }),
       );
-      expect(written.status).toBe(405);
+      expect(written.status).toBe(404);
     });
   });
 });

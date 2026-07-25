@@ -859,9 +859,21 @@ describe("owner follower control (#447)", () => {
     } finally {
       globalThis.fetch = original;
     }
-    expect(posted).toHaveLength(1);
-    expect(posted[0]?.url).toBe(`${REMOTE}/inbox`);
-    expect(JSON.parse(posted[0]?.body ?? "{}").type).toBe("Block");
+    // Not an exact count: the alarm and the explicit `__deliver` pass above can
+    // both pick up the same queued row across its outbound-fetch window, so the
+    // queue is at-least-once (harmless — peers dedup on the activity `id`). The
+    // invariants that matter are that something was delivered, that everything
+    // delivered was this one Block, and that it went nowhere but the blocked
+    // actor's inbox — a fan-out would show up here as an extra recipient.
+    expect(posted.length).toBeGreaterThan(0);
+    const bodies = posted.map(
+      (sent) => JSON.parse(sent.body) as Record<string, unknown>,
+    );
+    expect(posted.map((sent) => sent.url)).toEqual(
+      posted.map(() => `${REMOTE}/inbox`),
+    );
+    expect(bodies.map((body) => body.type)).toEqual(bodies.map(() => "Block"));
+    expect(new Set(bodies.map((body) => body.id)).size).toBe(1);
 
     // The follower is gone from the public collection, and the Block never
     // appears in the public outbox.
@@ -909,6 +921,18 @@ describe("owner follower control (#447)", () => {
       ctx,
     );
     expect(wrongToken.status).toBe(401);
+
+    // A non-GET verb is 404, not 405: the route never confirms its existence
+    // to anything but an authorized read.
+    const written = await handler(
+      new Request(`${actorUrl(config)}/blocked`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(written.status).toBe(404);
 
     // With no publish token configured the route does not exist at all.
     const openConfig = makeConfig();

@@ -428,6 +428,13 @@ export function createActivityPub(
     // the blocklist is private, so it is neither an AS2 collection nor served
     // to anyone but the owner. Without it a block could be created but never
     // reviewed or undone.
+    //
+    // Only `GET` is matched, so every other verb falls through to the generic
+    // `404` below rather than the `405` a public route like the actor document
+    // answers. That asymmetry is deliberate and matched in the DO: a `405`
+    // confirms the route exists to an unauthorized prober, which a private
+    // blocklist must not do — the same reason a publish `POST` answers `404`
+    // rather than `405` when no publish token is configured.
     if (path === blockedPath && method === "GET") {
       if (!resolved.publishToken) {
         emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
