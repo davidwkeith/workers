@@ -69,7 +69,7 @@
     "ws": "8.21.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260718.1",
+    "@cloudflare/workers-types": "5.20260724.1",
     "@dwk/activitypub": "workspace:*",
     "@dwk/atproto-pds": "workspace:*",
     "@dwk/host-meta": "workspace:*",
