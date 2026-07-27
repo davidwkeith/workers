@@ -200,7 +200,10 @@ export function buildMounts(env: ConformanceEnv): readonly Mount[] {
     },
     {
       name: "home",
-      matches: (u) => u.pathname === "/" || u.pathname === "/profile/card",
+      matches: (u) =>
+        u.pathname === "/" ||
+        u.pathname === "/profile/card" ||
+        u.pathname === "/webmention-qa-source",
       handler: createHome(env),
     },
   ];

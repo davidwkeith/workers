@@ -87,6 +87,22 @@ describe("home", () => {
     const res = await call("/no-such-mount");
     expect(res.status).toBe(404);
   });
+
+  it("serves the webmention.rocks/sender source page with a link per target", async () => {
+    const res = await call("/webmention-qa-source");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const body = await res.text();
+    for (const path of [
+      "test/1",
+      "test/23",
+      "update/1",
+      "update/2",
+      "delete/1",
+    ]) {
+      expect(body).toContain(`href="https://webmention.rocks/${path}"`);
+    }
+  });
 });
 
 describe("discovery", () => {
