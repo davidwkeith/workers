@@ -66,6 +66,8 @@ function load(paths: readonly string[]): void {
     path: [...paths],
     quiet: true,
     ignore: ["MISSING_ENV_FILE"],
+    noNative: true,
+    noArmor: true,
   });
   if (result.error) throw result.error;
 }

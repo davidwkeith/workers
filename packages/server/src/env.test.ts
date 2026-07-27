@@ -16,7 +16,15 @@ const dotenvxCli = join(
 function encryptFile(dir: string, filename: string): void {
   execFileSync(
     "node",
-    [dotenvxCli, "encrypt", "-f", filename, "--no-armor", "--no-native"],
+    [
+      dotenvxCli,
+      "encrypt",
+      "-f",
+      filename,
+      "--no-armor",
+      "--no-native",
+      "--quiet",
+    ],
     { cwd: dir },
   );
 }
@@ -34,6 +42,8 @@ const STATIC_KEYS = [
   "PRESET",
   "A",
   "B",
+  "PLAIN",
+  "SECRET_VALUE",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
