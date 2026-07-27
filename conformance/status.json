@@ -89,9 +89,9 @@
       "standard": "Webmention",
       "suites": {
         "webmention.rocks/receiver": {
-          "status": "pending",
+          "status": "passing",
           "report": null,
-          "lastRun": null,
+          "lastRun": "2026-07-27T20:55:26Z",
           "targets": {
             "node": {
               "status": "pending",
@@ -101,9 +101,9 @@
           }
         },
         "webmention.rocks/sender": {
-          "status": "pending",
-          "report": null,
-          "lastRun": null,
+          "status": "failing",
+          "report": "https://github.com/davidwkeith/workers/issues/457",
+          "lastRun": "2026-07-27T20:55:26Z",
           "targets": {
             "node": {
               "status": "pending",
