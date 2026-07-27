@@ -11,4 +11,9 @@ coverage/
 # from an accidental `npm install` / `yarn`.
 package-lock.json
 yarn.lock
-.env
+# dwk-serve .env / <domain>.env files (packages/server/.env.example,
+# spec/self-hosting.md §9.1) — real secrets, never committed. Does not match
+# .env.example (that ends in .example, not .env).
+*.env
+# dotenvx private-key store (packages/server/.env.example) — never commit.
+.env.keys
