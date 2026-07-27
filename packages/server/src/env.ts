@@ -13,7 +13,11 @@
  *
  * @see spec/self-hosting.md §9
  */
-import { config as dotenvxConfig } from "@dotenvx/dotenvx";
+import {
+  config as dotenvxConfig,
+  parse as dotenvxParse,
+} from "@dotenvx/dotenvx";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Options for {@link loadDwkEnv}. */
@@ -28,6 +32,28 @@ function domainFromBaseUrl(baseUrl: string | undefined): string | undefined {
   try {
     const { hostname } = new URL(baseUrl);
     return hostname.length > 0 ? hostname : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `DWK_BASE_URL`, from the real environment if already set, else peeked out
+ * of `.env`'s content (without writing anything to `process.env` — that
+ * only happens once, in the single ordered `load()` call below, so a
+ * `<domain>.env` discovered this way still gets to override `.env`'s
+ * overlapping keys). A `.env` whose `DWK_BASE_URL` is itself an encrypted
+ * value can't be peeked this way (no private key is applied here); such a
+ * setup falls back to loading `.env` alone, same as if no domain were known.
+ */
+function peekBaseUrl(cwd: string): string | undefined {
+  if (process.env.DWK_BASE_URL) return process.env.DWK_BASE_URL;
+  try {
+    const raw = readFileSync(join(cwd, ".env"), "utf8");
+    const parsed = dotenvxParse(raw);
+    return typeof parsed.DWK_BASE_URL === "string"
+      ? parsed.DWK_BASE_URL
+      : undefined;
   } catch {
     return undefined;
   }
@@ -53,14 +79,6 @@ export function loadDwkEnv(options: LoadDwkEnvOptions = {}): void {
   const cwd = options.cwd ?? process.cwd();
   const path = (name: string): string => join(cwd, name);
 
-  const domain = domainFromBaseUrl(process.env.DWK_BASE_URL);
+  const domain = domainFromBaseUrl(peekBaseUrl(cwd));
   load(domain ? [path(`${domain}.env`), path(".env")] : [path(".env")]);
-
-  // DWK_BASE_URL wasn't known externally — it may have just been set by the
-  // .env loaded above. Check again, and layer in a matching <domain>.env
-  // that wasn't already part of the first load.
-  if (!domain) {
-    const discovered = domainFromBaseUrl(process.env.DWK_BASE_URL);
-    if (discovered) load([path(`${discovered}.env`)]);
-  }
 }

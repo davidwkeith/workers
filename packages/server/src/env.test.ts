@@ -94,19 +94,20 @@ describe("loadDwkEnv", () => {
     expect(process.env.PRESET).toBe("real-value");
   });
 
-  it("loads <domain>.env as a second pass when DWK_BASE_URL is only known via .env", () => {
+  it("prefers <domain>.env over .env even when DWK_BASE_URL is only known via .env", () => {
     snapshot();
     delete process.env.DWK_BASE_URL;
     const dir = workdir();
     writeEnvFile(
       dir,
       ".env",
-      "DWK_BASE_URL=https://blog.example.org\nA=from-generic\n",
+      "DWK_BASE_URL=https://blog.example.org\nA=from-generic\nSHARED=generic\n",
     );
-    writeEnvFile(dir, "blog.example.org.env", "B=from-domain\n");
+    writeEnvFile(dir, "blog.example.org.env", "B=from-domain\nSHARED=domain\n");
     loadDwkEnv({ cwd: dir });
     expect(process.env.DWK_BASE_URL).toBe("https://blog.example.org");
     expect(process.env.A).toBe("from-generic");
     expect(process.env.B).toBe("from-domain");
+    expect(process.env.SHARED).toBe("domain");
   });
 });
