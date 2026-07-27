@@ -33,11 +33,13 @@ read `process.env`.
 ### Task 1: `loadDwkEnv()` core — dependency, module, precedence tests
 
 **Files:**
+
 - Modify: `packages/server/package.json` (add `@dotenvx/dotenvx` dependency)
 - Create: `packages/server/src/env.ts`
 - Create: `packages/server/src/env.test.ts`
 
 **Interfaces:**
+
 - Produces: `loadDwkEnv(options?: LoadDwkEnvOptions): void` and `interface LoadDwkEnvOptions { readonly cwd?: string }`, both from `packages/server/src/env.ts` — later tasks (3, 4) import `loadDwkEnv` from this file (and, after Task 3, from `@dwk/server`'s `index.ts` re-export).
 
 - [ ] **Step 1: Add the pinned dependency**
@@ -298,9 +300,11 @@ no per-package lockfile.)
 ### Task 2: Encryption support — round-trip test against the real `dotenvx` CLI
 
 **Files:**
+
 - Modify: `packages/server/src/env.test.ts`
 
 **Interfaces:**
+
 - Consumes: `loadDwkEnv` from `./env.js` (Task 1).
 - Produces: nothing new — this task is verification only, confirming
   `loadDwkEnv()` needs no code changes to support encrypted values (dotenvx's
@@ -357,54 +361,51 @@ afterEach(() => {
 Add the two new tests inside the `describe("loadDwkEnv", ...)` block:
 
 ```ts
-  it("decrypts encrypted: values using whichever DOTENV_PRIVATE_KEY* name dotenvx assigns", () => {
-    snapshot();
-    process.env.DWK_BASE_URL = "https://pod.example.com";
-    const dir = workdir();
-    writeEnvFile(
-      dir,
-      "pod.example.com.env",
-      "PLAIN=not-secret\nSECRET_VALUE=super-secret\n",
-    );
-    encryptFile(dir, "pod.example.com.env");
+it("decrypts encrypted: values using whichever DOTENV_PRIVATE_KEY* name dotenvx assigns", () => {
+  snapshot();
+  process.env.DWK_BASE_URL = "https://pod.example.com";
+  const dir = workdir();
+  writeEnvFile(
+    dir,
+    "pod.example.com.env",
+    "PLAIN=not-secret\nSECRET_VALUE=super-secret\n",
+  );
+  encryptFile(dir, "pod.example.com.env");
 
-    // Read back whichever DOTENV_PUBLIC_KEY* name dotenvx actually assigned —
-    // never assume one (see design spec §3: filename-derived naming isn't
-    // meaningful for <domain>.env files).
-    const encryptedFile = readFileSync(
-      join(dir, "pod.example.com.env"),
-      "utf8",
-    );
-    const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
-    expect(publicKeyMatch).not.toBeNull();
-    const privateKeyName = publicKeyMatch![1].replace("PUBLIC", "PRIVATE");
+  // Read back whichever DOTENV_PUBLIC_KEY* name dotenvx actually assigned —
+  // never assume one (see design spec §3: filename-derived naming isn't
+  // meaningful for <domain>.env files).
+  const encryptedFile = readFileSync(join(dir, "pod.example.com.env"), "utf8");
+  const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
+  expect(publicKeyMatch).not.toBeNull();
+  const privateKeyName = publicKeyMatch![1].replace("PUBLIC", "PRIVATE");
 
-    const keysFile = readFileSync(join(dir, ".env.keys"), "utf8");
-    const privateKeyMatch = keysFile.match(
-      new RegExp(`^${privateKeyName}=(.+)$`, "m"),
-    );
-    expect(privateKeyMatch).not.toBeNull();
+  const keysFile = readFileSync(join(dir, ".env.keys"), "utf8");
+  const privateKeyMatch = keysFile.match(
+    new RegExp(`^${privateKeyName}=(.+)$`, "m"),
+  );
+  expect(privateKeyMatch).not.toBeNull();
 
-    process.env[privateKeyName] = privateKeyMatch![1];
-    dynamicKeys.push(privateKeyName);
+  process.env[privateKeyName] = privateKeyMatch![1];
+  dynamicKeys.push(privateKeyName);
 
-    loadDwkEnv({ cwd: dir });
-    expect(process.env.PLAIN).toBe("not-secret");
-    expect(process.env.SECRET_VALUE).toBe("super-secret");
-  });
+  loadDwkEnv({ cwd: dir });
+  expect(process.env.PLAIN).toBe("not-secret");
+  expect(process.env.SECRET_VALUE).toBe("super-secret");
+});
 
-  it("throws when an encrypted value has no matching private key available", () => {
-    snapshot();
-    process.env.DWK_BASE_URL = "https://pod.example.com";
-    const dir = workdir();
-    writeEnvFile(dir, "pod.example.com.env", "SECRET_VALUE=super-secret\n");
-    encryptFile(dir, "pod.example.com.env");
-    // No DOTENV_PRIVATE_KEY* in the real environment, and no .env.keys to
-    // fall back to: decryption must fail loudly, not silently pass the
-    // ciphertext through as the app's config value.
-    rmSync(join(dir, ".env.keys"));
-    expect(() => loadDwkEnv({ cwd: dir })).toThrow();
-  });
+it("throws when an encrypted value has no matching private key available", () => {
+  snapshot();
+  process.env.DWK_BASE_URL = "https://pod.example.com";
+  const dir = workdir();
+  writeEnvFile(dir, "pod.example.com.env", "SECRET_VALUE=super-secret\n");
+  encryptFile(dir, "pod.example.com.env");
+  // No DOTENV_PRIVATE_KEY* in the real environment, and no .env.keys to
+  // fall back to: decryption must fail loudly, not silently pass the
+  // ciphertext through as the app's config value.
+  rmSync(join(dir, ".env.keys"));
+  expect(() => loadDwkEnv({ cwd: dir })).toThrow();
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -438,11 +439,13 @@ git commit -m "test(server): verify loadDwkEnv() decrypts dotenvx-encrypted valu
 ### Task 3: Wire into the CLI and the package's public exports
 
 **Files:**
+
 - Modify: `packages/server/src/cli.ts`
 - Modify: `packages/server/src/cli.test.ts`
 - Modify: `packages/server/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `loadDwkEnv` from `./env.js` (Task 1).
 - Produces: `loadDwkEnv` re-exported from `@dwk/server`'s public entry point
   (`index.ts`) — Task 4's example modules import it from there.
@@ -463,12 +466,12 @@ Add a new test inside the `describe("main", ...)` block, after the existing
 "parses args, loads the config path, and starts listening" test:
 
 ```ts
-    it("loads a domain .env file before reading the config", async () => {
-      const dir = workdir();
-      const path = join(dir, "config.mjs");
-      writeFileSync(
-        path,
-        `export default {
+it("loads a domain .env file before reading the config", async () => {
+  const dir = workdir();
+  const path = join(dir, "config.mjs");
+  writeFileSync(
+    path,
+    `export default {
     baseUrl: process.env.DWK_BASE_URL,
     dataDir: ${JSON.stringify(dir)},
     env: {},
@@ -481,34 +484,31 @@ Add a new test inside the `describe("main", ...)` block, after the existing
       },
     ],
   };`,
-      );
-      writeFileSync(
-        join(dir, ".env"),
-        `DWK_BASE_URL=http://localhost\n`,
-      );
-      const prevBaseUrl = process.env.DWK_BASE_URL;
-      delete process.env.DWK_BASE_URL;
-      const prevCwd = process.cwd();
-      process.chdir(dir);
-      const cap = capture();
-      try {
-        const server = await main({
-          argv: [path, "--port", "0", "--host", "127.0.0.1"],
-          logger: cap.logger,
-          signals: false,
-        });
-        try {
-          const port = portFrom(cap);
-          expect(port).toBeGreaterThan(0);
-        } finally {
-          await server.close();
-        }
-      } finally {
-        process.chdir(prevCwd);
-        if (prevBaseUrl === undefined) delete process.env.DWK_BASE_URL;
-        else process.env.DWK_BASE_URL = prevBaseUrl;
-      }
+  );
+  writeFileSync(join(dir, ".env"), `DWK_BASE_URL=http://localhost\n`);
+  const prevBaseUrl = process.env.DWK_BASE_URL;
+  delete process.env.DWK_BASE_URL;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  const cap = capture();
+  try {
+    const server = await main({
+      argv: [path, "--port", "0", "--host", "127.0.0.1"],
+      logger: cap.logger,
+      signals: false,
     });
+    try {
+      const port = portFrom(cap);
+      expect(port).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    process.chdir(prevCwd);
+    if (prevBaseUrl === undefined) delete process.env.DWK_BASE_URL;
+    else process.env.DWK_BASE_URL = prevBaseUrl;
+  }
+});
 ```
 
 Add the `join` import needed above — check the top of `cli.test.ts`: `join`
@@ -596,11 +596,13 @@ git commit -m "feat(server): load <domain>.env / .env automatically in dwk-serve
 ### Task 4: Wire explicit `loadDwkEnv()` calls into the reference compositions
 
 **Files:**
+
 - Modify: `packages/server/examples/composition.mjs`
 - Modify: `packages/server/examples/central-composition.mjs`
 - Modify: `packages/server/examples/serve.mjs`
 
 **Interfaces:**
+
 - Consumes: `loadDwkEnv` exported from `@dwk/server` (Task 3, Step 6).
 
 These files aren't unit-tested directly by `@dwk/server`'s own test suite in
@@ -716,6 +718,7 @@ git commit -m "feat(server): call loadDwkEnv() explicitly in reference compositi
 ### Task 5: Expand `.env.example`
 
 **Files:**
+
 - Modify: `packages/server/.env.example`
 
 **Interfaces:** None — documentation only.
@@ -846,6 +849,7 @@ git commit -m "docs(server): expand .env.example to cover <domain>.env and encry
 ### Task 6: README + spec documentation
 
 **Files:**
+
 - Modify: `packages/server/README.md`
 - Modify: `spec/self-hosting.md`
 
@@ -882,7 +886,6 @@ secrets` section (do not renumber — insert new content at the end of that
 section, before the `## 10. Distribution & CLI` heading):
 
 ```markdown
-
 ### 9.1 `.env` / `<domain>.env` loading (implemented, #<issue>)
 
 `@dwk/server` exports `loadDwkEnv()` (`src/env.ts`), the one file-backed
@@ -914,6 +917,7 @@ git commit -m "docs(server): document .env / <domain>.env loading and encryption
 ### Task 7: Gitignore coverage
 
 **Files:**
+
 - Modify: `.gitignore`
 
 **Interfaces:** None.
@@ -964,6 +968,7 @@ git commit -m "chore: gitignore <domain>.env files and dotenvx's .env.keys"
 ### Task 8: Changeset
 
 **Files:**
+
 - Create: `.changeset/server-dotenv-support.md`
 
 **Interfaces:** None.

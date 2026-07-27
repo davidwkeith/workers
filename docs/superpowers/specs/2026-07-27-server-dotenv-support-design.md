@@ -121,7 +121,7 @@ custom cryptography is written for this feature.
   derives the private-key variable name from the **file's own embedded
   `DOTENV_PUBLIC_KEY[_X]` line** when one is present ("src public key name
   wins") — it does **not** recompute a name from the filename at load time.
-  The filename only matters the *first* time a file is encrypted (no
+  The filename only matters the _first_ time a file is encrypted (no
   `DOTENV_PUBLIC_KEY` line yet), and dotenvx's filename-derivation algorithm
   (`src/lib/conventions/environment.js`) assumes the `.env.<environment>`
   shape (dot-prefixed, single trailing label) — for a `<domain>.env` file
