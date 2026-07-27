@@ -16,9 +16,18 @@ import { ownerWebId } from "./config.js";
  * no_link_found` unless the page literally contains an `<a href>` to the
  * `target` (see conformance/webmention-qa.md's 2026-07-27 note), so every one
  * of them needs a real link on this page.
+ *
+ * `test/23` is the redirect-chain case: webmention.rocks' own instructions
+ * ("send a Webmention to the URL below") say the real target to link to and
+ * submit is `test/23/page`, which redirects to the page that actually
+ * advertises the endpoint — `test/23` itself is only the human-readable
+ * description, not the target — confirmed live (2026-07-27): submitting
+ * `test/23` as target left discovery with no endpoint to resolve
+ * (`endpoint: null`), while `test/23/page` resolved correctly.
  */
 const WEBMENTION_ROCKS_TARGETS: readonly string[] = [
-  ...Array.from({ length: 23 }, (_, i) => `test/${i + 1}`),
+  ...Array.from({ length: 22 }, (_, i) => `test/${i + 1}`),
+  "test/23/page",
   "update/1",
   "update/2",
   "delete/1",

@@ -101,9 +101,9 @@
           }
         },
         "webmention.rocks/sender": {
-          "status": "failing",
-          "report": "https://github.com/davidwkeith/workers/issues/457",
-          "lastRun": "2026-07-27T20:55:26Z",
+          "status": "passing",
+          "report": null,
+          "lastRun": "2026-07-27T21:32:31Z",
           "targets": {
             "node": {
               "status": "pending",

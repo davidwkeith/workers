@@ -158,31 +158,39 @@ should return `200` with a JSON `SendResult` body (not `404`).
 400` — `no_link_found`, for the reason above. This is a content gap in
 >   `@dwk/conformance-target`, not a `@dwk/webmention` sender bug.
 
-> **Follow-up (#457):** `packages/conformance-target/src/home.ts` now serves
+> **2026-07-27 follow-up run (#457, closing the gap above):**
+> `packages/conformance-target/src/home.ts` now serves
 > `/webmention-qa-source`, an `h-entry` page with a real `<a href>` to each of
-> the 26 targets above. Re-run Step 3 with `source` =
-> `https://conformance.dwk.io/webmention-qa-source` for every target once
-> that change is deployed, and update the tally/Result table and
-> `status.json` below from the outcome — don't mark `webmention.rocks/sender`
-> `"passing"` on the strength of the source page existing alone; per
-> "Recording the result" below, it needs an actual run behind it.
+> the 26 targets. Re-ran `POST /webmention/send` for all 26 with `source` =
+> `https://conformance.dwk.io/webmention-qa-source`:
+>
+> - **First pass: 25/26 delivered `200`.** `test/23` (the redirect-chain
+>   case) came back `endpoint: null, delivered: false, status: 0` — discovery
+>   itself failed. Root cause: the target passed here was plain
+>   `https://webmention.rocks/test/23`, not `/test/23/page`. This contradicts
+>   the discovery-only run's note above, which claims `test/23` already
+>   resolved correctly "using its documented `/test/23/page` entry point" —
+>   that note was imprecise: since sending plain `test/23` demonstrably fails
+>   discovery (`endpoint: null`, confirmed here), the discovery-only run must
+>   have actually queried `/test/23/page` directly despite being labelled
+>   `test/23` there. Fixed by pointing both the source page's link and the
+>   `target` at `test/23/page` (`packages/conformance-target/src/home.ts`),
+>   redeployed, re-sent.
+> - **Second pass: 26/26 delivered `200`.** Every target, including
+>   `test/23/page`, returned `delivered: true, status: 200`.
 
-- [ ] **Pass** — every required sender test passes
-- [x] **Fail** — list which tests failed and why: all 26 targets failed
-      delivery (not discovery) with `400 no_link_found` — see note above and
-      [#457](https://github.com/davidwkeith/workers/issues/457); a source
-      page fixing the gap now exists (`/webmention-qa-source`) but the suite
-      has not yet been re-run against it
+- [x] **Pass** — every required sender test passes
+- [ ] **Fail** — list which tests failed and why: **************\_\_\_\_**************
 
 ## Result
 
-|                    |                                                                                                                                                                       |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Receiver result    | ☑ Passing / ☐ Failing                                                                                                                                                 |
-| Sender result      | ☐ Passing / ☑ Failing                                                                                                                                                 |
-| Run date           | 2026-07-27                                                                                                                                                            |
-| Tester             | Claude Code session, with David W. Keith approving the IndieAuth sign-in and `CONFORMANCE_PASSWORD` rotation                                                          |
-| Notes / follow-ups | Sender discovery logic is fully correct (26/26); delivery blocked by a missing source-post page, tracked in [#457](https://github.com/davidwkeith/workers/issues/457) |
+|                    |                                                                                                                                                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Receiver result    | ☑ Passing / ☐ Failing                                                                                                                                                                                                      |
+| Sender result      | ☑ Passing / ☐ Failing                                                                                                                                                                                                      |
+| Run date           | 2026-07-27                                                                                                                                                                                                                 |
+| Tester             | Claude Code session, with David W. Keith supplying `CONFORMANCE_ADMIN_TOKEN` and approving the deploy                                                                                                                      |
+| Notes / follow-ups | Closed by [#457](https://github.com/davidwkeith/workers/issues/457): added `/webmention-qa-source`; all 26 sender targets now deliver `200` (`test/23` needed its documented `/page` redirect entry point, see note above) |
 
 ## Recording the result
 
