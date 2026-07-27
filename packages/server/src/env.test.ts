@@ -1,8 +1,28 @@
 import { describe, it, expect, afterAll, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { loadDwkEnv } from "./env.js";
+
+const require = createRequire(import.meta.url);
+const dotenvxCli = join(
+  require.resolve("@dotenvx/dotenvx/package.json"),
+  "..",
+  "src/cli/dotenvx.js",
+);
+
+function encryptFile(dir: string, filename: string): void {
+  execFileSync(
+    "node",
+    [dotenvxCli, "encrypt", "-f", filename, "--no-armor", "--no-native"],
+    { cwd: dir },
+  );
+}
+
+/** Extra env vars set mid-test (dynamic key names dotenvx assigns) to clean up. */
+const dynamicKeys: string[] = [];
 
 const STATIC_KEYS = [
   "DWK_BASE_URL",
@@ -39,6 +59,7 @@ afterEach(() => {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }
+  for (const key of dynamicKeys.splice(0)) delete process.env[key];
 });
 
 afterAll(() => {
@@ -109,5 +130,65 @@ describe("loadDwkEnv", () => {
     expect(process.env.A).toBe("from-generic");
     expect(process.env.B).toBe("from-domain");
     expect(process.env.SHARED).toBe("domain");
+  });
+
+  it("decrypts encrypted: values using whichever DOTENV_PRIVATE_KEY* name dotenvx assigns", () => {
+    snapshot();
+    process.env.DWK_BASE_URL = "https://pod.example.com";
+    const dir = workdir();
+    writeEnvFile(
+      dir,
+      "pod.example.com.env",
+      "PLAIN=not-secret\nSECRET_VALUE=super-secret\n",
+    );
+    encryptFile(dir, "pod.example.com.env");
+
+    // Read back whichever DOTENV_PUBLIC_KEY* name dotenvx actually assigned —
+    // never assume one (see design spec §3: filename-derived naming isn't
+    // meaningful for <domain>.env files).
+    const encryptedFile = readFileSync(
+      join(dir, "pod.example.com.env"),
+      "utf8",
+    );
+    const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
+    expect(publicKeyMatch).not.toBeNull();
+    const publicKeyName = publicKeyMatch?.[1];
+    expect(publicKeyName).toBeDefined();
+    const privateKeyName = (publicKeyName || "DOTENV_PUBLIC_KEY").replace(
+      "PUBLIC",
+      "PRIVATE",
+    );
+
+    const keysFile = readFileSync(join(dir, ".env.keys"), "utf8");
+    const privateKeyMatch = keysFile.match(
+      new RegExp(`^${privateKeyName}=(.+)$`, "m"),
+    );
+    expect(privateKeyMatch).not.toBeNull();
+
+    process.env[privateKeyName] = privateKeyMatch![1];
+    dynamicKeys.push(privateKeyName);
+
+    loadDwkEnv({ cwd: dir });
+    expect(process.env.PLAIN).toBe("not-secret");
+    expect(process.env.SECRET_VALUE).toBe("super-secret");
+  });
+
+  it("throws when an encrypted value has no matching private key available", () => {
+    snapshot();
+    process.env.DWK_BASE_URL = "https://pod.example.com";
+    const dir = workdir();
+    writeEnvFile(dir, "pod.example.com.env", "SECRET_VALUE=super-secret\n");
+    encryptFile(dir, "pod.example.com.env");
+    // No DOTENV_PRIVATE_KEY* in the real environment, and no .env.keys to
+    // fall back to: decryption must fail loudly, not silently pass the
+    // ciphertext through as the app's config value.
+    rmSync(join(dir, ".env.keys"));
+    // Ensure no lingering private keys from previous tests
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("DOTENV_PRIVATE_KEY")) {
+        delete process.env[key];
+      }
+    }
+    expect(() => loadDwkEnv({ cwd: dir })).toThrow();
   });
 });
