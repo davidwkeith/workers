@@ -392,6 +392,24 @@ Worker entry does. Proposed model:
   packages already enforce, surfaced as a clear startup error rather than a
   first-request 500.
 
+### 9.1 `.env` / `<domain>.env` loading (implemented, #<issue>)
+
+`@dwk/server` exports `loadDwkEnv()` (`src/env.ts`), the one file-backed
+config source the composition root may opt into. Precedence, high to low:
+real `process.env` (already set before it runs) > `<domain>.env` (`<domain>`
+is the hostname of `DWK_BASE_URL`) > `.env`; missing files are silently
+skipped. `dwk-serve`'s CLI calls it automatically before loading the config
+module; the bundled Docker entry and reference compositions
+(`examples/serve.mjs`, `examples/composition.mjs`,
+`examples/central-composition.mjs`) call it explicitly, since they bypass the
+CLI.
+
+Parsing and `encrypted:`-value decryption are both delegated to
+`@dotenvx/dotenvx` (a pinned exact-version dependency) rather than
+implemented in-house — no custom cryptography. `packages/server/.env.example`
+is the full reference: every supported variable, the file-selection rules
+above, and the encrypt/decrypt workflow.
+
 ## 10. Distribution & CLI
 
 - `@dwk/server` ships **ESM, fully typed**, deps minimised and pinned, like
