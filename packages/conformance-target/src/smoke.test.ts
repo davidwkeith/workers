@@ -95,7 +95,7 @@ describe("home", () => {
     const body = await res.text();
     for (const path of [
       "test/1",
-      "test/23",
+      "test/23/page",
       "update/1",
       "update/2",
       "delete/1",
