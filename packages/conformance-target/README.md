@@ -181,13 +181,18 @@ curl -sS -X POST https://conformance.dwk.io/webmention/send \
 Response is the library's `SendResult` as JSON (`{target, endpoint,
 delivered, status}`). Unlike webmention.rocks/receiver, /sender doesn't hand
 you a ready-made source page — it numbers 26 **targets**
-(`https://webmention.rocks/test/1`..`/test/23`, `/update/1`, `/update/2`,
-`/delete/1`), each advertising its endpoint a different way, and fetches
-`source` synchronously to confirm it links to `target` before accepting the
-mention (`400 no_link_found` otherwise). `/webmention-qa-source` (served by
-`home.ts`) is this deployment's source page: it links to all 26 targets, so
-passing it as `source` above satisfies that check for whichever `target`
-you're driving through the suite (see issue #457).
+(`https://webmention.rocks/test/1`..`/test/22`, `/test/23/page`, `/update/1`,
+`/update/2`, `/delete/1`), each advertising its endpoint a different way, and
+fetches `source` synchronously to confirm it links to `target` before
+accepting the mention (`400 no_link_found` otherwise). `test/23` (the
+redirect-chain case) is the one exception to the plain `test/N` pattern: its
+own page says "send a Webmention to the URL below" = `test/23/page`, the
+actual redirect entry point — `test/23` itself is only the human-readable
+description and returns `endpoint: null` if targeted directly.
+`/webmention-qa-source` (served by `home.ts`) is this deployment's source
+page: it links to all 26 targets, so passing it as `source` above satisfies
+that check for whichever `target` you're driving through the suite (see
+issue #457).
 
 ## Running litmus (WebDAV conformance)
 

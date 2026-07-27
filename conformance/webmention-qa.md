@@ -166,13 +166,16 @@ should return `200` with a JSON `SendResult` body (not `404`).
 >
 > - **First pass: 25/26 delivered `200`.** `test/23` (the redirect-chain
 >   case) came back `endpoint: null, delivered: false, status: 0` — discovery
->   itself failed. Root cause: the target passed was
->   `https://webmention.rocks/test/23`, but that test's own page says "send a
->   Webmention to the URL below" = `test/23/page` — `test/23` is only the
->   human-readable description, `test/23/page` is the actual redirect entry
->   point the earlier discovery-only run (above) had used. Fixed by pointing
->   both the source page's link and the `target` at `test/23/page`
->   (`packages/conformance-target/src/home.ts`), redeployed, re-sent.
+>   itself failed. Root cause: the target passed here was plain
+>   `https://webmention.rocks/test/23`, not `/test/23/page`. This contradicts
+>   the discovery-only run's note above, which claims `test/23` already
+>   resolved correctly "using its documented `/test/23/page` entry point" —
+>   that note was imprecise: since sending plain `test/23` demonstrably fails
+>   discovery (`endpoint: null`, confirmed here), the discovery-only run must
+>   have actually queried `/test/23/page` directly despite being labelled
+>   `test/23` there. Fixed by pointing both the source page's link and the
+>   `target` at `test/23/page` (`packages/conformance-target/src/home.ts`),
+>   redeployed, re-sent.
 > - **Second pass: 26/26 delivered `200`.** Every target, including
 >   `test/23/page`, returned `delivered: true, status: 200`.
 
