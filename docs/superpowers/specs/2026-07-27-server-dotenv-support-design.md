@@ -116,13 +116,31 @@ custom cryptography is written for this feature.
   is present in the **real** environment at that point (systemd/Docker/secrets
   manager) — never inside the `.env`/`<domain>.env` file itself, and never in
   `.env.keys` once it leaves the machine that generated it.
-- The exact private-key variable name dotenvx expects for a `<domain>.env`
-  file (as opposed to its own `.env.<name>` convention) will be confirmed
-  against the pinned version during implementation — expected to be derived
-  by stripping the trailing `.env` from the filename and
-  uppercasing/sanitizing the remainder (e.g. `pod.example.com.env` →
-  `DOTENV_PRIVATE_KEY_POD_EXAMPLE_COM`), verified with a real
-  encrypt-then-decrypt round trip in `env.test.ts` rather than assumed.
+- **Correction from the original draft of this spec** (confirmed by reading
+  the pinned dependency's source, `src/lib/conventions/keynames.js`): dotenvx
+  derives the private-key variable name from the **file's own embedded
+  `DOTENV_PUBLIC_KEY[_X]` line** when one is present ("src public key name
+  wins") — it does **not** recompute a name from the filename at load time.
+  The filename only matters the *first* time a file is encrypted (no
+  `DOTENV_PUBLIC_KEY` line yet), and dotenvx's filename-derivation algorithm
+  (`src/lib/conventions/environment.js`) assumes the `.env.<environment>`
+  shape (dot-prefixed, single trailing label) — for a `<domain>.env` file
+  (no leading dot, a multi-label domain), it does **not** produce a
+  domain-meaningful suffix (e.g. `pod.example.com.env` yields
+  `DOTENV_PUBLIC_KEY_COM_ENV`, and every `*.com.env` file collides on that
+  same non-descriptive suffix). This is cosmetically confusing but not a
+  correctness bug: since exactly one domain's file loads per `dwk-serve`
+  process, whatever name got embedded in that file is the one name that
+  process's real environment needs to supply, and `loadDwkEnv()` itself never
+  computes or assumes a key name — it only needs the matching
+  `DOTENV_PRIVATE_KEY*` to already be present in the real environment. The
+  documented workflow (§4) is therefore: run `dotenvx encrypt`, then **read
+  the exact key name dotenvx actually inserted** from the file's
+  `DOTENV_PUBLIC_KEY*` line (or from `.env.keys`, which records the matching
+  private key under the same name) rather than assume one — this is also how
+  dotenvx's own docs instruct routine use, independent of our filename
+  choice. `env.test.ts`'s encryption round-trip test follows this same
+  read-don't-assume pattern rather than hardcoding a derived name.
 - `.env.keys` is local-machine-only key material and must never be committed
   (see Gitignore below) or shipped inside a Docker image layer.
 
@@ -164,8 +182,9 @@ main() (cli.ts)
   │     cwd has pod.example.com.env + .env
   │     DWK_BASE_URL already set (systemd) → domain known up front
   │     dotenvx.config({ path: ["pod.example.com.env", ".env"] })
-  │     encrypted: values decrypted via DOTENV_PRIVATE_KEY_POD_EXAMPLE_COM
-  │     (already present in the real environment, e.g. systemd Environment=)
+  │     encrypted: values decrypted via whichever DOTENV_PRIVATE_KEY* name
+  │     the file's own DOTENV_PUBLIC_KEY* line calls for (already present in
+  │     the real environment, e.g. systemd Environment= — see §3)
   ▼
 loadConfig(configPath)                ← unchanged: imports the config module
   ▼
