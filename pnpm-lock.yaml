@@ -290,6 +290,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@dotenvx/dotenvx':
+        specifier: 2.19.0
+        version: 2.19.0
       '@dwk/cf-shims':
         specifier: workspace:*
         version: link:../cf-shims
@@ -683,6 +686,16 @@ packages:
   '@digitalbazaar/http-client@4.3.0':
     resolution: {integrity: sha512-6lMpxpt9BOmqHKGs9Xm6DP4LlZTBFer/ZjHvP3FcW3IaUWYIWC7dw5RFZnvw4fP57kAVcm1dp3IF+Y50qhBvAw==}
     engines: {node: '>=18.0'}
+
+  '@dotenvx/dotenvx@2.19.0':
+    resolution: {integrity: sha512-DPy8Xbe+wV8gDRAC9Kr324dkgH4aQS7tPGh1YLkBSBICFvAQNe5umnpRT7IZ0yJ3VlsfWVFJ6+2s9dcZjtQOAw==}
+    hasBin: true
+
+  '@dotenvx/primitives@2.1.1':
+    resolution: {integrity: sha512-FvG4D0x5nELUxGjeGviXJnVHluK4jIeB3ebOTObgCMbc0/hc7byzUsl3nURTSyBcSCy9dQdOZ12zOIknircMkA==}
+
+  '@dotenvx/tooling@1.0.3':
+    resolution: {integrity: sha512-Gd6qQol/ICb4MPRWpiIH56y+pR9AVB7kPBkbhrLSGLtAiF4Qgy+k651/f2pze0Xbm3H5XewbPfIm4y9K+ic30Q==}
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -2861,6 +2874,14 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  yocto-spinner@1.2.2:
+    resolution: {integrity: sha512-DODGl1wJjA/s5pnJFKau9lIYHT81lnhob1i3e1TjxZRxEhWRKl74nTbWE6H5KlkViQQTo/Z29YFdxzTZAMY3ng==}
+    engines: {node: '>=18.19'}
+
+  yoctocolors@2.2.0:
+    resolution: {integrity: sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg==}
+    engines: {node: '>=18'}
+
   youch-core@0.3.3:
     resolution: {integrity: sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA==}
 
@@ -3168,6 +3189,16 @@ snapshots:
     dependencies:
       ky: 1.14.3
       undici: 6.28.0
+
+  '@dotenvx/dotenvx@2.19.0':
+    dependencies:
+      '@dotenvx/primitives': 2.1.1
+      '@dotenvx/tooling': 1.0.3
+      yocto-spinner: 1.2.2
+
+  '@dotenvx/primitives@2.1.1': {}
+
+  '@dotenvx/tooling@1.0.3': {}
 
   '@emnapi/core@1.11.1':
     dependencies:
@@ -5197,6 +5228,12 @@ snapshots:
   yaml@2.9.0: {}
 
   yocto-queue@0.1.0: {}
+
+  yocto-spinner@1.2.2:
+    dependencies:
+      yoctocolors: 2.2.0
+
+  yoctocolors@2.2.0: {}
 
   youch-core@0.3.3:
     dependencies:
