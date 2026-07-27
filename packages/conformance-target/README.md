@@ -29,7 +29,7 @@ Worker".
 | `/credentials/*`                                                                 | `@dwk/vc`                                                      |
 | `/xrpc/*`, `/.well-known/atproto-did`, `/.well-known/did.json`                   | `@dwk/atproto-pds`                                             |
 | `/admin/init`                                                                    | one-time D1 schema init (owner-gated)                          |
-| `/`, `/profile/card`                                                             | test identity (h-card + WebID)                                 |
+| `/`, `/profile/card`, `/webmention-qa-source`                                    | test identity (h-card + WebID + webmention.rocks/sender source page) |
 
 The `/dav` pod is deliberately separate from `/pod`: the per-pod Durable
 Object is keyed by the configured `baseUrl`, so mounting both doors on one pod
@@ -175,14 +175,19 @@ added (issue #405) — without a trigger, the sender half of
 curl -sS -X POST https://conformance.dwk.io/webmention/send \
   -H "Authorization: Bearer $CONFORMANCE_ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"source":"<webmention.rocks source-page URL>","target":"<webmention.rocks target URL>"}'
+  -d '{"source":"https://conformance.dwk.io/webmention-qa-source","target":"<webmention.rocks target URL>"}'
 ```
 
 Response is the library's `SendResult` as JSON (`{target, endpoint,
-delivered, status}`). webmention.rocks/sender hands you a source-page URL per
-discovery edge case and a target to notify — pass those straight through; the
-`source` need not be a page this deployment actually published, since the
-suite is testing discovery + notification, not authorship.
+delivered, status}`). Unlike webmention.rocks/receiver, /sender doesn't hand
+you a ready-made source page — it numbers 26 **targets**
+(`https://webmention.rocks/test/1`..`/test/23`, `/update/1`, `/update/2`,
+`/delete/1`), each advertising its endpoint a different way, and fetches
+`source` synchronously to confirm it links to `target` before accepting the
+mention (`400 no_link_found` otherwise). `/webmention-qa-source` (served by
+`home.ts`) is this deployment's source page: it links to all 26 targets, so
+passing it as `source` above satisfies that check for whichever `target`
+you're driving through the suite (see issue #457).
 
 ## Running litmus (WebDAV conformance)
 

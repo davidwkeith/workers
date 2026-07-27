@@ -158,10 +158,21 @@ should return `200` with a JSON `SendResult` body (not `404`).
 400` — `no_link_found`, for the reason above. This is a content gap in
 >   `@dwk/conformance-target`, not a `@dwk/webmention` sender bug.
 
+> **Follow-up (#457):** `packages/conformance-target/src/home.ts` now serves
+> `/webmention-qa-source`, an `h-entry` page with a real `<a href>` to each of
+> the 26 targets above. Re-run Step 3 with `source` =
+> `https://conformance.dwk.io/webmention-qa-source` for every target once
+> that change is deployed, and update the tally/Result table and
+> `status.json` below from the outcome — don't mark `webmention.rocks/sender`
+> `"passing"` on the strength of the source page existing alone; per
+> "Recording the result" below, it needs an actual run behind it.
+
 - [ ] **Pass** — every required sender test passes
 - [x] **Fail** — list which tests failed and why: all 26 targets failed
       delivery (not discovery) with `400 no_link_found` — see note above and
-      [#457](https://github.com/davidwkeith/workers/issues/457)
+      [#457](https://github.com/davidwkeith/workers/issues/457); a source
+      page fixing the gap now exists (`/webmention-qa-source`) but the suite
+      has not yet been re-run against it
 
 ## Result
 
