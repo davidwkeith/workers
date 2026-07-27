@@ -392,7 +392,7 @@ Worker entry does. Proposed model:
   packages already enforce, surfaced as a clear startup error rather than a
   first-request 500.
 
-### 9.1 `.env` / `<domain>.env` loading (implemented, #<issue>)
+### 9.1 `.env` / `<domain>.env` loading (implemented)
 
 `@dwk/server` exports `loadDwkEnv()` (`src/env.ts`), the one file-backed
 config source the composition root may opt into. Precedence, high to low:
