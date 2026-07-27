@@ -22,6 +22,7 @@ import { noopLogger, type Logger } from "@dwk/log";
 import { registerCloudflareWorkers } from "@dwk/cf-shims";
 import { createServer, type DwkServer } from "./server.js";
 import type { HostConfig } from "./config.js";
+import { loadDwkEnv } from "./env.js";
 
 /** A config module: a default (or named `config`) export — value or factory. */
 type ConfigExport =
@@ -180,6 +181,7 @@ export async function main(options: MainOptions = {}): Promise<DwkServer> {
   // Redirect `cloudflare:workers` to the Node shim before the config — and the
   // Durable-Object packages it imports — are dynamically loaded.
   registerCloudflareWorkers();
+  loadDwkEnv();
   const config = await loadConfig(configPath);
   const { server } = await startServer(config, {
     port: port ?? options.port,

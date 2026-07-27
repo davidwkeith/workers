@@ -169,6 +169,50 @@ describe("dwk-serve CLI", () => {
       }
     });
 
+    it("loads a domain .env file before reading the config", async () => {
+      const dir = workdir();
+      const path = join(dir, "config.mjs");
+      writeFileSync(
+        path,
+        `export default {
+    baseUrl: process.env.DWK_BASE_URL,
+    dataDir: ${JSON.stringify(dir)},
+    env: {},
+    lock: false,
+    mounts: [
+      {
+        name: "ping",
+        reservedPaths: ["/ping"],
+        handler: async () => new Response("pong"),
+      },
+    ],
+  };`,
+      );
+      writeFileSync(join(dir, ".env"), `DWK_BASE_URL=http://localhost\n`);
+      const prevBaseUrl = process.env.DWK_BASE_URL;
+      delete process.env.DWK_BASE_URL;
+      const prevCwd = process.cwd();
+      process.chdir(dir);
+      const cap = capture();
+      try {
+        const server = await main({
+          argv: [path, "--port", "0", "--host", "127.0.0.1"],
+          logger: cap.logger,
+          signals: false,
+        });
+        try {
+          const port = portFrom(cap);
+          expect(port).toBeGreaterThan(0);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        process.chdir(prevCwd);
+        if (prevBaseUrl === undefined) delete process.env.DWK_BASE_URL;
+        else process.env.DWK_BASE_URL = prevBaseUrl;
+      }
+    });
+
     it("registers SIGTERM/SIGINT handlers when signals are enabled", async () => {
       const path = configFile(pingConfig());
       const cap = capture();
