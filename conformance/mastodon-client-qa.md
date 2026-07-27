@@ -33,6 +33,11 @@ Motivation section). Run this doc, record results here, then update
   `"not-applicable"` in `status.json`, not `"failing"`: the server's
   Mastodon-API surface is never exercised. Generic Mastodon clients
   (Tusky; web clients as a stretch) remain the matrix.
+- **Re-checked 2026-07-27 (issue #449):** `loginPreflightCheck` in
+  [pixelfed-rn `src/requests.ts`](https://github.com/pixelfed/pixelfed-rn/blob/main/src/requests.ts)
+  on `main` is unchanged — still fetches `/api/nodeinfo/2.0.json` and still
+  hard-requires `software.name === "pixelfed"`. The `not-applicable` call
+  stands.
 
 ## Environment
 
@@ -69,7 +74,10 @@ Motivation section). Run this doc, record results here, then update
 - [ ] **Pass** (Pixelfed app) — N/A, descoped (see Scope): the app's
       preflight rejects any non-Pixelfed server before OAuth starts
       ("This server is not compatible or is unavailable", 2026-07-23 run)
-- [ ] **Pass** (Tusky)
+- [x] **Pass** (Tusky, 2026-07-27) — registration against `conformance.dwk.io`,
+      the `/mastodon-consent` password page, and `verify_credentials` all
+      completed; the owner profile rendered (see Quirks below re: the blank
+      avatar)
 - [x] **Pass** (Ice Cubes, 2026-07-23) — registration, consent, and
       `verify_credentials` completed; the owner profile rendered
 - [ ] **Fail** — note what happened: **************\_\_\_\_**************
@@ -89,8 +97,15 @@ test account, or any existing federated content).
    in home, with reply/favourite/reblog counts when the corresponding inbound
    activity exists.
 
+- [x] **Pass** (Tusky, 2026-07-27) — the "Content warning test" post renders
+      with `Show more`/`Show less` toggling the CW'd text, media hidden
+      behind a "Sensitive content" tap-to-reveal (Tusky's own media-privacy
+      default, separate from CW), and the image's `ALT` badge opens to show
+      the real alt text
 - [x] **Pass** (Ice Cubes, 2026-07-23) — timeline renders with media/CW/alt
       text and hydrated account details as expected
+- [x] **Pass** (Tusky, 2026-07-27) — the same CW post shows a reply count of
+      1 on the owner's own profile posts tab (`accounts/:id/statuses`)
 - [x] **Pass** (Ice Cubes, 2026-07-23) — the owner's own posts and available
       interaction counters render (favourite count visible on the Lemmy
       federation post; profile posts tab loads via the new
@@ -103,8 +118,13 @@ Using the same Pixelfed test account from `pixelfed-qa.md` step 4 (which
 liked and replied to a post), confirm both now render as notifications in
 the client's notifications view:
 
+- [x] **Pass** (Tusky, 2026-07-27) — "dwk favorited your post" from
+      `@dwk@pixelfed.social` renders as a favourite notification
 - [x] **Pass** (Ice Cubes, 2026-07-23) — the `Like` renders as a favourite
       notification
+- [x] **Pass** (Tusky, 2026-07-27) — the reply ("A billionare needs their
+      wealth like a pelican needs a bike") renders inline under a `Reply`
+      notification from the same account
 - [x] **Pass** (Ice Cubes, 2026-07-23) — the reply renders as a mention
       notification
 - [ ] **Fail** — note what's missing: **************\_\_\_\_**************
@@ -134,14 +154,28 @@ run surfaced three findings:
    `accounts/:id/{followers,following,featured_tags}` companions now
    answer valid-but-empty pages. All fixture-tested.
 
+## Quirks surfaced (2026-07-27 Tusky run)
+
+1. **No avatar rendered — owner's profile and home timeline both show a
+   blank/placeholder image, no broken-image icon.** Root cause: the deployed
+   target's `mastodonApi.account` config
+   ([`packages/conformance-target/src/config.ts`](../packages/conformance-target/src/config.ts))
+   never sets an `avatar`, so `@dwk/mastodon-api`'s entity mapping
+   ([`entities.ts`](../packages/mastodon-api/src/entities.ts)) falls back to
+   the documented 1×1 transparent-PNG placeholder (avatar/header are
+   required fields some clients crash without). **Expected, not a bug** —
+   don't file this; if a more realistic-looking QA run is wanted later, set
+   a real `avatar` URL in the conformance target's config, but nothing in
+   `@dwk/mastodon-api` needs to change.
+
 ## Result
 
 |                    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Overall result     | ☑ Passing (Ice Cubes) / ☐ Failing — Tusky target still pending                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Run date           | 2026-07-23                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Overall result     | ☑ Passing (Ice Cubes, Tusky)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Run date           | 2026-07-23 (Ice Cubes); 2026-07-27 (Tusky)                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Tester             | David W. Keith                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Notes / follow-ups | Server-side preflight all green. Pixelfed app rejected the instance at its own preflight — root-caused to its Pixelfed-server-only gate and descoped (see Scope). Ice Cubes substituted; its first run surfaced three quirks (see Quirks above), fixed in #388, redeployed, and all three steps then passed end-to-end (re-login required — Ice Cubes caches the login-time account entity, so the stale epoch join date persisted until sign-out/sign-in). Tusky still pending. |
+| Notes / follow-ups | Server-side preflight all green. Pixelfed app rejected the instance at its own preflight — root-caused to its Pixelfed-server-only gate and descoped (see Scope; re-confirmed still accurate 2026-07-27). Ice Cubes substituted; its first run surfaced three quirks (see Quirks above), fixed in #388, redeployed, and all three steps then passed end-to-end (re-login required — Ice Cubes caches the login-time account entity, so the stale epoch join date persisted until sign-out/sign-in). Tusky run (2026-07-27, issue #449) against an Android emulator (arm64 AVD, `system-images;android-34;google_apis;arm64-v8a`, Tusky v29.0 sideloaded from GitHub releases) passed all three steps end-to-end with no code changes needed; the only finding (missing avatar) is expected behavior, not a bug — see Quirks above. |
 
 ## Recording the result
 
