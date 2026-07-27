@@ -82,23 +82,5 @@ export function loadDwkEnv(options: LoadDwkEnvOptions = {}): void {
   const path = (name: string): string => join(cwd, name);
 
   const domain = domainFromBaseUrl(peekBaseUrl(cwd));
-  const beforeEnv = { ...process.env };
   load(domain ? [path(`${domain}.env`), path(".env")] : [path(".env")]);
-
-  // Verify no encrypted values were left unresolved (missing or invalid private keys).
-  const unresolved: string[] = [];
-  for (const [key, value] of Object.entries(process.env)) {
-    if (
-      typeof value === "string" &&
-      value.startsWith("encrypted:") &&
-      beforeEnv[key] !== value
-    ) {
-      unresolved.push(key);
-    }
-  }
-  if (unresolved.length > 0) {
-    throw new Error(
-      `[DECRYPTION_FAILED] could not decrypt ${unresolved.join(", ")} (missing or invalid private key)`,
-    );
-  }
 }
