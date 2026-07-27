@@ -3,6 +3,7 @@
 // aliased at build time, so the bundle needs no loader hook. (To run unbundled,
 // prefer the `dwk-serve` bin pointed at `composition.mjs` as a config module.)
 import { startServer } from "@dwk/server/cli";
+import { loadDwkEnv } from "@dwk/server";
 import composition from "./composition.mjs";
 
 const write = (stream) => (event, fields) =>
@@ -17,6 +18,7 @@ const logger = {
   error: write(process.stderr),
 };
 
+loadDwkEnv();
 startServer(composition(), { logger }).catch((err) => {
   process.stderr.write(`dwk-serve: ${err?.message ?? String(err)}\n`);
   process.exit(1);

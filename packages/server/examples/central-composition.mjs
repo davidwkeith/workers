@@ -30,10 +30,13 @@ import {
   createCentralServer,
   CentralFleetPoller,
   LibsqlKv,
+  loadDwkEnv,
 } from "@dwk/server";
 import { createWebfinger } from "@dwk/webfinger";
 import { createIndieAuth, createIndieAuthStore } from "@dwk/indieauth";
 import { createWebAuthn, WebAuthnObject } from "@dwk/webauthn";
+
+loadDwkEnv();
 
 const baseUrl = process.env.DWK_BASE_URL ?? "https://example.com";
 const dataDir = process.env.DWK_DATA_DIR ?? "./data";
