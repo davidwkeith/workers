@@ -28,9 +28,9 @@
       "standard": "Mastodon client API",
       "suites": {
         "mastodon-client-api": {
-          "status": "pending",
+          "status": "passing",
           "report": null,
-          "lastRun": null,
+          "lastRun": "2026-07-27T22:37:57Z",
           "targets": {
             "pixelfed-app": {
               "status": "not-applicable",
@@ -38,9 +38,9 @@
               "lastRun": "2026-07-23T17:30:00Z"
             },
             "tusky": {
-              "status": "pending",
+              "status": "passing",
               "report": null,
-              "lastRun": null
+              "lastRun": "2026-07-27T22:37:57Z"
             },
             "ice-cubes": {
               "status": "passing",
