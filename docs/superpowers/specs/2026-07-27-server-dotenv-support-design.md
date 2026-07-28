@@ -73,6 +73,18 @@ file that already exists in `cwd`.
 5. No file present at all → no-op; existing behavior (each composition
    module's own `process.env.X ?? default` fallback) is unchanged.
 
+**Correction from the original draft of this spec:** the shipped implementation
+does not literally follow steps 2-4 above. It peeks `.env`'s content
+non-destructively (via dotenvx's `parse()`, not `config()`) to discover
+`DWK_BASE_URL` _before_ making any real load call, then makes exactly one
+correctly-ordered `dotenvx.config({ path: [domainFile, ".env"] })` call —
+this closes a precedence bug the two-pass design above had (a `<domain>.env`
+discovered only via `.env` couldn't override `.env`'s own overlapping keys,
+since dotenvx never overwrites an already-set `process.env` value). The one
+case the peek can't cover — `.env`'s `DWK_BASE_URL` is itself an encrypted
+value — falls back to a second, gap-filling-only `<domain>.env` load after
+the real decrypting call has run. See `src/env.ts` for the actual algorithm.
+
 This covers both real-world shapes without any special-casing beyond the two
 branches above:
 
