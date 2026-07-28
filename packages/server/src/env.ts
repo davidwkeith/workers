@@ -66,9 +66,14 @@ function peekBaseUrl(cwd: string): string | undefined {
       ignore: ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"],
     };
     const parsed = dotenvxParse(raw, options);
-    return typeof parsed.DWK_BASE_URL === "string"
-      ? parsed.DWK_BASE_URL
-      : undefined;
+    const value = parsed.DWK_BASE_URL;
+    // An unresolved encrypted value comes back as the literal ciphertext
+    // (dotenvx's "encrypted:" prefix) rather than throwing — reject it
+    // explicitly instead of relying on new URL(...) happening to fail on it.
+    if (typeof value !== "string" || value.startsWith("encrypted:")) {
+      return undefined;
+    }
+    return value;
   } catch {
     return undefined;
   }
