@@ -64,21 +64,39 @@ section before proceeding to the version bump below.
   - Runs the full CI gate (lint → format:check → typecheck → **build → test**)
     before publishing — build precedes test because package tests import sibling
     `@dwk/*` deps through their `exports` map (`dist/`).
-  - Runs in the **`npm-publish`** GitHub Environment, which holds the
-    `NPM_TOKEN` secret and any protection rules (required reviewers, allowed
-    branches). The environment is gated to the `main` branch.
-  - Publishes with **provenance** (`id-token: write` + `NPM_CONFIG_PROVENANCE`),
-    then tags origin by re-deriving `name@version` tags from each non-private
-    `package.json` and pushing (changeset's own tags don't survive the step —
-    see the gotcha).
+  - Runs in the **`npm-publish`** GitHub Environment, which holds any
+    protection rules (required reviewers, allowed branches). The environment
+    is gated to the `main` branch.
+  - Authenticates to npm via **Trusted Publishing (OIDC)** — no stored npm
+    token. `permissions: id-token: write` lets the job mint a short-lived
+    OIDC token that npm exchanges for a publish credential, scoped to this
+    exact repo + workflow file + environment. This also satisfies
+    **provenance** (`NPM_CONFIG_PROVENANCE`) automatically for a public repo.
+    After publishing, the workflow tags origin by re-deriving `name@version`
+    tags from each non-private `package.json` and pushing (changeset's own
+    tags don't survive the step — see the gotcha).
 - **`@dwk/server` is `"private": true`** — the Node/Express self-hosting host
   ships only as a Docker image and is never published to npm.
 
 ### Prerequisites (one-time)
 
-- Repo secret **`NPM_TOKEN`** on the `npm-publish` environment: an npm
-  **automation** or **granular** token with publish rights to the `@dwk` scope.
-  Automation tokens bypass 2FA prompts (essential for CI).
+- **npm Trusted Publisher**, configured individually for **every**
+  publishable `@dwk/*` package (npm has no bulk/org-wide setting — one
+  config per package, and a package can only have one Trusted Publisher at a
+  time). On each package's npmjs.com page → Settings → Trusted Publisher →
+  GitHub Actions:
+  - Org/user: `davidwkeith`, repo: `workers`
+  - Workflow filename: `release.yml` (filename only, not the full path)
+  - Environment: `npm-publish`
+  - Allowed actions: `npm publish`
+  - Requires npm CLI `>= 11.5.1` and Node `>= 22.14.0` in the publishing
+    environment; `release.yml` pins both.
+  - Once verified working, retire the fallback path per package: Settings →
+    Publishing access → "Require two-factor authentication and disallow
+    tokens". This is also the mechanism npm is phasing out — see
+    [the GitHub changelog post on the GAT bypass-2FA deprecation](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/):
+    2FA-bypass tokens lose account/access-management ability in early August
+    2026, and lose the ability to publish directly at all in January 2027.
 - The `npm-publish` environment must allow the `main` branch (so a
   `workflow_dispatch` from `main` isn't rejected).
 
@@ -188,18 +206,18 @@ publish` sends packages that have _never had a stable release_ to the `latest`
   `npm i @dwk/<pkg>` (→ newest beta); `@dwk/<pkg>@beta` is stale — don't advertise
   it. This self-corrects on `pre exit` + `1.0.0`, when `latest` moves to the
   stable. We deliberately do **not** maintain the `beta` tag in the meantime.
-- **`@dwk/mcp`'s `latest` still points at the bad `0.0.0`** — outstanding, and
-  the one package where the rule above doesn't hold. The partial publish
+- **`@dwk/mcp`'s stale `latest` (resolved, 2026-07-28).** The partial publish
   repaired in PR #321 (see "Recovering from a bad publish" above) left `0.0.0`
-  on npm; the good `0.1.0-beta.0` landed on `beta` instead of `latest`, because
-  by then the package _did_ have a prior release for `changeset publish` to
-  treat as stable. So `npm i @dwk/mcp` currently installs the broken `0.0.0`.
-  Fix with a one-off dist-tag move (needs an npm token with publish rights to
-  the scope — it is a registry operation, not a repo change):
+  on npm; a later good publish landed on `beta` instead of `latest`, because by
+  then the package _did_ have a prior release for `changeset publish` to treat
+  as stable, so `npm i @dwk/mcp` kept installing the broken `0.0.0`. Fixed with
+  a one-off dist-tag move (a registry operation, not a repo change — needs an
+  **interactive, 2FA-backed** `npm login`, not a bypass-2FA token, see the
+  Trusted Publishing prerequisite above):
 
   ```sh
-  npm dist-tag add @dwk/mcp@0.1.0-beta.0 latest
-  npm view @dwk/mcp dist-tags     # expect latest === 0.1.0-beta.0
+  npm dist-tag add @dwk/mcp@<latest-published-version> latest
+  npm view @dwk/mcp dist-tags     # expect latest === <latest-published-version>
   ```
 
   Verify this whenever a package's first real publish followed a bad one;
