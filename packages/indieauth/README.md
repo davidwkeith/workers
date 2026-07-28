@@ -15,7 +15,7 @@ resource servers via `verifyAccessToken`. `@dwk/solid-pod`'s Resource Server
 does **not** accept these tokens — it validates asymmetrically-signed
 Solid-OIDC tokens (`webid` claim, issuer JWKS) instead, issued by the separate
 [`@dwk/solid-oidc`](../solid-oidc) package (see
-[`spec/open-questions.md`](../../spec/open-questions.md#1-solid-oidc-op---resolved)).
+[`spec/open-questions.md`](../../spec/open-questions.md#1-solid-oidc-op--resolved)).
 
 ## Endpoints
 

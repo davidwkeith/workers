@@ -59,7 +59,7 @@ redirect to an external IdP, …).
   `@dwk/solid-pod` is not one of them — its Resource Server validates
   asymmetrically-signed Solid-OIDC tokens (issuer JWKS, `webid` claim) from the
   separate [`@dwk/solid-oidc`](solid-oidc.md) OP instead; see
-  [open-questions.md §1](../open-questions.md#1-solid-oidc-op---resolved).
+  [open-questions.md §1](../open-questions.md#1-solid-oidc-op--resolved).
 - Support **audience-restricted** access tokens (RFC 8707 resource indicators /
   RFC 9700 §2.3): when a client supplies `resource` parameter(s), the issued
   token carries an `aud` claim, and resource servers verify it against their own
