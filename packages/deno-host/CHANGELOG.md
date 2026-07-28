@@ -1,5 +1,14 @@
 # @dwk/deno-host
 
+## 1.0.0-beta.1
+
+### Major Changes
+
+- Synchronized `v1.0.0-beta.1` release: every package in the workspace is bumped
+  to the same version for this coordinated beta milestone. After this release,
+  `.changeset/config.json`'s `fixed` group is removed so packages resume
+  independent versioning and drift apart again.
+
 ## 0.1.0-beta.0
 
 ### Minor Changes

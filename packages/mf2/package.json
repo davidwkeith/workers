@@ -1,6 +1,6 @@
 {
   "name": "@dwk/mf2",
-  "version": "0.1.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Microformats2 h-entry/h-card extraction to JF2 and an allowlist HTML sanitizer, built on the Workers runtime's streaming HTMLRewriter (zero bundled-parser cost).",
   "keywords": [
     "microformats",

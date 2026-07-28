@@ -1,6 +1,6 @@
 {
   "name": "@dwk/store",
-  "version": "0.1.0-beta.5",
+  "version": "1.0.0-beta.1",
   "description": "DO-SQLite quad store + R2 copy-on-write blob bodies behind one storage interface.",
   "keywords": [
     "storage",

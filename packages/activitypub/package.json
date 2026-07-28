@@ -1,6 +1,6 @@
 {
   "name": "@dwk/activitypub",
-  "version": "0.1.0-beta.6",
+  "version": "1.0.0-beta.2",
   "description": "Edge-native ActivityPub actor: inbox/outbox, follower collections, signed S2S federation. Ships the per-actor Durable Object.",
   "keywords": [
     "activitypub",

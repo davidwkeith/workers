@@ -1,6 +1,6 @@
 {
   "name": "@dwk/webauthn",
-  "version": "0.1.0-beta.5",
+  "version": "1.0.0-beta.1",
   "description": "WebAuthn / passkeys relying party: registration + authentication ceremonies over a per-RP Durable Object for challenge state and credential records.",
   "keywords": [
     "webauthn",

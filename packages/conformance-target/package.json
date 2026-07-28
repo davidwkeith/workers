@@ -1,6 +1,6 @@
 {
   "name": "@dwk/conformance-target",
-  "version": "0.0.1-beta.2",
+  "version": "1.0.0-beta.2",
   "private": true,
   "description": "Conformance-target Worker: every @dwk endpoint package composed into one deployable Worker (conformance.dwk.io) that the hosted conformance suites run against. Never published.",
   "type": "module",

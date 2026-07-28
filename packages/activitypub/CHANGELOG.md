@@ -1,5 +1,63 @@
 # @dwk/activitypub
 
+## 1.0.0-beta.2
+
+### Minor Changes
+
+- db6d3f1: Give an actor's owner a way to remove and block a follower (#447). Previously
+  the owner-publish path special-cased only `Follow` and `Undo(Follow)`, both of
+  which operate on `following`; an owner-published `Reject` or `Block` was fanned
+  out to the entire follower set and left the target's `followers` row in place,
+  so the only remedy against an abusive follower was rotating the actor identity.
+
+  - **Follower-control activities** — `Reject` (of a `Follow`), `Block`, and
+    `Undo(Block)` published to `POST <actor>/outbox` — are routed to the named
+    actor's inbox alone through the same targeted queue an owner `Follow` uses,
+    and are never written to the publicly-served outbox (an outbox row would
+    publish the owner's moderation decisions). They answer `202` with the
+    normalized activity.
+  - **`Reject`** drops the `followers` row and delivers a canonical
+    `Reject(Follow)` naming the original `Follow`'s IRI when one was recorded.
+    The target may be given as the embedded `Follow`, the follower's actor IRI,
+    or the recorded `Follow`'s IRI.
+  - **`Block`** additionally persists a durable blocklist entry and severs both
+    the `followers` and `following` rows. Every subsequent inbound activity from
+    a blocked actor is refused with `403`, before dedup — not only a re-`Follow`.
+    `Undo(Block)` reverses it and notifies the peer.
+  - **`?skipDelivery=1`** applies the local state change without federating it,
+    for a silent removal.
+  - **`GET <actor>/blocked`** lists the blocklist behind the same bearer token as
+    publishing, so a block can be reviewed and undone. It is never public.
+
+- 820ae87: Add backfill support to the outbox Durable Object (#451): `?skipDelivery=1`
+  on `POST <actor>/outbox` and `POST <actor>/publish` inserts the activity into
+  the outbox without follower fan-out, relationship routing, community
+  delivery, or arming the delivery alarm, and a caller-supplied `published`
+  (ISO-8601) is preserved instead of always being stamped to `now`. The outbox
+  `OrderedCollection` now orders by `published_at` instead of insertion order,
+  so a backfilled post sorts into its historical position.
+
+## 1.0.0-beta.1
+
+### Major Changes
+
+- Synchronized `v1.0.0-beta.1` release: every package in the workspace is bumped
+  to the same version for this coordinated beta milestone. After this release,
+  `.changeset/config.json`'s `fixed` group is removed so packages resume
+  independent versioning and drift apart again.
+
+### Patch Changes
+
+- Updated dependencies
+  - @dwk/calendar@1.0.0-beta.1
+  - @dwk/http-signatures@1.0.0-beta.1
+  - @dwk/ldn@1.0.0-beta.1
+  - @dwk/log@1.0.0-beta.1
+  - @dwk/mastodon-api@1.0.0-beta.1
+  - @dwk/mcp@1.0.0-beta.1
+  - @dwk/safe-fetch@1.0.0-beta.1
+  - @dwk/webfinger@1.0.0-beta.1
+
 ## 0.1.0-beta.6
 
 ### Minor Changes

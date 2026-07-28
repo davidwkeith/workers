@@ -1,6 +1,6 @@
 {
   "name": "@dwk/cf-shims",
-  "version": "0.1.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Node-backed implementations of the Cloudflare Workers binding interfaces (D1, R2, KV, Queue, cron, Durable Objects) and runtime-global seams (cloudflare:workers, HTMLRewriter, crypto.DigestStream, hibernatable WebSockets), for any Node host.",
   "keywords": [
     "cloudflare-workers",

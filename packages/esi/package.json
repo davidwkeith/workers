@@ -1,6 +1,6 @@
 {
   "name": "@dwk/esi",
-  "version": "0.1.0-beta.4",
+  "version": "1.0.0-beta.1",
   "description": "Streaming Edge Side Includes (ESI) processor for Cloudflare Workers responses. Cross-standard reusable; no Workers runtime dependency.",
   "keywords": [
     "esi",

@@ -1,6 +1,6 @@
 {
   "name": "@dwk/calendar",
-  "version": "0.1.0-beta.3",
+  "version": "1.0.0-beta.1",
   "description": "Canonical JSCalendar (RFC 8984) event model with an RFC 5545 iCalendar (.ics) serializer and a stateless text/calendar feed handler for webcal:// subscription.",
   "keywords": [
     "icalendar",
