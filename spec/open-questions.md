@@ -61,8 +61,13 @@ All of it has landed: the protocol core (XXE-safe XML, scoped app passwords,
 locking, the per-pod Durable Object integration (`createSolidPodWebdav` in
 `@dwk/solid-pod`), `COPY`/`MOVE` (resource + collection), the owner-gated
 app-password mint/list/revoke endpoint, and per-resource size + mtime in
-`@dwk/store` so PROPFIND metadata is real. The remaining increment is a hosted
-litmus conformance run against a deployed Worker. Spec in
+`@dwk/store` so PROPFIND metadata is real. Implementation is done; conformance
+is not: a hosted litmus run against `conformance.dwk.io` (2026-07-23) found and
+fixed four RFC 4918 bugs but is still **failing** — the last fix (a
+percent-encoding case-normalization bug in `mkcol_over_plain`, 2026-07-24)
+hasn't been re-verified, and the `copymove`/`props`/`locks` groups haven't run
+yet because litmus halts after the first failing group. Re-running litmus to
+green (`conformance/webdav-qa.md`) is the remaining increment. Spec in
 [`packages/webdav.md`](packages/webdav.md). Tracked in
 [#169](https://github.com/davidwkeith/workers/issues/169).
 
