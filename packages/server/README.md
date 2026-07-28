@@ -73,7 +73,7 @@ const dataDir = process.env.DWK_DATA_DIR ?? "./data";
 const env = assembleBindings({
   dataDir,
   d1: ["AUTH_DB"],
-  secrets: { TOKEN_SIGNING_KEY: process.env.TOKEN_SIGNING_KEY },
+  secrets: { TOKEN_SIGNING_KEY: process.env.DWK_TOKEN_SIGNING_KEY },
 });
 
 const server = createServer({
