@@ -175,13 +175,13 @@ export interface MainOptions extends StartOptions {
  * and start the server. Returns the running server.
  */
 export async function main(options: MainOptions = {}): Promise<DwkServer> {
+  loadDwkEnv();
   const { configPath, port, host } = parseArgs(
     options.argv ?? process.argv.slice(2),
   );
   // Redirect `cloudflare:workers` to the Node shim before the config — and the
   // Durable-Object packages it imports — are dynamically loaded.
   registerCloudflareWorkers();
-  loadDwkEnv();
   const config = await loadConfig(configPath);
   const { server } = await startServer(config, {
     port: port ?? options.port,

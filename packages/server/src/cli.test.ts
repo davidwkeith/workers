@@ -169,7 +169,7 @@ describe("dwk-serve CLI", () => {
       }
     });
 
-    it("loads a domain .env file before reading the config", async () => {
+    it("loads a .env file before reading the config", async () => {
       const dir = workdir();
       const path = join(dir, "config.mjs");
       writeFileSync(
@@ -210,6 +210,37 @@ describe("dwk-serve CLI", () => {
         process.chdir(prevCwd);
         if (prevBaseUrl === undefined) delete process.env.DWK_BASE_URL;
         else process.env.DWK_BASE_URL = prevBaseUrl;
+      }
+    });
+
+    it("reads $DWK_CONFIG from a .env file, not just the real environment", async () => {
+      const dir = workdir();
+      writeFileSync(join(dir, "config.mjs"), pingConfig());
+      writeFileSync(
+        join(dir, ".env"),
+        `DWK_CONFIG=${join(dir, "config.mjs")}\n`,
+      );
+      const prevConfig = process.env.DWK_CONFIG;
+      delete process.env.DWK_CONFIG;
+      const prevCwd = process.cwd();
+      process.chdir(dir);
+      const cap = capture();
+      try {
+        const server = await main({
+          argv: ["--port", "0", "--host", "127.0.0.1"],
+          logger: cap.logger,
+          signals: false,
+        });
+        try {
+          const port = portFrom(cap);
+          expect(port).toBeGreaterThan(0);
+        } finally {
+          await server.close();
+        }
+      } finally {
+        process.chdir(prevCwd);
+        if (prevConfig === undefined) delete process.env.DWK_CONFIG;
+        else process.env.DWK_CONFIG = prevConfig;
       }
     });
 
