@@ -57,8 +57,10 @@ jobs:
 
       # Trusted Publishing (OIDC) needs npm >= 11.5.1; don't rely on whatever
       # ships with the Node 24 setup-node distribution happening to clear that.
+      # Pinned (not `latest`) like every other tool in this workflow — this is
+      # the one step that establishes publish auth, so bump it deliberately.
       - name: Ensure npm supports Trusted Publishing
-        run: npm install -g npm@latest && npm --version
+        run: npm install -g npm@11.16.0 && npm --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
