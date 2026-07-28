@@ -41,6 +41,13 @@ libraries [`@dwk/dpop`](../dpop) (edge DPoP validation), [`@dwk/rdf`](../rdf)
   (`createSolidPodGc`), never by waking a DO.
 - **Notifications** — Solid Notifications over WebSocket channels on the DO's
   hibernatable WebSockets (v1 channels carry the changed resource IRI only).
+- **WebDAV "second door"** — `createSolidPodWebdav` resolves
+  [`@dwk/webdav`](../webdav)'s `WebdavBackend` seam onto the same per-pod DO, so
+  OS file managers can mount the pod as a network drive over HTTP Basic
+  app-passwords; `createSolidPodWebdavCredentials` is the owner-gated
+  mint/list/revoke endpoint for those app-passwords. Both share the Solid
+  door's consistency domain — a WebDAV `LOCK` blocks an unkeyed Solid write and
+  vice versa.
 
 v1 is a **Resource Server only** (no OIDC OP) and runs **one Durable Object per
 pod** (no sharding).
@@ -48,14 +55,24 @@ pod** (no sharding).
 ## Usage
 
 ```ts
-import { createSolidPod, createSolidPodGc, SolidPodObject } from "@dwk/solid-pod";
+import {
+  createSolidPod,
+  createSolidPodWebdav,
+  createSolidPodWebdavCredentials,
+  createSolidPodGc,
+  SolidPodObject,
+} from "@dwk/solid-pod";
 
-const pod = createSolidPod({
+const podConfig = {
   baseUrl: "https://pod.example",
   issuer: "https://issuer.example",
   jwksUri: "https://issuer.example/jwks",
   owner: "https://pod.example/profile/card#me",
-});
+};
+
+const pod = createSolidPod(podConfig);
+const dav = createSolidPodWebdav(podConfig);
+const davCredentials = createSolidPodWebdavCredentials(podConfig);
 
 const gc = createSolidPodGc({
   baseUrl: "https://pod.example",
@@ -63,7 +80,7 @@ const gc = createSolidPodGc({
 });
 
 export default {
-  fetch: pod,
+  fetch: pod, // mount `dav` and `davCredentials` under their own path prefixes
   scheduled: gc,
 };
 

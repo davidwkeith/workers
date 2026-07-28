@@ -11,10 +11,14 @@ Explorer, GNOME/KDE, iOS Files) onto the same resources `@dwk/solid-pod` serves
 (XXE-safe bounded XML, scoped app passwords, strict-subset `If:` header
 parsing, content-type inference, OS-litter matching), the Class 2 verb router
 (`createWebdav`) driven over an injected `WebdavBackend` seam, and the lock +
-app-password DO-SQLite stores (`LockStore`, `CredentialStore`). **Status: in
-progress** — `@dwk/solid-pod` resolves the backend seam onto the live per-pod
-`SolidPodObject` (`createSolidPodWebdav`), but the hosted litmus run is the
-remaining increment.
+app-password DO-SQLite stores (`LockStore`, `CredentialStore`). `@dwk/solid-pod`
+resolves the backend seam onto the live per-pod `SolidPodObject`
+(`createSolidPodWebdav` for data, `createSolidPodWebdavCredentials` for
+app-password management). **Status: in progress** — implementation is done;
+a hosted litmus run against `conformance.dwk.io` found and fixed four RFC 4918
+bugs but is still failing pending re-verification of the last fix, and the
+`copymove`/`props`/`locks` groups haven't run yet (litmus halts after the
+first failing group) — see `conformance/webdav-qa.md`.
 
 ## Spec
 
