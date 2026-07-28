@@ -9,8 +9,11 @@ name: Release
 # (release:gate -> build -> changeset publish), then pushes the git tags that
 # `changeset publish` creates.
 #
-# Requires repo secret NPM_TOKEN: an npm automation/granular token with
-# publish rights to the @dwk scope (automation tokens bypass 2FA prompts).
+# Authenticates via npm Trusted Publishing (OIDC) — no stored npm token.
+# Each publishable @dwk/* package must have a Trusted Publisher configured on
+# npmjs.com (package Settings -> Trusted Publisher): GitHub Actions, org/user
+# `davidwkeith`, repo `workers`, workflow filename `release.yml`, environment
+# `npm-publish`, allowed action `npm publish`. See RELEASING.md.
 
 on:
   workflow_dispatch:
@@ -26,13 +29,14 @@ concurrency:
 
 permissions:
   contents: write # push the git tags changeset publish creates
-  id-token: write # npm provenance (OIDC) for published packages
+  id-token: write # npm Trusted Publishing (OIDC) auth + provenance
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    # NPM_TOKEN lives in the `npm-publish` environment; attach any environment
-    # protection rules (required reviewers, branch restrictions) there.
+    # The Trusted Publisher config on npmjs.com is scoped to this environment
+    # name; attach any environment protection rules (required reviewers,
+    # branch restrictions) here too.
     environment: npm-publish
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,6 +54,11 @@ jobs:
           node-version: 24
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1; don't rely on whatever
+      # ships with the Node 24 setup-node distribution happening to clear that.
+      - name: Ensure npm supports Trusted Publishing
+        run: npm install -g npm@latest && npm --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -94,7 +103,6 @@ jobs:
         # plain `npm i @dwk/<pkg>` installs it. @dwk/server is `private` and skipped.
         run: pnpm release
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Push release tags
