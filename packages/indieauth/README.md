@@ -9,8 +9,13 @@ The identity layer rooted at the user's own domain. It runs the
 authorization-code + PKCE flow, issues **DPoP-bound** access tokens (bound via
 [`@dwk/dpop`](../dpop)'s `cnf.jkt`), and publishes an OAuth 2.0 / IndieAuth
 server-metadata document so clients can discover the endpoints and PKCE methods.
-The tokens it mints are consumed downstream by [`@dwk/micropub`](../micropub)
-and validated by the Solid Pod Resource Server.
+The tokens it mints are **HS256**, self-issued with a shared secret, and are
+consumed downstream by [`@dwk/micropub`](../micropub) and other IndieAuth
+resource servers via `verifyAccessToken`. `@dwk/solid-pod`'s Resource Server
+does **not** accept these tokens — it validates asymmetrically-signed
+Solid-OIDC tokens (`webid` claim, issuer JWKS) instead, issued by the separate
+[`@dwk/solid-oidc`](../solid-oidc) package (see
+[`spec/open-questions.md`](../../spec/open-questions.md#1-solid-oidc-op--resolved)).
 
 ## Endpoints
 

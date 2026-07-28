@@ -53,8 +53,13 @@ redirect to an external IdP, …).
 
 ## Auth / security
 
-- Tokens issued here are **DPoP-bound** (see [dpop.md](dpop.md)); token
-  validation is shared with the Solid Pod Resource Server.
+- Tokens issued here are **HS256**, self-issued with a shared secret, and
+  **DPoP-bound** (see [dpop.md](dpop.md)); `verifyAccessToken` validation is
+  shared with Micropub and other resource servers that accept these tokens.
+  `@dwk/solid-pod` is not one of them — its Resource Server validates
+  asymmetrically-signed Solid-OIDC tokens (issuer JWKS, `webid` claim) from the
+  separate [`@dwk/solid-oidc`](solid-oidc.md) OP instead; see
+  [open-questions.md §1](../open-questions.md#1-solid-oidc-op--resolved).
 - Support **audience-restricted** access tokens (RFC 8707 resource indicators /
   RFC 9700 §2.3): when a client supplies `resource` parameter(s), the issued
   token carries an `aud` claim, and resource servers verify it against their own
