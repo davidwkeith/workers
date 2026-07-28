@@ -221,7 +221,23 @@ describe("loadDwkEnv", () => {
     expect(process.env.B).toBe("from-domain");
   });
 
-  it("does not error when peeking an encrypted .env with no private key available", () => {
+  it("succeeds when peeking an encrypted .env that has no private key applied to the peek itself", () => {
+    // peekBaseUrl's dotenvxParse() call is deliberately given no private
+    // key (it's a non-destructive peek, not the real decrypting load), so
+    // it can never decrypt an encrypted DWK_BASE_URL — env.ts's `ignore:
+    // ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"]` option keeps that
+    // expected, handled failure from logging via dotenvx's own console.error
+    // logger. That suppression isn't asserted directly here: dotenvx's log
+    // level is process-global mutable state (`currentLevel` in its
+    // logger.js), so an in-process spy on console.error is unreliable
+    // across this file's full test run — verified instead by direct
+    // reproduction against the pinned dotenvx version in isolation (see the
+    // design spec §3 discussion) and by `ignore`'s effect being read
+    // directly from dotenvx's own source (`main.js`'s `parse()`, which
+    // checks `ignore.includes(error.code)` before calling `logger.error`).
+    // What IS reliably provable in-process is the overall outcome: the real
+    // load() call right after the peek does have the private key, so
+    // loadDwkEnv() as a whole must still succeed.
     snapshot();
     delete process.env.DWK_BASE_URL;
     const dir = workdir();
@@ -231,8 +247,6 @@ describe("loadDwkEnv", () => {
       "DWK_BASE_URL=https://blog.example.org\nA=plain\n",
     );
     encryptFile(dir, ".env");
-    // Provide the real private key so the actual load() succeeds (this test
-    // is about the peek path not erroring, not about decryption failing).
     const encryptedFile = readFileSync(join(dir, ".env"), "utf8");
     const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
     const privateKeyName = publicKeyMatch![1]!.replace("PUBLIC", "PRIVATE");
@@ -245,5 +259,6 @@ describe("loadDwkEnv", () => {
 
     expect(() => loadDwkEnv({ cwd: dir })).not.toThrow();
     expect(process.env.DWK_BASE_URL).toBe("https://blog.example.org");
+    expect(process.env.A).toBe("plain");
   });
 });
