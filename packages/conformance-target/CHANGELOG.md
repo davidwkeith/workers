@@ -1,5 +1,13 @@
 # @dwk/conformance-target
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- Updated dependencies [db6d3f1]
+- Updated dependencies [820ae87]
+  - @dwk/activitypub@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes
