@@ -43,6 +43,8 @@ export {
 
 export { toWebRequest, sendWebResponse } from "./adapter.js";
 
+export { loadDwkEnv, type LoadDwkEnvOptions } from "./env.js";
+
 export {
   assembleBindings,
   type BindingsSpec,

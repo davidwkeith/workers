@@ -22,6 +22,7 @@ import { noopLogger, type Logger } from "@dwk/log";
 import { registerCloudflareWorkers } from "@dwk/cf-shims";
 import { createServer, type DwkServer } from "./server.js";
 import type { HostConfig } from "./config.js";
+import { loadDwkEnv } from "./env.js";
 
 /** A config module: a default (or named `config`) export — value or factory. */
 type ConfigExport =
@@ -174,6 +175,7 @@ export interface MainOptions extends StartOptions {
  * and start the server. Returns the running server.
  */
 export async function main(options: MainOptions = {}): Promise<DwkServer> {
+  loadDwkEnv();
   const { configPath, port, host } = parseArgs(
     options.argv ?? process.argv.slice(2),
   );

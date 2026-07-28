@@ -73,7 +73,7 @@ const dataDir = process.env.DWK_DATA_DIR ?? "./data";
 const env = assembleBindings({
   dataDir,
   d1: ["AUTH_DB"],
-  secrets: { TOKEN_SIGNING_KEY: process.env.TOKEN_SIGNING_KEY },
+  secrets: { TOKEN_SIGNING_KEY: process.env.DWK_TOKEN_SIGNING_KEY },
 });
 
 const server = createServer({
@@ -248,6 +248,22 @@ directory, or a filesystem/volume snapshot. See
 feasibility analysis (why Fastly Compute and Lambda@Edge are explicit
 non-goals for the stateful packages, and what a future isolate-class host
 like Deno Deploy would need).
+
+## Environment files & secrets
+
+`dwk-serve`'s CLI loads `<domain>.env` (the hostname of `DWK_BASE_URL`) and/or
+`.env` from the current working directory automatically, before reading your
+config module — real environment variables (systemd `Environment=`, Docker
+`-e`) always win over either file, and a domain-specific file wins over the
+generic one. A bundled/Docker composition calls the same `loadDwkEnv()`
+helper (exported from `@dwk/server`) explicitly at the top of its own module,
+since it bypasses the CLI entirely.
+
+See [`.env.example`](./.env.example) for every supported variable, the file
+precedence rules, and how to encrypt a file's values at rest with
+`npx @dotenvx/dotenvx encrypt` — decryption happens transparently via the
+same `loadDwkEnv()` call, given the matching `DOTENV_PRIVATE_KEY*` in the real
+environment (never committed).
 
 ## Security (you now own what Cloudflare provided)
 

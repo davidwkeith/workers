@@ -3,12 +3,17 @@
 // "Worker entry + wrangler.toml" a Cloudflare deployer writes by hand — copy it
 // and add the packages/secrets your pod needs. Used by `examples/serve.mjs` (the
 // Docker bundle entry) and runnable directly via `dwk-serve ./composition.mjs`.
-import { assembleBindings, createDurableObjectNamespace } from "@dwk/server";
+import {
+  assembleBindings,
+  createDurableObjectNamespace,
+  loadDwkEnv,
+} from "@dwk/server";
 import { createWebfinger } from "@dwk/webfinger";
 import { createWebAuthn, WebAuthnObject } from "@dwk/webauthn";
 
 /** Build the HostConfig from the environment (the composition root reads env). */
 export default function composition() {
+  loadDwkEnv();
   const baseUrl = process.env.DWK_BASE_URL ?? "http://localhost";
   const dataDir = process.env.DWK_DATA_DIR ?? "./data";
 

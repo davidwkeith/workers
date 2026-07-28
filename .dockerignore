@@ -8,3 +8,5 @@
 **/*.log
 .changeset/*.md
 **/.DS_Store
+**/*.env
+**/.env.keys
