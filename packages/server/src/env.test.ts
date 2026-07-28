@@ -193,12 +193,57 @@ describe("loadDwkEnv", () => {
     // fall back to: decryption must fail loudly, not silently pass the
     // ciphertext through as the app's config value.
     rmSync(join(dir, ".env.keys"));
-    // Ensure no lingering private keys from previous tests
-    for (const key of Object.keys(process.env)) {
-      if (key.startsWith("DOTENV_PRIVATE_KEY")) {
-        delete process.env[key];
-      }
-    }
     expect(() => loadDwkEnv({ cwd: dir })).toThrow();
+  });
+
+  it("loads <domain>.env as a fallback layer when .env's DWK_BASE_URL is encrypted", () => {
+    snapshot();
+    delete process.env.DWK_BASE_URL;
+    const dir = workdir();
+    writeEnvFile(dir, ".env", "DWK_BASE_URL=https://blog.example.org\n");
+    encryptFile(dir, ".env");
+    const encryptedFile = readFileSync(join(dir, ".env"), "utf8");
+    const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
+    expect(publicKeyMatch).not.toBeNull();
+    const privateKeyName = publicKeyMatch![1]!.replace("PUBLIC", "PRIVATE");
+    const keysFile = readFileSync(join(dir, ".env.keys"), "utf8");
+    const privateKeyMatch = keysFile.match(
+      new RegExp(`^${privateKeyName}=(.+)$`, "m"),
+    );
+    expect(privateKeyMatch).not.toBeNull();
+    process.env[privateKeyName] = privateKeyMatch![1]!;
+    dynamicKeys.push(privateKeyName);
+
+    writeEnvFile(dir, "blog.example.org.env", "B=from-domain\n");
+
+    loadDwkEnv({ cwd: dir });
+    expect(process.env.DWK_BASE_URL).toBe("https://blog.example.org");
+    expect(process.env.B).toBe("from-domain");
+  });
+
+  it("does not error when peeking an encrypted .env with no private key available", () => {
+    snapshot();
+    delete process.env.DWK_BASE_URL;
+    const dir = workdir();
+    writeEnvFile(
+      dir,
+      ".env",
+      "DWK_BASE_URL=https://blog.example.org\nA=plain\n",
+    );
+    encryptFile(dir, ".env");
+    // Provide the real private key so the actual load() succeeds (this test
+    // is about the peek path not erroring, not about decryption failing).
+    const encryptedFile = readFileSync(join(dir, ".env"), "utf8");
+    const publicKeyMatch = encryptedFile.match(/^(DOTENV_PUBLIC_KEY\w*)=/m);
+    const privateKeyName = publicKeyMatch![1]!.replace("PUBLIC", "PRIVATE");
+    const keysFile = readFileSync(join(dir, ".env.keys"), "utf8");
+    const privateKeyMatch = keysFile.match(
+      new RegExp(`^${privateKeyName}=(.+)$`, "m"),
+    );
+    process.env[privateKeyName] = privateKeyMatch![1]!;
+    dynamicKeys.push(privateKeyName);
+
+    expect(() => loadDwkEnv({ cwd: dir })).not.toThrow();
+    expect(process.env.DWK_BASE_URL).toBe("https://blog.example.org");
   });
 });

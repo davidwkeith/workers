@@ -11,14 +11,24 @@
  * (non-strict) behavior already tolerates a missing path without throwing,
  * so no existence check is needed here.
  *
- * @see spec/self-hosting.md §9
+ * @see spec/self-hosting.md §9.1
  */
 import {
   config as dotenvxConfig,
   parse as dotenvxParse,
+  type DotenvParseOptions,
 } from "@dotenvx/dotenvx";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
+/**
+ * `parse()`'s `DotenvParseOptions` type doesn't declare `ignore`, but the
+ * implementation reads and honors it identically to `config()`'s (typed)
+ * `ignore` option — this just closes that gap in the upstream `.d.ts`.
+ */
+type PeekParseOptions = DotenvParseOptions & {
+  readonly ignore?: readonly string[];
+};
 
 /** Options for {@link loadDwkEnv}. */
 export interface LoadDwkEnvOptions {
@@ -42,15 +52,20 @@ function domainFromBaseUrl(baseUrl: string | undefined): string | undefined {
  * of `.env`'s content (without writing anything to `process.env` — that
  * only happens once, in the single ordered `load()` call below, so a
  * `<domain>.env` discovered this way still gets to override `.env`'s
- * overlapping keys). A `.env` whose `DWK_BASE_URL` is itself an encrypted
- * value can't be peeked this way (no private key is applied here); such a
- * setup falls back to loading `.env` alone, same as if no domain were known.
+ * overlapping keys). An encrypted `DWK_BASE_URL` can't be peeked this way —
+ * `parse()` here is given no private key, so it would otherwise log a
+ * `MISSING_PRIVATE_KEY`/`DECRYPTION_FAILED` error even though this is an
+ * expected, handled case (the fallback pass in `loadDwkEnv` below covers
+ * it once the real decrypting `load()` call has run).
  */
 function peekBaseUrl(cwd: string): string | undefined {
   if (process.env.DWK_BASE_URL) return process.env.DWK_BASE_URL;
   try {
     const raw = readFileSync(join(cwd, ".env"), "utf8");
-    const parsed = dotenvxParse(raw);
+    const options: PeekParseOptions = {
+      ignore: ["MISSING_PRIVATE_KEY", "DECRYPTION_FAILED"],
+    };
+    const parsed = dotenvxParse(raw, options);
     return typeof parsed.DWK_BASE_URL === "string"
       ? parsed.DWK_BASE_URL
       : undefined;
@@ -68,6 +83,8 @@ function load(paths: readonly string[]): void {
     ignore: ["MISSING_ENV_FILE"],
     noNative: true,
     noArmor: true,
+    no1Password: true,
+    noBitwarden: true,
   });
   if (result.error) throw result.error;
 }
@@ -83,4 +100,15 @@ export function loadDwkEnv(options: LoadDwkEnvOptions = {}): void {
 
   const domain = domainFromBaseUrl(peekBaseUrl(cwd));
   load(domain ? [path(`${domain}.env`), path(".env")] : [path(".env")]);
+
+  // If DWK_BASE_URL couldn't be peeked above (e.g. it's itself an encrypted
+  // value in .env), the load above only covered .env. Now that .env has
+  // been decrypted for real, check again and load a matching <domain>.env
+  // as an additional layer — it can't override keys .env already set
+  // (dotenvx never overwrites an already-set process.env value), but
+  // loading it at all is strictly better than never loading it.
+  if (!domain) {
+    const discovered = domainFromBaseUrl(process.env.DWK_BASE_URL);
+    if (discovered) load([path(`${discovered}.env`)]);
+  }
 }
