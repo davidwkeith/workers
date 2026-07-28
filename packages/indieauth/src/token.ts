@@ -8,9 +8,11 @@
  * verifying a DPoP proof against that thumbprint (via `@dwk/dpop`).
  *
  * Verification here covers the signature, the standard time claims, and the
- * issuer — it is shared by the Solid Pod Resource Server and Micropub. Those
- * callers pass the recovered `cnf.jkt` to `@dwk/dpop` and (optionally) check
- * revocation against the token store.
+ * issuer — it is shared by Micropub and other resource servers that accept
+ * these HS256 IndieAuth tokens. (`@dwk/solid-pod` is not among them: it
+ * validates asymmetrically-signed Solid-OIDC tokens from `@dwk/solid-oidc`
+ * instead.) Callers pass the recovered `cnf.jkt` to `@dwk/dpop` and
+ * (optionally) check revocation against the token store.
  */
 
 import {
