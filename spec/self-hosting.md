@@ -410,6 +410,14 @@ implemented in-house — no custom cryptography. `packages/server/.env.example`
 is the full reference: every supported variable, the file-selection rules
 above, and the encrypt/decrypt workflow.
 
+One precedence caveat: the loader discovers `DWK_BASE_URL` by peeking `.env`
+non-destructively before any real load, so it can determine `<domain>.env`
+without disturbing precedence — except when `.env`'s `DWK_BASE_URL` is itself
+an encrypted value, which the peek can't decrypt. In that case `<domain>.env`
+still loads (as a fallback, once the real decrypting load has run), but only
+fills gaps — it can no longer override a key `.env` already set. Keeping
+`DWK_BASE_URL` itself in plaintext (or in the real environment) avoids this.
+
 ## 10. Distribution & CLI
 
 - `@dwk/server` ships **ESM, fully typed**, deps minimised and pinned, like
