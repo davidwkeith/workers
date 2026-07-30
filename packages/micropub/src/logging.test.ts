@@ -332,35 +332,23 @@ describe("@dwk/micropub media logging", () => {
           return {
             bind: () => ({
               run: () =>
-                Promise.reject(
-                  new Error("no such column: internal_col"),
-                ),
+                Promise.reject(new Error("no such column: internal_col")),
               first: () =>
-                Promise.reject(
-                  new Error("no such column: internal_col"),
-                ),
+                Promise.reject(new Error("no such column: internal_col")),
               all: () =>
-                Promise.reject(
-                  new Error("no such column: internal_col"),
-                ),
+                Promise.reject(new Error("no such column: internal_col")),
             }),
             run: () =>
-              Promise.reject(
-                new Error("no such column: internal_col"),
-              ),
+              Promise.reject(new Error("no such column: internal_col")),
             first: () =>
-              Promise.reject(
-                new Error("no such column: internal_col"),
-              ),
+              Promise.reject(new Error("no such column: internal_col")),
             all: () =>
-              Promise.reject(
-                new Error("no such column: internal_col"),
-              ),
+              Promise.reject(new Error("no such column: internal_col")),
           } as unknown as D1PreparedStatement;
         }
         return realDb.prepare(sql);
       },
-      batch: (statements: any[]) => realDb.batch(statements),
+      batch: (statements: D1PreparedStatement[]) => realDb.batch(statements),
       exec: (sql: string) => realDb.exec(sql),
     } as unknown as D1Database;
 
