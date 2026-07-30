@@ -54,6 +54,7 @@ import {
   ResourceConflict as WebdavResourceConflict,
   CredentialStore,
   LockStore,
+  PropertyStore,
   type ResourceBody,
   type ResourceStat,
   type WebdavBackend,
@@ -165,6 +166,8 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   #locks: LockStore | null = null;
   /** WebDAV app-password store, lazily built over this DO's SQLite (spec §1). */
   #credentials: CredentialStore | null = null;
+  /** WebDAV dead-property store, lazily built over this DO's SQLite (spec §4). */
+  #deadProps: PropertyStore | null = null;
   /** The WebDAV Class 2 verb router, built once over the in-DO backend. */
   #webdavHandler: WebdavHandler | null = null;
 
@@ -832,6 +835,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       }
       throw error;
     }
+    // A Solid-door DELETE drops the resource's WebDAV dead properties too —
+    // a later same-name resource must not inherit them (spec §3: same pod,
+    // two protocols).
+    this.#webdavProperties().removeTree(path);
     this.#removeContainment(store, origin, path);
     await this.#drainOrphans(store);
     this.#broadcast(toIri(origin, path), "Delete");
@@ -863,6 +870,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       resolveLockPolicy(),
       this.#storageRoot,
     ));
+  }
+
+  /** The dead-property store over this pod's SQLite (built once). */
+  #webdavProperties(): PropertyStore {
+    return (this.#deadProps ??= new PropertyStore(this.#sql));
   }
 
   /** The app-password store over this pod's SQLite (built once). */
@@ -1198,6 +1210,10 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         } catch (error) {
           throw mapStoreError(error);
         }
+        // Dead properties die with the resource (a later same-name resource
+        // must not resurrect them); the collection case is covered again by
+        // #webdavDeleteTree, harmlessly.
+        this.#webdavProperties().removeTree(path);
         this.#removeContainment(store, origin, path);
         await this.#drainOrphans(store);
         this.#broadcast(toIri(origin, path), "Delete");
@@ -1223,6 +1239,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         // collision), so the destination subtree never lingers under the copy.
         if (destExisted) this.#webdavDeleteTree(store, dest);
         await this.#webdavCopyTree(store, origin, from, dest, depth);
+        // Dead properties travel with the copy (RFC 4918 §9.8.2); Depth: 0
+        // copies only the named collection's own properties.
+        this.#webdavProperties().copyTree(from, dest, depth === "infinity");
         this.#ensureContainerChain(store, origin, dest);
         await this.#drainOrphans(store);
         this.#broadcast(toIri(origin, dest), destExisted ? "Update" : "Create");
@@ -1244,6 +1263,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         const destExisted = store.head(dest) !== null;
         if (destExisted) this.#webdavDeleteTree(store, dest);
         await this.#webdavCopyTree(store, origin, from, dest, "infinity");
+        // Dead properties MUST move with the resource (RFC 4918 §9.9.1,
+        // litmus `propmove`); the source's rows go with #webdavDeleteTree.
+        this.#webdavProperties().copyTree(from, dest, true);
         this.#ensureContainerChain(store, origin, dest);
         this.#webdavDeleteTree(store, from);
         this.#removeContainment(store, origin, from);
@@ -1271,6 +1293,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
       locks: this.#webdavLocks(),
       credentials: this.#webdavCredentials(),
+      properties: this.#webdavProperties(),
     };
   }
 
@@ -1338,6 +1361,9 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     } else {
       store.delete(path, {});
     }
+    // Deleted resources take their dead properties with them (covers the
+    // MOVE source and an overwritten COPY/MOVE destination).
+    this.#webdavProperties().removeTree(path);
   }
 
   // -- write helpers ---------------------------------------------------------

@@ -6,6 +6,7 @@ import {
   escapeXml,
   firstChild,
   parseXml,
+  serializeFragment,
   type XmlElement,
 } from "./xml.js";
 
@@ -172,6 +173,54 @@ describe("parseXml — XXE and DoS guards", () => {
 
   it("accepts an explicit utf-8 declaration", () => {
     expect(parse(`<?xml version="1.0" encoding="utf-8"?><r/>`).local).toBe("r");
+  });
+});
+
+describe("serializeFragment", () => {
+  const value = (body: string): XmlElement => {
+    const root = parse(
+      `<D:propertyupdate xmlns:D="DAV:"><D:set><D:prop>${body}</D:prop></D:set></D:propertyupdate>`,
+    );
+    const set = firstChild(root, DAV_NS, "set");
+    const prop = set && firstChild(set, DAV_NS, "prop");
+    const element = prop?.children[0];
+    if (!element) throw new Error("test body had no property element");
+    return element;
+  };
+
+  it("serializes a plain text value", () => {
+    expect(serializeFragment(value(`<t:p xmlns:t="urn:x">hello</t:p>`))).toBe(
+      "hello",
+    );
+  });
+
+  it("re-escapes XML metacharacters so the fragment stays well-formed", () => {
+    const el = value(`<t:p xmlns:t="urn:x">a &amp; b &lt; c</t:p>`);
+    expect(serializeFragment(el)).toBe("a &amp; b &lt; c");
+  });
+
+  it("round-trips an astral-plane character (litmus prophighunicode)", () => {
+    const el = value(`<t:p xmlns:t="urn:x">&#65536;</t:p>`);
+    expect(serializeFragment(el)).toBe("\u{10000}");
+  });
+
+  it("emits a namespaced child element with its declaration (propvalnspace)", () => {
+    const el = value(`<t:p xmlns:t="urn:x"><foo xmlns="http://bar"/></t:p>`);
+    expect(serializeFragment(el)).toBe(`<foo xmlns="http://bar"></foo>`);
+  });
+
+  it("emits a no-namespace child element bare", () => {
+    const el = value(`<t:p xmlns:t="urn:x"><foo xmlns=""/></t:p>`);
+    expect(serializeFragment(el)).toBe("<foo></foo>");
+  });
+
+  it("recurses into nested children with their own text", () => {
+    const el = value(
+      `<t:p xmlns:t="urn:x"><a xmlns="urn:y">inner<b>deep</b></a></t:p>`,
+    );
+    expect(serializeFragment(el)).toBe(
+      `<a xmlns="urn:y">inner<b xmlns="urn:y">deep</b></a>`,
+    );
   });
 });
 

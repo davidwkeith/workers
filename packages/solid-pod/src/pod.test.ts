@@ -2,6 +2,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ensureGcSchema } from "@dwk/store";
+import { PropertyStore } from "@dwk/webdav";
 
 import { INTERNAL_HEADERS, type SolidPodEnv } from "./config.js";
 import type { SolidPodObject } from "./pod.js";
@@ -441,5 +442,36 @@ _:p a solid:InsertDeletePatch ;
       jti: crypto.randomUUID(),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("@dwk/solid-pod DO Solid-door DELETE × WebDAV dead properties", () => {
+  it("drops the resource's dead-property rows on an LDP DELETE", async () => {
+    const stub = freshStub();
+    expect((await putBlob(stub, "/noted.bin", "x")).status).toBe(201);
+
+    // Seed a dead property exactly as the WebDAV door would — same DO SQLite,
+    // same table the PROPPATCH path writes.
+    await runInDurableObject(stub, (_instance, state) => {
+      new PropertyStore(state.storage.sql).set("/noted.bin", {
+        ns: "urn:example",
+        local: "flavor",
+        valueXml: "plum",
+      });
+    });
+
+    // Delete via the *Solid LDP* door (not the WebDAV router): the dead
+    // properties must die with the resource, or a later same-path PUT from
+    // either door would resurrect them.
+    const del = await run(stub, "DELETE", "/noted.bin", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+    });
+    expect(del.status).toBe(204);
+
+    const remaining = await runInDurableObject(stub, (_instance, state) =>
+      new PropertyStore(state.storage.sql).list("/noted.bin"),
+    );
+    expect(remaining).toEqual([]);
   });
 });

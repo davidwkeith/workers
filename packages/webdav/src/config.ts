@@ -37,6 +37,28 @@ export interface CredentialApi {
   verify(credentialId: string, secret: string): Promise<VerifyResult>;
 }
 
+/** A stored dead property (RFC 4918 §4) — spec §4. */
+export interface DeadProperty {
+  /** Namespace URI, or `null` for a no-namespace property (litmus `propnullns`). */
+  readonly ns: string | null;
+  readonly local: string;
+  /** The property element's inner content as a serialized XML fragment. */
+  readonly valueXml: string;
+}
+
+/**
+ * The dead-property operations the router needs, satisfied by `PropertyStore`
+ * over the per-pod DO's SQLite (spec §4). Sync because DO SQLite is. Carrying
+ * properties across COPY/MOVE and dropping them on DELETE is the backend
+ * adapter's job (`PropertyStore.copyTree`/`removeTree`), not the router's —
+ * those verbs are implemented behind the seam.
+ */
+export interface DeadPropertyApi {
+  list(path: string): DeadProperty[];
+  set(path: string, prop: DeadProperty): void;
+  remove(path: string, ns: string | null, local: string): void;
+}
+
 /** Access modes a request exercises; mapped onto WAC at authorization time. */
 export type WebdavMode = "read" | "write";
 
@@ -138,6 +160,8 @@ export interface WebdavBackend {
   readonly locks: LockApi;
   /** The app-password verification store (DO SQLite). */
   readonly credentials: CredentialApi;
+  /** The dead-property store (DO SQLite, spec §4). */
+  readonly properties: DeadPropertyApi;
 }
 
 /** A thrown precondition failure the router renders as `412 Precondition Failed`. */

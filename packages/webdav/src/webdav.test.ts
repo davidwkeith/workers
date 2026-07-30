@@ -17,6 +17,7 @@ import {
   type WritePreconditions,
 } from "./config.js";
 import { CredentialStore } from "./credential-store.js";
+import { PropertyStore } from "./dead-props.js";
 import { LockStore } from "./locks.js";
 import { createWebdav } from "./webdav.js";
 import type { WebdavTestObject } from "./test-harness.js";
@@ -54,6 +55,7 @@ class MemBackend implements WebdavBackend {
   readonly resources = new Map<string, MemResource>();
   readonly locks: LockStore;
   readonly credentials: CredentialStore;
+  readonly properties: PropertyStore;
   allow: (webid: string, path: string, mode: WebdavMode) => boolean = () =>
     true;
 
@@ -68,6 +70,7 @@ class MemBackend implements WebdavBackend {
       now,
     );
     this.credentials = new CredentialStore(sql, {}, now);
+    this.properties = new PropertyStore(sql);
     this.resources.set("/", {
       body: new Uint8Array(),
       contentType: "text/turtle",
@@ -186,6 +189,7 @@ class MemBackend implements WebdavBackend {
       }
     }
     this.resources.delete(path);
+    this.properties.removeTree(path);
   }
 
   async copy(
@@ -200,6 +204,7 @@ class MemBackend implements WebdavBackend {
       throw new ResourceConflict("missing parent collection");
     }
     const created = !this.resources.has(to);
+    if (!created) this.properties.removeTree(to);
     this.resources.set(to, { ...src, body: src.body.slice() });
     if (src.collection && depth === "infinity") {
       for (const [key, value] of [...this.resources]) {
@@ -211,6 +216,8 @@ class MemBackend implements WebdavBackend {
         }
       }
     }
+    // Dead properties travel with the resource (RFC 4918 §9.8.2).
+    this.properties.copyTree(from, to, depth === "infinity");
     return { created };
   }
 
@@ -221,9 +228,15 @@ class MemBackend implements WebdavBackend {
     overwrite: boolean,
   ): Promise<WriteOutcome> {
     const outcome = await this.copy(from, to, depth, overwrite);
+    // Match the source subtree on a path boundary: a raw `startsWith(from)`
+    // would also delete a prefix-sharing sibling — litmus `propmove` MOVEs
+    // `/prop` to `/prop2`, and the destination must not go with the source.
     for (const key of [...this.resources.keys()]) {
-      if (key === from || key.startsWith(from)) this.resources.delete(key);
+      if (key === from || (from.endsWith("/") && key.startsWith(from))) {
+        this.resources.delete(key);
+      }
     }
+    this.properties.removeTree(from);
     return outcome;
   }
 
@@ -767,8 +780,8 @@ const LOCKINFO =
   "<D:locktype><D:write/></D:locktype></D:lockinfo>";
 
 describe("createWebdav — PROPPATCH & named PROPFIND (spec §4)", () => {
-  it("accepts a dead property (200) and refuses a protected live one (403)", async () => {
-    await withHandler(async ({ call }) => {
+  it("refuses a protected live prop (403) and fails the rest atomically (424)", async () => {
+    await withHandler(async ({ call, backend }) => {
       await call("PUT", "/p.txt", { body: "x" });
       const res = await call("PROPPATCH", "/p.txt", {
         headers: { "content-type": 'application/xml; charset="utf-8"' },
@@ -780,9 +793,224 @@ describe("createWebdav — PROPPATCH & named PROPFIND (spec §4)", () => {
       });
       expect(res.status).toBe(207);
       const body = await res.text();
-      expect(body).toContain("HTTP/1.1 200 OK"); // dead prop accepted-and-ignored
       expect(body).toContain("HTTP/1.1 403 Forbidden"); // protected live prop
+      // RFC 4918 §9.2 atomicity: the otherwise-fine dead prop must not land.
+      expect(body).toContain("HTTP/1.1 424 Failed Dependency");
+      expect(body).not.toContain("HTTP/1.1 200 OK");
       expect(body).toContain('xmlns:x="urn:example"');
+      expect(backend.properties.list("/p.txt")).toEqual([]);
+    });
+  });
+
+  it("stores a dead property and returns it from a named PROPFIND", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/p.txt", { body: "x" });
+      const patch = await call("PROPPATCH", "/p.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          '<?xml version="1.0"?><D:propertyupdate xmlns:D="DAV:" xmlns:Z="urn:example">' +
+          "<D:set><D:prop><Z:author>me &amp; you</Z:author></D:prop></D:set>" +
+          "</D:propertyupdate>",
+      });
+      expect(patch.status).toBe(207);
+      expect(await patch.text()).toContain("HTTP/1.1 200 OK");
+      const res = await call("PROPFIND", "/p.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body:
+          '<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop>' +
+          '<Z:author xmlns:Z="urn:example"/></D:prop></D:propfind>',
+      });
+      const body = await res.text();
+      expect(body).toContain("HTTP/1.1 200 OK");
+      expect(body).not.toContain("HTTP/1.1 404 Not Found");
+      expect(body).toContain('xmlns:x="urn:example"');
+      expect(body).toContain("me &amp; you</x:author>");
+    });
+  });
+
+  it("applies set/remove in document order (litmus propremoveset)", async () => {
+    await withHandler(async ({ call, backend }) => {
+      await call("PUT", "/o.txt", { body: "x" });
+      const NS = "http://example.com/neon/litmus/";
+      const res = await call("PROPPATCH", "/o.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'>" +
+          `<remove><prop><removeset xmlns='${NS}'/></prop></remove>` +
+          `<set><prop><removeset xmlns='${NS}'>x</removeset></prop></set>` +
+          `<set><prop><removeset xmlns='${NS}'>y</removeset></prop></set>` +
+          "</propertyupdate>",
+      });
+      expect(res.status).toBe(207);
+      expect(backend.properties.list("/o.txt")).toEqual([
+        { ns: NS, local: "removeset", valueXml: "y" },
+      ]);
+    });
+  });
+
+  it("applies set-then-remove leaving the property gone (litmus propsetremove)", async () => {
+    await withHandler(async ({ call, backend }) => {
+      await call("PUT", "/o.txt", { body: "x" });
+      const NS = "http://example.com/neon/litmus/";
+      const res = await call("PROPPATCH", "/o.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'>" +
+          `<set><prop><removeset xmlns='${NS}'>x</removeset></prop></set>` +
+          `<remove><prop><removeset xmlns='${NS}'/></prop></remove>` +
+          "</propertyupdate>",
+      });
+      expect(res.status).toBe(207);
+      expect(backend.properties.list("/o.txt")).toEqual([]);
+      // The named PROPFIND must now 404 the property.
+      const find = await call("PROPFIND", "/o.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body:
+          "<propfind xmlns='DAV:'><prop>" +
+          `<removeset xmlns='${NS}'/></prop></propfind>`,
+      });
+      expect(await find.text()).toContain("HTTP/1.1 404 Not Found");
+    });
+  });
+
+  it("round-trips a no-namespace property (litmus propnullns)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/nn.txt", { body: "x" });
+      const patch = await call("PROPPATCH", "/nn.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          '<propertyupdate xmlns="DAV:"><set><prop>' +
+          '<nonamespace xmlns="">randomvalue</nonamespace>' +
+          "</prop></set></propertyupdate>",
+      });
+      expect(patch.status).toBe(207);
+      const find = await call("PROPFIND", "/nn.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: '<propfind xmlns="DAV:"><prop><nonamespace xmlns=""/></prop></propfind>',
+      });
+      const body = await find.text();
+      expect(body).toContain("<nonamespace>randomvalue</nonamespace>");
+      expect(body).not.toContain("HTTP/1.1 404 Not Found");
+    });
+  });
+
+  it("round-trips an astral-plane value (litmus prophighunicode)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/hu.txt", { body: "x" });
+      const NS = "http://example.com/neon/litmus/";
+      await call("PROPPATCH", "/hu.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'><set><prop>" +
+          `<high-unicode xmlns='${NS}'>&#65536;</high-unicode>` +
+          "</prop></set></propertyupdate>",
+      });
+      const find = await call("PROPFIND", "/hu.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body:
+          "<propfind xmlns='DAV:'><prop>" +
+          `<high-unicode xmlns='${NS}'/></prop></propfind>`,
+      });
+      expect(await find.text()).toContain(`\u{10000}</x:high-unicode>`);
+    });
+  });
+
+  it("preserves a namespaced element value (litmus propvalnspace)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/vn.txt", { body: "x" });
+      const NS = "http://example.com/neon/litmus/";
+      await call("PROPPATCH", "/vn.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'><set><prop>" +
+          `<t:valnspace xmlns:t='${NS}'><foo xmlns='http://bar'/></t:valnspace>` +
+          "</prop></set></propertyupdate>",
+      });
+      const find = await call("PROPFIND", "/vn.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body:
+          "<propfind xmlns='DAV:'><prop>" +
+          `<valnspace xmlns='${NS}'/></prop></propfind>`,
+      });
+      expect(await find.text()).toContain('<foo xmlns="http://bar"></foo>');
+    });
+  });
+
+  it("includes dead props in allprop and propname PROPFINDs", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/ap.txt", { body: "x" });
+      await call("PROPPATCH", "/ap.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          '<D:propertyupdate xmlns:D="DAV:" xmlns:Z="urn:example">' +
+          "<D:set><D:prop><Z:flavor>plum</Z:flavor></D:prop></D:set>" +
+          "</D:propertyupdate>",
+      });
+      const allprop = await call("PROPFIND", "/ap.txt", {
+        headers: { depth: "0" },
+      });
+      expect(await allprop.text()).toContain("plum</x:flavor>");
+      const propname = await call("PROPFIND", "/ap.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: '<D:propfind xmlns:D="DAV:"><D:propname/></D:propfind>',
+      });
+      const names = await propname.text();
+      expect(names).toContain("<x:flavor");
+      expect(names).not.toContain("plum");
+    });
+  });
+
+  it("carries dead props across COPY to the destination's PROPFIND", async () => {
+    await withHandler(async ({ call }) => {
+      const NS = "http://example.com/neon/litmus/";
+      await call("PUT", "/src.txt", { body: "x" });
+      await call("PROPPATCH", "/src.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'><set><prop>" +
+          `<foo xmlns='${NS}'>bar</foo></prop></set></propertyupdate>`,
+      });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: "https://pod.example/dst.txt" },
+      });
+      expect([201, 204]).toContain(copy.status);
+      const findBody =
+        "<propfind xmlns='DAV:'><prop>" +
+        `<foo xmlns='${NS}'/></prop></propfind>`;
+      const dst = await call("PROPFIND", "/dst.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: findBody,
+      });
+      expect(await dst.text()).toContain("bar</x:foo>");
+      // COPY leaves the source's properties in place, unlike MOVE.
+      const src = await call("PROPFIND", "/src.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: findBody,
+      });
+      expect(await src.text()).toContain("bar</x:foo>");
+    });
+  });
+
+  it("carries dead props across MOVE and drops them on DELETE", async () => {
+    await withHandler(async ({ call, backend }) => {
+      const NS = "http://example.com/neon/litmus/";
+      await call("PUT", "/prop", { body: "x" });
+      await call("PROPPATCH", "/prop", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'><set><prop>" +
+          `<foo xmlns='${NS}'>bar</foo></prop></set></propertyupdate>`,
+      });
+      const move = await call("MOVE", "/prop", {
+        headers: { destination: "https://pod.example/prop2" },
+      });
+      expect([201, 204]).toContain(move.status);
+      expect(backend.properties.list("/prop")).toEqual([]);
+      expect(backend.properties.list("/prop2")).toEqual([
+        { ns: NS, local: "foo", valueXml: "bar" },
+      ]);
+      await call("DELETE", "/prop2");
+      expect(backend.properties.list("/prop2")).toEqual([]);
     });
   });
 
