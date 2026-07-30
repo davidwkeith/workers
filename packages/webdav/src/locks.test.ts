@@ -293,6 +293,52 @@ describe("LockStore", () => {
       expect(locks.locksOn("/a")).toHaveLength(0);
     });
   });
+
+  // RFC 4918 §6.3 scope pairing (litmus `lock_shared`/`double_sharedlock`):
+  // shared+shared coexist; any pairing involving an exclusive lock conflicts.
+  it("lets shared locks coexist and conflicts every exclusive pairing", async () => {
+    await withSql((sql) => {
+      const clock = { t: 1000 };
+      const locks = new LockStore(sql, policy, "/", () => clock.t);
+      const base = {
+        path: "/s",
+        depth: "0",
+        ownerHref: "",
+        webid: "w",
+        timeoutSeconds: 600,
+      } as const;
+
+      const first = locks.acquire({ ...base, scope: "shared" });
+      expect(first.ok).toBe(true);
+      const second = locks.acquire({ ...base, scope: "shared" });
+      expect(second.ok).toBe(true);
+      if (!first.ok || !second.ok) return;
+      expect(second.lock.token).not.toBe(first.lock.token);
+      expect(locks.locksOn("/s")).toHaveLength(2);
+
+      // exclusive-over-shared conflicts.
+      const exclusive = locks.acquire({ ...base, scope: "exclusive" });
+      expect(exclusive.ok).toBe(false);
+
+      // Any one shared token satisfies the group; no token blocks.
+      expect(locks.blockingLock("/s", [second.lock.token])).toBeNull();
+      expect(locks.blockingLock("/s", [])).not.toBeNull();
+
+      // shared-over-exclusive conflicts too.
+      const held = locks.acquire({
+        ...base,
+        path: "/x",
+        scope: "exclusive",
+      });
+      expect(held.ok).toBe(true);
+      const sharedOverExclusive = locks.acquire({
+        ...base,
+        path: "/x",
+        scope: "shared",
+      });
+      expect(sharedOverExclusive.ok).toBe(false);
+    });
+  });
 });
 
 describe("Timeout header parsing", () => {
