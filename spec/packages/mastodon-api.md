@@ -122,6 +122,13 @@ That extension is therefore **opt-in and owner-scoped**, not on by default:
   `POST <actor>/__client/publish` DO route that shares the outbox-write path
   with the AS2 `/publish` endpoint and returns the stored row's snowflake
   coordinates.
+- **`follow_requests` (#473):** `GET /api/v1/follow_requests` (read, not
+  `allowWrites`-gated — matches the other read routes) lists pending
+  followers as synthesized remote `Account`s. `POST
+  /api/v1/follow_requests/:id/authorize` and `.../reject` require the same
+  `allowWrites` + `write`/`write:follows` scope gate as `POST
+  /api/v1/statuses`, and return a `Relationship` entity. Backed by
+  `MastodonBackend.followRequests?`/`.respondToFollowRequest?`.
 
 ## Entity fields emitted (phase 1)
 
