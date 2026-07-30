@@ -38,16 +38,25 @@ export async function verifyPkceS256(
   return base64Url(new Uint8Array(digest)) === challenge;
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(Math.floor(hex.length / 2));
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
 /**
- * Constant-time comparison for equal-length hex digests, so secret checks
- * don't leak match length. Unequal lengths return `false` immediately —
- * digest lengths are public.
+ * Constant-time comparison of two hex digests via the Workers runtime's
+ * `crypto.subtle.timingSafeEqual`. Do not short-circuit on length — that
+ * itself leaks length via timing; compare the value against itself instead
+ * when lengths differ, per Cloudflare's documented safe pattern.
  */
 export function timingSafeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+  const bytesA = hexToBytes(a);
+  const bytesB = hexToBytes(b);
+  const lengthsMatch = bytesA.byteLength === bytesB.byteLength;
+  return lengthsMatch
+    ? crypto.subtle.timingSafeEqual(bytesA, bytesB)
+    : !crypto.subtle.timingSafeEqual(bytesA, bytesA);
 }

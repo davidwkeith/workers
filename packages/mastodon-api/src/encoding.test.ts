@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   randomToken,
@@ -31,5 +31,12 @@ describe("encoding", () => {
     expect(timingSafeEqualHex("abcd", "abcd")).toBe(true);
     expect(timingSafeEqualHex("abcd", "abce")).toBe(false);
     expect(timingSafeEqualHex("abcd", "abc")).toBe(false);
+  });
+
+  it("uses crypto.subtle.timingSafeEqual under the hood", () => {
+    const spy = vi.spyOn(crypto.subtle, "timingSafeEqual");
+    timingSafeEqualHex("ab".repeat(32), "ab".repeat(32));
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
