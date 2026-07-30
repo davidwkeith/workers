@@ -21,10 +21,12 @@
 ## Task 1: `#asOutboxActivity` — recognize `Accept` and `Remove` as real activities
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`#asOutboxActivity`, currently ~line 1642-1696)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: from this task on, `#publish` receives an owner-supplied `{type: "Accept", ...}` or `{type: "Remove", ...}` unchanged (actor/id normalized, not wrapped in a `Create`). Every later task in this plan depends on this.
 
@@ -77,27 +79,27 @@ Expected: FAIL — the response bodies come back `{type: "Create", ...}` (both g
 In `packages/activitypub/src/object.ts`, in `#asOutboxActivity`, extend the `isActivity` list:
 
 ```ts
-    const isActivity =
-      typeof input.type === "string" &&
-      [
-        "Create",
-        "Update",
-        "Delete",
-        "Announce",
-        "Like",
-        "Dislike",
-        "Follow",
-        "Undo",
-        // Follower control (#447): these are activities in their own right —
-        // wrapping one in a `Create` would publish "the owner created a Block
-        // object" instead of performing the block.
-        "Block",
-        "Reject",
-        // Owner admin (#473): confirm a pending follower / Group moderation —
-        // same reasoning as Block/Reject above.
-        "Accept",
-        "Remove",
-      ].includes(input.type);
+const isActivity =
+  typeof input.type === "string" &&
+  [
+    "Create",
+    "Update",
+    "Delete",
+    "Announce",
+    "Like",
+    "Dislike",
+    "Follow",
+    "Undo",
+    // Follower control (#447): these are activities in their own right —
+    // wrapping one in a `Create` would publish "the owner created a Block
+    // object" instead of performing the block.
+    "Block",
+    "Reject",
+    // Owner admin (#473): confirm a pending follower / Group moderation —
+    // same reasoning as Block/Reject above.
+    "Accept",
+    "Remove",
+  ].includes(input.type);
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -117,10 +119,12 @@ git commit -m "fix(activitypub): recognize owner Accept/Remove as real outbox ac
 ## Task 2: `followers.accepted_at` column, with one-time migration backfill
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (constructor / `#ensureColumn`, currently ~line 318-348)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `followers.accepted_at INTEGER` (nullable). `#ensureColumn` now returns `boolean` (whether it just added the column) — every existing call site ignores the return value already, so this is source-compatible. Task 3 and Task 4 write to this column; Task 6 reads it.
 
@@ -217,23 +221,23 @@ In `packages/activitypub/src/object.ts`, change `#ensureColumn`'s signature and 
 Then, at the end of the existing migration block in the constructor (after the `this.#ensureColumn("following", "shared_inbox", "TEXT");` line):
 
 ```ts
-    this.#ensureColumn("following", "shared_inbox", "TEXT");
-    // Owner-admin follow confirmation (#473): NULL means still awaiting the
-    // owner's `Accept`; non-NULL (the timestamp) means confirmed — either
-    // auto-accepted at insert time (#onFollow) or owner-triggered later
-    // (#routeFollowerControl's Accept branch). Every pre-existing row
-    // predates this column and has no other stored signal of whether it was
-    // genuinely still pending at migration time; backfilling all of them to
-    // "already settled" (their `added_at`) avoids surfacing years of
-    // ordinary auto-accepted followers as false "pending" requests. This
-    // must run only the one time the column is actually added — never on
-    // every cold start, or it would silently re-confirm every currently-
-    // pending follower on every restart.
-    if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
-      this.#sql.exec(
-        `UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`,
-      );
-    }
+this.#ensureColumn("following", "shared_inbox", "TEXT");
+// Owner-admin follow confirmation (#473): NULL means still awaiting the
+// owner's `Accept`; non-NULL (the timestamp) means confirmed — either
+// auto-accepted at insert time (#onFollow) or owner-triggered later
+// (#routeFollowerControl's Accept branch). Every pre-existing row
+// predates this column and has no other stored signal of whether it was
+// genuinely still pending at migration time; backfilling all of them to
+// "already settled" (their `added_at`) avoids surfacing years of
+// ordinary auto-accepted followers as false "pending" requests. This
+// must run only the one time the column is actually added — never on
+// every cold start, or it would silently re-confirm every currently-
+// pending follower on every restart.
+if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
+  this.#sql.exec(
+    `UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`,
+  );
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -258,10 +262,12 @@ git commit -m "feat(activitypub): add followers.accepted_at with one-time migrat
 ## Task 3: `#onFollow` sets `accepted_at`
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`#onFollow`, currently ~line 662-727)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `followers.accepted_at` column (Task 2).
 - Produces: a new follower row has `accepted_at = <insert time>` when auto-accepted (`!manuallyApprovesFollowers`), `accepted_at = NULL` when awaiting manual approval. Task 6's `__client/follow_requests` list depends on this being correct.
 
@@ -358,39 +364,38 @@ Expected: FAIL — `auto.accepted_at` is `null` (column is never written by `#on
 In `packages/activitypub/src/object.ts`, in `#onFollow`, change the insert:
 
 ```ts
-    // Record the follower first (inbox filled in on the auto-accept path), so a
-    // manually-approved actor never triggers an outbound actor fetch here.
-    const now = Date.now();
-    const alreadyFollowing =
-      this.#sql
-        .exec(`SELECT 1 FROM followers WHERE actor = ?`, follower)
-        .toArray().length > 0;
-    // The `Follow`'s own IRI is kept so a later owner `Reject` can name the
-    // activity it rejects (#447). Only a real `Follow` contributes one — the
-    // FEP-1b12 membership `Join` synonym routes here too, and labelling its id
-    // as a `Follow` id would misname it on the wire. A re-`Follow` refreshes a
-    // NULL id without disturbing `added_at` or an already-resolved `inbox`.
-    const followId =
-      activity.type === "Follow" && typeof activity.id === "string"
-        ? activity.id
-        : null;
-    // Owner-admin follow confirmation (#473): auto-accept sets accepted_at
-    // immediately; manual approval leaves it NULL until the owner's later
-    // Accept action (#routeFollowerControl). A re-Follow must never un-set an
-    // already-recorded acceptance, hence the COALESCE in ON CONFLICT below —
-    // same "refresh without disturbing settled state" shape as follow_id's.
-    const acceptedAt = config.manuallyApprovesFollowers ? null : now;
-    this.#sql.exec(
-      `INSERT INTO followers (actor, inbox, added_at, follow_id, accepted_at)
+// Record the follower first (inbox filled in on the auto-accept path), so a
+// manually-approved actor never triggers an outbound actor fetch here.
+const now = Date.now();
+const alreadyFollowing =
+  this.#sql.exec(`SELECT 1 FROM followers WHERE actor = ?`, follower).toArray()
+    .length > 0;
+// The `Follow`'s own IRI is kept so a later owner `Reject` can name the
+// activity it rejects (#447). Only a real `Follow` contributes one — the
+// FEP-1b12 membership `Join` synonym routes here too, and labelling its id
+// as a `Follow` id would misname it on the wire. A re-`Follow` refreshes a
+// NULL id without disturbing `added_at` or an already-resolved `inbox`.
+const followId =
+  activity.type === "Follow" && typeof activity.id === "string"
+    ? activity.id
+    : null;
+// Owner-admin follow confirmation (#473): auto-accept sets accepted_at
+// immediately; manual approval leaves it NULL until the owner's later
+// Accept action (#routeFollowerControl). A re-Follow must never un-set an
+// already-recorded acceptance, hence the COALESCE in ON CONFLICT below —
+// same "refresh without disturbing settled state" shape as follow_id's.
+const acceptedAt = config.manuallyApprovesFollowers ? null : now;
+this.#sql.exec(
+  `INSERT INTO followers (actor, inbox, added_at, follow_id, accepted_at)
          VALUES (?, NULL, ?, ?, ?)
          ON CONFLICT(actor) DO UPDATE
            SET follow_id = COALESCE(excluded.follow_id, followers.follow_id),
                accepted_at = COALESCE(followers.accepted_at, excluded.accepted_at)`,
-      follower,
-      now,
-      followId,
-      acceptedAt,
-    );
+  follower,
+  now,
+  followId,
+  acceptedAt,
+);
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -415,10 +420,12 @@ git commit -m "feat(activitypub): record follower accepted_at on auto-accept vs 
 ## Task 4: Owner `Accept` — confirm a pending follower
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`isFollowerControlActivity` ~line 136, `#rejectTarget` ~line 1465, `#routeFollowerControl` ~line 1361, `#publish` calls `isFollowerControlActivity`/`#routeFollowerControl` ~line 1256)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `#singleFollowTarget` (renamed from `#rejectTarget`, same signature: `(activity: Record<string, JsonValue>) => string | undefined`); `followers.accepted_at` (Tasks 2-3).
 - Produces: an owner `POST <actor>/outbox` with `{type: "Accept", object: <follower-iri-or-follow-id-or-embedded-Follow>}` delivers a canonical `Accept(Follow)` to that follower's inbox alone and sets `accepted_at`. This is the exact code path Task 10 (mastodon-api adapter) reuses for "authorize".
 
@@ -693,10 +700,12 @@ git commit -m "feat(activitypub): owner Accept confirms a pending follower via P
 ## Task 5: Owner `Remove` — ban a member / un-announce a post
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`#onModerationRemove` ~line 886, `#removeAnnouncedPost` ~line 919, `#publish` ~line 1225)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `objectId`, `objectType` (existing, from `as2.ts`).
 - Produces: `#applyModerationRemove(activity, config, deliver)` — the shared core both the inbound moderator path and the new owner path call. `#removeAnnouncedPost` gains a `deliver: boolean = true` parameter.
 
@@ -731,7 +740,10 @@ describe("owner Remove: Group moderation (#473)", () => {
       expect(res.status).toBe(202);
       expect(counts(state, "followers")).toBe(0);
       const banned = state.storage.sql
-        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM banned WHERE actor = ?`, REMOTE)
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM banned WHERE actor = ?`,
+          REMOTE,
+        )
         .one().n;
       expect(banned).toBe(1);
     });
@@ -1064,10 +1076,12 @@ git commit -m "feat(activitypub): owner Remove bans a member or un-announces a p
 ## Task 6: Internal DO route `__client/follow_requests`
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`#route` ~line 374-416, new `#listFollowRequests` method)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: `followers.accepted_at` (Tasks 2-3), `json()` helper (existing).
 - Produces: `GET <actor>/__client/follow_requests` (internal-header-gated) → `{items: [{actor, added_at}], total}`. Task 10 (mastodon-api adapter) consumes this.
 
@@ -1141,20 +1155,20 @@ Expected: FAIL — the route doesn't exist yet, so both requests fall through to
 In `packages/activitypub/src/object.ts`, in `#route` (~line 411-416), add after the existing `__following` block:
 
 ```ts
-    if (path === `${pathOf(iris.id)}/__following`) {
-      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
-        return text(404, "not found");
-      }
-      return this.#listFollowing(request);
-    }
-    // Owner-only pending-follower listing (internal, like `__following`):
-    // backs @dwk/mastodon-api's GET /api/v1/follow_requests (#473).
-    if (path === `${pathOf(iris.id)}/__client/follow_requests`) {
-      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
-        return text(404, "not found");
-      }
-      return this.#listFollowRequests();
-    }
+if (path === `${pathOf(iris.id)}/__following`) {
+  if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+    return text(404, "not found");
+  }
+  return this.#listFollowing(request);
+}
+// Owner-only pending-follower listing (internal, like `__following`):
+// backs @dwk/mastodon-api's GET /api/v1/follow_requests (#473).
+if (path === `${pathOf(iris.id)}/__client/follow_requests`) {
+  if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+    return text(404, "not found");
+  }
+  return this.#listFollowRequests();
+}
 ```
 
 Add the new method near `#listBlocked` (same file):
@@ -1200,10 +1214,12 @@ git commit -m "feat(activitypub): internal __client/follow_requests route lists 
 ## Task 7: `@dwk/mastodon-api` — `MastodonBackend` gains `followRequests`/`respondToFollowRequest`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/backend.ts`
 - Test: none (a plain-data interface addition; exercised by Tasks 9 and 11's tests)
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `BackendFollowRequest {actor, addedAt}`; `MastodonBackend.followRequests?(): Promise<readonly BackendFollowRequest[]>`; `MastodonBackend.respondToFollowRequest?(actor: string, action: "authorize" | "reject"): Promise<void>`. Task 9 consumes both; Task 10 implements both.
 
@@ -1258,10 +1274,12 @@ git commit -m "feat(mastodon-api): add followRequests/respondToFollowRequest to 
 ## Task 8: `@dwk/mastodon-api` — `relationshipEntity`
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/entities.ts`
 - Test: `packages/mastodon-api/src/entities.test.ts`
 
 **Interfaces:**
+
 - Consumes: `encodeRemoteAccountId` (existing, same file).
 - Produces: `relationshipEntity(actorIri: string, opts: {followedBy: boolean}): Record<string, unknown>`. Task 9 consumes this.
 
@@ -1348,6 +1366,7 @@ git commit -m "feat(mastodon-api): add relationshipEntity for the follow_request
 ## Task 9: `@dwk/mastodon-api` — `follow_requests` route handlers, wired into the router
 
 **Files:**
+
 - Create: `packages/mastodon-api/src/follow-requests.ts`
 - Create: `packages/mastodon-api/src/follow-requests.test.ts`
 - Modify: `packages/mastodon-api/src/stubs.ts` (remove the now-superseded `follow_requests` stub entry)
@@ -1355,6 +1374,7 @@ git commit -m "feat(mastodon-api): add relationshipEntity for the follow_request
 - Test: `packages/mastodon-api/src/stubs.test.ts` (update if it enumerates `STUB_ROUTES` by path/count)
 
 **Interfaces:**
+
 - Consumes: `MastodonBackend.followRequests?`/`.respondToFollowRequest?` (Task 7), `relationshipEntity` (Task 8), `remoteAccountEntity`/`decodeRemoteAccountId` (existing `entities.ts`), `authenticateBearer`/`tokenHasScope` (existing `auth.ts`), `accountRequired`/`insufficientScope`/`invalidToken`/`recordNotFound` (existing `errors.ts`), `RouteContext` (existing `handler.ts`).
 - Produces: `handleFollowRequests(ctx: RouteContext): Promise<Response>`; `handleFollowRequestRespond(ctx: RouteContext, id: string, action: "authorize" | "reject"): Promise<Response>`, both live-routed. Task 10 (adapter) is what makes these return real data instead of test-double `MastodonBackend`s.
 
@@ -1371,9 +1391,13 @@ import { encodeRemoteAccountId } from "./entities.js";
 
 const REMOTE = "https://remote.example/users/alice";
 
-function readBackend(rows: readonly BackendFollowRequest[] = []): MastodonBackend {
+function readBackend(
+  rows: readonly BackendFollowRequest[] = [],
+): MastodonBackend {
   return {
-    account: async () => ({ counts: { followers: 0, following: 0, statuses: 0 } }),
+    account: async () => ({
+      counts: { followers: 0, following: 0, statuses: 0 },
+    }),
     timeline: async () => ({ entries: [] }),
     notifications: async () => ({ entries: [] }),
     entry: async () => null,
@@ -1381,7 +1405,9 @@ function readBackend(rows: readonly BackendFollowRequest[] = []): MastodonBacken
   };
 }
 
-function writeBackend(rows: readonly BackendFollowRequest[] = []): MastodonBackend & {
+function writeBackend(
+  rows: readonly BackendFollowRequest[] = [],
+): MastodonBackend & {
   readonly responses: { actor: string; action: "authorize" | "reject" }[];
 } {
   const responses: { actor: string; action: "authorize" | "reject" }[] = [];
@@ -1402,7 +1428,9 @@ async function tokenWithScopes(scopes: string): Promise<string> {
   authorize.searchParams.set("redirect_uri", "app://oauth-callback");
   authorize.searchParams.set("response_type", "code");
   const redirect = await api()(new Request(authorize.toString()));
-  const code = new URL(redirect.headers.get("location") ?? "").searchParams.get("code");
+  const code = new URL(redirect.headers.get("location") ?? "").searchParams.get(
+    "code",
+  );
   const res = await api()(
     new Request("https://owner.example/oauth/token", {
       method: "POST",
@@ -1706,10 +1734,12 @@ git commit -m "feat(mastodon-api): route follow_requests list/authorize/reject, 
 ## Task 10: `@dwk/activitypub` adapter — implement `followRequests`/`respondToFollowRequest`
 
 **Files:**
+
 - Modify: `packages/activitypub/src/mastodon-api.ts` (`buildMastodonBackend`)
 - Test: `packages/activitypub/src/mastodon-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `__client/follow_requests` (Task 6), the owner-`Accept`/`Reject`-via-`/outbox` path (Task 4 and the pre-existing #447 `Reject`), `BackendFollowRequest`/`MastodonBackend` (Task 7).
 - Produces: a real, working `MastodonBackend` for `@dwk/activitypub` actors — the last piece connecting Task 9's routes to real data.
 
@@ -1903,6 +1933,7 @@ git commit -m "feat(activitypub): implement MastodonBackend.followRequests/respo
 ## Task 11: Update specs and package `CLAUDE.md` files
 
 **Files:**
+
 - Modify: `spec/packages/activitypub.md`
 - Modify: `spec/packages/mastodon-api.md`
 - Modify: `packages/activitypub/CLAUDE.md`
@@ -1934,9 +1965,9 @@ In the "Write surface (opt-in; `config.allowWrites`)" section, add after the exi
 - **`follow_requests` (#473):** `GET /api/v1/follow_requests` (read, not
   `allowWrites`-gated — matches the other read routes) lists pending
   followers as synthesized remote `Account`s. `POST
-  /api/v1/follow_requests/:id/authorize` and `.../reject` require the same
+/api/v1/follow_requests/:id/authorize` and `.../reject` require the same
   `allowWrites` + `write`/`write:follows` scope gate as `POST
-  /api/v1/statuses`, and return a `Relationship` entity. Backed by
+/api/v1/statuses`, and return a `Relationship` entity. Backed by
   `MastodonBackend.followRequests?`/`.respondToFollowRequest?`.
 ```
 
@@ -1945,10 +1976,10 @@ In the "Write surface (opt-in; `config.allowWrites`)" section, add after the exi
 In the "Owner follower control (#447)" bullet, append a sentence:
 
 ```markdown
-  Owner `Accept` (confirm a pending follower) and `Group`-moderation `Remove`
-  (ban a member / un-announce a post) follow the identical `POST
+Owner `Accept` (confirm a pending follower) and `Group`-moderation `Remove`
+(ban a member / un-announce a post) follow the identical `POST
   <actor>/outbox` pattern (#473) — see `object.ts` `#routeFollowerControl`'s
-  `Accept` branch and `#applyModerationRemove`.
+`Accept` branch and `#applyModerationRemove`.
 ```
 
 - [ ] **Step 4: Update `packages/mastodon-api/CLAUDE.md`**
@@ -1984,6 +2015,7 @@ git commit -m "docs(activitypub,mastodon-api): document owner Accept/Remove and 
 ## Task 12: Changesets
 
 **Files:**
+
 - Create: `.changeset/<auto-generated-name>.md` (one changeset covering both packages — `pnpm changeset` prompts for package selection and writes the file; do not hand-author it)
 
 **Interfaces:** none.
@@ -1993,6 +2025,7 @@ git commit -m "docs(activitypub,mastodon-api): document owner Accept/Remove and 
 Run: `pnpm changeset`
 
 When prompted:
+
 - Select both `@dwk/activitypub` and `@dwk/mastodon-api`.
 - Bump type: `patch` for both (this repo is in Changesets pre mode — `0.1.0-beta.N` prereleases — per root `CLAUDE.md`; a `patch` bump is correct for an additive, backward-compatible feature under a pre-1.0 prerelease line, matching how #447/#376's follow-on features were released. If unsure, check `.changeset/pre.json` and the most recent merged changeset under `.changeset/` for the convention this repo actually uses before choosing.).
 - Summary text (edit the generated file directly if the interactive prompt's editor is inconvenient):

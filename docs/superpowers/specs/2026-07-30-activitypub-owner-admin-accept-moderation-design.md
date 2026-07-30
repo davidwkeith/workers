@@ -12,7 +12,7 @@ Anglesite-only via `/outbox`).
 
 ## Problem
 
-Capability 4 (hosting `Group` actors, #376) shipped the *federated protocol*
+Capability 4 (hosting `Group` actors, #376) shipped the _federated protocol_
 side of membership approval and moderation — `manuallyApprovesFollowers`
 config, and `Remove`-based moderation validated against an HTTP-signature-
 verified `moderators` actor-IRI allowlist (`#onModerationRemove`,
@@ -40,7 +40,7 @@ to trigger either one from outside the protocol.
   `Remove`.** Both still route through the existing `POST <actor>/outbox`
   seam, already gated by the bearer `publishToken` in `handler.ts`. No
   changes to `handler.ts`, or `config.ts`'s `INTERNAL_HEADERS`, or
-  `mcp-tools.ts`. (`@dwk/mastodon-api` *does* gain routes — see §3 — but
+  `mcp-tools.ts`. (`@dwk/mastodon-api` _does_ gain routes — see §3 — but
   those live in that package, reusing the `/outbox` seam internally rather
   than duplicating its logic.)
 - **`Group` moderation through `@dwk/mastodon-api`.** No off-the-shelf client
@@ -86,8 +86,8 @@ IRI, the stored `Follow` id, or an embedded `{type: "Follow", actor: "<iri>"}`.
   `#onFollow`'s `INSERT INTO followers` sets `accepted_at` to `Date.now()`
   when `!config.manuallyApprovesFollowers`, else `NULL`; its `ON CONFLICT`
   clause becomes `SET follow_id = COALESCE(excluded.follow_id,
-  followers.follow_id), accepted_at = COALESCE(followers.accepted_at,
-  excluded.accepted_at)` — a re-`Follow` never un-sets an already-recorded
+followers.follow_id), accepted_at = COALESCE(followers.accepted_at,
+excluded.accepted_at)` — a re-`Follow` never un-sets an already-recorded
   acceptance, matching the existing `follow_id` COALESCE's "refresh without
   disturbing settled state" pattern immediately above it.
 - **Rename `#rejectTarget` → `#singleFollowTarget`**: its target-resolution
@@ -100,12 +100,12 @@ IRI, the stored `Follow` id, or an embedded `{type: "Follow", actor: "<iri>"}`.
   "follower-control"), structured like the `Reject` branch:
   1. Resolve the follower via `#singleFollowTarget`.
   2. **Require an existing `followers` row** for that actor (`SELECT
-     follow_id FROM followers WHERE actor = ?`) — unlike `Reject`'s looser
+follow_id FROM followers WHERE actor = ?`) — unlike `Reject`'s looser
      drift-repair fallback, confirming a follow that was never recorded
      doesn't make sense. No row ⇒ no-op (return `false`), matching the
      "unroutable → dropped" convention the other branches already use.
   3. `UPDATE followers SET accepted_at = COALESCE(accepted_at, ?) WHERE
-     actor = ?` (now, follower) — applied unconditionally once a row is
+actor = ?` (now, follower) — applied unconditionally once a row is
      found, same as every other branch's local-state-always-applies rule
      (independent of `deliver`/`?skipDelivery=1`, which only gates the
      outbound notification below).
@@ -134,9 +134,9 @@ names the member or the `Announce` id.
 { "type": "Remove", "object": "<announce-id>", "target": "<iris.outbox>" }
 ```
 
-- **Extract the shared core.** `#onModerationRemove`'s body *after* its
+- **Extract the shared core.** `#onModerationRemove`'s body _after_ its
   authorization check becomes `#applyModerationRemove(activity, config,
-  deliver: boolean)`:
+deliver: boolean)`:
   ```ts
   async #applyModerationRemove(
     activity: ActivityObject,
@@ -167,7 +167,7 @@ names the member or the `Announce` id.
 - **New branch in `#publish()`**, placed immediately after the existing
   `isFollowerControlActivity` check and before the outbox `INSERT` — same
   position in the function, same reason (never stored to the publicly-served
-  outbox, never broadcast). `Remove` is *not* added to
+  outbox, never broadcast). `Remove` is _not_ added to
   `isFollowerControlActivity` itself — its delivery model differs: ban has
   no delivery at all, and un-announce's fan-out is a broadcast to the whole
   membership, not a single target:
@@ -204,7 +204,7 @@ adds the two write routes, following the exact `config.allowWrites` +
 /api/v1/statuses` (spec/packages/mastodon-api.md § Write surface).
 
 **Migration backfill (required for correctness).** `#ensureColumn` currently
-returns `void`; it needs to report whether it *just* added the column, so
+returns `void`; it needs to report whether it _just_ added the column, so
 the DO can backfill existing rows exactly once:
 
 ```ts
@@ -215,6 +215,7 @@ the DO can backfill existing rows exactly once:
   return true;
 }
 ```
+
 ```ts
 if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
   // Every pre-existing row predates this column and has no other stored
@@ -225,9 +226,12 @@ if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
   // awaiting manual approval at the exact moment of upgrade reads as
   // already-accepted afterward — a one-time migration artifact, not an
   // ongoing behavior change.
-  this.#sql.exec(`UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`);
+  this.#sql.exec(
+    `UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`,
+  );
 }
 ```
+
 This must run only inside the `if` — i.e., only the one time the column is
 actually added — never on every constructor call, or it would silently
 re-confirm every currently-pending follower on every DO cold start.
@@ -235,6 +239,7 @@ re-confirm every currently-pending follower on every DO cold start.
 **New internal DO route** (`__client/follow_requests`, gated by
 `INTERNAL_HEADERS.internal`, matching `__following`/`__inbox`): unpaged, like
 `#listBlocked`:
+
 ```ts
 #listFollowRequests(): Response {
   const items = this.#sql
@@ -248,6 +253,7 @@ re-confirm every currently-pending follower on every DO cold start.
 
 **`MastodonBackend` gains two members** (`packages/mastodon-api/src/backend.ts`),
 both optional (degrade gracefully, matching `publishStatus?`/`ownStatuses?`):
+
 ```ts
 export interface BackendFollowRequest {
   readonly actor: string;
@@ -262,6 +268,7 @@ respondToFollowRequest?(actor: string, action: "authorize" | "reject"): Promise<
 
 **`@dwk/activitypub`'s adapter** (`packages/activitypub/src/mastodon-api.ts`,
 `buildMastodonBackend`) implements them:
+
 ```ts
 async followRequests() {
   const response = await stub().fetch(
@@ -290,6 +297,7 @@ async respondToFollowRequest(actor, action) {
   }
 },
 ```
+
 `respondToFollowRequest` is the key reuse: it POSTs directly to the DO's
 `#publish` route (`config.iris.outbox`, internal fetch — the same
 "trusted-caller-sets-the-internal-header-directly" pattern
@@ -300,6 +308,7 @@ same one `POST <actor>/outbox` already exposes to Anglesite. `"authorize"`
 lands on §1's new `Accept` branch. One code path, two front doors.
 
 **`@dwk/mastodon-api` route layer:**
+
 - `entities.ts` gains `relationshipEntity(actorIri, { followedBy })` — a
   `Relationship` entity (`id` via the existing `encodeRemoteAccountId`,
   `following: false`, `followed_by`, `requested: false`, the rest of
@@ -308,14 +317,14 @@ lands on §1's new `Accept` branch. One code path, two front doors.
 - `handleFollowRequests` (new, `GET /api/v1/follow_requests`): authenticate +
   require an account-bound token (matching `handleNotifications`'s pattern —
   no scope check; reads aren't scope-gated in this package today). `if
-  (!ctx.config.backend?.followRequests) return Response.json([])`. Otherwise
+(!ctx.config.backend?.followRequests) return Response.json([])`. Otherwise
   map each `{actor, addedAt}` through the existing `remoteAccountEntity`
   (optionally enriched via `backend.actorProfile?.(actor)`, same as other
   read routes) and return the array — no `Link` header (unpaged, see
   Non-goals).
 - `handleFollowRequestRespond` (new, shared by both write routes):
   `if (!ctx.config.allowWrites || !ctx.config.backend?.respondToFollowRequest)
-  return recordNotFound()`; authenticate, require an account-bound token,
+return recordNotFound()`; authenticate, require an account-bound token,
   `tokenHasScope(token.scope, "write:follows")` (Mastodon's real granular
   scope for this — `insufficientScope()` otherwise, matching
   `statuses-write.ts`'s exact structure); `decodeRemoteAccountId(id)` — `404`
@@ -323,9 +332,9 @@ lands on §1's new `Accept` branch. One code path, two front doors.
   `relationshipEntity(actorIri, { followedBy: action === "authorize" })`.
 - `handler.ts`: remove `/api/v1/follow_requests` from `stubs.ts`'s
   `STUB_ROUTES` (a real route now shadows it), add `["GET
-  /api/v1/follow_requests", handleFollowRequests]` to `ROUTES`, and two
+/api/v1/follow_requests", handleFollowRequests]` to `ROUTES`, and two
   `DYNAMIC_ROUTES` entries matching `/^\/api\/v1\/follow_requests\/([^/]+)\/
-  (authorize|reject)$/`-shaped patterns (mirroring the existing
+(authorize|reject)$/`-shaped patterns (mirroring the existing
   `/^\/api\/v1\/statuses\/([^/]+)$/` dynamic-route convention) dispatching to
   `handleFollowRequestRespond(ctx, id, "authorize" | "reject")`.
 
@@ -337,7 +346,18 @@ overwritten) or "a bare object" (wrapped in a synthetic `Create`). Its
 `isActivity` list currently reads:
 
 ```ts
-["Create", "Update", "Delete", "Announce", "Like", "Dislike", "Follow", "Undo", "Block", "Reject"]
+[
+  "Create",
+  "Update",
+  "Delete",
+  "Announce",
+  "Like",
+  "Dislike",
+  "Follow",
+  "Undo",
+  "Block",
+  "Reject",
+];
 ```
 
 `"Accept"` and `"Remove"` are missing. Without adding them, an owner-published
@@ -469,7 +489,7 @@ Extend `packages/activitypub/src/object.test.ts` alongside the existing
   `#ensureColumn` returns `true`) with pre-existing `followers` rows
   (inserted directly via SQL, predating the column, as existing migration
   tests in this file already do for other additive columns) ends up with
-  every row's `accepted_at = added_at`, not `NULL`. A *second* construction
+  every row's `accepted_at = added_at`, not `NULL`. A _second_ construction
   of the same DO (column already present) leaves a genuinely-`NULL` row
   `NULL` — the critical regression to guard: the backfill must not re-run.
 - `#onFollow`: `accepted_at` is set at insert time under auto-accept
@@ -480,20 +500,20 @@ Extend `packages/mastodon-api/src/*.test.ts`:
 
 - `entities.test.ts`: `relationshipEntity` shape, both `followedBy` values.
 - `handler.test.ts` / a new `follow-requests.test.ts`: `GET
-  /api/v1/follow_requests` maps backend rows through `remoteAccountEntity`;
+/api/v1/follow_requests` maps backend rows through `remoteAccountEntity`;
   `200 []` with no backend method. Both write routes: `404` with
   `allowWrites` off, `404` with no backend method, `403 insufficient_scope`
   with a `read`-only token, `404` on an undecodable id, `200` with the
   right `relationshipEntity` and the backend method called with the right
   `(actorIri, action)` on success. Route-table wiring: `/api/v1/
-  follow_requests` no longer resolves through `stubRouteEntries()`.
+follow_requests` no longer resolves through `stubRouteEntries()`.
 
 Extend `packages/activitypub/src/mastodon-api.test.ts` (the adapter):
 
 - `followRequests()` maps `__client/follow_requests`'s `{items}` shape to
   `BackendFollowRequest[]`; empty/failed response → `[]`.
 - `respondToFollowRequest(actor, "authorize")` POSTs `{type: "Accept",
-  object: actor}` to `config.iris.outbox` with `INTERNAL_HEADERS.publish`
+object: actor}` to `config.iris.outbox` with `INTERNAL_HEADERS.publish`
   set; `"reject"` POSTs `{type: "Reject", ...}`; a non-`ok` DO response
   throws.
 
