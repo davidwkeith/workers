@@ -24,6 +24,8 @@ const harness = env as unknown as SolidPodEnv & {
 
 const BASE = "https://pod.test";
 const OWNER = "https://owner.example/profile#me";
+/** A non-owner WebID, granted read only where an ACL says so. */
+const FRIEND = "https://friend.example/profile#me";
 const TURTLE = "text/turtle";
 const OCTET = "application/octet-stream";
 
@@ -446,7 +448,15 @@ _:p a solid:InsertDeletePatch ;
 });
 
 describe("@dwk/solid-pod DO WebSocket notification WAC filtering", () => {
-  /** Owner-only ACL over `/private/`, seeded through the DO's own door. */
+  /**
+   * A non-public ACL over `/private/`: full control for the owner, and an
+   * explicit `acl:Read` grant for one named non-owner. The second block is what
+   * forces `#allowedToRead` through the real `authorize()`/WAC evaluation —
+   * the owner is short-circuited by `#decide`'s owner bypass before WAC runs,
+   * and the anonymous case is decided by default-deny, so without a granted
+   * non-owner neither of those paths would catch an `#allowedToRead` that
+   * denied every non-owner outright.
+   */
   async function seedPrivateAcl(
     stub: DurableObjectStub<SolidPodObject>,
   ): Promise<void> {
@@ -461,6 +471,11 @@ describe("@dwk/solid-pod DO WebSocket notification WAC filtering", () => {
           acl:accessTo <./>;
           acl:default <./>;
           acl:mode acl:Read, acl:Write, acl:Control.
+        <#friend> a acl:Authorization;
+          acl:agent <${FRIEND}>;
+          acl:accessTo <./>;
+          acl:default <./>;
+          acl:mode acl:Read.
       `,
     });
     expect(res.status).toBe(201);
@@ -529,6 +544,32 @@ describe("@dwk/solid-pod DO WebSocket notification WAC filtering", () => {
       type: "Create",
       object: `${BASE}/private/secret`,
     });
+  });
+
+  it("broadcasts to a WAC-granted non-owner but not to an ungranted one", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    // `friend` holds an explicit acl:Read grant; `stranger` is authenticated but
+    // appears in no ACL, so only the real WAC evaluation can tell them apart —
+    // the owner bypass never fires for either.
+    const friend = await subscribe(stub, FRIEND);
+    const stranger = await subscribe(stub, "https://stranger.example/#me");
+
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(friend).toHaveLength(1);
+    expect(JSON.parse(friend[0]!)).toMatchObject({
+      type: "Create",
+      object: `${BASE}/private/secret`,
+    });
+    expect(stranger).toHaveLength(0);
   });
 });
 

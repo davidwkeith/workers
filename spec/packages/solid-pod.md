@@ -109,6 +109,17 @@ Durable Object.
 
 - Solid Notifications via **WebSocket channels**, implemented on the DO's
   **hibernatable WebSockets**.
+- Every notification is **WAC-filtered per subscriber**: the connecting agent's
+  WebID is attached to the socket at upgrade time, and a change is sent only to
+  sockets whose agent is granted `read` on the changed resource. The stream MUST
+  NOT let an unauthorized subscriber learn that a private resource changed.
+- Consequence: a subscription authenticates from the upgrade request's
+  `Authorization` header, which the browser `WebSocket` API cannot set — so
+  browser-originated subscriptions are **anonymous** and receive only
+  publicly-readable changes. Authenticated browser subscriptions need a channel
+  mechanism that carries the token elsewhere (a Solid Notifications subscription
+  endpoint minting a bearer-bound channel URL, or a token in
+  `Sec-WebSocket-Protocol`); not yet implemented.
 
 ## Bindings (declared `Env` fragment)
 
