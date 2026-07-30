@@ -86,17 +86,29 @@ export class WebAuthnObject extends DurableObject<WebAuthnEnv> {
     const body = await readJsonObject(request);
     if (config === null) return badRequest("missing config");
 
-    switch (op) {
-      case "register/options":
-        return this.#registerOptions(config, now, body);
-      case "register/verify":
-        return this.#registerVerify(config, now, body);
-      case "authenticate/options":
-        return this.#authenticateOptions(config, now, body);
-      case "authenticate/verify":
-        return this.#authenticateVerify(config, now, body);
-      default:
-        return new Response("Not Found", { status: 404 });
+    try {
+      switch (op) {
+        case "register/options":
+          return await this.#registerOptions(config, now, body);
+        case "register/verify":
+          return await this.#registerVerify(config, now, body);
+        case "authenticate/options":
+          return await this.#authenticateOptions(config, now, body);
+        case "authenticate/verify":
+          return await this.#authenticateVerify(config, now, body);
+        default:
+          return new Response("Not Found", { status: 404 });
+      }
+    } catch (error) {
+      // A parse/verification failure that escapes the normal `reject(...)`
+      // paths (e.g. a malformed CBOR structure) must still answer the
+      // package's structured `{error}` contract instead of an unhandled
+      // exception reaching the Workers runtime.
+      console.error("@dwk/webauthn: unexpected ceremony error", error);
+      const event = op?.startsWith("register/")
+        ? WebAuthnLogEvent.RegisterRejected
+        : WebAuthnLogEvent.AuthenticateRejected;
+      return rejected(event, "internal_error");
     }
   }
 
