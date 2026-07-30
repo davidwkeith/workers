@@ -361,6 +361,32 @@ export function parseXml(input: string, limits: XmlParseLimits): XmlElement {
   return root;
 }
 
+/**
+ * Serialize one parsed element with an explicit namespace declaration —
+ * `<local xmlns="ns">…</local>`, or bare `<local>` when it is in no namespace —
+ * so the fragment stays well-formed pasted into any context with no default
+ * namespace in scope (the multistatus emitter only ever declares prefixes).
+ */
+function serializeElement(element: XmlElement): string {
+  const decl = element.ns === null ? "" : ` xmlns="${escapeXml(element.ns)}"`;
+  return `<${element.local}${decl}>${serializeFragment(element)}</${element.local}>`;
+}
+
+/**
+ * Serialize a parsed element's inner content — its text, then its child
+ * elements — back to a well-formed XML fragment. This is how a dead property's
+ * value (PROPPATCH `<D:set>`) is persisted and later re-emitted by PROPFIND
+ * (litmus `propvalnspace`, `prophighunicode`). The parser concatenates direct
+ * text and keeps children separately, so a mixed-content value re-serializes
+ * with its text first; litmus and real clients store text-only or
+ * element-only values, where the order is exact.
+ */
+export function serializeFragment(element: XmlElement): string {
+  return (
+    escapeXml(element.text) + element.children.map(serializeElement).join("")
+  );
+}
+
 /** First direct child with the given namespace + local name, or `undefined`. */
 export function firstChild(
   element: XmlElement,
