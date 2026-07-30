@@ -101,6 +101,12 @@ export interface BackendPublishInput {
   readonly sensitive?: boolean;
 }
 
+/** A pending follow request (#473) — a `followers` row awaiting the owner's `Accept`. */
+export interface BackendFollowRequest {
+  readonly actor: string;
+  readonly addedAt: number;
+}
+
 export interface MastodonBackend {
   /** Actor profile + live counts (followers/following/statuses). */
   account(): Promise<BackendAccount>;
@@ -125,4 +131,19 @@ export interface MastodonBackend {
    * enforced by the route before this is called.
    */
   publishStatus?(input: BackendPublishInput): Promise<BackendEntry>;
+  /**
+   * Pending follow requests, oldest first (#473). Optional: absent backend ⇒
+   * `GET /api/v1/follow_requests` answers `200 []`, matching every other
+   * degrade-gracefully optional member here.
+   */
+  followRequests?(): Promise<readonly BackendFollowRequest[]>;
+  /**
+   * Authorize or reject a pending follow request (#473). Optional and
+   * `allowWrites`-gated like `publishStatus` — absent backend or
+   * `allowWrites` off ⇒ both write routes answer `404`.
+   */
+  respondToFollowRequest?(
+    actor: string,
+    action: "authorize" | "reject",
+  ): Promise<void>;
 }

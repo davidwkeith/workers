@@ -878,6 +878,178 @@ describe("buildMastodonBackend", () => {
     });
   });
 
+  it("followRequests() lists pending followers (accepted_at IS NULL), oldest first", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/newer",
+        20,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/older",
+        10,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/confirmed",
+        "https://remote.example/users/confirmed/inbox",
+        5,
+        999,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const requests = await backend.followRequests!();
+    expect(requests.map((r) => r.actor)).toEqual([
+      "https://remote.example/users/older",
+      "https://remote.example/users/newer",
+    ]);
+    expect(requests[0]?.addedAt).toBe(10);
+  });
+
+  it("respondToFollowRequest(actor, 'authorize') delivers Accept(Follow) to that follower alone, once the alarm resolves their inbox", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const follower = "https://remote.example/users/pending";
+    await runInDurableObject(stub, async (_instance, state) => {
+      // A manually-approved follower: recorded, but with no resolved inbox
+      // yet (exactly the state #onFollow leaves under
+      // manuallyApprovesFollowers — only the auto-accept path resolves the
+      // inbox inline).
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        follower,
+        1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    // Stub the actor-document fetch *before* triggering the Accept:
+    // `respondToFollowRequest` goes through the real external DO stub (same
+    // as production), which arms a genuinely-due alarm that this
+    // single-isolate test environment can fire on its own schedule — so the
+    // stub needs to already be in place for whichever gets to the pending
+    // `kind = 'follow'` row first, our own explicit `/__resolve` drive below
+    // or the real alarm.
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href === follower) {
+        return new Response(
+          JSON.stringify({ id: follower, inbox: `${follower}/inbox` }),
+          { status: 200 },
+        );
+      }
+      return new Response(null, { status: 202 });
+    }) as unknown as typeof fetch;
+    try {
+      await backend.respondToFollowRequest!(follower, "authorize");
+
+      await runInDurableObject(stub, async (instance, state) => {
+        const row = state.storage.sql
+          .exec<{ accepted_at: number | null }>(
+            `SELECT accepted_at FROM followers WHERE actor = ?`,
+            follower,
+          )
+          .one();
+        expect(row.accepted_at).not.toBeNull();
+
+        // Routed through the same `kind = 'follow'` pending-accept queue
+        // #onFollow's own auto-accept uses — drive the alarm-equivalent
+        // `/__resolve` pass explicitly (mirrors object.test.ts's
+        // `resolvePendingFollowAccept`; idempotent if the real alarm above
+        // already got there first), so the follower's inbox is resolved and
+        // persisted, and the queued `Accept` is handed off to the ordinary
+        // delivery queue.
+        await instance.fetch(
+          new Request(`${config.iris.id}/__resolve`, {
+            headers: {
+              [INTERNAL_HEADERS.config]: JSON.stringify(
+                forwardedConfig(config),
+              ),
+            },
+          }),
+        );
+
+        expect(
+          state.storage.sql
+            .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM pending_accept`)
+            .one().n,
+        ).toBe(0);
+        // The resolved inbox is persisted, so every future `WHERE inbox IS
+        // NOT NULL` fan-out query reaches this follower — this is the #473
+        // final-review fix: this adapter's "authorize" path reaches the
+        // same corrected `object.ts` branch as raw `POST <actor>/outbox`,
+        // and must produce the same end state (inbox resolved + persisted),
+        // not just a one-time delivery.
+        const resolvedFollower = state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            follower,
+          )
+          .one();
+        expect(resolvedFollower.inbox).toBe(`${follower}/inbox`);
+
+        const delivered = state.storage.sql
+          .exec<{ inbox: string; json: string }>(
+            `SELECT inbox, json FROM delivery`,
+          )
+          .toArray();
+        expect(delivered).toHaveLength(1);
+        expect(delivered[0]?.inbox).toBe(`${follower}/inbox`);
+        const deliveredActivity = JSON.parse(delivered[0]!.json) as {
+          type: string;
+          actor: string;
+          object: { actor: string };
+        };
+        expect(deliveredActivity.type).toBe("Accept");
+        expect(deliveredActivity.actor).toBe(config.iris.id);
+        expect(deliveredActivity.object.actor).toBe(follower);
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("respondToFollowRequest(actor, 'reject') drops the follower and delivers Reject(Follow)", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const follower = "https://remote.example/users/pending2";
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, NULL)`,
+        follower,
+        `${follower}/inbox`,
+        1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    await backend.respondToFollowRequest!(follower, "reject");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const remaining = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM followers WHERE actor = ?`,
+          follower,
+        )
+        .one().n;
+      expect(remaining).toBe(0);
+      const queued = state.storage.sql
+        .exec<{ json: string }>(
+          `SELECT json FROM pending_accept WHERE kind = 'deliver'`,
+        )
+        .toArray();
+      expect(queued).toHaveLength(1);
+      expect((JSON.parse(queued[0]!.json) as { type: string }).type).toBe(
+        "Reject",
+      );
+    });
+  });
+
   it("resolves inReplyTo to the owner's outbox post (in_reply_to snowflake + owner author)", async () => {
     const config = freshConfig();
     const ownerPost = `${config.iris.outbox}/reply-target/object`;

@@ -122,21 +122,29 @@ function text(status: number, body: string): Response {
 }
 
 /**
- * Whether an owner-published activity is a **follower-control** activity (#447)
- * — one aimed at a single actor's relationship with this one, rather than
- * content for the follower set: `Reject` (of a `Follow`), `Block`, and
- * `Undo(Block)`.
+ * Whether an owner-published activity is a **single-target relationship**
+ * activity (#447, #473) — one aimed at a single actor's relationship with
+ * this one, rather than content for the follower set: `Reject` (of a
+ * `Follow`), `Block`, `Undo(Block)`, and `Accept` (confirming a pending
+ * follower).
  *
- * Every `Reject` qualifies, not only one carrying a well-formed `Follow`: the
- * failure this guards against is a control activity leaking into the follower
- * fan-out, so an unroutable one is claimed here and dropped rather than
- * broadcast. `Reject` of an event `Join` is not a case this actor can produce —
- * manual `Join` approval is out of scope for v1 (spec §"Events & RSVPs").
+ * Every `Reject`/`Accept` qualifies, not only one carrying a well-formed
+ * `Follow`: the failure this guards against is a control activity leaking
+ * into the follower fan-out, so an unroutable one is claimed here and
+ * dropped rather than broadcast. `Reject`/`Accept` of an event `Join` is not
+ * a case this actor can produce — manual `Join` approval is out of scope
+ * for v1 (spec §"Events & RSVPs").
  */
 function isFollowerControlActivity(
   activity: Record<string, JsonValue>,
 ): boolean {
-  if (activity.type === "Block" || activity.type === "Reject") return true;
+  if (
+    activity.type === "Block" ||
+    activity.type === "Reject" ||
+    activity.type === "Accept"
+  ) {
+    return true;
+  }
   return (
     activity.type === "Undo" &&
     objectType(activity.object as JsonValue) === "Block"
@@ -187,7 +195,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS followers (
          actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL,
-         shared_inbox TEXT, follow_id TEXT)`,
+         shared_inbox TEXT, follow_id TEXT, accepted_at INTEGER)`,
     );
     // `actor_type` is the followed actor's AS2 type (`Person`, `Group`, …),
     // resolved from its actor document off the critical path; a `Group` row is
@@ -328,6 +336,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#ensureColumn("following", "actor_type", "TEXT");
     this.#ensureColumn("following", "inbox", "TEXT");
     this.#ensureColumn("following", "shared_inbox", "TEXT");
+    // Owner-admin follow confirmation (#473): NULL means still awaiting the
+    // owner's `Accept`; non-NULL (the timestamp) means confirmed — either
+    // auto-accepted at insert time (#onFollow) or owner-triggered later
+    // (#routeFollowerControl's Accept branch). Every pre-existing row
+    // predates this column and has no other stored signal of whether it was
+    // genuinely still pending at migration time; backfilling all of them to
+    // "already settled" (their `added_at`) avoids surfacing years of
+    // ordinary auto-accepted followers as false "pending" requests. This
+    // must run only the one time the column is actually added — never on
+    // every cold start, or it would silently re-confirm every currently-
+    // pending follower on every restart.
+    if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
+      this.#sql.exec(
+        `UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`,
+      );
+    }
   }
 
   /**
@@ -338,13 +362,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * unrelated SQLite error (e.g. a disk-full write failure) that happens to
    * mention "duplicate column" in its own message, or miss a legitimate
    * duplicate-column error phrased differently by a future SQLite version.
+   * Returns whether the column was just added, so a caller can run a
+   * one-time backfill exactly once (see the `followers.accepted_at` call
+   * site below) rather than on every constructor invocation.
    */
-  #ensureColumn(table: string, column: string, type: string): void {
+  #ensureColumn(table: string, column: string, type: string): boolean {
     const columns = this.#sql
       .exec<{ name: string }>(`PRAGMA table_info(${table})`)
       .toArray();
-    if (columns.some((c) => c.name === column)) return;
+    if (columns.some((c) => c.name === column)) return false;
     this.#sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    return true;
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -413,6 +441,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         return text(404, "not found");
       }
       return this.#listFollowing(request);
+    }
+    // Owner-only pending-follower listing (internal, like `__following`):
+    // backs @dwk/mastodon-api's GET /api/v1/follow_requests (#473).
+    if (path === `${pathOf(iris.id)}/__client/follow_requests`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#listFollowRequests();
     }
     // Owner-only cursor-paginated reads for the Mastodon client API phase 2
     // (`@dwk/mastodon-api`'s `MastodonBackend` seam, #349): timeline (posts
@@ -692,14 +728,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       activity.type === "Follow" && typeof activity.id === "string"
         ? activity.id
         : null;
+    // Owner-admin follow confirmation (#473): auto-accept sets accepted_at
+    // immediately; manual approval leaves it NULL until the owner's later
+    // Accept action (#routeFollowerControl). A re-Follow must never un-set an
+    // already-recorded acceptance, hence the COALESCE in ON CONFLICT below —
+    // same "refresh without disturbing settled state" shape as follow_id's.
+    const acceptedAt = config.manuallyApprovesFollowers ? null : now;
     this.#sql.exec(
-      `INSERT INTO followers (actor, inbox, added_at, follow_id)
-         VALUES (?, NULL, ?, ?)
+      `INSERT INTO followers (actor, inbox, added_at, follow_id, accepted_at)
+         VALUES (?, NULL, ?, ?, ?)
          ON CONFLICT(actor) DO UPDATE
-           SET follow_id = COALESCE(excluded.follow_id, followers.follow_id)`,
+           SET follow_id = COALESCE(excluded.follow_id, followers.follow_id),
+               accepted_at = COALESCE(followers.accepted_at, excluded.accepted_at)`,
       follower,
       now,
       followId,
+      acceptedAt,
     );
     // A *new* follower is also stored in `inbox` so the Mastodon client API's
     // notifications read surfaces it as a `follow` (see #classifyClientEntry);
@@ -875,21 +919,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
-   * `Group` moderation (#376): a signed `Remove` from a listed
-   * `config.moderators` actor either bans a member (`target` names our
+   * `Group` moderation (#376, #473): either bans a member (`target` names our
    * `followers` collection, `object` names the member) or un-announces a
    * member post (`target` names our `outbox`, `object` names the `Announce`
-   * id we authored for it). Ignored for a `Person` actor, or when the
-   * (HTTP-signature-verified — see the `signer === activity.actor` check in
-   * {@link #handleInbox}) requester is not a configured moderator.
+   * id we authored for it). Ignored for a `Person` actor. Shared by the
+   * inbound moderator-signed path (`#onModerationRemove`, which checks
+   * `config.moderators` before calling this) and the owner-publish path
+   * (`#publish`'s `Remove` branch, which skips that check — the owner is
+   * implicitly the top moderator of their own actor). `deliver` gates only
+   * the un-announce fan-out (`?skipDelivery=1`); the ban branch has no
+   * delivery to suppress either way.
    */
-  async #onModerationRemove(
+  async #applyModerationRemove(
     activity: ActivityObject,
     config: ForwardedConfig,
+    deliver: boolean,
   ): Promise<void> {
     if (config.actorType !== "Group") return;
-    const moderator = actorIri(activity.actor);
-    if (!moderator || !config.moderators.includes(moderator)) return;
     const object = objectId(activity.object);
     if (!object) return;
     const target = objectId(activity.target);
@@ -905,20 +951,40 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return;
     }
     if (target === config.iris.outbox) {
-      await this.#removeAnnouncedPost(object, config);
+      await this.#removeAnnouncedPost(object, config, deliver);
     }
+  }
+
+  /**
+   * `Group` moderation (#376): a signed `Remove` from a listed
+   * `config.moderators` actor invokes {@link #applyModerationRemove}.
+   * Ignored when the (HTTP-signature-verified — see the `signer ===
+   * activity.actor` check in {@link #handleInbox}) requester is not a
+   * configured moderator. Inbound moderation always delivers — there is no
+   * backfill concept for it.
+   */
+  async #onModerationRemove(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const moderator = actorIri(activity.actor);
+    if (!moderator || !config.moderators.includes(moderator)) return;
+    await this.#applyModerationRemove(activity, config, /* deliver */ true);
   }
 
   /**
    * Un-announce a member post (#376 remove-post): delete the `Announce` we
    * authored for it from our outbox, tombstone the relayed inbox copy so
-   * reads stop surfacing it, and fan out a self-signed `Undo(Announce)` to
-   * the membership so their servers retract the boost too — the same
-   * `followers`-inbox fan-out {@link #maybeAnnounceMemberPost} uses.
+   * reads stop surfacing it — both always applied — and, unless `deliver` is
+   * `false` (`?skipDelivery=1` on an owner-triggered Remove, #473), fan out a
+   * self-signed `Undo(Announce)` to the membership so their servers retract
+   * the boost too — the same `followers`-inbox fan-out
+   * {@link #maybeAnnounceMemberPost} uses.
    */
   async #removeAnnouncedPost(
     announceId: string,
     config: ForwardedConfig,
+    deliver: boolean = true,
   ): Promise<void> {
     const row = this.#sql
       .exec<{
@@ -947,6 +1013,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         innerId,
       );
     }
+    if (!deliver) return;
     const undo: Record<string, JsonValue> = {
       "@context": "https://www.w3.org/ns/activitystreams",
       id: `${config.iris.id}#undos/${crypto.randomUUID()}`,
@@ -1259,6 +1326,31 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return json(202, activity as JsonValue);
     }
 
+    // Owner Group moderation (#473): ban a member / un-announce a post. Not
+    // added to isFollowerControlActivity — its delivery model differs (ban
+    // has no delivery at all; un-announce's fan-out is a broadcast to the
+    // whole membership, not a single target). No config.moderators check
+    // here: bearer publishToken auth at the front door is authorization
+    // enough, and the owner is implicitly the top moderator of their own
+    // actor — this succeeds even when moderators is empty or doesn't list
+    // the owner's own actor IRI.
+    if (activity.type === "Remove") {
+      // Scoped to the two Group-moderation targets this feature defines
+      // (ban a member / un-announce a post) — AS2 `Remove` is also the
+      // standard mechanism for other collection-removal uses this package
+      // doesn't implement yet (e.g. featured/pinned-post retraction), so a
+      // `Remove` naming some other `target` falls through unrouted below
+      // rather than being hard-blocked here.
+      const target = objectId(activity.target);
+      if (target === config.iris.followers || target === config.iris.outbox) {
+        if (config.actorType !== "Group") {
+          return text(400, "`Remove` moderation requires a Group actor");
+        }
+        await this.#applyModerationRemove(activity, config, !skipDelivery);
+        return json(202, activity as JsonValue);
+      }
+    }
+
     this.#sql.exec(
       `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
       id,
@@ -1371,8 +1463,48 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // `#undos/…`).
     activity.id = `${iris.id}#${(activity.type as string).toLowerCase()}s/${crypto.randomUUID()}`;
 
+    if (activity.type === "Accept") {
+      const follower = this.#singleFollowTarget(activity);
+      if (!follower) return false;
+      const row = this.#sql
+        .exec<{
+          follow_id: string | null;
+        }>(`SELECT follow_id FROM followers WHERE actor = ?`, follower)
+        .toArray()[0];
+      // Unlike Reject's drift-repair looseness: confirming a follow that was
+      // never recorded doesn't make sense, so an unknown actor no-ops.
+      if (!row) return false;
+      // Local state always applies, independent of `deliver`/skipDelivery,
+      // which only gates the outbound notification below — same rule every
+      // other branch in this method follows.
+      this.#sql.exec(
+        `UPDATE followers SET accepted_at = COALESCE(accepted_at, ?) WHERE actor = ?`,
+        now,
+        follower,
+      );
+      activity.object = {
+        ...(row.follow_id ? { id: row.follow_id } : {}),
+        type: "Follow",
+        actor: follower,
+        object: iris.id,
+      };
+      addressPrivately(activity, follower);
+      if (!deliver || !isSafeTarget(follower)) return false;
+      // Unlike Reject/Block/Undo(Block) below, this Accept's target inbox is
+      // not yet known — a manually-approved follower is recorded with
+      // `inbox = NULL` (#onFollow) since only the auto-accept path resolves
+      // it inline. Route through the same `kind = 'follow'` pending-accept
+      // queue #onFollow's own auto-accept uses, so the alarm resolves the
+      // inbox, persists it back onto `followers.inbox` (see
+      // `#processPendingAccepts`), and only then delivers this `Accept` —
+      // otherwise every future fan-out query (`WHERE inbox IS NOT NULL`)
+      // would silently skip this follower forever.
+      this.#enqueuePendingAccept("follow", follower, JSON.stringify(activity));
+      return true;
+    }
+
     if (activity.type === "Reject") {
-      const follower = this.#rejectTarget(activity);
+      const follower = this.#singleFollowTarget(activity);
       if (!follower) return false;
       // The `Follow` being rejected, named by its own IRI when we recorded one
       // (either from the caller or from the row the inbound `Follow` wrote).
@@ -1445,24 +1577,21 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
-   * The follower an owner `Reject` names. Canonically its `object` is the
-   * `Follow` being rejected (target = that activity's `actor`). As a shorthand
-   * the owner may pass a bare IRI, which is read as the stored `Follow`'s id
-   * when it matches one we recorded and as the follower's actor IRI otherwise
-   * — the two readings a client can reasonably take of "reject this follow".
+   * The follower a single-target `Reject`/`Accept` names. Canonically its
+   * `object` is the `Follow` being rejected/accepted (target = that
+   * activity's `actor`). As a shorthand the owner may pass a bare IRI, which
+   * is read as the stored `Follow`'s id when it matches one we recorded and
+   * as the follower's actor IRI otherwise — the two readings a client can
+   * reasonably take of "reject/accept this follow".
    *
-   * That last fallback deliberately does **not** require a matching `followers`
-   * row. A `Reject` is most needed exactly when our state and the peer's
-   * disagree — they believe they follow us, our row is already gone — and
-   * demanding local proof of the relationship would refuse the one message that
-   * repairs the drift. What the owner can reach this way is bounded: the target
-   * still passes the SSRF guard before anything leaves, and the delivered body
-   * asserts nothing about a third party (it tells one actor "you do not follow
-   * me", which is true however they got the message). The cost of the looseness
-   * is an owner typo sending a stray `Reject` that its recipient no-ops on;
-   * the cost of tightening it is a silent no-op in the case that matters.
+   * That last fallback deliberately does **not** require a matching
+   * `followers` row for `Reject` — a `Reject` is most needed exactly when
+   * our state and the peer's disagree — see `#routeFollowerControl`'s
+   * `Reject` branch for that looseness; `Accept` layers its own stricter
+   * "row must exist" check on top, since confirming a follow that was never
+   * recorded doesn't make sense.
    */
-  #rejectTarget(activity: Record<string, JsonValue>): string | undefined {
+  #singleFollowTarget(activity: Record<string, JsonValue>): string | undefined {
     const object = activity.object;
     if (typeof object === "string") {
       const row = this.#sql
@@ -1659,6 +1788,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // object" instead of performing the block.
         "Block",
         "Reject",
+        // Owner admin (#473): confirm a pending follower / Group moderation —
+        // same reasoning as Block/Reject above.
+        "Accept",
+        "Remove",
       ].includes(input.type);
     const published = isValidPublished(input.published)
       ? new Date(input.published).toISOString()
@@ -1715,6 +1848,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       200,
       buildCollectionPage(collectionId, page, config.pageSize, total, items),
     );
+  }
+
+  /**
+   * Pending follow requests (#473): followers awaiting the owner's `Accept`.
+   * Unpaged flat JSON, like `#listBlocked` — this list is small, and capping
+   * it would silently hide requests from the only view of them there is.
+   */
+  #listFollowRequests(): Response {
+    const items = this.#sql
+      .exec<{
+        actor: string;
+        added_at: number;
+      }>(
+        `SELECT actor, added_at FROM followers WHERE accepted_at IS NULL ORDER BY added_at ASC`,
+      )
+      .toArray();
+    return json(200, { items, total: items.length } as unknown as JsonValue);
   }
 
   /**
