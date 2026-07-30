@@ -231,6 +231,8 @@
     "webdav-copy-move",
     "webdav-copymove-verify-ceiling",
     "webdav-credential-endpoint",
+    "webdav-dead-property-store",
+    "webdav-litmus-full-groups",
     "webdav-mkcol-delete-conformance",
     "webdav-mkcol-percent-encoding-case",
     "webdav-pathprefix-segment-boundary",
