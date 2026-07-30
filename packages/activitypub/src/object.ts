@@ -712,14 +712,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       activity.type === "Follow" && typeof activity.id === "string"
         ? activity.id
         : null;
+    // Owner-admin follow confirmation (#473): auto-accept sets accepted_at
+    // immediately; manual approval leaves it NULL until the owner's later
+    // Accept action (#routeFollowerControl). A re-Follow must never un-set an
+    // already-recorded acceptance, hence the COALESCE in ON CONFLICT below —
+    // same "refresh without disturbing settled state" shape as follow_id's.
+    const acceptedAt = config.manuallyApprovesFollowers ? null : now;
     this.#sql.exec(
-      `INSERT INTO followers (actor, inbox, added_at, follow_id)
-         VALUES (?, NULL, ?, ?)
+      `INSERT INTO followers (actor, inbox, added_at, follow_id, accepted_at)
+         VALUES (?, NULL, ?, ?, ?)
          ON CONFLICT(actor) DO UPDATE
-           SET follow_id = COALESCE(excluded.follow_id, followers.follow_id)`,
+           SET follow_id = COALESCE(excluded.follow_id, followers.follow_id),
+               accepted_at = COALESCE(followers.accepted_at, excluded.accepted_at)`,
       follower,
       now,
       followId,
+      acceptedAt,
     );
     // A *new* follower is also stored in `inbox` so the Mastodon client API's
     // notifications read surfaces it as a `follow` (see #classifyClientEntry);

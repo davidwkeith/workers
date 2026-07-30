@@ -1792,6 +1792,83 @@ describe("owner follower control (#447)", () => {
     });
   });
 
+  it("sets accepted_at immediately on auto-accept, leaves it NULL under manual approval, and never un-sets it on a re-Follow", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Auto-accept (default config): accepted_at is set immediately.
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/follow-auto`,
+            type: "Follow",
+            actor: REMOTE,
+            object: deriveIris(BASE, username).id,
+          },
+          REMOTE,
+        ),
+      );
+      const auto = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(auto.accepted_at).not.toBeNull();
+
+      // Manual approval, a different follower: accepted_at stays NULL.
+      const PENDING = "https://remote.example/users/pending";
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${PENDING}/activities/follow-1`,
+            type: "Follow",
+            actor: PENDING,
+            object: deriveIris(BASE, username).id,
+          },
+          PENDING,
+          { manuallyApprovesFollowers: true },
+        ),
+      );
+      const pending = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          PENDING,
+        )
+        .one();
+      expect(pending.accepted_at).toBeNull();
+
+      // Manually mark it accepted (simulating Task 4's Accept branch, not yet
+      // implemented), then re-Follow: accepted_at must not be reset to NULL.
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = ? WHERE actor = ?`,
+        9999,
+        PENDING,
+      );
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${PENDING}/activities/follow-2`,
+            type: "Follow",
+            actor: PENDING,
+            object: deriveIris(BASE, username).id,
+          },
+          PENDING,
+          { manuallyApprovesFollowers: true },
+        ),
+      );
+      const reFollowed = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          PENDING,
+        )
+        .one();
+      expect(reFollowed.accepted_at).toBe(9999);
+    });
+  });
+
   it("drops the follower and delivers a canonical Reject(Follow) to them alone", async () => {
     const { username, stub } = freshUser();
     const iris = deriveIris(BASE, username);
