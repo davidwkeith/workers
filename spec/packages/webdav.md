@@ -190,16 +190,29 @@ and the N3 Patch parser.
 - **Live properties** supported: `displayname`, `getcontentlength`,
   `getcontenttype`, `getlastmodified`, `getetag`, `resourcetype`,
   `lockdiscovery`, `supportedlock`, `creationdate`.
-- **PROPPATCH** of arbitrary **dead properties** is **out of scope for v1** (no
-  general dead-property store — that is net-new state for little OS-client gain);
-  a small set of known client-written props (e.g. Win32 attributes/timestamps)
-  is **accepted-and-ignored** (`200`, not persisted) so Finder/Explorer do not
-  error.
+- **PROPPATCH** persists arbitrary **dead properties** in a DO-SQLite store
+  (`PropertyStore`, table keyed `path + namespace + local name`), in the same
+  per-pod DO as locks. The original cut excluded this ("net-new state for
+  little OS-client gain"), but the litmus `props` group requires it — 8 of its
+  30 cases exercise dead-property storage — and it was the last blocker for a
+  fully green run (issue #467), the same litmus-overturns-the-cut path shared
+  locks and the full `If:` grammar took. Semantics (RFC 4918 §9.2, litmus):
+  instructions apply in **document order** (`propremoveset`/`propsetremove`)
+  and **atomically** — a `set`/`remove` naming a protected live property fails
+  `403` and drags every other instruction to `424 Failed Dependency`, nothing
+  persisted. Values round-trip as serialized XML fragments, including
+  no-namespace names (`propnullns`), astral-plane text (`prophighunicode`),
+  and namespaced child elements (`propvalnspace`). Dead properties are
+  returned by named-prop, `allprop`, and `propname` PROPFINDs, travel with
+  `COPY`/`MOVE` (§9.8.2/§9.9.1, `propmove`), and die with `DELETE` — from
+  either door: a Solid-side `DELETE` drops them too, so a later same-name
+  resource cannot inherit them.
 
 ## Verb surface
 
 `OPTIONS`, `PROPFIND` (`Depth: 0`/`1`; `infinity` guarded or `403`),
-`PROPPATCH` (live/known-only per §4), `MKCOL`, `GET`, `HEAD`, `PUT`, `DELETE`,
+`PROPPATCH` (dead-property store, live properties protected — §4), `MKCOL`,
+`GET`, `HEAD`, `PUT`, `DELETE`,
 `COPY`, `MOVE`, `LOCK`, `UNLOCK`. Successful responses and `OPTIONS` advertise an
 accurate `Allow`; the storage root is undeletable (inherited from
 `solid-pod`'s `#server-delete-protect-root-container`). Collection `DELETE`
@@ -286,8 +299,9 @@ all verbs; UTF-8-only, `DOCTYPE`/external-entity-rejecting XML and a strict-subs
 - **CalDAV (RFC 4791) / CardDAV** and scheduling (iTIP/iMIP/RFC 6638) — see the
   calendar tracking issue [#167](https://github.com/davidwkeith/workers/issues/167);
   WebDAV here is plain file access, not calendar collections.
-- **Shared locks**, **Digest** auth, a general **dead-property** store, **quota**
-  (`{DAV:}quota-*`) reporting, and **DeltaV** versioning.
+- **Digest** auth, **quota** (`{DAV:}quota-*`) reporting, and **DeltaV**
+  versioning. (Shared locks and the dead-property store were originally cut
+  here too; litmus evidence pulled both back in — see §2 and §4.)
 - **Per-member `207 Multi-Status` failure reporting** for collection
   `DELETE`/`COPY`/`MOVE` (RFC 4918 §9.6.1). A collection operation that fails
   collapses to a single representative status (e.g. `423`/`409`) rather than

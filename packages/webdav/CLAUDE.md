@@ -8,18 +8,18 @@ native network drive.
 Translates the WebDAV verbs OS file managers speak (macOS Finder, Windows
 Explorer, GNOME/KDE, iOS Files) onto the same resources `@dwk/solid-pod` serves
 — one pod, a second door, not a second store. Ships the pure protocol core
-(XXE-safe bounded XML, scoped app passwords, strict-subset `If:` header
-parsing, content-type inference, OS-litter matching), the Class 2 verb router
+(XXE-safe bounded XML, scoped app passwords, bounded `If:` header parsing,
+content-type inference, OS-litter matching), the Class 2 verb router
 (`createWebdav`) driven over an injected `WebdavBackend` seam, and the lock +
-app-password DO-SQLite stores (`LockStore`, `CredentialStore`). `@dwk/solid-pod`
-resolves the backend seam onto the live per-pod `SolidPodObject`
-(`createSolidPodWebdav` for data, `createSolidPodWebdavCredentials` for
-app-password management). **Status: in progress** — implementation is done;
-a 2026-07-29 local full-group litmus run (issue #467) passes `basic` 16/16,
-`copymove` 13/13, and `locks` 41/41; `props` fails 8/30 cases, all on
-dead-property storage (excluded from v1 by spec §4 — the remaining blocker).
-The hosted re-run against `conformance.dwk.io` is pending fresh credentials —
-see `conformance/webdav-qa.md`.
+app-password + dead-property DO-SQLite stores (`LockStore`, `CredentialStore`,
+`PropertyStore`). `@dwk/solid-pod` resolves the backend seam onto the live
+per-pod `SolidPodObject` (`createSolidPodWebdav` for data,
+`createSolidPodWebdavCredentials` for app-password management). **Status: in
+progress** — implementation is done; local full-group litmus runs (issue #467)
+pass `basic` 16/16, `copymove` 13/13, `locks` 41/41, and — since the
+dead-property store landed — `props` 30/30. The hosted re-run against
+`conformance.dwk.io` is pending fresh credentials — see
+`conformance/webdav-qa.md`.
 
 ## Spec
 
@@ -47,6 +47,10 @@ implementation; the four load-bearing decisions live there).
   `opaquelocktoken:<uuid>` tokens; expired locks pruned opportunistically.
   Lock enforcement is TOCTOU-free — check and mutation in one transaction.
   Never KV.
+- **Dead properties in DO SQLite** (`PropertyStore`, spec §4): PROPPATCH
+  applies set/remove in document order, atomically (a protected live prop →
+  403 + 424 for the rest, nothing persisted); values round-trip as XML
+  fragments; props travel with COPY/MOVE and die with DELETE from either door.
 - **Hand-rolled, bounded, XXE-safe XML.** No general XML library
   (script-size budget). `DOCTYPE`/markup declarations rejected outright;
   body-size and nesting caps; UTF-8 only. The `If:` header is parsed as the
