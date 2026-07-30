@@ -383,3 +383,48 @@ describe("createSolidOidc — authorization-code + PKCE + DPoP flow", () => {
     expect(body.error).toBe("invalid_request");
   });
 });
+
+describe("createSolidOidc — performance (CodeStore memoization)", () => {
+  beforeEach(resetDb);
+
+  it("does not rebuild CodeStore's D1 schema check on every /authorize request", async () => {
+    let schemaCheckCalls = 0;
+
+    // Wrap the D1Database to track CREATE TABLE calls
+    const wrappedDb: typeof testEnv.AUTH_DB = {
+      prepare: (sql: string) => {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS solid_oidc_codes")) {
+          schemaCheckCalls += 1;
+        }
+        return testEnv.AUTH_DB.prepare(sql);
+      },
+      exec: testEnv.AUTH_DB.exec.bind(testEnv.AUTH_DB),
+      batch: testEnv.AUTH_DB.batch.bind(testEnv.AUTH_DB),
+      dump: testEnv.AUTH_DB.dump.bind(testEnv.AUTH_DB),
+    };
+
+    const handler = await makeHandler();
+    const { challenge } = await pkce();
+
+    // Create an authorize request helper
+    const makeAuthorizeRequest = () => {
+      const url = new URL(`${ISSUER}/authorize`);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", CLIENT_ID);
+      url.searchParams.set("redirect_uri", REDIRECT);
+      url.searchParams.set("scope", "openid webid");
+      url.searchParams.set("state", "xyz");
+      url.searchParams.set("nonce", "n-1");
+      url.searchParams.set("code_challenge", challenge);
+      url.searchParams.set("code_challenge_method", "S256");
+      return new Request(url.toString());
+    };
+
+    // Make multiple authorize requests
+    await handler(makeAuthorizeRequest(), { ...testEnv, AUTH_DB: wrappedDb }, ctx);
+    await handler(makeAuthorizeRequest(), { ...testEnv, AUTH_DB: wrappedDb }, ctx);
+
+    // Schema check should only happen once, not on every request
+    expect(schemaCheckCalls).toBe(1);
+  });
+});
