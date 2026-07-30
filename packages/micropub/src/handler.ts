@@ -1223,6 +1223,7 @@ async function handleAction(
   env: MicropubEnv,
   config: ResolvedConfig,
   store: MicropubStore,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Response> {
   // The update body needs the raw JSON for `replace`/`add`/`delete`; capture it
   // before `parseRequest` consumes the stream.
@@ -1326,7 +1327,7 @@ async function handleAction(
 
   switch (action) {
     case "create":
-      return doCreate(parsed.mf2, parsed.commands, config, store);
+      return doCreate(parsed.mf2, parsed.commands, config, store, waitUntil);
     case "update":
       return doUpdate(parsed.url, rawJson, isJson, config, store);
     case "delete":
@@ -1362,6 +1363,7 @@ export async function publishPost(
   commands: MicropubCommands,
   config: ResolvedConfig,
   store: MicropubStore,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<PublishPostResult> {
   const type = mf2.type[0];
   if (!type) {
@@ -1438,14 +1440,23 @@ export async function publishPost(
       // Fediverse syndication (#278): when configured and requested, publish
       // the entry through `@dwk/activitypub`'s shaped-publish endpoint too.
       // Failures are logged per target, never fatal — the post is created.
+      // Run it in the background via `waitUntil` when available (the HTTP
+      // `create` action) so a slow/unreachable fediverse peer never delays
+      // the client's response; when omitted (the MCP publish tool, which has
+      // no `ExecutionContext`) fall back to awaiting it inline as before.
       if (config.fediverse && commands.syndicateTo.length > 0) {
-        await syndicateEntry(
+        const syndication = syndicateEntry(
           config.fediverse,
           mf2,
           commands.syndicateTo,
           await config.syndicateTo(),
           config.logger,
         );
+        if (waitUntil) {
+          waitUntil(syndication);
+        } else {
+          await syndication;
+        }
       }
       return { ok: true, url };
     }
@@ -1468,8 +1479,9 @@ async function doCreate(
   commands: MicropubCommands,
   config: ResolvedConfig,
   store: MicropubStore,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Response> {
-  const result = await publishPost(mf2, commands, config, store);
+  const result = await publishPost(mf2, commands, config, store, waitUntil);
   if (!result.ok) {
     return error(result.error, result.description, result.status);
   }
@@ -1608,7 +1620,7 @@ async function doUndelete(
 export function createMicropub(config: MicropubConfig): MicropubHandler {
   const resolved = resolveConfig(config);
 
-  return async (request, env, _ctx) => {
+  return async (request, env, ctx) => {
     assertBindings(env);
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -1648,7 +1660,15 @@ export function createMicropub(config: MicropubConfig): MicropubHandler {
     if (pathname === resolved.micropubPath) {
       const store = createMicropubStore(env);
       if (method === "GET") return handleQuery(request, env, resolved, store);
-      if (method === "POST") return handleAction(request, env, resolved, store);
+      if (method === "POST") {
+        // Deferred: only resolved when actually invoked (fediverse
+        // syndication is requested), so a caller whose `ExecutionContext`
+        // stub omits `waitUntil` — as most tests' fixtures do — never trips
+        // over its absence unless it truly reaches that path.
+        return handleAction(request, env, resolved, store, (p) =>
+          ctx.waitUntil(p),
+        );
+      }
       return methodNotAllowed("GET, POST, OPTIONS");
     }
 

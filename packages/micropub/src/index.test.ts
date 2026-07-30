@@ -9,6 +9,7 @@ import {
   createMicropubVenueStore,
 } from "./index.js";
 import type { MicropubEnv } from "./index.js";
+import { FEDIVERSE_TARGET_UID } from "./fediverse.js";
 
 const harness = env as unknown as MicropubEnv;
 
@@ -2824,5 +2825,62 @@ describe("@dwk/micropub media-endpoint extensions", () => {
       // promise, so its init() would no-op against the dropped table.
       await createMicropubMediaStore(harness).init();
     }
+  });
+});
+
+describe("@dwk/micropub fediverse syndication", () => {
+  it("does not block the create response on fediverse syndication", async () => {
+    let resolveSyndication!: () => void;
+    const syndicationBlocked = new Promise<void>((resolve) => {
+      resolveSyndication = resolve;
+    });
+    const waited: Promise<unknown>[] = [];
+    const waitCtx = {
+      waitUntil: (p: Promise<unknown>) => {
+        waited.push(p);
+      },
+    } as unknown as ExecutionContext;
+
+    const fediverseHandler = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      fediverse: {
+        publishUrl: "https://social.example/users/alice/publish",
+        publishToken: "s3cret",
+        fetch: async () => {
+          await syndicationBlocked;
+          return new Response("{}", { status: 201 });
+        },
+      },
+    });
+
+    const minted = await mintToken("create");
+    const start = Date.now();
+    const res = await fediverseHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: {
+            content: ["Hello fediverse"],
+            "mp-syndicate-to": [FEDIVERSE_TARGET_UID],
+          },
+        }),
+      }),
+      harness,
+      waitCtx,
+    );
+    const elapsed = Date.now() - start;
+
+    expect(res.status).toBe(201);
+    expect(elapsed).toBeLessThan(500);
+    expect(waited).toHaveLength(1);
+
+    resolveSyndication();
+    await waited[0];
   });
 });
