@@ -446,13 +446,16 @@ async function storeMedia(
     });
   } catch (err) {
     if (config.extensions.proposed) {
+      config.logger.error(MicropubLogEvent.MediaMetadataFailed, {
+        reason: err instanceof Error ? err.message : String(err),
+      });
       try {
         await env.MEDIA.delete(key);
       } catch {
         // Best-effort rollback; the orphaned blob is unlisted either way.
       }
       throw new MediaMetadataError(
-        `failed to record media metadata: ${err instanceof Error ? err.message : String(err)}`,
+        "failed to record media metadata; the upload was rolled back",
       );
     }
     emit(config, "warn", MicropubLogEvent.MediaMetadataFailed, {});

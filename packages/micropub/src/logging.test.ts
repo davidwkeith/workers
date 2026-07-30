@@ -299,4 +299,95 @@ describe("@dwk/micropub media logging", () => {
     expect(rec?.level).toBe("info");
     expect(rec?.fields).toMatchObject({ contentType: "image/png" });
   });
+
+  it("logs the D1 failure and does not leak its message to the client", async () => {
+    const logger = captureLogger();
+    const metrics = captureMetrics();
+    const handler = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      extensions: { proposed: true },
+      logger,
+      metrics,
+    });
+
+    const minted = await mintToken("media");
+    const form = new FormData();
+    form.append(
+      "file",
+      new File([new Uint8Array([1, 2, 3])], "test.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+
+    // Wrap the real MICROPUB_DB to intercept and fail only for the media
+    // metadata insert, letting other queries through
+    const realDb = harness.MICROPUB_DB;
+    let isMediaInsert = false;
+
+    const wrappedDb: D1Database = {
+      prepare: (sql: string) => {
+        isMediaInsert = sql.includes("INSERT INTO micropub_media");
+        if (isMediaInsert) {
+          return {
+            bind: () => ({
+              run: () =>
+                Promise.reject(
+                  new Error("no such column: internal_col"),
+                ),
+              first: () =>
+                Promise.reject(
+                  new Error("no such column: internal_col"),
+                ),
+              all: () =>
+                Promise.reject(
+                  new Error("no such column: internal_col"),
+                ),
+            }),
+            run: () =>
+              Promise.reject(
+                new Error("no such column: internal_col"),
+              ),
+            first: () =>
+              Promise.reject(
+                new Error("no such column: internal_col"),
+              ),
+            all: () =>
+              Promise.reject(
+                new Error("no such column: internal_col"),
+              ),
+          } as unknown as D1PreparedStatement;
+        }
+        return realDb.prepare(sql);
+      },
+      batch: (statements: any[]) => realDb.batch(statements),
+      exec: (sql: string) => realDb.exec(sql),
+    } as unknown as D1Database;
+
+    const failingEnv = {
+      ...harness,
+      MICROPUB_DB: wrappedDb,
+    };
+
+    const res = await handler(
+      new Request(MEDIA, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MEDIA),
+        body: form,
+      }),
+      failingEnv,
+      ctx,
+    );
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error_description?: string };
+    expect(body.error_description).not.toContain("internal_col");
+    expect(body.error_description).not.toContain("no such column");
+
+    const errorRec = find(logger.records, MicropubLogEvent.MediaMetadataFailed);
+    expect(errorRec?.level).toBe("error");
+    expect(errorRec?.fields).toMatchObject({
+      reason: "no such column: internal_col",
+    });
+  });
 });
