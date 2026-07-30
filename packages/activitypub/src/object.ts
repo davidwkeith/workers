@@ -1659,6 +1659,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // object" instead of performing the block.
         "Block",
         "Reject",
+        // Owner admin (#473): confirm a pending follower / Group moderation —
+        // same reasoning as Block/Reject above.
+        "Accept",
+        "Remove",
       ].includes(input.type);
     const published = isValidPublished(input.published)
       ? new Date(input.published).toISOString()

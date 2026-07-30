@@ -826,6 +826,37 @@ describe("publish endpoint", () => {
     });
   });
 
+  it("passes Accept and Remove through as real activities, not wrapped in a Create", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const acceptRes = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      const accept = (await acceptRes.json()) as Record<string, unknown>;
+      expect(accept.type).toBe("Accept");
+      expect(accept.actor).toBe(iris.id);
+
+      const removeRes = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: iris.followers,
+          }),
+          true,
+        ),
+      );
+      const remove = (await removeRes.json()) as Record<string, unknown>;
+      expect(remove.type).toBe("Remove");
+      expect(remove.actor).toBe(iris.id);
+    });
+  });
+
   it("mints a server id for an owner activity, ignoring a client-supplied id", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance) => {
