@@ -49,6 +49,10 @@ class Reader {
   offset: number;
   readonly #bytes: Uint8Array;
   readonly #view: DataView;
+  /** WebAuthn's deepest real structure (COSE key inside authData) needs 2-3
+   * levels; 32 is generous headroom without letting a crafted attestation
+   * object stack-overflow the Worker. */
+  static readonly MAX_DEPTH = 32;
 
   constructor(bytes: Uint8Array, start: number) {
     this.#bytes = bytes;
@@ -56,7 +60,10 @@ class Reader {
     this.offset = start;
   }
 
-  readItem(): CborValue {
+  readItem(depth = 0): CborValue {
+    if (depth > Reader.MAX_DEPTH) {
+      throw new CborError("CBOR nesting exceeds maximum depth");
+    }
     const initial = this.#byte();
     const major = initial >> 5;
     const info = initial & 0x1f;
@@ -79,7 +86,7 @@ class Reader {
         // array
         const len = this.#lengthArgument(info);
         const items: CborValue[] = [];
-        for (let i = 0; i < len; i++) items.push(this.readItem());
+        for (let i = 0; i < len; i++) items.push(this.readItem(depth + 1));
         return items;
       }
       case 5: {
@@ -87,8 +94,8 @@ class Reader {
         const len = this.#lengthArgument(info);
         const map = new Map<CborValue, CborValue>();
         for (let i = 0; i < len; i++) {
-          const key = this.readItem();
-          map.set(key, this.readItem());
+          const key = this.readItem(depth + 1);
+          map.set(key, this.readItem(depth + 1));
         }
         return map;
       }

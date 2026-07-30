@@ -72,4 +72,14 @@ describe("@dwk/webauthn cbor decoder", () => {
     // Truncated argument inside a byte-string length prefix, too.
     expect(() => decodeFirst(new Uint8Array([0x59, 0x01]))).toThrow(CborError);
   });
+
+  it("throws CborError on CBOR nested past the depth limit", () => {
+    // Build 40 nested single-element arrays: [[[[...]]]] — each level is a
+    // major-type-4 array header `0x81` (array, length 1) followed by its child.
+    const DEPTH = 40;
+    const bytes = new Uint8Array(DEPTH + 1);
+    bytes.fill(0x81, 0, DEPTH); // 40 "array of length 1" headers
+    bytes[DEPTH] = 0x00; // innermost item: unsigned integer 0
+    expect(() => decodeFirst(bytes)).toThrow(CborError);
+  });
 });
