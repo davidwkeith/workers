@@ -22,7 +22,7 @@ litmus conformance (issue #467): `basic`, `copymove`, and `locks` now pass
 - Shared write locks: any number coexist, any one of their tokens admits a
   write, and an exclusive request against them conflicts.
 - The XML parser rejects the invalid `xmlns:prefix=""` declaration (400, litmus
-  `propfind_invalid2`) and resolves a legal `xmlns=""` un-declaration to *no*
+  `propfind_invalid2`) and resolves a legal `xmlns=""` un-declaration to _no_
   namespace so no-namespace property names serialize legally.
 
 The `props` group still fails 8/30 cases, all on dead-property storage —
