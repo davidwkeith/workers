@@ -160,6 +160,8 @@ export interface WebdavBackend {
   readonly locks: LockApi;
   /** The app-password verification store (DO SQLite). */
   readonly credentials: CredentialApi;
+  /** The dead-property store (DO SQLite, spec §4). */
+  readonly properties: DeadPropertyApi;
 }
 
 /** A thrown precondition failure the router renders as `412 Precondition Failed`. */

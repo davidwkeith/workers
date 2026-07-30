@@ -19,6 +19,7 @@
 
 import {
   resolveLockPolicy,
+  type DeadProperty,
   type ResolvedLockPolicy,
   type ResourceStat,
   type WebdavBackend,
@@ -44,7 +45,13 @@ import {
   type LockRecord,
   type LockScope,
 } from "./locks.js";
-import { escapeXml, parseXml, type XmlElement, XmlError } from "./xml.js";
+import {
+  escapeXml,
+  parseXml,
+  serializeFragment,
+  type XmlElement,
+  XmlError,
+} from "./xml.js";
 
 /** The composed request handler `createWebdav` returns. */
 export type WebdavHandler = (
@@ -854,6 +861,29 @@ const SUPPORTED_LOCK =
   "<D:locktype><D:write/></D:locktype>" +
   "</D:lockentry></D:supportedlock>";
 
+/**
+ * Serialize one stored dead property as a value-bearing element. Each element
+ * is namespace-self-contained (a fresh `x` prefix declaration, or bare for the
+ * null namespace — litmus `propnullns`), and the persisted value fragment's
+ * child elements carry their own `xmlns="…"` declarations (litmus
+ * `propvalnspace`), so nothing can collide with the multistatus's `D:` prefix.
+ */
+function deadPropXml(prop: DeadProperty): string {
+  if (prop.ns === null) {
+    return `<${prop.local}>${prop.valueXml}</${prop.local}>`;
+  }
+  if (prop.ns === "DAV:") {
+    return `<D:${prop.local}>${prop.valueXml}</D:${prop.local}>`;
+  }
+  return `<x:${prop.local} xmlns:x="${escapeXml(prop.ns)}">${prop.valueXml}</x:${prop.local}>`;
+}
+
+function isLiveName(req: PropName): boolean {
+  return (
+    req.ns === "DAV:" && (LIVE_PROPS as readonly string[]).includes(req.local)
+  );
+}
+
 function responseXml(
   stat: ResourceStat,
   selection: PropSelection,
@@ -861,43 +891,53 @@ function responseXml(
   resolved: Resolved,
 ): string {
   const href = `<D:href>${escapeXml(hrefOf(stat.path, resolved))}</D:href>`;
+  const dead = backend.properties.list(stat.path);
 
   if (selection.kind === "propname") {
-    const names = LIVE_PROPS.filter(
-      (n) => livePropValue(n, stat, backend, resolved) !== "",
-    )
-      .map((n) => `<D:${n}/>`)
-      .join("");
+    const names =
+      LIVE_PROPS.filter(
+        (n) => livePropValue(n, stat, backend, resolved) !== "",
+      )
+        .map((n) => `<D:${n}/>`)
+        .join("") + dead.map((p) => `<${qname(p)}/>`).join("");
     return `<D:response>${href}<D:propstat><D:prop>${names}</D:prop><D:status>${statusLine(200)}</D:status></D:propstat></D:response>`;
   }
 
-  const wanted: readonly LivePropName[] =
-    selection.kind === "allprop"
-      ? LIVE_PROPS
-      : LIVE_PROPS.filter((n) =>
-          selection.names.some((req) => req.ns === "DAV:" && req.local === n),
-        );
-
   const found: string[] = [];
-  for (const name of wanted) {
-    const value = livePropValue(name, stat, backend, resolved);
-    if (value !== "") found.push(value);
+  const missing: PropName[] = [];
+
+  if (selection.kind === "allprop") {
+    for (const name of LIVE_PROPS) {
+      const value = livePropValue(name, stat, backend, resolved);
+      if (value !== "") found.push(value);
+    }
+    for (const prop of dead) found.push(deadPropXml(prop));
+  } else {
+    for (const req of selection.names) {
+      if (isLiveName(req)) {
+        // A live prop that does not apply here (e.g. `getcontentlength` on a
+        // collection, `creationdate` untracked) is omitted, matching the
+        // pre-dead-prop behaviour — omitted, not reported 404.
+        const value = livePropValue(
+          req.local as LivePropName,
+          stat,
+          backend,
+          resolved,
+        );
+        if (value !== "") found.push(value);
+        continue;
+      }
+      const match = dead.find((p) => p.ns === req.ns && p.local === req.local);
+      if (match) found.push(deadPropXml(match));
+      else missing.push(req);
+    }
   }
 
   let body = `<D:propstat><D:prop>${found.join("")}</D:prop><D:status>${statusLine(200)}</D:status></D:propstat>`;
 
-  if (selection.kind === "prop") {
-    const missing = selection.names.filter(
-      (req) =>
-        !(
-          req.ns === "DAV:" &&
-          (LIVE_PROPS as readonly string[]).includes(req.local)
-        ),
-    );
-    if (missing.length > 0) {
-      const empties = missing.map((req) => `<${qname(req)}/>`).join("");
-      body += `<D:propstat><D:prop>${empties}</D:prop><D:status>${statusLine(404)}</D:status></D:propstat>`;
-    }
+  if (missing.length > 0) {
+    const empties = missing.map((req) => `<${qname(req)}/>`).join("");
+    body += `<D:propstat><D:prop>${empties}</D:prop><D:status>${statusLine(404)}</D:status></D:propstat>`;
   }
 
   return `<D:response>${href}${body}</D:response>`;
@@ -910,8 +950,22 @@ function qname(name: PropName): string {
 }
 
 // ---------------------------------------------------------------------------
-// PROPPATCH (live/known-only — spec §4)
+// PROPPATCH (dead-property store — spec §4)
 // ---------------------------------------------------------------------------
+
+/** One parsed `propertyupdate` instruction, in document order. */
+interface PropOp {
+  readonly kind: "set" | "remove";
+  readonly ns: string | null;
+  readonly local: string;
+  /** The property element itself (its inner content is the value), for `set`. */
+  readonly element: XmlElement | null;
+}
+
+/** Dedupe key for a property name; ` ` cannot occur in an XML name. */
+function propKey(ns: string | null, local: string): string {
+  return `${ns ?? ""} ${local}`;
+}
 
 async function proppatch(
   ctx: RequestContext,
@@ -939,31 +993,79 @@ async function proppatch(
     return problem(400, "Expected a DAV:propertyupdate body");
   }
 
-  // No general dead-property store (spec §4): every set/remove of an arbitrary
-  // dead property is accepted-and-ignored (200) so Finder/Explorer do not
-  // error, but nothing is persisted. Protected live properties are 403.
-  const props: PropName[] = [];
-  for (const op of root.children) {
-    if (op.ns !== "DAV:" || (op.local !== "set" && op.local !== "remove"))
+  const ops: PropOp[] = [];
+  for (const action of root.children) {
+    if (
+      action.ns !== "DAV:" ||
+      (action.local !== "set" && action.local !== "remove")
+    ) {
       continue;
-    const prop = op.children.find((c) => c.ns === "DAV:" && c.local === "prop");
-    for (const p of prop?.children ?? [])
-      props.push({ ns: p.ns, local: p.local });
+    }
+    const prop = action.children.find(
+      (c) => c.ns === "DAV:" && c.local === "prop",
+    );
+    for (const p of prop?.children ?? []) {
+      ops.push({
+        kind: action.local,
+        ns: p.ns,
+        local: p.local,
+        element: action.local === "set" ? p : null,
+      });
+    }
   }
 
-  const entries = props
-    .map((p) => {
-      const protectedLive =
-        p.ns === "DAV:" && (LIVE_PROPS as readonly string[]).includes(p.local);
-      const code = protectedLive ? 403 : 200;
-      return `<D:propstat><D:prop><${qname(p)}/></D:prop><D:status>${statusLine(code)}</D:status></D:propstat>`;
-    })
-    .join("");
+  const isProtected = (op: PropOp): boolean =>
+    op.ns === "DAV:" && (LIVE_PROPS as readonly string[]).includes(op.local);
   const href = `<D:href>${escapeXml(hrefOf(ctx.path, resolved))}</D:href>`;
-  return xml(
-    207,
-    `<D:multistatus xmlns:D="DAV:"><D:response>${href}${entries}</D:response></D:multistatus>`,
-  );
+  const propstat = (names: readonly PropName[], code: number): string =>
+    `<D:propstat><D:prop>${names.map((n) => `<${qname(n)}/>`).join("")}</D:prop><D:status>${statusLine(code)}</D:status></D:propstat>`;
+  const respond = (entries: string): Response =>
+    xml(
+      207,
+      `<D:multistatus xmlns:D="DAV:"><D:response>${href}${entries}</D:response></D:multistatus>`,
+    );
+
+  // A PROPPATCH is atomic (RFC 4918 §9.2): a protected live property fails 403
+  // and drags every other instruction down as 424 Failed Dependency — nothing
+  // is persisted.
+  if (ops.some(isProtected)) {
+    const byKey = new Map<string, { name: PropName; code: number }>();
+    for (const op of ops) {
+      const code = isProtected(op) ? 403 : 424;
+      const key = propKey(op.ns, op.local);
+      const prior = byKey.get(key);
+      if (!prior || code === 403) {
+        byKey.set(key, { name: { ns: op.ns, local: op.local }, code });
+      }
+    }
+    const all = [...byKey.values()];
+    const rejected = all.filter((e) => e.code === 403).map((e) => e.name);
+    const dependent = all.filter((e) => e.code === 424).map((e) => e.name);
+    return respond(
+      propstat(rejected, 403) +
+        (dependent.length > 0 ? propstat(dependent, 424) : ""),
+    );
+  }
+
+  // Apply in document order (litmus `propremoveset`/`propsetremove`): the last
+  // instruction for a property wins. DO SQLite is synchronous and the DO is
+  // single-threaded, so the loop is effectively one atomic batch.
+  const applied = new Map<string, PropName>();
+  for (const op of ops) {
+    if (op.kind === "set" && op.element !== null) {
+      ctx.backend.properties.set(ctx.path, {
+        ns: op.ns,
+        local: op.local,
+        valueXml: serializeFragment(op.element),
+      });
+    } else {
+      // Removing an absent property still succeeds (RFC 4918 §9.2).
+      ctx.backend.properties.remove(ctx.path, op.ns, op.local);
+    }
+    applied.set(propKey(op.ns, op.local), { ns: op.ns, local: op.local });
+  }
+
+  return respond(propstat([...applied.values()], 200));
 }
 
 // ---------------------------------------------------------------------------

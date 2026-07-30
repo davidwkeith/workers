@@ -27,6 +27,7 @@
  * - {@link LockStore} — exclusive write locks in DO SQLite (spec §2).
  * - {@link CredentialStore} — app-password persistence + throttled verification
  *   (spec §1).
+ * - {@link PropertyStore} — dead-property storage in DO SQLite (spec §4).
  *
  * The concrete adapter that resolves {@link WebdavBackend} onto the per-pod
  * `SolidPodObject` (hosting the lock + app-password tables alongside the Solid
@@ -84,6 +85,8 @@ export {
   ResourceConflict,
   type AppPasswordPolicy,
   type CredentialApi,
+  type DeadProperty,
+  type DeadPropertyApi,
   type LockApi,
   type LockPolicy,
   type ResolvedLockPolicy,
@@ -111,5 +114,7 @@ export {
   type ThrottlePolicy,
   type VerifyResult,
 } from "./credential-store.js";
+
+export { PropertyStore } from "./dead-props.js";
 
 export { createWebdav, type WebdavHandler } from "./webdav.js";
