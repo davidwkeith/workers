@@ -287,7 +287,16 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
   };
 
   return async function webdav(request, env): Promise<Response> {
-    const response = await route(request, env);
+    let response: Response;
+    try {
+      response = await route(request, env);
+    } catch (error) {
+      // An unexpected backend exception must still answer as a well-formed
+      // DAV response (every reply carries `DAV: 1, 2` etc. per spec) rather
+      // than escape as a bare crash from the composing Worker.
+      console.error("@dwk/webdav: unexpected error", error);
+      response = problem(500, "Internal Server Error");
+    }
     // A refused write (401/403/409/423 …) leaves the request body unread.
     // Consume a bounded amount before responding: this handler runs inside
     // the pod DO on a body forwarded over `stub.fetch`, and workerd's local
