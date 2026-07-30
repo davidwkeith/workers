@@ -225,7 +225,12 @@ export function parseXml(input: string, limits: XmlParseLimits): XmlElement {
     const local = colon === -1 ? qname : qname.slice(colon + 1);
     let ns: string | null;
     if (prefix === "") {
-      ns = scope.get("") ?? null;
+      // `xmlns=""` legally un-declares the default namespace, so an empty
+      // in-scope default is the same as no default: the element is in no
+      // namespace (`null`), never the empty string — downstream emitters
+      // branch on `null` to serialize such names legally (bare, unprefixed).
+      const def = scope.get("");
+      ns = def === undefined || def === "" ? null : def;
     } else {
       const resolved = scope.get(prefix);
       if (resolved === undefined) {
@@ -280,6 +285,12 @@ export function parseXml(input: string, limits: XmlParseLimits): XmlElement {
       if (attrName === "xmlns") {
         scope.set("", attrValue);
       } else if (attrName.startsWith("xmlns:")) {
+        // XML Namespaces 1.0: a *prefixed* declaration MUST NOT be empty —
+        // only the default namespace can be un-declared that way (litmus
+        // `propfind_invalid2` requires a 400 here, see the litmus FAQ).
+        if (attrValue === "") {
+          error(`invalid empty namespace declaration for "${attrName}"`);
+        }
         scope.set(attrName.slice(6), attrValue);
       } else {
         rawAttrs.push([attrName, attrValue]);

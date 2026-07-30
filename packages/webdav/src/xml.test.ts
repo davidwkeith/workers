@@ -54,6 +54,29 @@ describe("parseXml — namespaces", () => {
     );
   });
 
+  // XML Namespaces 1.0: only the default namespace may be un-declared with an
+  // empty value; `xmlns:prefix=""` is invalid (litmus `propfind_invalid2`
+  // requires a 400, not a best-effort 207).
+  it("rejects an empty prefixed namespace declaration", () => {
+    expect(() =>
+      parse(
+        `<D:propfind xmlns:D="DAV:"><D:prop><bar:foo xmlns:bar=""/></D:prop></D:propfind>`,
+      ),
+    ).toThrow(XmlError);
+  });
+
+  // `xmlns=""` un-declares the default namespace: the element is in *no*
+  // namespace (`null`), never the empty string — emitters branch on `null`
+  // to serialize such names legally (litmus `propnullns`).
+  it("resolves an xmlns='' un-declaration to no namespace", () => {
+    const root = parse(
+      `<propfind xmlns="DAV:"><prop><nonamespace xmlns=""/></prop></propfind>`,
+    );
+    const prop = firstChild(root, DAV_NS, "prop");
+    expect(prop?.children[0]?.ns).toBeNull();
+    expect(prop?.children[0]?.local).toBe("nonamespace");
+  });
+
   it("collects multiple same-named children", () => {
     const root = parse(
       `<D:prop xmlns:D="DAV:"><D:getetag/><D:getcontentlength/></D:prop>`,

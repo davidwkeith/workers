@@ -295,6 +295,28 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 
+  // RFC 4918 §9.6.1: DELETE on a collection acts as if `Depth: infinity` —
+  // the whole subtree is removed, unlike the Solid door, which keeps LDP's
+  // refuse-on-non-empty semantics. litmus depends on this: every group's
+  // `begin` DELETEs a leftover `/litmus/` (ignoring the status) and then
+  // MKCOLs it fresh, so a 409-on-non-empty door 405s the MKCOL and wedges
+  // `copymove`/`props`/`locks` before they start.
+  it("deletes a non-empty collection recursively and frees the name for MKCOL", async () => {
+    await withPod(RW, async ({ call }) => {
+      expect((await call("MKCOL", "/litmus")).status).toBe(201);
+      await call("PUT", "/litmus/res", { body: "x" });
+      expect((await call("MKCOL", "/litmus/sub")).status).toBe(201);
+      await call("PUT", "/litmus/sub/deep.txt", { body: "y" });
+
+      expect((await call("DELETE", "/litmus/")).status).toBe(204);
+      expect((await call("GET", "/litmus/res")).status).toBe(404);
+      expect((await call("GET", "/litmus/sub/deep.txt")).status).toBe(404);
+
+      // litmus `begin`'s DELETE-then-MKCOL: the name is reusable afterwards.
+      expect((await call("MKCOL", "/litmus")).status).toBe(201);
+    });
+  });
+
   it("refuses a write outside a read-only app-password scope", async () => {
     await withPod({ modes: ["read"] }, async ({ call }) => {
       expect((await call("PUT", "/ro.txt", { body: "x" })).status).toBe(403);

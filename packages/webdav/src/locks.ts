@@ -8,7 +8,9 @@
  * router ({@link createWebdav}) maps its structured results onto HTTP status.
  *
  * Scope (spec §2):
- * - **Exclusive write locks only**; shared locks are deferred.
+ * - **Exclusive and shared write locks** (litmus `locks` — `lock_shared`,
+ *   `double_sharedlock` — requires shared): any number of shared locks
+ *   coexist on a resource; an exclusive lock conflicts with everything.
  * - `Depth: 0` resource locks (the Finder/Explorer case) and **bounded**
  *   `Depth: infinity` collection locks: forbidden on the storage root and above
  *   a configurable depth, rejected as `forbidden` (the router answers `403`).
@@ -21,13 +23,17 @@
 
 import type { ResolvedLockPolicy } from "./config.js";
 
-/** A live exclusive write lock. */
+/** A lock's scope (RFC 4918 §6.2/§6.3). */
+export type LockScope = "exclusive" | "shared";
+
+/** A live write lock. */
 export interface LockRecord {
   /** The full `opaquelocktoken:<uuid>` URI. */
   readonly token: string;
   /** The locked resource path (percent-encoded; collections end in `/`). */
   readonly path: string;
   readonly depth: "0" | "infinity";
+  readonly scope: LockScope;
   /** The opaque `<owner>` XML the client supplied, or `""`. */
   readonly ownerHref: string;
   /** The WebID that holds the lock. */
@@ -40,6 +46,7 @@ export interface LockRecord {
 export interface AcquireParams {
   readonly path: string;
   readonly depth: "0" | "infinity";
+  readonly scope: LockScope;
   readonly ownerHref: string;
   readonly webid: string;
   /** Requested lifetime in seconds; clamped to the policy ceiling. */
@@ -60,6 +67,7 @@ type LockRow = {
   readonly token: string;
   readonly path: string;
   readonly depth: string;
+  readonly scope: string;
   readonly owner_href: string;
   readonly webid: string;
   readonly expires_at: number;
@@ -70,6 +78,7 @@ function rowToRecord(row: LockRow): LockRecord {
     token: row.token,
     path: row.path,
     depth: row.depth === "infinity" ? "infinity" : "0",
+    scope: row.scope === "shared" ? "shared" : "exclusive",
     ownerHref: row.owner_href,
     webid: row.webid,
     expiresAt: row.expires_at,
@@ -126,11 +135,21 @@ export class LockStore {
          token      TEXT PRIMARY KEY,
          path       TEXT NOT NULL,
          depth      TEXT NOT NULL,
+         scope      TEXT NOT NULL DEFAULT 'exclusive',
          owner_href TEXT NOT NULL DEFAULT '',
          webid      TEXT NOT NULL,
          expires_at INTEGER NOT NULL
        )`,
     );
+    // Migration for pre-shared-lock deployments whose table predates the
+    // `scope` column; the ALTER errors harmlessly once the column exists.
+    try {
+      this.#sql.exec(
+        `ALTER TABLE webdav_locks ADD COLUMN scope TEXT NOT NULL DEFAULT 'exclusive'`,
+      );
+    } catch {
+      // Column already present.
+    }
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS webdav_locks_by_path ON webdav_locks (path)`,
     );
@@ -151,7 +170,7 @@ export class LockStore {
       .map(rowToRecord);
   }
 
-  /** Every live lock that governs `path` (≤ 1 under exclusive-only locking). */
+  /** Every live lock that governs `path` (shared locks allow several). */
   locksOn(path: string): LockRecord[] {
     this.#prune();
     return this.#liveLocks().filter((lock) => covers(lock, path));
@@ -169,27 +188,38 @@ export class LockStore {
   /**
    * Whether a mutation of `path` is blocked: a lock governs `path` (itself or an
    * ancestor infinity lock) — **or** a lock sits on a descendant of `path` —
-   * whose token was not presented in the request's `If:` header. The descendant
-   * check is RFC 4918 §9.6.1: a `DELETE`/overwriting `MOVE` of a collection must
-   * fail if any member is locked without the member's token submitted.
+   * and no submitted token satisfies it. Locks are grouped by locked path:
+   * shared locks on one resource are satisfied by *any one* of their tokens
+   * (RFC 4918 §6.3), while distinct locked paths each need a matching token —
+   * the descendant check is RFC 4918 §9.6.1: a `DELETE`/overwriting `MOVE` of
+   * a collection must fail if any member is locked without that member's
+   * token submitted.
    */
   blockingLock(
     path: string,
-    providedToken: string | undefined,
+    submittedTokens: readonly string[],
   ): LockRecord | null {
-    for (const lock of this.locksOn(path)) {
-      if (lock.token !== providedToken) return lock;
-    }
+    const submitted = new Set(submittedTokens);
+    const byPath = new Map<string, LockRecord[]>();
+    const add = (lock: LockRecord) => {
+      const group = byPath.get(lock.path);
+      if (group) group.push(lock);
+      else byPath.set(lock.path, [lock]);
+    };
     const prefix = subtreePrefix(path);
+    for (const lock of this.locksOn(path)) add(lock);
     for (const lock of this.#liveLocks()) {
-      if (lock.path.startsWith(prefix) && lock.token !== providedToken) {
-        return lock;
+      if (lock.path.startsWith(prefix)) add(lock);
+    }
+    for (const group of byPath.values()) {
+      if (!group.some((lock) => submitted.has(lock.token))) {
+        return group[0] ?? null;
       }
     }
     return null;
   }
 
-  /** Attempt to take an exclusive write lock. */
+  /** Attempt to take a write lock. */
   acquire(params: AcquireParams): AcquireResult {
     this.#prune();
 
@@ -203,11 +233,19 @@ export class LockStore {
       }
     }
 
+    // Two shared locks coexist (RFC 4918 §6.3, litmus `double_sharedlock`);
+    // any pairing that involves an exclusive lock conflicts.
+    const conflicts = (lock: LockRecord): boolean =>
+      lock.scope === "exclusive" || params.scope === "exclusive";
+
     const live = this.#liveLocks();
     for (const lock of live) {
       // A lock already on this exact resource, or an ancestor infinity lock
       // covering it, conflicts.
-      if (lock.path === params.path || covers(lock, params.path)) {
+      if (
+        (lock.path === params.path || covers(lock, params.path)) &&
+        conflicts(lock)
+      ) {
         return { ok: false, reason: "conflict", lock };
       }
       // Taking an infinity lock fails if any existing lock sits inside the
@@ -215,7 +253,8 @@ export class LockStore {
       // a name-prefix sibling does not falsely conflict).
       if (
         params.depth === "infinity" &&
-        lock.path.startsWith(subtreePrefix(params.path))
+        lock.path.startsWith(subtreePrefix(params.path)) &&
+        conflicts(lock)
       ) {
         return { ok: false, reason: "conflict", lock };
       }
@@ -229,16 +268,18 @@ export class LockStore {
       token: `opaquelocktoken:${crypto.randomUUID()}`,
       path: params.path,
       depth: params.depth,
+      scope: params.scope,
       ownerHref: params.ownerHref,
       webid: params.webid,
       expiresAt: this.#now() + timeout * 1000,
     };
     this.#sql.exec(
-      `INSERT INTO webdav_locks (token, path, depth, owner_href, webid, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO webdav_locks (token, path, depth, scope, owner_href, webid, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       lock.token,
       lock.path,
       lock.depth,
+      lock.scope,
       lock.ownerHref,
       lock.webid,
       lock.expiresAt,

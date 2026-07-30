@@ -6,7 +6,6 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
-  CollectionNotEmpty,
   PreconditionFailed,
   ResourceConflict,
   resolveLockPolicy,
@@ -179,9 +178,12 @@ class MemBackend implements WebdavBackend {
   async remove(path: string, pre: WritePreconditions): Promise<void> {
     const existing = this.resources.get(path);
     this.#check(existing, pre);
+    // Collection DELETE is `Depth: infinity` (RFC 4918 §9.6.1): the subtree
+    // goes with it.
     if (existing?.collection) {
-      const children = await this.listChildren(path);
-      if (children.length > 0) throw new CollectionNotEmpty();
+      for (const key of [...this.resources.keys()]) {
+        if (key.startsWith(path)) this.resources.delete(key);
+      }
     }
     this.resources.delete(path);
   }
@@ -510,6 +512,18 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
+  // litmus `mkcol_over_plain`'s actual wire shape: neon's ne_mkcol() always
+  // appends a trailing slash, so after `PUT /res` the MKCOL arrives as
+  // `MKCOL /res/`. A slashed request path makes `ctx.path` already the
+  // collection form, so checking only that form misses the plain resource
+  // stored under the un-slashed name and creates a collection alongside it.
+  it("405s a trailing-slash MKCOL over an existing plain resource", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/plain2.txt", { body: "x" });
+      expect((await call("MKCOL", "/plain2.txt/")).status).toBe(405);
+    });
+  });
+
   it("copies a resource and moves another, dropping the source", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/src.txt", { body: "data" });
@@ -578,13 +592,19 @@ describe("createWebdav — MKCOL / COPY / MOVE (spec §3)", () => {
     });
   });
 
-  it("deletes a resource and refuses to delete a non-empty collection", async () => {
+  // RFC 4918 §9.6.1: DELETE on a collection acts as if `Depth: infinity` —
+  // the whole subtree goes. litmus depends on this: every group's `begin`
+  // DELETEs `/litmus/` (ignoring the status) before re-MKCOLing it, so a
+  // 409-on-non-empty door wedges `copymove`/`props`/`locks` behind a 405.
+  it("deletes a resource and deletes a non-empty collection recursively", async () => {
     await withHandler(async ({ call }) => {
       await call("MKCOL", "/full");
       await call("PUT", "/full/child.txt", { body: "x" });
-      expect((await call("DELETE", "/full/")).status).toBe(409);
-      expect((await call("DELETE", "/full/child.txt")).status).toBe(204);
       expect((await call("DELETE", "/full/")).status).toBe(204);
+      expect((await call("GET", "/full/child.txt")).status).toBe(404);
+      expect((await call("DELETE", "/full/")).status).toBe(404);
+      // The path is reusable afterwards (litmus `begin`'s DELETE-then-MKCOL).
+      expect((await call("MKCOL", "/full")).status).toBe(201);
     });
   });
 
@@ -623,6 +643,33 @@ describe("createWebdav — Class 2 locking (spec §2)", () => {
         headers: { if: `(<${token}>)` },
       });
       expect(keyed.status).toBe(204);
+
+      // litmus `owner_modify`: neon-based clients tag the list with the
+      // locked resource's URI — the tagged form must admit the keyed write
+      // too, not 400 the lock's own owner.
+      const tagged = await call("PUT", "/doc.txt", {
+        body: "v3",
+        headers: { if: `<https://pod.example/doc.txt> (<${token}>)` },
+      });
+      expect(tagged.status).toBe(204);
+
+      // litmus `cond_put_with_not`: `(<token>) (Not <DAV:no-lock>)` — the
+      // first list is true (the token names the live lock) and the token is
+      // submitted, so the write proceeds.
+      const withNot = await call("PUT", "/doc.txt", {
+        body: "v4",
+        headers: { if: `(<${token}>) (Not <DAV:no-lock>)` },
+      });
+      expect(withNot.status).toBe(204);
+
+      // litmus `cond_put_corrupt_token`: precondition true via the
+      // `(Not <DAV:no-lock>)` arm, but the live lock's token is nowhere
+      // submitted — the write is still refused 423.
+      const corrupt = await call("PUT", "/doc.txt", {
+        body: "v5",
+        headers: { if: `(<${token}x>) (Not <DAV:no-lock>)` },
+      });
+      expect(corrupt.status).toBe(423);
 
       const unlock = await call("UNLOCK", "/doc.txt", {
         headers: { "lock-token": `<${token}>` },
@@ -865,11 +912,11 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
   it("rejects an If: header outside the supported subset with 400 (§10.4)", async () => {
     await withHandler(async ({ call }) => {
       await call("PUT", "/c.txt", { body: "x" });
-      // A tagged list is outside the strict subset (spec §4): fail closed with
-      // 400 rather than silently dropping the conditional.
+      // Anything outside the bounded §10.4 grammar (spec §4) fails closed
+      // with 400 rather than silently dropping the conditional.
       const res = await call("PUT", "/c.txt", {
         body: "y",
-        headers: { if: "<https://pod.example/c.txt> (<opaquelocktoken:z>)" },
+        headers: { if: "(maybe <opaquelocktoken:z>)" },
       });
       expect(res.status).toBe(400);
     });
@@ -890,6 +937,113 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
         headers: { if: `([${etag}])` },
       });
       expect(fresh.status).toBe(204);
+    });
+  });
+
+  // litmus `fail_cond_put_unlocked` (RFC 4918 §10.4.3): a lock token that
+  // names no live lock makes its list false — 412, not a silent success,
+  // even when the resource is not locked at all.
+  it("412s a conditional naming a dead lock token on an unlocked resource", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/u.txt", { body: "x" });
+      const res = await call("PUT", "/u.txt", {
+        body: "y",
+        headers: { if: "(<DAV:no-lock>)" },
+      });
+      expect(res.status).toBe(412);
+    });
+  });
+
+  // litmus `complex_cond_put` / `fail_complex_cond_put`: two OR'd lists, each
+  // ANDing a token and an ETag.
+  it("evaluates multi-list conditionals with tokens and ETags (§10.4)", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/cx.txt", { body: "x" });
+      const lock = await call("LOCK", "/cx.txt", {
+        headers: { depth: "0" },
+        body:
+          '<?xml version="1.0"?><D:lockinfo xmlns:D="DAV:">' +
+          "<D:lockscope><D:exclusive/></D:lockscope>" +
+          "<D:locktype><D:write/></D:locktype></D:lockinfo>",
+      });
+      const token = lock.headers.get("Lock-Token")?.replace(/^<|>$/g, "");
+      const etag = (await call("HEAD", "/cx.txt")).headers.get("ETag");
+
+      const good = await call("PUT", "/cx.txt", {
+        body: "y",
+        headers: { if: `(<${token}> [${etag}]) (Not <DAV:no-lock> [${etag}])` },
+      });
+      expect(good.status).toBe(204);
+
+      // Both lists carry a stale ETag → every list false → 412.
+      const bad = await call("PUT", "/cx.txt", {
+        body: "z",
+        headers: {
+          if: `(<${token}> ["stale"]) (Not <DAV:no-lock> ["stale"])`,
+        },
+      });
+      expect(bad.status).toBe(412);
+    });
+  });
+
+  // litmus `lock_shared` / `double_sharedlock` (RFC 4918 §6.3): shared locks
+  // coexist; an exclusive request against them conflicts; any one shared
+  // token admits a write; an unkeyed write is still refused.
+  it("supports shared locks coexisting and excluding exclusive locks", async () => {
+    await withHandler(async ({ call }) => {
+      await call("PUT", "/s.txt", { body: "v1" });
+      const sharedBody =
+        '<?xml version="1.0"?><D:lockinfo xmlns:D="DAV:">' +
+        "<D:lockscope><D:shared/></D:lockscope>" +
+        "<D:locktype><D:write/></D:locktype></D:lockinfo>";
+
+      const first = await call("LOCK", "/s.txt", {
+        headers: { depth: "0" },
+        body: sharedBody,
+      });
+      expect(first.status).toBe(200);
+      expect(await first.text()).toContain("<D:shared/>");
+      const token1 = first.headers.get("Lock-Token")?.replace(/^<|>$/g, "");
+
+      const second = await call("LOCK", "/s.txt", {
+        headers: { depth: "0" },
+        body: sharedBody,
+      });
+      expect(second.status).toBe(200);
+      const token2 = second.headers.get("Lock-Token")?.replace(/^<|>$/g, "");
+      expect(token2).not.toBe(token1);
+
+      const exclusive = await call("LOCK", "/s.txt", {
+        headers: { depth: "0" },
+        body:
+          '<?xml version="1.0"?><D:lockinfo xmlns:D="DAV:">' +
+          "<D:lockscope><D:exclusive/></D:lockscope>" +
+          "<D:locktype><D:write/></D:locktype></D:lockinfo>",
+      });
+      expect(exclusive.status).toBe(423);
+
+      expect((await call("PUT", "/s.txt", { body: "v2" })).status).toBe(423);
+      const keyed = await call("PUT", "/s.txt", {
+        body: "v2",
+        headers: { if: `(<${token2}>)` },
+      });
+      expect(keyed.status).toBe(204);
+
+      expect(
+        (
+          await call("UNLOCK", "/s.txt", {
+            headers: { "lock-token": `<${token1}>` },
+          })
+        ).status,
+      ).toBe(204);
+      expect(
+        (
+          await call("UNLOCK", "/s.txt", {
+            headers: { "lock-token": `<${token2}>` },
+          })
+        ).status,
+      ).toBe(204);
+      expect((await call("PUT", "/s.txt", { body: "v3" })).status).toBe(204);
     });
   });
 

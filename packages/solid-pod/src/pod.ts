@@ -1182,23 +1182,19 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         preconditions: WritePreconditions,
       ): Promise<void> => {
         try {
+          // WebDAV DELETE on a collection acts as if `Depth: infinity`
+          // (RFC 4918 §9.6.1): the whole subtree goes with it — unlike the
+          // Solid door, which keeps LDP's refuse-on-non-empty semantics.
+          // litmus's `begin` relies on this to clear a previous run's
+          // leftover `/litmus/` tree. Preconditions apply to the collection
+          // itself; its row is deleted first (enforcing them), then the
+          // subtree is swept by prefix.
           store.delete(path, {
             ...(preconditions.ifMatch !== undefined
               ? { ifMatch: preconditions.ifMatch }
               : {}),
-            // Re-check container emptiness inside the delete transaction, as the
-            // Solid door does — a non-empty container MUST NOT be deleted.
-            guard: () => {
-              if (
-                isContainer(path) &&
-                store
-                  .readQuads(path)
-                  .some((q) => isContainsQuad(q, toIri(origin, path)))
-              ) {
-                throw new ContainerNotEmptyError();
-              }
-            },
           });
+          if (isContainer(path)) this.#webdavDeleteTree(store, path);
         } catch (error) {
           throw mapStoreError(error);
         }

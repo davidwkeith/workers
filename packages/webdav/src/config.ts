@@ -25,7 +25,7 @@ export interface LockApi {
   findByToken(token: string): LockRecord | null;
   blockingLock(
     path: string,
-    providedToken: string | undefined,
+    submittedTokens: readonly string[],
   ): LockRecord | null;
   acquire(params: AcquireParams): AcquireResult;
   refresh(token: string, timeoutSeconds: number): LockRecord | null;
@@ -109,7 +109,11 @@ export interface WebdavBackend {
   ): Promise<WriteOutcome>;
   /** Create a collection (`MKCOL`). */
   makeCollection(path: string): Promise<WriteOutcome>;
-  /** Remove a resource or (empty-checked) collection. */
+  /**
+   * Remove a resource, or a collection and its whole subtree — collection
+   * `DELETE` acts as if `Depth: infinity` (RFC 4918 §9.6.1). Preconditions
+   * apply to the named target itself.
+   */
   remove(path: string, preconditions: WritePreconditions): Promise<void>;
   /** Copy `from`→`to`; collections honour `depth`. */
   copy(

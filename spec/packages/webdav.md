@@ -91,9 +91,12 @@ the entire point of this package — need **Class 2** (`LOCK`/`UNLOCK`).
 
 - Advertise `DAV: 1, 2` on every `OPTIONS` response (Windows WebClient refuses to
   mount read-write without it) plus `MS-Author-Via: DAV`.
-- **Exclusive write locks** only (the kind Finder/Windows take); **shared locks
-  are deferred**. `Depth: 0` resource locks are the primary case (sufficient for
-  Finder and Windows Explorer).
+- **Exclusive and shared write locks.** Exclusive is the kind Finder/Windows
+  take and remains the primary case; shared locks (any number coexist, any one
+  of their tokens admits a write, an exclusive request against them conflicts)
+  were originally deferred but are required by the litmus `locks` group
+  (`lock_shared`, `double_sharedlock` — issue #467). `Depth: 0` resource locks
+  are the primary case (sufficient for Finder and Windows Explorer).
 - **`Depth: infinity` collection locks are bounded, not open-ended.** An
   unrestricted infinity lock lets one credential lock an arbitrarily large
   subtree — locking `/` would freeze the whole pod. So infinity locks are
@@ -174,12 +177,16 @@ and the N3 Patch parser.
   other charset (in `Content-Type` or via a non-UTF-8 BOM / XML encoding
   declaration) is rejected `415`, closing the encoding-bypass class (UTF-16/UTF-7
   smuggling past the bounds/XXE checks) that a hand-rolled parser is prone to.
-- **The `If:` header is parsed as a strict, documented subset.** RFC 4918 §10.4's
-  full grammar (tagged + untagged lists, multiple state tokens, `Not`) is a
-  classic source of parser-differential bugs. The server supports only what the
-  precondition path needs — a single untagged list of one lock token and/or one
-  ETag — and answers a more complex `If:` with `400`/`501` rather than
-  best-effort guessing.
+- **The `If:` header is parsed as a bounded, fully-evaluated grammar.** RFC 4918
+  §10.4's grammar is a classic source of parser-differential bugs, so the
+  original cut supported only a single untagged list — but the litmus `locks`
+  group (and neon-based clients generally: litmus, davfs2) exercises tagged
+  lists, multiple OR'd lists, `Not`, and `DAV:no-lock` (issue #467). The parser
+  now accepts that full surface under hard DoS bounds (a fixed cap on lists and
+  conditions per header) and the router genuinely evaluates it: `412` when no
+  list is satisfied, and lock enforcement counts only positively-named tokens
+  as submitted. Anything outside the bounded grammar is still answered `400`
+  rather than best-effort guessed.
 - **Live properties** supported: `displayname`, `getcontentlength`,
   `getcontenttype`, `getlastmodified`, `getetag`, `resourcetype`,
   `lockdiscovery`, `supportedlock`, `creationdate`.
@@ -195,7 +202,11 @@ and the N3 Patch parser.
 `PROPPATCH` (live/known-only per §4), `MKCOL`, `GET`, `HEAD`, `PUT`, `DELETE`,
 `COPY`, `MOVE`, `LOCK`, `UNLOCK`. Successful responses and `OPTIONS` advertise an
 accurate `Allow`; the storage root is undeletable (inherited from
-`solid-pod`'s `#server-delete-protect-root-container`).
+`solid-pod`'s `#server-delete-protect-root-container`). Collection `DELETE`
+acts as if `Depth: infinity` (RFC 4918 §9.6.1) — the whole subtree is removed,
+unlike the Solid door's LDP refuse-on-non-empty semantics; litmus's own
+`begin` fixture depends on this to clear a previous run's leftovers
+(issue #467).
 
 ## OS-client quirks to design around
 
