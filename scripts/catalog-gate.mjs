@@ -210,6 +210,160 @@ function checkTriggers(entry, label, resourceBindings, violations) {
   return valid;
 }
 
+/** Valid `type` values for an owner-configurable config field (issue #470). */
+const CONFIG_FIELD_TYPES = new Set(["enum", "string-list"]);
+
+/** Valid `itemFormat` values for a string-list config field. */
+const CONFIG_ITEM_FORMATS = new Set(["iri"]);
+
+/**
+ * Dot-path shape for a config field `key`: identifier segments joined by dots,
+ * naming where the value lands in the package's factory config object
+ * (e.g. "actor.type", "moderators").
+ */
+const CONFIG_KEY_PATTERN = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/;
+
+/**
+ * True when `values` is a well-formed enum value set: a non-empty array of
+ * unique non-empty strings.
+ * @param {unknown} values
+ */
+function isValidEnumValues(values) {
+  return (
+    Array.isArray(values) &&
+    values.length > 0 &&
+    values.every(isNonEmptyString) &&
+    new Set(values).size === values.length
+  );
+}
+
+/**
+ * Structurally validate one entry's owner-configurable config fields
+ * (issue #470), appending to `violations`.
+ * @param {any} entry
+ * @param {string} label
+ * @param {string[]} violations
+ */
+function checkConfigFields(entry, label, violations) {
+  if (entry.configFields === undefined) return;
+  if (!Array.isArray(entry.configFields)) {
+    violations.push(`${label}: "configFields" must be an array when present.`);
+    return;
+  }
+
+  /** @type {Map<string, any>} keyed fields, for relevantWhen cross-checks */
+  const byKey = new Map();
+  for (const field of entry.configFields) {
+    if (!isNonEmptyString(field?.key) || !CONFIG_KEY_PATTERN.test(field.key)) {
+      violations.push(
+        `${label}: every config field needs a dot-path "key" into the factory config (got ${JSON.stringify(field?.key)}).`,
+      );
+      continue;
+    }
+    if (byKey.has(field.key)) {
+      violations.push(`${label}: duplicate config field key "${field.key}".`);
+      continue;
+    }
+    byKey.set(field.key, field);
+  }
+
+  for (const field of byKey.values()) {
+    const where = `${label}: config field "${field.key}"`;
+
+    for (const name of ["displayName", "description"]) {
+      if (!isNonEmptyString(field[name])) {
+        violations.push(`${where}: "${name}" must be a non-empty string.`);
+      }
+    }
+
+    if (!CONFIG_FIELD_TYPES.has(field.type)) {
+      violations.push(
+        `${where}: "type" must be "enum" or "string-list" (got ${JSON.stringify(field.type)}).`,
+      );
+      continue;
+    }
+
+    if (field.type === "enum") {
+      if (!isValidEnumValues(field.values)) {
+        violations.push(
+          `${where}: an enum field needs a "values" array of unique non-empty strings.`,
+        );
+      } else if (
+        field.default !== undefined &&
+        !field.values.includes(field.default)
+      ) {
+        violations.push(
+          `${where}: "default" must be one of the declared values (got ${JSON.stringify(field.default)}).`,
+        );
+      }
+      if (field.itemFormat !== undefined) {
+        violations.push(
+          `${where}: "itemFormat" applies only to string-list fields.`,
+        );
+      }
+    } else {
+      // string-list
+      if (field.values !== undefined || field.default !== undefined) {
+        violations.push(
+          `${where}: "values" and "default" apply only to enum fields.`,
+        );
+      }
+      if (
+        field.itemFormat !== undefined &&
+        !CONFIG_ITEM_FORMATS.has(field.itemFormat)
+      ) {
+        violations.push(
+          `${where}: unknown "itemFormat" ${JSON.stringify(field.itemFormat)}.`,
+        );
+      }
+    }
+
+    if (field.relevantWhen !== undefined) {
+      const ref = field.relevantWhen;
+      if (!isNonEmptyString(ref?.key) || !isNonEmptyString(ref?.equals)) {
+        violations.push(
+          `${where}: "relevantWhen" needs a "key" and an "equals" string.`,
+        );
+      } else if (ref.key === field.key) {
+        violations.push(`${where}: "relevantWhen" must not reference itself.`);
+      } else if (!byKey.has(ref.key)) {
+        violations.push(
+          `${where}: "relevantWhen" references undeclared config field key "${ref.key}".`,
+        );
+      } else {
+        // Skip the membership check against a malformed target enum — its own
+        // "values" violation already covers it.
+        const target = byKey.get(ref.key);
+        if (
+          target.type === "enum" &&
+          isValidEnumValues(target.values) &&
+          !target.values.includes(ref.equals)
+        ) {
+          violations.push(
+            `${where}: "relevantWhen".equals ${JSON.stringify(ref.equals)} is not among "${ref.key}"'s values.`,
+          );
+        }
+      }
+    }
+
+    if (field.specificationURL !== undefined) {
+      if (!isNonEmptyString(field.specificationURL)) {
+        violations.push(
+          `${where}: "specificationURL" must be a non-empty string when present.`,
+        );
+      } else {
+        try {
+          new URL(field.specificationURL);
+        } catch {
+          violations.push(
+            `${where}: "specificationURL" must be a valid absolute URL (got ${JSON.stringify(field.specificationURL)}).`,
+          );
+        }
+      }
+    }
+  }
+}
+
 /** Valid `match` values for a route claim. */
 const ROUTE_MATCH_KINDS = new Set(["exact", "prefix"]);
 
@@ -456,6 +610,7 @@ export function evaluateCatalog({ catalog, packages }) {
     }
 
     const resourceBindings = checkEntry(entry, label, violations);
+    checkConfigFields(entry, label, violations);
     const routes = checkRoutes(entry, label, violations);
     if (routes.length > 0) {
       routed.push({ id: String(entry?.id), routes });
