@@ -470,8 +470,7 @@ describe("@dwk/solid-pod WebDAV door — dead properties (spec §4)", () => {
   const PATCH =
     "<propertyupdate xmlns='DAV:'><set><prop>" +
     `<foo xmlns='${NS}'>bar</foo></prop></set></propertyupdate>`;
-  const FIND =
-    `<propfind xmlns='DAV:'><prop><foo xmlns='${NS}'/></prop></propfind>`;
+  const FIND = `<propfind xmlns='DAV:'><prop><foo xmlns='${NS}'/></prop></propfind>`;
 
   it("round-trips a PROPPATCHed dead property through PROPFIND", async () => {
     await withPod(RW, async ({ call }) => {

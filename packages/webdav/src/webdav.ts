@@ -895,9 +895,7 @@ function responseXml(
 
   if (selection.kind === "propname") {
     const names =
-      LIVE_PROPS.filter(
-        (n) => livePropValue(n, stat, backend, resolved) !== "",
-      )
+      LIVE_PROPS.filter((n) => livePropValue(n, stat, backend, resolved) !== "")
         .map((n) => `<D:${n}/>`)
         .join("") + dead.map((p) => `<${qname(p)}/>`).join("");
     return `<D:response>${href}<D:propstat><D:prop>${names}</D:prop><D:status>${statusLine(200)}</D:status></D:propstat></D:response>`;

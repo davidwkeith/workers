@@ -886,8 +886,7 @@ describe("createWebdav — PROPPATCH & named PROPFIND (spec §4)", () => {
       expect(patch.status).toBe(207);
       const find = await call("PROPFIND", "/nn.txt", {
         headers: { depth: "0", "content-type": "application/xml" },
-        body:
-          '<propfind xmlns="DAV:"><prop><nonamespace xmlns=""/></prop></propfind>',
+        body: '<propfind xmlns="DAV:"><prop><nonamespace xmlns=""/></prop></propfind>',
       });
       const body = await find.text();
       expect(body).toContain("<nonamespace>randomvalue</nonamespace>");
