@@ -9,6 +9,7 @@ import {
   sha256Base64url,
   textToBase64url,
 } from "./encoding.js";
+import { SolidOidcLogEvent } from "./log.js";
 import type { SolidOidcConfig, SolidOidcEnv } from "./index.js";
 
 const testEnv = env as unknown as SolidOidcEnv;
@@ -381,6 +382,218 @@ describe("createSolidOidc — authorization-code + PKCE + DPoP flow", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("invalid_request");
+  });
+});
+
+describe("createSolidOidc — logger/metrics on token-endpoint rejections", () => {
+  beforeEach(resetDb);
+
+  /** A logger + metrics spy pair, plus the config overrides to wire them in. */
+  function spyLogging(): {
+    logged: Array<["warn" | "error", string, unknown]>;
+    counted: Array<[string, unknown]>;
+    overrides: Partial<SolidOidcConfig>;
+  } {
+    const logged: Array<["warn" | "error", string, unknown]> = [];
+    const counted: Array<[string, unknown]> = [];
+    return {
+      logged,
+      counted,
+      overrides: {
+        logger: {
+          debug: () => {},
+          info: () => {},
+          warn: (event, fields) => logged.push(["warn", event, fields]),
+          error: (event, fields) => logged.push(["error", event, fields]),
+        },
+        metrics: {
+          count: (event, fields) => counted.push([event, fields]),
+          observe: () => {},
+        },
+      },
+    };
+  }
+
+  it("logs+counts a warn event when the DPoP proof is missing", async () => {
+    const { logged, counted, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.DpopRejected,
+      { reason: "missing" },
+    ]);
+    expect(counted).toContainEqual([
+      SolidOidcLogEvent.DpopRejected,
+      { reason: "missing" },
+    ]);
+  });
+
+  it("logs a warn event when the DPoP proof is invalid", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: "not-a-valid-proof",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(
+      logged.some(
+        ([level, event]) =>
+          level === "warn" && event === SolidOidcLogEvent.DpopRejected,
+      ),
+    ).toBe(true);
+  });
+
+  it("logs a warn event when the code is invalid/replayed", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "no-such-code",
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: "whatever-whatever-whatever-whatever-whatever12",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.InvalidGrant,
+      { reason: "code_invalid_used_or_expired" },
+    ]);
+  });
+
+  it("logs a warn event on client_id/redirect_uri mismatch", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://not-the-registered-client.example/callback",
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.InvalidGrant,
+      { reason: "client_or_redirect_mismatch" },
+    ]);
+  });
+
+  it("logs a warn event on PKCE mismatch", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: "wrong-verifier-wrong-verifier-wrong-verifier-xx",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.PkceMismatch,
+      undefined,
+    ]);
+  });
+
+  it("stays silent (noop) when no logger/metrics is configured", async () => {
+    // No overrides — default config resolves to noopLogger/noopMetrics, so
+    // this must not throw even though every rejection path calls them.
+    const handler = await makeHandler();
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
   });
 });
 

@@ -13,6 +13,7 @@ import { readRequestBodyCapped } from "./body.js";
 import type { ResolvedSolidOidcConfig } from "./config.js";
 import { oauthError, json } from "./http.js";
 import { importSigningKey } from "./jws.js";
+import { SolidOidcLogEvent } from "./log.js";
 import { verifyPkce } from "./pkce.js";
 import type { CodeStore } from "./store.js";
 import { mintAccessToken, mintIdToken } from "./token.js";
@@ -24,6 +25,20 @@ import { mintAccessToken, mintIdToken } from "./token.js";
  * opaque tokens, so a generous cap still refuses to buffer an unbounded body.
  */
 const MAX_TOKEN_BODY_BYTES = 8 * 1024;
+
+/**
+ * Emit a structured event on both the logger and metrics seams, which share
+ * one vocabulary — the same dotted event name goes to each so a log line and
+ * its counter line up. Only security-relevant rejections call this.
+ */
+function emit(
+  config: ResolvedSolidOidcConfig,
+  event: SolidOidcLogEvent,
+  fields?: Record<string, unknown>,
+): void {
+  config.logger.warn(event, fields);
+  config.metrics.count(event, fields);
+}
 
 async function readForm(request: Request): Promise<URLSearchParams | null> {
   const bytes = await readRequestBodyCapped(request, MAX_TOKEN_BODY_BYTES);
@@ -69,6 +84,7 @@ export async function handleToken(
   // request; its confirmed thumbprint is what we bind into the token.
   const proof = request.headers.get("DPoP");
   if (!proof) {
+    emit(config, SolidOidcLogEvent.DpopRejected, { reason: "missing" });
     return oauthError(
       400,
       "invalid_dpop_proof",
@@ -82,6 +98,9 @@ export async function handleToken(
     now: Math.floor(config.now() / 1000),
   });
   if (!dpop.valid || !dpop.jkt) {
+    emit(config, SolidOidcLogEvent.DpopRejected, {
+      reason: dpop.reason ?? "invalid",
+    });
     return oauthError(
       400,
       "invalid_dpop_proof",
@@ -92,6 +111,9 @@ export async function handleToken(
   // Redeem the code atomically (single-use). Unknown/used/expired ⇒ invalid.
   const record = await codes.redeem(code, Math.floor(config.now() / 1000));
   if (!record) {
+    emit(config, SolidOidcLogEvent.InvalidGrant, {
+      reason: "code_invalid_used_or_expired",
+    });
     return oauthError(
       400,
       "invalid_grant",
@@ -100,6 +122,9 @@ export async function handleToken(
   }
   // The code is bound to the client + redirect it was issued to.
   if (record.clientId !== clientId || record.redirectUri !== redirectUri) {
+    emit(config, SolidOidcLogEvent.InvalidGrant, {
+      reason: "client_or_redirect_mismatch",
+    });
     return oauthError(
       400,
       "invalid_grant",
@@ -108,6 +133,7 @@ export async function handleToken(
   }
   // PKCE: prove possession of the verifier for the stored challenge.
   if (!(await verifyPkce(codeVerifier, record.codeChallenge))) {
+    emit(config, SolidOidcLogEvent.PkceMismatch);
     return oauthError(400, "invalid_grant", "PKCE verification failed");
   }
 
