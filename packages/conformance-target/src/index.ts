@@ -41,18 +41,23 @@ type AnyJob = WebmentionJob | WebSubJob | unknown;
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
-    mounts ??= buildMounts(env);
-    const response = await routeRequest(mounts, request, env, ctx);
-    // A refused write (401/423/…) can leave the request body unread. Cancel
-    // it before responding so the stream is marked used — `wrangler dev`'s
-    // drainBody middleware otherwise reads it after the response and, across
-    // the Durable Object fetch boundary, that late read crashes workerd
-    // (litmus `locks` never finished locally until this; harmless in
-    // production, where no such middleware exists).
-    if (request.body !== null && !request.bodyUsed) {
-      request.body.cancel().catch(() => undefined);
+    try {
+      mounts ??= buildMounts(env);
+      const response = await routeRequest(mounts, request, env, ctx);
+      // A refused write (401/423/…) can leave the request body unread. Cancel
+      // it before responding so the stream is marked used — `wrangler dev`'s
+      // drainBody middleware otherwise reads it after the response and, across
+      // the Durable Object fetch boundary, that late read crashes workerd
+      // (litmus `locks` never finished locally until this; harmless in
+      // production, where no such middleware exists).
+      if (request.body !== null && !request.bodyUsed) {
+        request.body.cancel().catch(() => undefined);
+      }
+      return response;
+    } catch (error) {
+      console.error("@dwk/conformance-target: unhandled fetch error", error);
+      return new Response("Internal Server Error", { status: 500 });
     }
-    return response;
   },
 
   async queue(batch, env, ctx): Promise<void> {
