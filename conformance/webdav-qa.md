@@ -165,6 +165,35 @@ curl -sS -X DELETE "https://conformance.dwk.io/dav-credentials?id=<credentialId>
 | Invocation path    | ☐ Local / ☑ CI ([run 30052950880](https://github.com/davidwkeith/workers/actions/runs/30052950880))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Notes / follow-ups | This run followed #407 (fixed `mintAppPassword`'s PBKDF2 iteration count exceeding workerd's ceiling, which blocked credential minting entirely) and #409 (fixed four RFC 4918 conformance bugs: `MKCOL`/`PUT`/`COPY`/`MOVE` onto a missing parent silently succeeding instead of `409`, `MKCOL` over a plain resource silently succeeding instead of `405`, `DELETE` of a nonexistent resource silently succeeding instead of `404`). `basic` now passes 15/16 (up from 12/16 pre-#409, and 0/16 pre-#407); the one remaining failure is a narrower UTF-8-segment-reuse edge case in `mkcol_over_plain` — see the Step 3 table. `copymove`/`props`/`locks` are still unrun since litmus stops after the first group with failures. Filed as a residual gap, not a fresh regression — worth its own follow-up increment. |
 
+## Follow-up: 2026-07-30 hosted CI run — fully green (pre-release QA)
+
+The hosted re-run anticipated by the local run below, executed as release QA
+for the `@dwk/webdav`/`@dwk/solid-pod` beta cut. Full Procedure pass: the
+`CONFORMANCE_ADMIN_TOKEN` Worker secret was rotated (the previous token was
+not on record), a fresh read-write app password minted and stored in the
+`WEBDAV_USERNAME`/`WEBDAV_PASSWORD` repo secrets, the pod seeded, and the
+`Conformance` workflow dispatched with `standard=webdav`,
+`target_url=https://conformance.dwk.io/dav/` (the bare-domain default 404s
+on litmus's first `MKCOL` — see Step 3b's note). The credential was revoked
+after the run (Step 4).
+
+| litmus group | Result           |
+| ------------ | ---------------- |
+| `basic`      | **Pass** (16/16) |
+| `copymove`   | **Pass** (13/13) |
+| `props`      | **Pass** (30/30) |
+| `locks`      | **Pass** (41/41) |
+
+|                 |                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| Overall result  | ☑ Passing                                                                                 |
+| Run date        | 2026-07-30                                                                                |
+| Tester          | Claude (on behalf of David W. Keith)                                                      |
+| Invocation path | ☑ CI ([run 30569154067](https://github.com/davidwkeith/workers/actions/runs/30569154067)) |
+
+`status.json` now records the hosted litmus suite as `passing` with this
+run's URL.
+
 ## Follow-up: 2026-07-30 local full-group run — fully green (dead-property store)
 
 The spec §4 dead-property decision from the 2026-07-29 run below was resolved

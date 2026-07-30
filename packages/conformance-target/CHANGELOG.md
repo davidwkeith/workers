@@ -1,5 +1,13 @@
 # @dwk/conformance-target
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- Updated dependencies [185b555]
+- Updated dependencies [c3f1715]
+  - @dwk/solid-pod@1.0.0-beta.2
+
 ## 1.0.0-beta.2
 
 ### Patch Changes

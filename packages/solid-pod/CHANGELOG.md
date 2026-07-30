@@ -1,5 +1,52 @@
 # @dwk/solid-pod
 
+## 1.0.0-beta.2
+
+### Minor Changes
+
+- 185b555: Store WebDAV dead properties (RFC 4918 §4) in the pod DO's SQLite, closing the
+  last litmus `props` failures (issue #467). `@dwk/webdav` gains `PropertyStore`
+  and a `properties: DeadPropertyApi` port on the `WebdavBackend` seam; PROPPATCH
+  now applies set/remove in document order and atomically (a protected live
+  property fails 403 and drags the rest to 424, persisting nothing), and PROPFIND
+  returns stored dead properties for named-prop, `allprop`, and `propname`
+  requests — including no-namespace names, astral-plane values, and namespaced
+  element values. `@dwk/solid-pod` wires the store through the pod DO: properties
+  travel with COPY/MOVE and are dropped on DELETE from either door (WebDAV or
+  Solid LDP).
+
+### Patch Changes
+
+- c3f1715: litmus conformance (issue #467): `basic`, `copymove`, and `locks` now pass
+  16/16, 13/13, and 41/41 against the composed conformance target.
+
+  - `MKCOL` with a trailing slash over an existing plain resource now 405s —
+    neon's `ne_mkcol()` always appends a slash, so the previous un-slashed-only
+    existence check let `mkcol_over_plain` create a collection alongside the
+    plain resource.
+  - WebDAV collection `DELETE` now acts as `Depth: infinity` (RFC 4918 §9.6.1),
+    removing the whole subtree instead of refusing non-empty collections with
+    409; the Solid door keeps its LDP refuse-on-non-empty semantics. litmus's
+    own `begin` fixture depends on this to clear a previous run's leftovers.
+  - The `If:` header is now parsed as the full (bounded) RFC 4918 §10.4 grammar
+    — multiple OR'd lists, resource tags, `Not`, `DAV:no-lock` — and genuinely
+    evaluated as a precondition (412 when no list holds, including a lock token
+    that names no live lock), with lock enforcement counting only
+    positively-named tokens as submitted.
+  - Shared write locks: any number coexist, any one of their tokens admits a
+    write, and an exclusive request against them conflicts.
+  - The XML parser rejects the invalid `xmlns:prefix=""` declaration (400, litmus
+    `propfind_invalid2`) and resolves a legal `xmlns=""` un-declaration to _no_
+    namespace so no-namespace property names serialize legally.
+
+  The `props` group still fails 8/30 cases, all on dead-property storage —
+  excluded from v1 by spec §4 ("PROPPATCH of arbitrary dead properties is out
+  of scope") — which is the remaining blocker for a fully green litmus run.
+
+- Updated dependencies [185b555]
+- Updated dependencies [c3f1715]
+  - @dwk/webdav@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes
