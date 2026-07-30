@@ -179,6 +179,34 @@ export function buildDidDocument(options: BuildDidDocumentOptions): JsonObject {
   return document;
 }
 
+/** Runtime guard: does `entry` have the shape of a `VerificationMethod`? */
+function isVerificationMethodShape(
+  entry: JsonObject,
+): entry is JsonObject & VerificationMethod {
+  if (typeof entry.id !== "string") return false;
+  if (entry.type !== undefined && typeof entry.type !== "string") {
+    return false;
+  }
+  if (entry.controller !== undefined && typeof entry.controller !== "string") {
+    return false;
+  }
+  if (
+    entry.publicKeyMultibase !== undefined &&
+    typeof entry.publicKeyMultibase !== "string"
+  ) {
+    return false;
+  }
+  if (
+    entry.publicKeyJwk !== undefined &&
+    (entry.publicKeyJwk === null ||
+      typeof entry.publicKeyJwk !== "object" ||
+      Array.isArray(entry.publicKeyJwk))
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Locate a verification method in a DID document by its id. A method `id` that
  * is a relative reference (`#key-0`) is resolved against the document's `id`
@@ -195,11 +223,12 @@ export function findVerificationMethod(
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       continue;
     }
-    const entryId = (entry as JsonObject).id;
+    const asObject = entry as JsonObject;
+    const entryId = asObject.id;
     if (typeof entryId !== "string") continue;
     const resolved = entryId.startsWith("#") ? `${docId}${entryId}` : entryId;
     if (resolved === id) {
-      return entry as unknown as VerificationMethod;
+      return isVerificationMethodShape(asObject) ? asObject : undefined;
     }
   }
   return undefined;
