@@ -14,6 +14,7 @@ import {
   instanceV2Entity,
   markerEntity,
   notificationEntity,
+  relationshipEntity,
   remoteAccountEntity,
   statusEntity,
 } from "./entities.js";
@@ -622,5 +623,23 @@ describe("notificationEntity", () => {
     };
     expect(() => notificationEntity(entry, { baseUrl })).not.toThrow();
     expect(notificationEntity(entry, { baseUrl })).toBeNull();
+  });
+});
+
+describe("relationshipEntity", () => {
+  it("builds a Relationship keyed by the reversible remote-account id", () => {
+    const actor = "https://remote.example/users/alice";
+    const entity = relationshipEntity(actor, { followedBy: true });
+    expect(entity.id).toBe(encodeRemoteAccountId(actor));
+    expect(entity.following).toBe(false);
+    expect(entity.followed_by).toBe(true);
+    expect(entity.requested).toBe(false);
+    expect(entity.blocking).toBe(false);
+  });
+
+  it("reflects followedBy: false for a rejected request", () => {
+    const actor = "https://remote.example/users/bob";
+    const entity = relationshipEntity(actor, { followedBy: false });
+    expect(entity.followed_by).toBe(false);
   });
 });
