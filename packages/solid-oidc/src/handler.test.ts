@@ -401,6 +401,7 @@ describe("createSolidOidc — performance (CodeStore memoization)", () => {
       exec: testEnv.AUTH_DB.exec.bind(testEnv.AUTH_DB),
       batch: testEnv.AUTH_DB.batch.bind(testEnv.AUTH_DB),
       dump: testEnv.AUTH_DB.dump.bind(testEnv.AUTH_DB),
+      withSession: testEnv.AUTH_DB.withSession.bind(testEnv.AUTH_DB),
     };
 
     const handler = await makeHandler();
@@ -421,8 +422,16 @@ describe("createSolidOidc — performance (CodeStore memoization)", () => {
     };
 
     // Make multiple authorize requests
-    await handler(makeAuthorizeRequest(), { ...testEnv, AUTH_DB: wrappedDb }, ctx);
-    await handler(makeAuthorizeRequest(), { ...testEnv, AUTH_DB: wrappedDb }, ctx);
+    await handler(
+      makeAuthorizeRequest(),
+      { ...testEnv, AUTH_DB: wrappedDb },
+      ctx,
+    );
+    await handler(
+      makeAuthorizeRequest(),
+      { ...testEnv, AUTH_DB: wrappedDb },
+      ctx,
+    );
 
     // Schema check should only happen once, not on every request
     expect(schemaCheckCalls).toBe(1);
