@@ -1754,6 +1754,66 @@ function seedFollower(
   );
 }
 
+/**
+ * The queued follow-confirmation pending-accepts (`pending_accept`
+ * `kind = 'follow'`), newest last. Owner `Accept` (#473) routes through this
+ * same queue #onFollow's own auto-accept uses — see `#routeFollowerControl`'s
+ * `Accept` branch — so confirming a manually-approved follower does not skip
+ * inbox resolution (`resolvePendingFollowAccept` below drives it).
+ */
+function pendingFollowAccepts(state: DurableObjectState): {
+  actor: string;
+  activity: Record<string, unknown>;
+}[] {
+  return state.storage.sql
+    .exec<{
+      actor: string;
+      json: string;
+    }>(
+      `SELECT actor, json FROM pending_accept WHERE kind = 'follow' ORDER BY seq`,
+    )
+    .toArray()
+    .map((row) => ({
+      actor: row.actor,
+      activity: JSON.parse(row.json) as Record<string, unknown>,
+    }));
+}
+
+/**
+ * Drive the alarm-equivalent resolution of a queued `kind = 'follow'`
+ * pending-accept for `actor`: stub the actor-document fetch and hit
+ * `POST <actor>/__resolve` (mirrors {@link followWith}'s auto-accept
+ * counterpart), so the confirmed follower's inbox is resolved and persisted
+ * to `followers.inbox`, and the queued `Accept` is handed to the ordinary
+ * delivery queue.
+ */
+async function resolvePendingFollowAccept(
+  instance: { fetch: (request: Request) => Promise<Response> },
+  username: string,
+  actor: string,
+  inbox = `${actor}/inbox`,
+): Promise<void> {
+  const iris = deriveIris(BASE, username);
+  await withFetch(
+    async (url) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href === actor) {
+        return new Response(JSON.stringify({ id: actor, inbox }), {
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 202 });
+    },
+    async () => {
+      await instance.fetch(
+        new Request(`${iris.id}/__resolve`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+    },
+  );
+}
+
 describe("owner follower control (#447)", () => {
   it("records the inbound Follow's id so a later Reject can name it", async () => {
     const { username, stub } = freshUser();
@@ -2217,13 +2277,16 @@ describe("owner follower control (#447)", () => {
     });
   });
 
-  it("Accept: confirms a pending follower and delivers Accept(Follow) to them alone, setting accepted_at", async () => {
-    const { username, stub } = freshUser();
-    const iris = deriveIris(BASE, username);
+  it("Accept: confirms a pending follower and, once the alarm resolves the follower's inbox, delivers Accept(Follow) to them alone and persists the inbox, setting accepted_at", async () => {
+    const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
+      // A manually-approved follower: recorded, but with no resolved inbox
+      // yet and accepted_at still NULL — exactly the state #onFollow leaves
+      // under manuallyApprovesFollowers (only the auto-accept path resolves
+      // the inbox inline).
       seedFollower(state);
       state.storage.sql.exec(
-        `UPDATE followers SET accepted_at = NULL WHERE actor = ?`,
+        `UPDATE followers SET accepted_at = NULL, inbox = NULL WHERE actor = ?`,
         REMOTE,
       );
       // A second follower must not see the Accept.
@@ -2246,14 +2309,54 @@ describe("owner follower control (#447)", () => {
         .one();
       expect(row.accepted_at).not.toBeNull();
 
-      // Targeted at the confirmed follower only — never the follower fan-out.
+      // Routed through the same `kind = 'follow'` pending-accept queue
+      // #onFollow's own auto-accept uses — not immediately in the delivery
+      // table — so the alarm resolves the follower's inbox before the
+      // Accept goes out (this is the #473 final-review fix: Accept used to
+      // go straight to a targeted 'deliver' row and never persist the
+      // resolved inbox onto `followers.inbox`, so all later fan-out to this
+      // follower silently skipped them forever).
       expect(counts(state, "delivery")).toBe(0);
-      const queued = targetedDeliveries(state);
-      expect(queued).toHaveLength(1);
-      expect(queued[0]?.actor).toBe(REMOTE);
-      expect(queued[0]?.activity.type).toBe("Accept");
-      expect(queued[0]?.activity.actor).toBe(iris.id);
-      expect(queued[0]?.activity.object).toEqual({
+      const pending = pendingFollowAccepts(state);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.actor).toBe(REMOTE);
+      expect(pending[0]?.activity.type).toBe("Accept");
+      expect(pending[0]?.activity.actor).toBe(iris.id);
+      expect(pending[0]?.activity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+
+      // Drive the alarm-equivalent resolution.
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+
+      expect(counts(state, "pending_accept")).toBe(0);
+      const resolvedFollower = state.storage.sql
+        .exec<{ inbox: string | null }>(
+          `SELECT inbox FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      // The resolved inbox is persisted, so every future `WHERE inbox IS
+      // NOT NULL` fan-out query reaches this follower.
+      expect(resolvedFollower.inbox).toBe(`${REMOTE}/inbox`);
+
+      const delivered = state.storage.sql
+        .exec<{ inbox: string; json: string }>(
+          `SELECT inbox, json FROM delivery`,
+        )
+        .toArray();
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.inbox).toBe(`${REMOTE}/inbox`);
+      const deliveredActivity = JSON.parse(delivered[0]!.json) as Record<
+        string,
+        unknown
+      >;
+      expect(deliveredActivity.type).toBe("Accept");
+      expect(deliveredActivity.actor).toBe(iris.id);
+      expect(deliveredActivity.object).toEqual({
         id: `${REMOTE}/activities/follow-1`,
         type: "Follow",
         actor: REMOTE,
@@ -2265,10 +2368,15 @@ describe("owner follower control (#447)", () => {
     });
   });
 
-  it("Accept: accepts the actor-IRI shorthand and the stored Follow id, same as Reject", async () => {
-    const { username, stub } = freshUser();
+  it("Accept: accepts the actor-IRI shorthand, the stored Follow id, and an embedded Follow object, same as Reject", async () => {
+    const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
+      // Shape 1: the follower's bare actor IRI.
       seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
       const byActor = await instance.fetch(
         outboxRequest(
           username,
@@ -2281,6 +2389,80 @@ describe("owner follower control (#447)", () => {
         ((await byActor.json()) as { object: Record<string, unknown> }).object
           .actor,
       ).toBe(REMOTE);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
+
+      // Shape 2: the stored Follow's own id.
+      state.storage.sql.exec(`DELETE FROM followers WHERE actor = ?`, REMOTE);
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const byFollowId = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Accept",
+            object: `${REMOTE}/activities/follow-1`,
+          }),
+          true,
+        ),
+      );
+      expect(byFollowId.status).toBe(202);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
+
+      // Shape 3: an embedded Follow object.
+      state.storage.sql.exec(`DELETE FROM followers WHERE actor = ?`, REMOTE);
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const byEmbedded = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Accept",
+            object: { type: "Follow", actor: REMOTE, object: iris.id },
+          }),
+          true,
+        ),
+      );
+      expect(byEmbedded.status).toBe(202);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
     });
   });
 
@@ -2295,7 +2477,7 @@ describe("owner follower control (#447)", () => {
         ),
       );
       expect(res.status).toBe(202);
-      expect(targetedDeliveries(state)).toHaveLength(0);
+      expect(counts(state, "pending_accept")).toBe(0);
       const armed = await state.storage.getAlarm();
       expect(armed).toBeNull();
     });
@@ -3185,6 +3367,36 @@ describe("owner Remove: Group moderation (#473)", () => {
       expect(res.status).toBe(400);
     });
   });
+
+  it("does not 400 a Remove on a non-Group actor when target isn't a moderation collection (#473 review)", async () => {
+    // The 400 is scoped to the two Group-moderation targets this feature
+    // defines (`iris.followers`/`iris.outbox`) so AS2 `Remove`'s other,
+    // not-yet-implemented collection-removal uses (e.g. featured/pinned-post
+    // retraction) aren't foreclosed by a hard block here.
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username), // default actorType: "Person"
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: `${iris.id}/collections/featured`,
+          }),
+        }),
+      );
+      expect(res.status).toBe(201);
+      // Falls through to the generic publish path, not moderation — no
+      // moderation state mutated.
+      expect(counts(state, "banned")).toBe(0);
+      expect(counts(state, "outbox")).toBe(1);
+    });
+  });
 });
 
 describe("follow-target typing and backfill", () => {
@@ -3897,8 +4109,21 @@ describe("delivery outcome logging", () => {
         REMOTE,
         async () => new Response(null, { status: 500 }),
       );
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(parseLogLine(warnSpy.mock.calls[0]?.[0] as string)).toEqual({
+      // Filter to the specific event/actor this test cares about rather than
+      // asserting the spy's total call count: under the combined
+      // @dwk/activitypub + @dwk/mastodon-api run, a `DeliveryFailed` warn from
+      // some other test's armed alarm can land inside this test's spy window
+      // in the same workerd isolate, which would otherwise make the raw
+      // call-count assertion order/isolate-dependent (flaky).
+      const matching = warnSpy.mock.calls
+        .map((call) => parseLogLine(call[0] as string))
+        .filter(
+          (line) =>
+            line.event === ActivityPubLogEvent.DeliveryFailed &&
+            line.targetHost === "remote.example",
+        );
+      expect(matching).toHaveLength(1);
+      expect(matching[0]).toEqual({
         level: "warn",
         event: ActivityPubLogEvent.DeliveryFailed,
         targetHost: "remote.example",

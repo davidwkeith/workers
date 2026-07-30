@@ -1,6 +1,7 @@
 # @dwk/mastodon-api
 
-Mastodon-compatible client API subset (read-only browsing via real clients).
+Mastodon-compatible client API subset (read-only browsing by default, with an
+opt-in owner-scoped write surface) for real clients.
 
 ## What this is
 
@@ -10,7 +11,9 @@ this deployment's single owner account: app registration, the Mastodon app
 OAuth flow, instance documents, `verify_credentials`, markers, and a
 data-driven stub roster. Phase 2 (#349) adds timelines/notifications through
 the `MastodonBackend` seam, implemented by `@dwk/activitypub`'s
-`createActivitypubMastodonApi` adapter.
+`createActivitypubMastodonApi` adapter. With `config.allowWrites` enabled, the
+owner can also post statuses and manage pending follow requests
+(authorize/reject) — see "Key constraints" below.
 
 ## Spec
 

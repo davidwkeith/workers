@@ -195,7 +195,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS followers (
          actor TEXT PRIMARY KEY, inbox TEXT, added_at INTEGER NOT NULL,
-         shared_inbox TEXT, follow_id TEXT)`,
+         shared_inbox TEXT, follow_id TEXT, accepted_at INTEGER)`,
     );
     // `actor_type` is the followed actor's AS2 type (`Person`, `Group`, …),
     // resolved from its actor document off the critical path; a `Group` row is
@@ -1335,11 +1335,20 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // actor — this succeeds even when moderators is empty or doesn't list
     // the owner's own actor IRI.
     if (activity.type === "Remove") {
-      if (config.actorType !== "Group") {
-        return text(400, "`Remove` moderation requires a Group actor");
+      // Scoped to the two Group-moderation targets this feature defines
+      // (ban a member / un-announce a post) — AS2 `Remove` is also the
+      // standard mechanism for other collection-removal uses this package
+      // doesn't implement yet (e.g. featured/pinned-post retraction), so a
+      // `Remove` naming some other `target` falls through unrouted below
+      // rather than being hard-blocked here.
+      const target = objectId(activity.target);
+      if (target === config.iris.followers || target === config.iris.outbox) {
+        if (config.actorType !== "Group") {
+          return text(400, "`Remove` moderation requires a Group actor");
+        }
+        await this.#applyModerationRemove(activity, config, !skipDelivery);
+        return json(202, activity as JsonValue);
       }
-      await this.#applyModerationRemove(activity, config, !skipDelivery);
-      return json(202, activity as JsonValue);
     }
 
     this.#sql.exec(
@@ -1481,7 +1490,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       };
       addressPrivately(activity, follower);
       if (!deliver || !isSafeTarget(follower)) return false;
-      this.#enqueuePendingDelivery(follower, JSON.stringify(activity));
+      // Unlike Reject/Block/Undo(Block) below, this Accept's target inbox is
+      // not yet known — a manually-approved follower is recorded with
+      // `inbox = NULL` (#onFollow) since only the auto-accept path resolves
+      // it inline. Route through the same `kind = 'follow'` pending-accept
+      // queue #onFollow's own auto-accept uses, so the alarm resolves the
+      // inbox, persists it back onto `followers.inbox` (see
+      // `#processPendingAccepts`), and only then delivers this `Accept` —
+      // otherwise every future fan-out query (`WHERE inbox IS NOT NULL`)
+      // would silently skip this follower forever.
+      this.#enqueuePendingAccept("follow", follower, JSON.stringify(activity));
       return true;
     }
 

@@ -1,6 +1,6 @@
 ---
-"@dwk/activitypub": patch
-"@dwk/mastodon-api": patch
+"@dwk/activitypub": minor
+"@dwk/mastodon-api": minor
 ---
 
 Add owner-admin endpoints: `Accept` (confirm a pending follower) and `Remove`
