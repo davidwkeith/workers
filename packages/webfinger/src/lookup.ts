@@ -14,7 +14,7 @@
  * @see spec/fediverse-interop.md §2.4 (community discovery)
  */
 
-import { createTimeoutSignal } from "@dwk/safe-fetch";
+import { createTimeoutSignal, readBodyCapped } from "@dwk/safe-fetch";
 
 /** A parsed `user@host` handle. `user` keeps its case; `host` is lowercased. */
 export interface ParsedHandle {
@@ -140,9 +140,14 @@ export async function resolveHandle(
     timeout.cancel();
   }
   if (!response.ok) return null;
+  // A malicious or compromised host can return an arbitrarily large body
+  // regardless of whether the injected `fetch` is SSRF-guarded — cap it
+  // before parsing rather than trusting `response.json()` to buffer safely.
+  const text = await readBodyCapped(response);
+  if (text === null) return null;
   let jrd: unknown;
   try {
-    jrd = await response.json();
+    jrd = JSON.parse(text);
   } catch {
     return null;
   }

@@ -12,11 +12,7 @@
  * primitive; this module wires it to the network.
  */
 
-import {
-  assertPublicUrl,
-  createTimeoutSignal,
-  SsrfError,
-} from "@dwk/safe-fetch";
+import { assertPublicUrl, safeFetch, SsrfError } from "@dwk/safe-fetch";
 
 import { signRequest, type SignerKey } from "./signature.js";
 
@@ -51,15 +47,17 @@ export function assertPublicHttpsTarget(url: string): URL {
   try {
     return assertPublicUrl(url, { allowedSchemes: ["https:"] });
   } catch (error) {
-    if (error instanceof SsrfError) {
-      const reason: BlockedReason =
-        error.reason === "invalid_url" || error.reason === "disallowed_scheme"
-          ? error.reason
-          : "blocked_host";
-      throw new DeliveryBlockedError(reason);
-    }
+    if (error instanceof SsrfError)
+      throw new DeliveryBlockedError(reasonFor(error));
     throw error;
   }
+}
+
+/** Map an `@dwk/safe-fetch` SSRF reason onto this module's narrower vocabulary. */
+function reasonFor(error: SsrfError): BlockedReason {
+  return error.reason === "invalid_url" || error.reason === "disallowed_scheme"
+    ? error.reason
+    : "blocked_host";
 }
 
 /** The outcome of a single delivery attempt. */
@@ -91,19 +89,31 @@ export async function deliverActivity(
   const signed = await signRequest(inboxUrl, body, signer, { now });
 
   let response: Response;
-  const timeout = createTimeoutSignal(undefined, timeoutMs);
   try {
-    response = await fetchImpl(inboxUrl, {
-      method: "POST",
-      headers: signed.headers,
-      body: signed.body as BufferSource,
-      // A hung peer must not pin the delivery worker; a timeout is retryable.
-      signal: timeout.signal,
-    });
-  } catch {
+    // Route the POST itself through the SSRF-safe wrapper too, not just the
+    // pre-flight check on `inboxUrl`: a hostile inbox can 3xx-redirect a
+    // signed delivery to a private/internal target, and only `safeFetch`
+    // re-validates every redirect hop (a bare `fetch` with the default
+    // `redirect: "follow"` would happily walk it there).
+    const result = await safeFetch(
+      fetchImpl,
+      inboxUrl,
+      {
+        method: "POST",
+        headers: signed.headers,
+        body: signed.body as BufferSource,
+      },
+      { allowedSchemes: ["https:"], timeoutMs },
+    );
+    response = result.response;
+  } catch (error) {
+    if (error instanceof SsrfError) {
+      // A redirect hop landed on a blocked target — this inbox can never be
+      // delivered to safely, same as failing the pre-flight check.
+      throw new DeliveryBlockedError(reasonFor(error));
+    }
+    // Network error or timeout: worth retrying.
     return { ok: false, status: 0, retryable: true };
-  } finally {
-    timeout.cancel();
   }
 
   if (response.status >= 200 && response.status < 300) {
