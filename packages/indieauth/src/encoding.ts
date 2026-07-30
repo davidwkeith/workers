@@ -46,13 +46,18 @@ export async function sha256Base64url(input: string): Promise<string> {
 }
 
 /**
- * Constant-time string comparison. Returns `false` early only on length
- * mismatch; otherwise compares every character so timing does not leak how much
- * of a secret matched.
+ * Constant-time string comparison via the Workers runtime's
+ * `crypto.subtle.timingSafeEqual`. Used for PKCE challenge and HMAC
+ * signature checks — do not short-circuit on length mismatch, which itself
+ * leaks length via timing; compare the value against itself instead, per
+ * Cloudflare's documented safe pattern.
  */
 export function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+  const encoder = new TextEncoder();
+  const bytesA = encoder.encode(a);
+  const bytesB = encoder.encode(b);
+  const lengthsMatch = bytesA.byteLength === bytesB.byteLength;
+  return lengthsMatch
+    ? crypto.subtle.timingSafeEqual(bytesA, bytesB)
+    : !crypto.subtle.timingSafeEqual(bytesA, bytesA);
 }
