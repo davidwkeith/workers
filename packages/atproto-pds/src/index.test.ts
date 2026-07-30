@@ -997,6 +997,27 @@ describe("AT Protocol PDS", () => {
     expect(commit.did).toBe(did);
     expect(commit.prev?.toString()).toBe(importedHead);
   });
+
+  it("rejects an oversized migration CAR by declared Content-Length before buffering it", async () => {
+    const host = "bigcar.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxImportCarSizeBytes: 1024,
+    });
+    const token = await login(handler, host);
+    const oversizedCar = new Uint8Array(2048);
+    const res = await call(handler, host, "/xrpc/com.atproto.repo.importRepo", {
+      raw: oversizedCar,
+      contentType: "application/vnd.ipld.car",
+      token,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "CarTooLarge",
+    });
+  });
 });
 
 afterEach(() => {

@@ -1193,11 +1193,26 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
    */
   async #importRepo(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
+    // Reject an oversized migration CAR by its declared length *before*
+    // resolving the source signing key or buffering the body, so a hostile
+    // Content-Length cannot push the DO past its 128 MB ceiling or trigger a
+    // wasted DID-resolution fetch for a request we're going to reject anyway
+    // (mirrors #uploadBlob).
+    const declared = Number(request.headers.get("content-length"));
+    if (
+      Number.isFinite(declared) &&
+      declared > this.#cfg.maxImportCarSizeBytes
+    ) {
+      throw namedError(400, "CarTooLarge", "Import CAR exceeds the size limit");
+    }
     const did = this.#accountDid();
     const verifyKey = await resolveSigningKey(did, {
       plcDirectoryUrl: this.#cfg.plcDirectoryUrl,
     });
     const carBytes = new Uint8Array(await request.arrayBuffer());
+    if (carBytes.length > this.#cfg.maxImportCarSizeBytes) {
+      throw namedError(400, "CarTooLarge", "Import CAR exceeds the size limit");
+    }
     const imported = await importRepoFromCar(carBytes, { verifyKey });
     if (imported.did !== did) {
       throw invalidRequest(
