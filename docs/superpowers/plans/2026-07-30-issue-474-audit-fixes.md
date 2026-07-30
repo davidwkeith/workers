@@ -2409,9 +2409,9 @@ export function timingSafeEqual(a: string, b: string): boolean {
 Run: `pnpm test --project @dwk/conformance-target`
 Expected: PASS (full package — grep `admin.ts`/`approval.ts` for call sites first to confirm neither expects an `async` function; the research pass found no such expectation, but re-verify at implementation time since this package composes several conformance suites).
 
-- [ ] **Step 5: Changeset + commit**
+- [ ] **Step 5: Commit (no changeset)**
 
-`@dwk/conformance-target` is a deployed target, not published to npm — check `conformance-target/package.json`'s `"private"` field before writing a changeset; if private, skip the changeset (matching the `examples/deploy-to-cloudflare` precedent in Task 22) and note it in the PR body's checklist instead.
+`@dwk/conformance-target`'s `package.json` has `"private": true` (confirmed) — it is a deployed target, not published to npm, so skip the changeset (same as Task 22's `examples/deploy-to-cloudflare`).
 
 ```bash
 git add packages/conformance-target/src/timing-safe-equal.ts packages/conformance-target/src/timing-safe-equal.test.ts
