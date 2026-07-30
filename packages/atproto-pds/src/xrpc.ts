@@ -62,6 +62,12 @@ export function errorResponse(error: unknown): Response {
       error.status,
     );
   }
+  // Unexpected errors are otherwise invisible: the DO only ever gets a no-op
+  // logger forwarded across the fetch() boundary (functions don't survive the
+  // JSON.stringify that carries config across it), so console.error here is
+  // the only surviving signal at this layer. The front door records an
+  // aggregate signal via the real injected logger/metrics — see handler.ts.
+  console.error("@dwk/atproto-pds: unhandled XRPC error", error);
   return jsonResponse(
     { error: "InternalServerError", message: "Internal server error" },
     500,

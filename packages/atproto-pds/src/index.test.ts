@@ -1020,6 +1020,155 @@ describe("AT Protocol PDS", () => {
   });
 });
 
+/**
+ * Front-door logging when the DO returns a 500. These stub `env.REPO` rather
+ * than routing to the real Durable Object, since the behaviour under test —
+ * `forwardToDo` reading the response the DO handed back — doesn't depend on
+ * why the DO failed, only on the response shape it failed with.
+ */
+describe("front-door unhandled-error logging", () => {
+  function fakeEnv(fetchImpl: (request: Request) => Promise<Response>) {
+    const stub = { fetch: fetchImpl };
+    return {
+      REPO: {
+        idFromName: () => "fake-id",
+        get: () => stub,
+      },
+      BLOBS: {},
+    } as unknown as AtprotoPdsEnv;
+  }
+
+  it("logs an aggregate event when the DO returns the generic InternalServerError envelope", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const counted: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+      metrics: {
+        count: (event, fields) => counted.push([event, fields]),
+        observe: () => {},
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: "InternalServerError",
+            message: "Internal server error",
+          }),
+          { status: 500, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const res = await handler(
+      new Request("https://logging.example/xrpc/com.atproto.repo.createRecord"),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    // The real caller still gets the full, unconsumed response body.
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "InternalServerError",
+      message: "Internal server error",
+    });
+    expect(logged).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      { path: "/xrpc/com.atproto.repo.createRecord" },
+    ]);
+    expect(counted).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      undefined,
+    ]);
+  });
+
+  it("logs when the DO 500s before it can even produce the XRPC envelope", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-bypass.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () => new Response("missing internal config", { status: 500 }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-bypass.example/xrpc/com.atproto.server.getSession",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("missing internal config");
+    expect(logged).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      { path: "/xrpc/com.atproto.server.getSession" },
+    ]);
+  });
+
+  it("does not log a legitimate XRPC error that happens to carry a 500 status", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-legit.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () =>
+        new Response(JSON.stringify({ error: "SomeOtherError" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-legit.example/xrpc/com.atproto.repo.createRecord",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    expect(logged).toEqual([]);
+  });
+
+  it("does not log for a 2xx response", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-ok.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () => new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-ok.example/xrpc/com.atproto.server.getSession",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(logged).toEqual([]);
+  });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

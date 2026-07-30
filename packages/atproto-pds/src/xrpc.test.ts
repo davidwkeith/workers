@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   errorResponse,
@@ -24,6 +24,24 @@ describe("XRPC helpers", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: "InternalServerError",
     });
+  });
+
+  it("logs the underlying error before mapping it to a generic 500", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = errorResponse(new TypeError("something broke internally"));
+    expect(res.status).toBe(500);
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("unhandled XRPC error"),
+      expect.any(TypeError),
+    );
+    spy.mockRestore();
+  });
+
+  it("does not log for an expected XrpcError", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    errorResponse(invalidRequest("bad"));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it("carries status and error name", () => {
