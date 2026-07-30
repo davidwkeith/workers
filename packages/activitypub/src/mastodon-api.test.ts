@@ -878,6 +878,111 @@ describe("buildMastodonBackend", () => {
     });
   });
 
+  it("followRequests() lists pending followers (accepted_at IS NULL), oldest first", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/newer",
+        20,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/older",
+        10,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/confirmed",
+        "https://remote.example/users/confirmed/inbox",
+        5,
+        999,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    const requests = await backend.followRequests!();
+    expect(requests.map((r) => r.actor)).toEqual([
+      "https://remote.example/users/older",
+      "https://remote.example/users/newer",
+    ]);
+    expect(requests[0]?.addedAt).toBe(10);
+  });
+
+  it("respondToFollowRequest(actor, 'authorize') delivers Accept(Follow) to that follower alone", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const follower = "https://remote.example/users/pending";
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, NULL)`,
+        follower,
+        `${follower}/inbox`,
+        1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    await backend.respondToFollowRequest!(follower, "authorize");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          follower,
+        )
+        .one();
+      expect(row.accepted_at).not.toBeNull();
+      const queued = state.storage.sql
+        .exec<{ actor: string; json: string }>(
+          `SELECT actor, json FROM pending_accept WHERE kind = 'deliver'`,
+        )
+        .toArray();
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.actor).toBe(follower);
+      expect((JSON.parse(queued[0]!.json) as { type: string }).type).toBe(
+        "Accept",
+      );
+    });
+  });
+
+  it("respondToFollowRequest(actor, 'reject') drops the follower and delivers Reject(Follow)", async () => {
+    const config = freshConfig();
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
+    const follower = "https://remote.example/users/pending2";
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, NULL)`,
+        follower,
+        `${follower}/inbox`,
+        1,
+      );
+    });
+    const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+
+    await backend.respondToFollowRequest!(follower, "reject");
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const remaining = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM followers WHERE actor = ?`,
+          follower,
+        )
+        .one().n;
+      expect(remaining).toBe(0);
+      const queued = state.storage.sql
+        .exec<{ json: string }>(
+          `SELECT json FROM pending_accept WHERE kind = 'deliver'`,
+        )
+        .toArray();
+      expect(queued).toHaveLength(1);
+      expect((JSON.parse(queued[0]!.json) as { type: string }).type).toBe(
+        "Reject",
+      );
+    });
+  });
+
   it("resolves inReplyTo to the owner's outbox post (in_reply_to snowflake + owner author)", async () => {
     const config = freshConfig();
     const ownerPost = `${config.iris.outbox}/reply-target/object`;
