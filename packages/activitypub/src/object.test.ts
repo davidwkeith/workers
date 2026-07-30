@@ -724,6 +724,27 @@ describe("auto-accept resolveInbox", () => {
     expect(out.deliveries).toBe(0);
   });
 
+  it("gives up on an oversized actor document instead of buffering it (lying content-length)", async () => {
+    const { username, stub } = freshUser();
+    const out = await followWith(
+      stub,
+      username,
+      REMOTE,
+      async () =>
+        // Body itself is small and would otherwise parse fine — the lying
+        // Content-Length must reject it up front via readBodyCapped, the
+        // same way `packages/safe-fetch/src/body.test.ts` exercises the cap.
+        new Response(JSON.stringify({ id: REMOTE, inbox: `${REMOTE}/inbox` }), {
+          status: 200,
+          headers: {
+            // Mirrors object.ts's ACTOR_PROFILE_MAX_BODY_BYTES (128 KiB).
+            "content-length": String(128 * 1024 + 1024),
+          },
+        }),
+    );
+    expect(out.deliveries).toBe(0);
+  });
+
   it("gives up when the actor document is a non-object", async () => {
     const { username, stub } = freshUser();
     const out = await followWith(
@@ -2939,6 +2960,50 @@ describe("relayed-object verification", () => {
         },
       );
       // Row survives, still pending, and the verify row backs off.
+      const row = state.storage.sql
+        .exec<{
+          verify_state: string | null;
+        }>(`SELECT verify_state FROM inbox WHERE id = ?`, innerId)
+        .one();
+      expect(row.verify_state).toBe("pending");
+      const verify = state.storage.sql
+        .exec<{ attempts: number }>(`SELECT attempts FROM verify_queue`)
+        .one();
+      expect(verify.attempts).toBe(1);
+    });
+  });
+
+  it("does not buffer an oversized verification document body (lying content-length), treating it as transient", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const innerId = await seedRelayed(instance, state, username);
+      await withFetch(
+        async () =>
+          // Body itself is small and would otherwise parse as a valid AS2
+          // document — the lying Content-Length must reject it up front via
+          // readBodyCapped, the same way
+          // `packages/safe-fetch/src/body.test.ts` exercises the cap.
+          new Response(
+            JSON.stringify({ id: `${AUTHOR}/post/v1`, type: "Note" }),
+            {
+              status: 200,
+              headers: {
+                // Mirrors object.ts's ACTOR_PROFILE_MAX_BODY_BYTES (128 KiB).
+                "content-length": String(128 * 1024 + 1024),
+              },
+            },
+          ),
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__deliver`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      // Same graceful "gave up" shape as the non-JSON-body case: row
+      // survives, still pending, and the verify row backs off — never
+      // treated as a refutation.
       const row = state.storage.sql
         .exec<{
           verify_state: string | null;

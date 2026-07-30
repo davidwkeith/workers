@@ -2858,11 +2858,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       // expect === "present" | "vote"
       if (response.ok) {
-        let doc: unknown;
-        try {
-          doc = await response.json();
-        } catch {
-          doc = null;
+        let doc: unknown = null;
+        const body = await readBodyCapped(
+          response,
+          ACTOR_PROFILE_MAX_BODY_BYTES,
+        );
+        if (body !== null) {
+          try {
+            doc = JSON.parse(body) as unknown;
+          } catch {
+            doc = null;
+          }
         }
         if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
           // A 2xx whose body is not an AS2 document (a CDN/proxy error page,
@@ -3291,9 +3297,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return null;
     }
     if (!response.ok) return null;
+    const body = await readBodyCapped(response, ACTOR_PROFILE_MAX_BODY_BYTES);
+    if (body === null) return null;
     let doc: unknown;
     try {
-      doc = await response.json();
+      doc = JSON.parse(body) as unknown;
     } catch {
       return null;
     }
