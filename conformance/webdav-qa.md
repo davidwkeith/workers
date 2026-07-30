@@ -266,12 +266,26 @@ password]` message and every test fails/aborts immediately** — the minted
   specific character, so this is just bad luck on the random draw, not a
   bug in `@dwk/webdav`.
 - **`begin` fails with `Could not create new collection '/dav/litmus/':
-405 Method Not Allowed` even though nothing looks wrong** — a previous
-  litmus run aborted partway through (didn't reach the `finish` test, which
-  is what normally deletes `/litmus/` at the end) and left `/dav/litmus/`
-  populated. `begin`'s first act is to `MKCOL` a fresh `/litmus/`, so a
-  leftover one 405s as "already exists" instead of testing anything real.
-  Fix: `PROPFIND` `Depth: 1` on `/dav/litmus/` as the owner to see what's
-  left, then `DELETE` every child bottom-up (deepest first — this door's
-  `DELETE` isn't recursive, so a non-empty collection 409s) before deleting
-  `/dav/litmus/` itself and retrying.
+405 Method Not Allowed` even though nothing looks wrong** — `begin` DELETEs
+  the leftover `/dav/litmus/` (ignoring the status) before its `MKCOL`, and
+  since #468 collection `DELETE` is recursive (`Depth: infinity`), so a plain
+  leftover tree self-heals. The one thing that still wedges it is a **live
+  lock** somewhere inside the leftover tree from an aborted `locks` run — the
+  DELETE then 423s and the MKCOL 405s. Wait out the lock timeout (litmus
+  requests short ones) or `UNLOCK` it with the token from the aborted run's
+  output, then retry.
+- **Building litmus from source on macOS** (Homebrew has no litmus formula):
+  use [litmus 0.14](https://notroj.github.io/litmus/litmus-0.14.tar.gz), and
+  configure with clang-compat flags plus a seeded cache var — the stock
+  `SSL_library_init` probe predates OpenSSL 1.1 (the symbol is a macro now)
+  even though the bundled neon compiles fine against OpenSSL 3:
+  `CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -Wno-deprecated-declarations -O2" CPPFLAGS="-I$(brew --prefix openssl@3)/include" LDFLAGS="-L$(brew --prefix openssl@3)/lib" ne_cv_libsfor_SSL_library_init="-lssl" ./configure --with-ssl=openssl`.
+  Run each group binary from the source tree (it needs `./htdocs/`), e.g.
+  `TESTS=locks ./litmus <url> <user> <pass>`.
+- **Running litmus against local dev** — the door is HTTPS-only, so start the
+  target with `wrangler dev --local-protocol https` (litmus ignores the
+  self-signed cert), create the GC table once in the local D1
+  (`wrangler d1 execute dwk-conformance-gc --local --command "<GC_SCHEMA from
+@dwk/store gc.ts>"`), and note local workerd crashes if a request body is
+  left unread across the DO boundary — the webdav router drains refused
+  writes for exactly this reason.
