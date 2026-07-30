@@ -1833,12 +1833,6 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
-   * The owner's blocklist, newest block first, as flat JSON (`{ items, total }`)
-   * rather than an AS2 collection — nothing federates it, and an AS2 envelope
-   * would invite exactly that. Unpaged: a personal blocklist is small, and
-   * capping it would silently hide blocks from the only view of them there is.
-   */
-  /**
    * Pending follow requests (#473): followers awaiting the owner's `Accept`.
    * Unpaged flat JSON, like `#listBlocked` — this list is small, and capping
    * it would silently hide requests from the only view of them there is.
@@ -1855,6 +1849,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return json(200, { items, total: items.length } as unknown as JsonValue);
   }
 
+  /**
+   * The owner's blocklist, newest block first, as flat JSON (`{ items, total }`)
+   * rather than an AS2 collection — nothing federates it, and an AS2 envelope
+   * would invite exactly that. Unpaged: a personal blocklist is small, and
+   * capping it would silently hide blocks from the only view of them there is.
+   */
   #listBlocked(): Response {
     const items = this.#sql
       .exec<{
