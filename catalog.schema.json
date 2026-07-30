@@ -60,6 +60,11 @@
           "items": { "type": "string" },
           "description": "Catalog ids of workers that must also be active for this one to function (e.g. webdav requires solid-pod)."
         },
+        "configFields": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/configField" },
+          "description": "Owner-configurable factory-config settings (issue #470): the subset of this package's factory config a composing app surfaces as site-owner settings and writes into the composed Worker's config. Each field's key is the dot-path where the value lands in the factory config object. Deliberately not the whole config surface — code-level config (base URL, key material, callbacks) stays documented per package in spec/packages/."
+        },
         "routes": {
           "type": "array",
           "items": { "$ref": "#/definitions/route" },
@@ -72,6 +77,87 @@
         }
       },
       "additionalProperties": false
+    },
+    "configFieldKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*$",
+      "description": "Dot-path into the package's factory config object where the value lands (e.g. \"actor.type\", \"moderators\"). Stable like worker ids: composing apps persist owner settings against it."
+    },
+    "configFieldRelevantWhen": {
+      "type": "object",
+      "required": ["key", "equals"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The key of another config field on the same worker entry this field's relevance depends on."
+        },
+        "equals": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The value the referenced field must hold for this field to be relevant. For an enum reference, one of its declared values."
+        }
+      },
+      "additionalProperties": false
+    },
+    "configField": {
+      "description": "One owner-configurable setting (issue #470). \"enum\" fields pick one of a closed value set; \"string-list\" fields hold an owner-edited list of strings. A field with relevantWhen only applies while the referenced field holds the given value (e.g. moderators only for a Group actor).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["key", "displayName", "description", "type", "values"],
+          "properties": {
+            "key": { "$ref": "#/definitions/configFieldKey" },
+            "displayName": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 },
+            "type": { "const": "enum" },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "The closed set of allowed values."
+            },
+            "default": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The value the package assumes when the field is not configured. Must be one of \"values\"."
+            },
+            "relevantWhen": {
+              "$ref": "#/definitions/configFieldRelevantWhen"
+            },
+            "specificationURL": {
+              "type": "string",
+              "format": "uri",
+              "description": "The specification governing the capability this field enables (e.g. FEP-1b12 for a Group actor)."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["key", "displayName", "description", "type"],
+          "properties": {
+            "key": { "$ref": "#/definitions/configFieldKey" },
+            "displayName": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 },
+            "type": { "const": "string-list" },
+            "itemFormat": {
+              "enum": ["iri"],
+              "description": "Validation format for each list item; \"iri\" means each entry must parse as an absolute IRI (e.g. an ActivityPub actor IRI). Omitted means free-form strings."
+            },
+            "relevantWhen": {
+              "$ref": "#/definitions/configFieldRelevantWhen"
+            },
+            "specificationURL": {
+              "type": "string",
+              "format": "uri",
+              "description": "The specification governing the capability this field enables."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "trigger": {
       "type": "object",

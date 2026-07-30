@@ -284,6 +284,26 @@
           "sqlite": true
         }
       ],
+      "configFields": [
+        {
+          "key": "actor.type",
+          "displayName": "Actor type",
+          "description": "The AS2 type this site federates as: a Person profile (the default), or a Group community actor that wraps member posts in Announce and fans them out to the membership (FEP-1b12).",
+          "type": "enum",
+          "values": ["Person", "Group"],
+          "default": "Person",
+          "specificationURL": "https://w3id.org/fep/1b12"
+        },
+        {
+          "key": "moderators",
+          "displayName": "Moderators",
+          "description": "Actor IRIs authorized to moderate the Group actor: ban a member (Remove from followers) or un-announce a member post (Remove from outbox). Ignored for a Person actor.",
+          "type": "string-list",
+          "itemFormat": "iri",
+          "relevantWhen": { "key": "actor.type", "equals": "Group" },
+          "specificationURL": "https://w3id.org/fep/1b12"
+        }
+      ],
       "routes": [
         {
           "path": "/users/",

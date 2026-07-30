@@ -533,6 +533,162 @@ test("shared-job triggers with mismatched crons across workers collide", () => {
   assert.match(violations[0], /store-gc.*same cron/);
 });
 
+/** Fixture pair with owner-configurable config fields (issue #470). */
+function configuredFixture() {
+  const input = fixture();
+  input.catalog.workers[0].configFields = [
+    {
+      key: "actor.type",
+      displayName: "Actor type",
+      description: "Federate as a Person profile or a Group community actor.",
+      type: "enum",
+      values: ["Person", "Group"],
+      default: "Person",
+      specificationURL: "https://w3id.org/fep/1b12",
+    },
+    {
+      key: "moderators",
+      displayName: "Moderators",
+      description: "Actor IRIs authorized to moderate the Group actor.",
+      type: "string-list",
+      itemFormat: "iri",
+      relevantWhen: { key: "actor.type", equals: "Group" },
+    },
+  ];
+  return input;
+}
+
+test("a catalog with well-formed config fields passes", () => {
+  assert.deepEqual(evaluateCatalog(configuredFixture()), []);
+});
+
+test("configFields must be an array when present", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields = { key: "actor.type" };
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /"configFields" must be an array/);
+});
+
+test("every config field needs a dot-path key", () => {
+  const input = configuredFixture();
+  delete input.catalog.workers[0].configFields[0].key;
+  input.catalog.workers[0].configFields[1].key = "actor..type";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /key/);
+  assert.match(violations[1], /key/);
+});
+
+test("duplicate config field keys within one entry are rejected", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[1].key = "actor.type";
+  delete input.catalog.workers[0].configFields[1].relevantWhen;
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /duplicate config field key "actor\.type"/);
+});
+
+test("config fields need a non-empty displayName and description", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[0].displayName = "";
+  delete input.catalog.workers[0].configFields[1].description;
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /displayName/);
+  assert.match(violations[1], /description/);
+});
+
+test("an unknown config field type is rejected", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[0].type = "number";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /type/);
+});
+
+test("an enum config field requires unique non-empty values", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[0].values = [];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /values/);
+
+  input.catalog.workers[0].configFields[0].values = ["Person", "Person"];
+  input.catalog.workers[0].configFields[0].default = "Person";
+  const duplicates = evaluateCatalog(input);
+  assert.equal(duplicates.length, 1);
+  assert.match(duplicates[0], /values/);
+});
+
+test("an enum default must be one of its values", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[0].default = "Organization";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /default/);
+});
+
+test("values, default, and itemFormat are tied to their field type", () => {
+  const input = configuredFixture();
+  // enum fields carry no itemFormat; string-list fields no values/default.
+  input.catalog.workers[0].configFields[0].itemFormat = "iri";
+  input.catalog.workers[0].configFields[1].values = ["Group"];
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 2);
+  assert.match(violations[0], /itemFormat/);
+  assert.match(violations[1], /values/);
+});
+
+test("an unknown itemFormat is rejected", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[1].itemFormat = "email";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /itemFormat/);
+});
+
+test("relevantWhen must reference another declared field's key", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[1].relevantWhen = {
+    key: "actor.kind",
+    equals: "Group",
+  };
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /actor\.kind/);
+});
+
+test("a field's relevantWhen must not reference itself", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[1].relevantWhen = {
+    key: "moderators",
+    equals: "x",
+  };
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /itself/);
+});
+
+test("relevantWhen.equals must be among the referenced enum's values", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[1].relevantWhen = {
+    key: "actor.type",
+    equals: "Organization",
+  };
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /Organization/);
+});
+
+test("a config field specificationURL must be a valid absolute URL", () => {
+  const input = configuredFixture();
+  input.catalog.workers[0].configFields[0].specificationURL = "not a url";
+  const violations = evaluateCatalog(input);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /specificationURL/);
+});
+
 test("overlapping claims within the same entry are allowed", () => {
   const input = routedFixture();
   // /media exact POST + /media/ prefix GET is the micropub shape.

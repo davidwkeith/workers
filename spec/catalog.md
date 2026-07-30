@@ -264,8 +264,61 @@ Populated for `solid-pod` (`createSolidPodGc`) and `remotestorage`
 (`createRemoteStorageGc`), the two workers whose orphan-tracking GC needs a
 cron when `GC_DB` is bound.
 
+## Owner-configurable settings (`configFields`, issue #470)
+
+Each worker entry may declare the subset of its factory config that a
+composing app surfaces as **site-owner settings** and writes into the composed
+Worker's config. This is deliberately not the whole config surface — code-level
+config (base URL, key material, callbacks) stays documented per package in
+`spec/packages/` — only the fields a site owner meaningfully chooses. The
+first consumer is Anglesite's hosted-community provisioning
+([Anglesite-app#907](https://github.com/Anglesite/Anglesite-app/issues/907)),
+which reads `activitypub`'s fields to surface a "Community" site kind and a
+moderator settings list. Per the paired-repo convention, app-side decoding
+treats the block as optional, so publishing it needs no synchronized release.
+
+```json
+{
+  "key": "actor.type",
+  "displayName": "Actor type",
+  "description": "The AS2 type this site federates as: …",
+  "type": "enum",
+  "values": ["Person", "Group"],
+  "default": "Person",
+  "specificationURL": "https://w3id.org/fep/1b12"
+}
+```
+
+- `key` — the **dot-path into the package's factory config object** where the
+  value lands (`actor.type` → `ActivityPubConfig.actor.type`, `moderators` →
+  `ActivityPubConfig.moderators`). Keys are stable like worker ids: composing
+  apps persist owner settings against them.
+- `displayName` / `description` — settings-UI copy.
+- `type` — the field's shape, a closed vocabulary the app can render without
+  interpreting arbitrary schemas:
+  - `"enum"` — pick one of `values` (unique non-empty strings). `default` is
+    the value the package assumes when unconfigured, and must be a member of
+    `values`.
+  - `"string-list"` — an owner-edited list of strings. An optional
+    `itemFormat` names a per-item validation format; `"iri"` (the only format
+    so far) means each entry must parse as an absolute IRI (e.g. an
+    ActivityPub actor IRI).
+- `relevantWhen` — `{ "key", "equals" }`: this field only applies while
+  another field on the same entry holds the given value (e.g. `moderators`
+  only when `actor.type` is `"Group"`). The gate checks the reference: the
+  key must name another declared field (never itself), and for an enum
+  target `equals` must be one of its values.
+- `specificationURL` — the specification governing the capability the field
+  enables (mirrors the route-claim field).
+
+Populated for `activitypub` (issue #470): `actor.type`
+(`"Person"`/`"Group"`, default `"Person"`) and `moderators` (actor-IRI list,
+relevant for a `Group` actor) — the FEP-1b12 hosted-community configuration
+shipped in #376/#401.
+
 ## What the catalog does not cover (yet)
 
-- **Config-object requirements** — factory config (base URL, issuer, origins)
-  is code-level and documented per package in `spec/packages/`; the catalog
-  only describes Cloudflare bindings.
+- **Config-object requirements beyond owner settings** — factory config
+  (base URL, issuer, origins, key material) is code-level and documented per
+  package in `spec/packages/`; the catalog describes Cloudflare bindings plus
+  the owner-configurable `configFields` subset above.
