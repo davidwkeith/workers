@@ -24,6 +24,9 @@ export const RemoteStorageLogEvent = {
   AuthAccepted: "remotestorage.auth.accepted",
   /** A request lacked the scope (or auth) for the target. Fields: `method`, `status` (401/403). */
   AccessDenied: "remotestorage.scope.denied",
+  /** An unexpected error escaped the Durable Object's request handling.
+   * Field: `method`. */
+  StorageError: "remotestorage.storage.error",
 } as const;
 
 /** Union of the event-name string literals in {@link RemoteStorageLogEvent}. */

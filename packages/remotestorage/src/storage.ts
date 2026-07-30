@@ -32,6 +32,7 @@ import {
   hashSignature,
   renderFolderDescription,
 } from "./folder.js";
+import { RemoteStorageLogEvent } from "./log.js";
 import { isFolderPath } from "./scope.js";
 
 /** Config the front door forwards to the DO (everything else is per-request). */
@@ -125,6 +126,19 @@ export class RemoteStorageObject extends DurableObject<RemoteStorageEnv> {
       if (error instanceof LengthRequiredError) {
         return text(411, "Length Required");
       }
+      // The DO cannot reach the front door's injected Logger/Metrics across
+      // the stub.fetch() boundary (functions don't survive the JSON.stringify
+      // config already crosses it with) — reproduce @dwk/log's consoleLogger
+      // record shape so an unexpected storage error is still visible via
+      // `wrangler tail` instead of vanishing into a bare rethrow.
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: RemoteStorageLogEvent.StorageError,
+          time: new Date().toISOString(),
+          method,
+        }),
+      );
       throw error;
     }
   }
