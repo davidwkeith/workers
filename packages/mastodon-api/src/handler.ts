@@ -13,7 +13,7 @@ import {
 } from "./accounts.js";
 import { handleCreateApp, handleVerifyAppCredentials } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
-import { recordNotFound } from "./errors.js";
+import { mastodonError, recordNotFound } from "./errors.js";
 import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
 import { handleNotifications } from "./notifications.js";
@@ -107,29 +107,36 @@ export function createMastodonApi(
         "@dwk/mastodon-api: missing required D1 binding `AUTH_DB`",
       );
     }
-    if (request.method.toUpperCase() === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
-    }
-    const url = new URL(request.url);
-    const route = ROUTES.get(`${request.method.toUpperCase()} ${url.pathname}`);
-    if (route) {
-      return withCors(await route({ config, env, request, url }));
-    }
-    for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
-      if (request.method.toUpperCase() !== method) continue;
-      const match = pattern.exec(url.pathname);
-      if (match?.[1]) {
-        let id: string;
-        try {
-          id = decodeURIComponent(match[1]);
-        } catch {
-          return withCors(recordNotFound());
-        }
-        return withCors(
-          await dynamicHandler({ config, env, request, url }, id),
-        );
+    try {
+      if (request.method.toUpperCase() === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
       }
+      const url = new URL(request.url);
+      const route = ROUTES.get(
+        `${request.method.toUpperCase()} ${url.pathname}`,
+      );
+      if (route) {
+        return withCors(await route({ config, env, request, url }));
+      }
+      for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
+        if (request.method.toUpperCase() !== method) continue;
+        const match = pattern.exec(url.pathname);
+        if (match?.[1]) {
+          let id: string;
+          try {
+            id = decodeURIComponent(match[1]);
+          } catch {
+            return withCors(recordNotFound());
+          }
+          return withCors(
+            await dynamicHandler({ config, env, request, url }, id),
+          );
+        }
+      }
+      return withCors(recordNotFound());
+    } catch (err) {
+      console.error("@dwk/mastodon-api: unhandled route error", err);
+      return withCors(mastodonError(500, "Internal server error"));
     }
-    return withCors(recordNotFound());
   };
 }
