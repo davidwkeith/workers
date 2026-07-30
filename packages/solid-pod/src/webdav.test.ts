@@ -491,6 +491,27 @@ describe("@dwk/solid-pod WebDAV door — dead properties (spec §4)", () => {
     });
   });
 
+  it("carries dead properties across COPY, keeping the source's", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/src.txt", { body: "x" });
+      await call("PROPPATCH", "/src.txt", {
+        body: PATCH,
+        headers: { "content-type": "application/xml" },
+      });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: `${baseUrl}/dst.txt` },
+      });
+      expect([201, 204]).toContain(copy.status);
+      for (const path of ["/dst.txt", "/src.txt"]) {
+        const find = await call("PROPFIND", path, {
+          body: FIND,
+          headers: { depth: "0", "content-type": "application/xml" },
+        });
+        expect(await find.text()).toContain("bar</x:foo>");
+      }
+    });
+  });
+
   it("carries dead properties across MOVE (litmus propmove)", async () => {
     await withPod(RW, async ({ call, baseUrl }) => {
       await call("PUT", "/prop", { body: "x" });

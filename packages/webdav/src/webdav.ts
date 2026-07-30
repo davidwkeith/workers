@@ -869,13 +869,17 @@ const SUPPORTED_LOCK =
  * `propvalnspace`), so nothing can collide with the multistatus's `D:` prefix.
  */
 function deadPropXml(prop: DeadProperty): string {
+  // `local` always comes from the parser today (name chars only), but escape
+  // it like `qname()` does so a future non-parser `PropertyStore` writer
+  // cannot break the emitted XML.
+  const local = escapeXml(prop.local);
   if (prop.ns === null) {
-    return `<${prop.local}>${prop.valueXml}</${prop.local}>`;
+    return `<${local}>${prop.valueXml}</${local}>`;
   }
   if (prop.ns === "DAV:") {
-    return `<D:${prop.local}>${prop.valueXml}</D:${prop.local}>`;
+    return `<D:${local}>${prop.valueXml}</D:${local}>`;
   }
-  return `<x:${prop.local} xmlns:x="${escapeXml(prop.ns)}">${prop.valueXml}</x:${prop.local}>`;
+  return `<x:${local} xmlns:x="${escapeXml(prop.ns)}">${prop.valueXml}</x:${local}>`;
 }
 
 function isLiveName(req: PropName): boolean {

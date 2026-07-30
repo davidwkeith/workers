@@ -140,6 +140,39 @@ describe("PropertyStore", () => {
     });
   });
 
+  it("treats % and _ in a subtree prefix as literals, not LIKE wildcards", async () => {
+    await withSql((sql) => {
+      const props = new PropertyStore(sql);
+      const pd = { ns: NS, local: "p", valueXml: "v" };
+      // Paths are percent-encoded (`ResourceStat.path`), so a stored path can
+      // legitimately contain a literal `%` — e.g. a collection named `x%`
+      // stores as `/x%25/`. Without `likeEscape`, the subtree pattern
+      // `/x%25/%` would also swallow `/xa25/kid` (`%` as wildcard), and
+      // `/a_b/%` would swallow `/acb/kid` (`_` as wildcard).
+      props.set("/x%25/", pd);
+      props.set("/x%25/kid", pd);
+      props.set("/xa25/kid", pd);
+      props.set("/a_b/", pd);
+      props.set("/a_b/kid", pd);
+      props.set("/acb/kid", pd);
+
+      // copyTree's descendant scan uses the same escaping: the real child is
+      // found, and only it lands under the destination.
+      props.copyTree("/x%25/", "/dest/", true);
+      expect(props.list("/dest/")).toHaveLength(1);
+      expect(props.list("/dest/kid")).toHaveLength(1);
+
+      props.removeTree("/x%25/");
+      props.removeTree("/a_b/");
+      expect(props.list("/x%25/")).toEqual([]);
+      expect(props.list("/x%25/kid")).toEqual([]);
+      expect(props.list("/a_b/kid")).toEqual([]);
+      // The prefix-sharing siblings survive both removals.
+      expect(props.list("/xa25/kid")).toHaveLength(1);
+      expect(props.list("/acb/kid")).toHaveLength(1);
+    });
+  });
+
   it("removeTree of a plain resource path drops only that resource", async () => {
     await withSql((sql) => {
       const props = new PropertyStore(sql);

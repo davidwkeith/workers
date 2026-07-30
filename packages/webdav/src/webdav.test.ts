@@ -960,6 +960,37 @@ describe("createWebdav — PROPPATCH & named PROPFIND (spec §4)", () => {
     });
   });
 
+  it("carries dead props across COPY to the destination's PROPFIND", async () => {
+    await withHandler(async ({ call }) => {
+      const NS = "http://example.com/neon/litmus/";
+      await call("PUT", "/src.txt", { body: "x" });
+      await call("PROPPATCH", "/src.txt", {
+        headers: { "content-type": "application/xml" },
+        body:
+          "<propertyupdate xmlns='DAV:'><set><prop>" +
+          `<foo xmlns='${NS}'>bar</foo></prop></set></propertyupdate>`,
+      });
+      const copy = await call("COPY", "/src.txt", {
+        headers: { destination: "https://pod.example/dst.txt" },
+      });
+      expect([201, 204]).toContain(copy.status);
+      const findBody =
+        "<propfind xmlns='DAV:'><prop>" +
+        `<foo xmlns='${NS}'/></prop></propfind>`;
+      const dst = await call("PROPFIND", "/dst.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: findBody,
+      });
+      expect(await dst.text()).toContain("bar</x:foo>");
+      // COPY leaves the source's properties in place, unlike MOVE.
+      const src = await call("PROPFIND", "/src.txt", {
+        headers: { depth: "0", "content-type": "application/xml" },
+        body: findBody,
+      });
+      expect(await src.text()).toContain("bar</x:foo>");
+    });
+  });
+
   it("carries dead props across MOVE and drops them on DELETE", async () => {
     await withHandler(async ({ call, backend }) => {
       const NS = "http://example.com/neon/litmus/";
