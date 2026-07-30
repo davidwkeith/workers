@@ -911,21 +911,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
-   * `Group` moderation (#376): a signed `Remove` from a listed
-   * `config.moderators` actor either bans a member (`target` names our
+   * `Group` moderation (#376, #473): either bans a member (`target` names our
    * `followers` collection, `object` names the member) or un-announces a
    * member post (`target` names our `outbox`, `object` names the `Announce`
-   * id we authored for it). Ignored for a `Person` actor, or when the
-   * (HTTP-signature-verified — see the `signer === activity.actor` check in
-   * {@link #handleInbox}) requester is not a configured moderator.
+   * id we authored for it). Ignored for a `Person` actor. Shared by the
+   * inbound moderator-signed path (`#onModerationRemove`, which checks
+   * `config.moderators` before calling this) and the owner-publish path
+   * (`#publish`'s `Remove` branch, which skips that check — the owner is
+   * implicitly the top moderator of their own actor). `deliver` gates only
+   * the un-announce fan-out (`?skipDelivery=1`); the ban branch has no
+   * delivery to suppress either way.
    */
-  async #onModerationRemove(
+  async #applyModerationRemove(
     activity: ActivityObject,
     config: ForwardedConfig,
+    deliver: boolean,
   ): Promise<void> {
     if (config.actorType !== "Group") return;
-    const moderator = actorIri(activity.actor);
-    if (!moderator || !config.moderators.includes(moderator)) return;
     const object = objectId(activity.object);
     if (!object) return;
     const target = objectId(activity.target);
@@ -941,20 +943,40 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return;
     }
     if (target === config.iris.outbox) {
-      await this.#removeAnnouncedPost(object, config);
+      await this.#removeAnnouncedPost(object, config, deliver);
     }
+  }
+
+  /**
+   * `Group` moderation (#376): a signed `Remove` from a listed
+   * `config.moderators` actor invokes {@link #applyModerationRemove}.
+   * Ignored when the (HTTP-signature-verified — see the `signer ===
+   * activity.actor` check in {@link #handleInbox}) requester is not a
+   * configured moderator. Inbound moderation always delivers — there is no
+   * backfill concept for it.
+   */
+  async #onModerationRemove(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const moderator = actorIri(activity.actor);
+    if (!moderator || !config.moderators.includes(moderator)) return;
+    await this.#applyModerationRemove(activity, config, /* deliver */ true);
   }
 
   /**
    * Un-announce a member post (#376 remove-post): delete the `Announce` we
    * authored for it from our outbox, tombstone the relayed inbox copy so
-   * reads stop surfacing it, and fan out a self-signed `Undo(Announce)` to
-   * the membership so their servers retract the boost too — the same
-   * `followers`-inbox fan-out {@link #maybeAnnounceMemberPost} uses.
+   * reads stop surfacing it — both always applied — and, unless `deliver` is
+   * `false` (`?skipDelivery=1` on an owner-triggered Remove, #473), fan out a
+   * self-signed `Undo(Announce)` to the membership so their servers retract
+   * the boost too — the same `followers`-inbox fan-out
+   * {@link #maybeAnnounceMemberPost} uses.
    */
   async #removeAnnouncedPost(
     announceId: string,
     config: ForwardedConfig,
+    deliver: boolean = true,
   ): Promise<void> {
     const row = this.#sql
       .exec<{
@@ -983,6 +1005,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         innerId,
       );
     }
+    if (!deliver) return;
     const undo: Record<string, JsonValue> = {
       "@context": "https://www.w3.org/ns/activitystreams",
       id: `${config.iris.id}#undos/${crypto.randomUUID()}`,
@@ -1292,6 +1315,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (isFollowerControlActivity(activity)) {
       const delivered = this.#routeFollowerControl(activity, !skipDelivery);
       if (delivered) await this.#armAlarm();
+      return json(202, activity as JsonValue);
+    }
+
+    // Owner Group moderation (#473): ban a member / un-announce a post. Not
+    // added to isFollowerControlActivity — its delivery model differs (ban
+    // has no delivery at all; un-announce's fan-out is a broadcast to the
+    // whole membership, not a single target). No config.moderators check
+    // here: bearer publishToken auth at the front door is authorization
+    // enough, and the owner is implicitly the top moderator of their own
+    // actor — this succeeds even when moderators is empty or doesn't list
+    // the owner's own actor IRI.
+    if (activity.type === "Remove") {
+      if (config.actorType !== "Group") {
+        return text(400, "`Remove` moderation requires a Group actor");
+      }
+      await this.#applyModerationRemove(activity, config, !skipDelivery);
       return json(202, activity as JsonValue);
     }
 

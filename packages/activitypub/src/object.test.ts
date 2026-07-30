@@ -826,7 +826,11 @@ describe("publish endpoint", () => {
     });
   });
 
-  it("passes Accept and Remove through as real activities, not wrapped in a Create", async () => {
+  it("passes Accept through as a real activity, not wrapped in a Create", async () => {
+    // `Remove` was covered here too until #473 gave it real Group-moderation
+    // semantics in #publish (a Person-actor Remove now 400s instead of
+    // passing through raw) — see "owner Remove: Group moderation (#473)"
+    // for its current, superseding coverage.
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance) => {
       const acceptRes = await instance.fetch(
@@ -839,21 +843,6 @@ describe("publish endpoint", () => {
       const accept = (await acceptRes.json()) as Record<string, unknown>;
       expect(accept.type).toBe("Accept");
       expect(accept.actor).toBe(iris.id);
-
-      const removeRes = await instance.fetch(
-        outboxRequest(
-          username,
-          JSON.stringify({
-            type: "Remove",
-            object: REMOTE,
-            target: iris.followers,
-          }),
-          true,
-        ),
-      );
-      const remove = (await removeRes.json()) as Record<string, unknown>;
-      expect(remove.type).toBe("Remove");
-      expect(remove.actor).toBe(iris.id);
     });
   });
 
@@ -3021,6 +3010,179 @@ describe("Group actor hosting (#376)", () => {
       );
       const timelineBody = (await timeline.json()) as { items: unknown[] };
       expect(timelineBody.items).toHaveLength(0);
+    });
+  });
+});
+
+describe("owner Remove: Group moderation (#473)", () => {
+  it("bans a member without requiring the owner's actor IRI in config.moderators", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+              moderators: [], // deliberately empty
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: iris.followers,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "followers")).toBe(0);
+      const banned = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM banned WHERE actor = ?`,
+          REMOTE,
+        )
+        .one().n;
+      expect(banned).toBe(1);
+    });
+  });
+
+  it("un-announces a post, still fanning out Undo(Announce)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const announceId = `${iris.outbox}/announce-1`;
+      const innerId = `${AUTHOR}/activities/post-3`;
+      const announce = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: announceId,
+        type: "Announce",
+        actor: iris.id,
+        object: {
+          id: innerId,
+          type: "Create",
+          actor: AUTHOR,
+          object: { id: `${innerId}/object`, type: "Note" },
+        },
+      };
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        announceId,
+        JSON.stringify(announce),
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at) VALUES (?, ?, ?)`,
+        innerId,
+        JSON.stringify(announce.object),
+        1,
+      );
+
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: announceId,
+            target: iris.outbox,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "outbox")).toBe(0);
+      const removedAt = state.storage.sql
+        .exec<{ removed_at: number | null }>(
+          `SELECT removed_at FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one().removed_at;
+      expect(removedAt).not.toBeNull();
+      expect(counts(state, "delivery")).toBe(1);
+    });
+  });
+
+  it("un-announcing with ?skipDelivery=1 still tombstones locally but queues no Undo(Announce)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const announceId = `${iris.outbox}/announce-2`;
+      const innerId = `${AUTHOR}/activities/post-4`;
+      const announce = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: announceId,
+        type: "Announce",
+        actor: iris.id,
+        object: { id: innerId, type: "Create", actor: AUTHOR },
+      };
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        announceId,
+        JSON.stringify(announce),
+        1,
+      );
+
+      const res = await instance.fetch(
+        new Request(`${iris.outbox}?skipDelivery=1`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+            [INTERNAL_HEADERS.skipDelivery]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: announceId,
+            target: iris.outbox,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "outbox")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+    });
+  });
+
+  it("400s on a non-Group actor", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username), // default actorType: "Person"
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: iris.followers,
+          }),
+        }),
+      );
+      expect(res.status).toBe(400);
     });
   });
 });
