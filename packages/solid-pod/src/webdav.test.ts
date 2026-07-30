@@ -464,3 +464,67 @@ describe("@dwk/solid-pod WebDAV door", () => {
     });
   });
 });
+
+describe("@dwk/solid-pod WebDAV door — dead properties (spec §4)", () => {
+  const NS = "http://example.com/neon/litmus/";
+  const PATCH =
+    "<propertyupdate xmlns='DAV:'><set><prop>" +
+    `<foo xmlns='${NS}'>bar</foo></prop></set></propertyupdate>`;
+  const FIND =
+    `<propfind xmlns='DAV:'><prop><foo xmlns='${NS}'/></prop></propfind>`;
+
+  it("round-trips a PROPPATCHed dead property through PROPFIND", async () => {
+    await withPod(RW, async ({ call }) => {
+      await call("PUT", "/prop.txt", { body: "x" });
+      const patch = await call("PROPPATCH", "/prop.txt", {
+        body: PATCH,
+        headers: { "content-type": "application/xml" },
+      });
+      expect(patch.status).toBe(207);
+      expect(await patch.text()).toContain("HTTP/1.1 200 OK");
+      const find = await call("PROPFIND", "/prop.txt", {
+        body: FIND,
+        headers: { depth: "0", "content-type": "application/xml" },
+      });
+      const body = await find.text();
+      expect(body).toContain("bar</x:foo>");
+      expect(body).not.toContain("HTTP/1.1 404 Not Found");
+    });
+  });
+
+  it("carries dead properties across MOVE (litmus propmove)", async () => {
+    await withPod(RW, async ({ call, baseUrl }) => {
+      await call("PUT", "/prop", { body: "x" });
+      await call("PROPPATCH", "/prop", {
+        body: PATCH,
+        headers: { "content-type": "application/xml" },
+      });
+      const move = await call("MOVE", "/prop", {
+        headers: { destination: `${baseUrl}/prop2` },
+      });
+      expect([201, 204]).toContain(move.status);
+      const find = await call("PROPFIND", "/prop2", {
+        body: FIND,
+        headers: { depth: "0", "content-type": "application/xml" },
+      });
+      expect(await find.text()).toContain("bar</x:foo>");
+    });
+  });
+
+  it("drops dead properties on WebDAV DELETE", async () => {
+    await withPod(RW, async ({ call }) => {
+      await call("PUT", "/gone.txt", { body: "x" });
+      await call("PROPPATCH", "/gone.txt", {
+        body: PATCH,
+        headers: { "content-type": "application/xml" },
+      });
+      expect((await call("DELETE", "/gone.txt")).status).toBe(204);
+      await call("PUT", "/gone.txt", { body: "fresh" });
+      const find = await call("PROPFIND", "/gone.txt", {
+        body: FIND,
+        headers: { depth: "0", "content-type": "application/xml" },
+      });
+      expect(await find.text()).toContain("HTTP/1.1 404 Not Found");
+    });
+  });
+});
