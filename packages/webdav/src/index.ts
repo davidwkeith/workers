@@ -50,7 +50,9 @@ export {
 
 export {
   parseIfHeader,
-  type IfHeaderCondition,
+  type IfCondition,
+  type IfList,
+  submittedLockTokens,
   type IfHeaderResult,
 } from "./if-header.js";
 

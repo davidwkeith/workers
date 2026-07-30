@@ -31,6 +31,7 @@ describe("LockStore", () => {
       const result = locks.acquire({
         path: "/photos/a.jpg",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "mailto:me@dwk.io",
         webid: "https://me.example/#me",
         timeoutSeconds: 600,
@@ -49,6 +50,7 @@ describe("LockStore", () => {
       const result = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 1_000_000,
@@ -66,6 +68,7 @@ describe("LockStore", () => {
         locks.acquire({
           path: "/a",
           depth: "0",
+          scope: "exclusive",
           ownerHref: "",
           webid: "w",
           timeoutSeconds: 60,
@@ -74,6 +77,7 @@ describe("LockStore", () => {
       const second = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w2",
         timeoutSeconds: 60,
@@ -89,15 +93,16 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
       });
       expect(taken.ok).toBe(true);
       if (!taken.ok) return;
-      expect(locks.blockingLock("/a", undefined)?.token).toBe(taken.lock.token);
-      expect(locks.blockingLock("/a", "opaquelocktoken:nope")).not.toBeNull();
-      expect(locks.blockingLock("/a", taken.lock.token)).toBeNull();
+      expect(locks.blockingLock("/a", [])?.token).toBe(taken.lock.token);
+      expect(locks.blockingLock("/a", ["opaquelocktoken:nope"])).not.toBeNull();
+      expect(locks.blockingLock("/a", [taken.lock.token])).toBeNull();
     });
   });
 
@@ -107,6 +112,7 @@ describe("LockStore", () => {
       const result = locks.acquire({
         path: "/",
         depth: "infinity",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -124,6 +130,7 @@ describe("LockStore", () => {
         locks.acquire({
           path: "/a/b/c/",
           depth: "infinity",
+          scope: "exclusive",
           ownerHref: "",
           webid: "w",
           timeoutSeconds: 60,
@@ -132,6 +139,7 @@ describe("LockStore", () => {
       const tooDeep = locks.acquire({
         path: "/a/b/c/d/",
         depth: "infinity",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -147,6 +155,7 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/dir/",
         depth: "infinity",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -154,11 +163,11 @@ describe("LockStore", () => {
       expect(taken.ok).toBe(true);
       if (!taken.ok) return;
       // A descendant write without the token is blocked by the covering lock.
-      expect(locks.blockingLock("/dir/deep/file.txt", undefined)?.token).toBe(
+      expect(locks.blockingLock("/dir/deep/file.txt", [])?.token).toBe(
         taken.lock.token,
       );
       // A sibling that merely shares a name prefix is not covered.
-      expect(locks.blockingLock("/dirty.txt", undefined)).toBeNull();
+      expect(locks.blockingLock("/dirty.txt", [])).toBeNull();
     });
   });
 
@@ -169,6 +178,7 @@ describe("LockStore", () => {
         locks.acquire({
           path: "/dir/file",
           depth: "0",
+          scope: "exclusive",
           ownerHref: "",
           webid: "w",
           timeoutSeconds: 60,
@@ -177,6 +187,7 @@ describe("LockStore", () => {
       const subtree = locks.acquire({
         path: "/dir/",
         depth: "infinity",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -192,6 +203,7 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -211,6 +223,7 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -229,6 +242,7 @@ describe("LockStore", () => {
       const child = locks.acquire({
         path: "/dir/child.txt",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -237,10 +251,8 @@ describe("LockStore", () => {
       if (!child.ok) return;
       // A DELETE/MOVE of the parent collection without the descendant's token is
       // blocked; submitting that token clears it.
-      expect(locks.blockingLock("/dir/", undefined)?.token).toBe(
-        child.lock.token,
-      );
-      expect(locks.blockingLock("/dir/", child.lock.token)).toBeNull();
+      expect(locks.blockingLock("/dir/", [])?.token).toBe(child.lock.token);
+      expect(locks.blockingLock("/dir/", [child.lock.token])).toBeNull();
     });
   });
 
@@ -250,14 +262,15 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/dir",
         depth: "infinity",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
       });
       expect(taken.ok).toBe(true);
       // `/dirty` shares a name prefix with `/dir` but is not in its subtree.
-      expect(locks.blockingLock("/dirty", undefined)).toBeNull();
-      expect(locks.blockingLock("/dir/inside", undefined)).not.toBeNull();
+      expect(locks.blockingLock("/dirty", [])).toBeNull();
+      expect(locks.blockingLock("/dir/inside", [])).not.toBeNull();
     });
   });
 
@@ -268,6 +281,7 @@ describe("LockStore", () => {
       const taken = locks.acquire({
         path: "/a",
         depth: "0",
+        scope: "exclusive",
         ownerHref: "",
         webid: "w",
         timeoutSeconds: 60,
@@ -275,8 +289,54 @@ describe("LockStore", () => {
       expect(taken.ok).toBe(true);
       // Advance the clock past expiry; the next op prunes it.
       clock.t = 61_000;
-      expect(locks.blockingLock("/a", undefined)).toBeNull();
+      expect(locks.blockingLock("/a", [])).toBeNull();
       expect(locks.locksOn("/a")).toHaveLength(0);
+    });
+  });
+
+  // RFC 4918 §6.3 scope pairing (litmus `lock_shared`/`double_sharedlock`):
+  // shared+shared coexist; any pairing involving an exclusive lock conflicts.
+  it("lets shared locks coexist and conflicts every exclusive pairing", async () => {
+    await withSql((sql) => {
+      const clock = { t: 1000 };
+      const locks = new LockStore(sql, policy, "/", () => clock.t);
+      const base = {
+        path: "/s",
+        depth: "0",
+        ownerHref: "",
+        webid: "w",
+        timeoutSeconds: 600,
+      } as const;
+
+      const first = locks.acquire({ ...base, scope: "shared" });
+      expect(first.ok).toBe(true);
+      const second = locks.acquire({ ...base, scope: "shared" });
+      expect(second.ok).toBe(true);
+      if (!first.ok || !second.ok) return;
+      expect(second.lock.token).not.toBe(first.lock.token);
+      expect(locks.locksOn("/s")).toHaveLength(2);
+
+      // exclusive-over-shared conflicts.
+      const exclusive = locks.acquire({ ...base, scope: "exclusive" });
+      expect(exclusive.ok).toBe(false);
+
+      // Any one shared token satisfies the group; no token blocks.
+      expect(locks.blockingLock("/s", [second.lock.token])).toBeNull();
+      expect(locks.blockingLock("/s", [])).not.toBeNull();
+
+      // shared-over-exclusive conflicts too.
+      const held = locks.acquire({
+        ...base,
+        path: "/x",
+        scope: "exclusive",
+      });
+      expect(held.ok).toBe(true);
+      const sharedOverExclusive = locks.acquire({
+        ...base,
+        path: "/x",
+        scope: "shared",
+      });
+      expect(sharedOverExclusive.ok).toBe(false);
     });
   });
 });

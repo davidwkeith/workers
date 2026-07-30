@@ -165,6 +165,38 @@ curl -sS -X DELETE "https://conformance.dwk.io/dav-credentials?id=<credentialId>
 | Invocation path    | ☐ Local / ☑ CI ([run 30052950880](https://github.com/davidwkeith/workers/actions/runs/30052950880))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Notes / follow-ups | This run followed #407 (fixed `mintAppPassword`'s PBKDF2 iteration count exceeding workerd's ceiling, which blocked credential minting entirely) and #409 (fixed four RFC 4918 conformance bugs: `MKCOL`/`PUT`/`COPY`/`MOVE` onto a missing parent silently succeeding instead of `409`, `MKCOL` over a plain resource silently succeeding instead of `405`, `DELETE` of a nonexistent resource silently succeeding instead of `404`). `basic` now passes 15/16 (up from 12/16 pre-#409, and 0/16 pre-#407); the one remaining failure is a narrower UTF-8-segment-reuse edge case in `mkcol_over_plain` — see the Step 3 table. `copymove`/`props`/`locks` are still unrun since litmus stops after the first group with failures. Filed as a residual gap, not a fresh regression — worth its own follow-up increment. |
 
+## Follow-up: 2026-07-29 local full-group run (issue #467)
+
+All four groups were run locally — litmus 0.14 built from source with OpenSSL,
+against the conformance target under `wrangler dev --local-protocol https`
+(the door is HTTPS-only, so plain-HTTP local dev cannot authenticate) — and
+each group run **individually** so one failing group could no longer hide the
+rest (`scripts/conformance/run-suite.mjs` now does the same in CI). Results:
+
+| litmus group | Result           | Notes                                                                                                                                                           |
+| ------------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `basic`      | **Pass** (16/16) | `mkcol_over_plain` root-caused for real: neon's `ne_mkcol()` always appends a trailing slash, so the un-slashed-only existence check missed the plain resource. |
+| `copymove`   | **Pass** (13/13) | Unblocked by making collection `DELETE` recursive (`Depth: infinity`, RFC 4918 §9.6.1) — every group's `begin` DELETEs the leftover `/litmus/` tree first.      |
+| `locks`      | **Pass** (41/41) | Needed the full (bounded) `If:` grammar — tagged lists, multiple OR'd lists, `Not`, `DAV:no-lock`, real 412 evaluation — plus shared write locks.               |
+| `props`      | Fail (22/30)     | The 8 failures are all dead-property storage, excluded from v1 by spec §4 — the remaining blocker for a fully green run.                                        |
+
+Corrections to the 2026-07-24 note below: the percent-encoding-case fix
+(#421) was real but was **not** `mkcol_over_plain`'s failure — litmus sends
+the identical lowercase string in both requests; the trailing slash was the
+difference all along. Also, the packaged litmus's stop-at-first-failing-group
+behaviour is now bypassed by running groups individually (its `-k` flag keeps
+going but then always exits 0, which would lie to CI).
+
+`status.json` still records the hosted suite as `failing` (2026-07-23 run):
+the hosted re-run needs a fresh app password minted with
+`CONFORMANCE_ADMIN_TOKEN` (operator-held), the `WEBDAV_USERNAME`/
+`WEBDAV_PASSWORD` repo secrets updated, and the `Conformance` workflow
+dispatched with `standard=webdav`, `target_url=https://conformance.dwk.io/dav/`.
+Expected hosted outcome with these fixes: `basic`/`copymove`/`locks` pass,
+`props` fails on dead properties only, so litmus stays `failing` until the
+spec §4 dead-property decision is revisited (or the exclusion is accepted and
+the gate re-scoped).
+
 ## Follow-up: 2026-07-24 fix, re-run still needed
 
 The `mkcol_over_plain` failure from the 2026-07-23 run (see **Result** →
@@ -234,12 +266,26 @@ password]` message and every test fails/aborts immediately** — the minted
   specific character, so this is just bad luck on the random draw, not a
   bug in `@dwk/webdav`.
 - **`begin` fails with `Could not create new collection '/dav/litmus/':
-405 Method Not Allowed` even though nothing looks wrong** — a previous
-  litmus run aborted partway through (didn't reach the `finish` test, which
-  is what normally deletes `/litmus/` at the end) and left `/dav/litmus/`
-  populated. `begin`'s first act is to `MKCOL` a fresh `/litmus/`, so a
-  leftover one 405s as "already exists" instead of testing anything real.
-  Fix: `PROPFIND` `Depth: 1` on `/dav/litmus/` as the owner to see what's
-  left, then `DELETE` every child bottom-up (deepest first — this door's
-  `DELETE` isn't recursive, so a non-empty collection 409s) before deleting
-  `/dav/litmus/` itself and retrying.
+405 Method Not Allowed` even though nothing looks wrong** — `begin` DELETEs
+  the leftover `/dav/litmus/` (ignoring the status) before its `MKCOL`, and
+  since #468 collection `DELETE` is recursive (`Depth: infinity`), so a plain
+  leftover tree self-heals. The one thing that still wedges it is a **live
+  lock** somewhere inside the leftover tree from an aborted `locks` run — the
+  DELETE then 423s and the MKCOL 405s. Wait out the lock timeout (litmus
+  requests short ones) or `UNLOCK` it with the token from the aborted run's
+  output, then retry.
+- **Building litmus from source on macOS** (Homebrew has no litmus formula):
+  use [litmus 0.14](https://notroj.github.io/litmus/litmus-0.14.tar.gz), and
+  configure with clang-compat flags plus a seeded cache var — the stock
+  `SSL_library_init` probe predates OpenSSL 1.1 (the symbol is a macro now)
+  even though the bundled neon compiles fine against OpenSSL 3:
+  `CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -Wno-deprecated-declarations -O2" CPPFLAGS="-I$(brew --prefix openssl@3)/include" LDFLAGS="-L$(brew --prefix openssl@3)/lib" ne_cv_libsfor_SSL_library_init="-lssl" ./configure --with-ssl=openssl`.
+  Run each group binary from the source tree (it needs `./htdocs/`), e.g.
+  `TESTS=locks ./litmus <url> <user> <pass>`.
+- **Running litmus against local dev** — the door is HTTPS-only, so start the
+  target with `wrangler dev --local-protocol https` (litmus ignores the
+  self-signed cert), create the GC table once in the local D1
+  (`wrangler d1 execute dwk-conformance-gc --local --command "<GC_SCHEMA from
+@dwk/store gc.ts>"`), and note local workerd crashes if a request body is
+  left unread across the DO boundary — the webdav router drains refused
+  writes for exactly this reason.

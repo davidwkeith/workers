@@ -17,3 +17,5 @@ yarn.lock
 *.env
 # dotenvx private-key store (packages/server/.env.example) — never commit.
 .env.keys
+# wrangler local-dev secrets (e.g. packages/conformance-target/.dev.vars).
+.dev.vars

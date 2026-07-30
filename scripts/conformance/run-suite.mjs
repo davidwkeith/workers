@@ -143,22 +143,39 @@ function runLitmus(target, rest) {
     exit(2);
   }
   stdout.write(`Running litmus against ${target} ...\n\n`);
-  const result = spawnSync("litmus", [target, username, password], {
-    stdio: "inherit",
-    env,
-  });
-  if (result.error) {
-    if (result.error.code === "ENOENT") {
-      stderr.write(
-        "\n`litmus` was not found on PATH. Install it (e.g. `apt-get install\n" +
-          "litmus`, or build from http://www.webdav.org/neon/litmus/) and retry.\n",
-      );
-      exit(127);
+  // One wrapper invocation per test group (via the wrapper's `TESTS` env
+  // seam) rather than one combined run: the stock wrapper stops at the first
+  // group with any failure, which left `copymove`/`props`/`locks` entirely
+  // unexercised whenever `basic` failed (issue #467). Its `-k` flag would
+  // also keep going, but then the wrapper always exits 0 — running groups
+  // separately keeps both full coverage and a truthful exit status.
+  const groups = ["basic", "copymove", "props", "locks"];
+  const failed = [];
+  for (const group of groups) {
+    stdout.write(`--- litmus group: ${group} ---\n`);
+    const result = spawnSync("litmus", [target, username, password], {
+      stdio: "inherit",
+      env: { ...env, TESTS: group },
+    });
+    if (result.error) {
+      if (result.error.code === "ENOENT") {
+        stderr.write(
+          "\n`litmus` was not found on PATH. Install it (e.g. `apt-get install\n" +
+            "litmus`, or build from http://www.webdav.org/neon/litmus/) and retry.\n",
+        );
+        exit(127);
+      }
+      stderr.write(`\nFailed to run litmus: ${result.error.message}\n`);
+      exit(1);
     }
-    stderr.write(`\nFailed to run litmus: ${result.error.message}\n`);
-    exit(1);
+    if ((result.status ?? 1) !== 0) failed.push(group);
   }
-  exit(result.status ?? 1);
+  stdout.write(
+    failed.length === 0
+      ? "\nlitmus: every group passed.\n"
+      : `\nlitmus: failing group(s): ${failed.join(", ")}\n`,
+  );
+  exit(failed.length === 0 ? 0 : 1);
 }
 
 /**

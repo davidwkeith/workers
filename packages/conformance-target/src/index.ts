@@ -21,7 +21,11 @@ import type { Mount } from "./mounts.js";
 import { buildMounts, routeRequest } from "./mounts.js";
 
 export type { ConformanceEnv } from "./config.js";
-export { configsFor, ownerWebId, USERNAME } from "./config.js";
+// USERNAME is deliberately not re-exported: workerd rejects non-handler,
+// non-function exports on the entry module (`wrangler dev` fails to start
+// with "Incorrect type for map entry 'USERNAME'"); import it from
+// `./config.js` instead.
+export { configsFor, ownerWebId } from "./config.js";
 
 // The five Durable Objects served by this Worker (wrangler.jsonc declares them
 // against this module).
@@ -38,7 +42,17 @@ type AnyJob = WebmentionJob | WebSubJob | unknown;
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     mounts ??= buildMounts(env);
-    return routeRequest(mounts, request, env, ctx);
+    const response = await routeRequest(mounts, request, env, ctx);
+    // A refused write (401/423/…) can leave the request body unread. Cancel
+    // it before responding so the stream is marked used — `wrangler dev`'s
+    // drainBody middleware otherwise reads it after the response and, across
+    // the Durable Object fetch boundary, that late read crashes workerd
+    // (litmus `locks` never finished locally until this; harmless in
+    // production, where no such middleware exists).
+    if (request.body !== null && !request.bodyUsed) {
+      request.body.cancel().catch(() => undefined);
+    }
+    return response;
   },
 
   async queue(batch, env, ctx): Promise<void> {

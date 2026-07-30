@@ -32,12 +32,17 @@ import {
 import { inferContentType } from "./content-type.js";
 import type { AppPasswordRecord } from "./credentials.js";
 import { isHttpsRequest, parseBasicAuthorization } from "./credentials.js";
-import { parseIfHeader } from "./if-header.js";
+import {
+  type IfList,
+  parseIfHeader,
+  submittedLockTokens,
+} from "./if-header.js";
 import { isOsLitter, DEFAULT_OS_LITTER } from "./litter.js";
 import {
   effectiveTimeout,
   parseTimeoutHeader,
   type LockRecord,
+  type LockScope,
 } from "./locks.js";
 import { escapeXml, parseXml, type XmlElement, XmlError } from "./xml.js";
 
@@ -199,7 +204,7 @@ interface Principal {
 export function createWebdav(config: WebdavConfig): WebdavHandler {
   const resolved = resolve(config);
 
-  return async function webdav(request, env): Promise<Response> {
+  const route = async (request: Request, env: WebdavEnv): Promise<Response> => {
     // HTTPS-only: Basic credentials are refused over anything but HTTPS, ahead
     // of credential parsing (spec §1).
     if (!isHttpsRequest(request.url)) {
@@ -227,14 +232,24 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
     // against `.acl`/`.meta` is 404 (spec §3) — not merely hidden.
     if (isAuxiliary(path)) return problem(404, "Not found");
 
-    // The `If:` header is a strict, documented subset (spec §4): a single
-    // untagged list of one lock token and/or one ETag. Anything richer (tagged
-    // lists, `Not`, multiple state tokens) is answered `400` rather than parsed
-    // best-effort — guessing here is a classic parser-differential hazard, and
-    // silently dropping a conditional the client asked for would fail *open*.
+    // The `If:` header is parsed as a bounded grammar (spec §4): anything
+    // outside it is answered `400` rather than parsed best-effort — guessing
+    // here is a classic parser-differential hazard, and silently dropping a
+    // conditional the client asked for would fail *open*. A parsed header is
+    // a precondition (RFC 4918 §10.4.3): the request proceeds only if at
+    // least one list evaluates true, else `412` (litmus `fail_cond_put_unlocked`
+    // — a lock token that matches no live lock must 412 even on an unlocked
+    // resource).
     const ifHeader = request.headers.get("if");
-    if (ifHeader !== null && parseIfHeader(ifHeader).kind === "unsupported") {
+    const parsedIf = parseIfHeader(ifHeader);
+    if (parsedIf.kind === "unsupported") {
       return problem(400, "Unsupported If: header");
+    }
+    if (
+      parsedIf.kind === "lists" &&
+      !(await evaluateIf(parsedIf.lists, backend, resolved, url, path))
+    ) {
+      return problem(412, "If: condition not satisfied");
     }
 
     const ctx: RequestContext = { request, url, backend, principal, path };
@@ -262,6 +277,35 @@ export function createWebdav(config: WebdavConfig): WebdavHandler {
       default:
         return methodNotAllowed("Method not allowed", resolved, path);
     }
+  };
+
+  return async function webdav(request, env): Promise<Response> {
+    const response = await route(request, env);
+    // A refused write (401/403/409/423 …) leaves the request body unread.
+    // Consume a bounded amount before responding: this handler runs inside
+    // the pod DO on a body forwarded over `stub.fetch`, and workerd's local
+    // dev crashes when the forwarding pipe is first pulled after the DO's
+    // response closed its context (litmus `locks` could never finish a run).
+    // The bound keeps a refused multi-megabyte PUT from being pulled through
+    // the Worker just to say 423 — past it, the body is cancelled instead.
+    if (request.body !== null && !request.bodyUsed) {
+      try {
+        const reader = request.body.getReader();
+        let remaining = 1 << 20;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          remaining -= value?.byteLength ?? 0;
+          if (remaining <= 0) {
+            await reader.cancel().catch(() => undefined);
+            break;
+          }
+        }
+      } catch {
+        // Draining is best-effort; the response is already decided.
+      }
+    }
+    return response;
   };
 }
 
@@ -365,10 +409,69 @@ function basename(path: string): string {
   return decodeURIComponent(trimmed.slice(trimmed.lastIndexOf("/") + 1));
 }
 
-/** The lock token a request presented in its `If:` header, if any. */
-function presentedToken(request: Request): string | undefined {
-  const parsed = parseIfHeader(request.headers.get("if"));
-  return parsed.kind === "supported" ? parsed.condition.lockToken : undefined;
+/** Every lock token the request's `If:` header submits (RFC 4918 §7.1). */
+function presentedTokens(request: Request): readonly string[] {
+  return submittedLockTokens(parseIfHeader(request.headers.get("if")));
+}
+
+/**
+ * Evaluate a parsed `If:` header as a precondition (RFC 4918 §10.4.3): true
+ * iff at least one list has every condition true. A `<token>` condition is
+ * true when the list's target is currently locked with exactly that token
+ * (`DAV:no-lock` therefore never matches — the `(Not <DAV:no-lock>)`
+ * always-true idiom falls out); an `[etag]` condition compares against the
+ * target's current ETag. Untagged lists target the request-URI; tagged lists
+ * target their own resource, and a tag outside this mount simply evaluates
+ * its conditions against a resource with no locks and no ETag.
+ */
+async function evaluateIf(
+  lists: readonly IfList[],
+  backend: WebdavBackend,
+  resolved: Resolved,
+  requestUrl: URL,
+  requestPath: string,
+): Promise<boolean> {
+  const etags = new Map<string, string | null>();
+  const etagOf = async (path: string | null): Promise<string | null> => {
+    if (path === null) return null;
+    const cached = etags.get(path);
+    if (cached !== undefined) return cached;
+    const etag = (await backend.stat(path))?.etag ?? null;
+    etags.set(path, etag);
+    return etag;
+  };
+  for (const list of lists) {
+    let target: string | null = requestPath;
+    if (list.resourceTag !== undefined) {
+      try {
+        target = pathOf(new URL(list.resourceTag, requestUrl), resolved);
+      } catch {
+        target = null;
+      }
+    }
+    let all = true;
+    for (const condition of list.conditions) {
+      let value: boolean;
+      if (condition.lockToken !== undefined) {
+        value =
+          target !== null &&
+          backend.locks
+            .locksOn(target)
+            .some((lock) => lock.token === condition.lockToken);
+      } else {
+        value =
+          condition.etag !== undefined &&
+          (await etagOf(target)) === condition.etag;
+      }
+      if (condition.not) value = !value;
+      if (!value) {
+        all = false;
+        break;
+      }
+    }
+    if (all) return true;
+  }
+  return false;
 }
 
 /** Translate a thrown backend error into the right WebDAV status. */
@@ -428,7 +531,7 @@ async function put(ctx: RequestContext, resolved: Resolved): Promise<Response> {
 
   const blocking = ctx.backend.locks.blockingLock(
     ctx.path,
-    presentedToken(ctx.request),
+    presentedTokens(ctx.request),
   );
   if (blocking) return lockedResponse(blocking, resolved);
 
@@ -467,7 +570,7 @@ async function remove(
   }
   const blocking = ctx.backend.locks.blockingLock(
     ctx.path,
-    presentedToken(ctx.request),
+    presentedTokens(ctx.request),
   );
   if (blocking) return lockedResponse(blocking, resolved);
   try {
@@ -516,9 +619,12 @@ async function mkcol(
   // A plain (non-collection) resource is stored under the un-slashed name, so
   // checking only `collectionPath` (litmus `mkcol_over_plain`) misses it —
   // MKCOL would silently create a same-named collection alongside it instead
-  // of refusing.
+  // of refusing. `ctx.path` alone is not enough either: neon's ne_mkcol()
+  // always sends a trailing slash, making `ctx.path` the collection form, so
+  // the un-slashed name must be derived and checked explicitly.
+  const plainPath = collectionPath.slice(0, -1);
   if (
-    (await ctx.backend.stat(ctx.path)) !== null ||
+    (plainPath !== "" && (await ctx.backend.stat(plainPath)) !== null) ||
     (await ctx.backend.stat(collectionPath)) !== null
   ) {
     return methodNotAllowed(
@@ -575,7 +681,7 @@ async function copyMove(
     (ctx.request.headers.get("overwrite") ?? "T").toUpperCase() !== "F";
 
   // MOVE mutates the source; both verbs mutate the destination.
-  const token = presentedToken(ctx.request);
+  const token = presentedTokens(ctx.request);
   if (method === "MOVE") {
     const srcLock = ctx.backend.locks.blockingLock(ctx.path, token);
     if (srcLock) return lockedResponse(srcLock, resolved);
@@ -743,6 +849,9 @@ const SUPPORTED_LOCK =
   "<D:supportedlock><D:lockentry>" +
   "<D:lockscope><D:exclusive/></D:lockscope>" +
   "<D:locktype><D:write/></D:locktype>" +
+  "</D:lockentry><D:lockentry>" +
+  "<D:lockscope><D:shared/></D:lockscope>" +
+  "<D:locktype><D:write/></D:locktype>" +
   "</D:lockentry></D:supportedlock>";
 
 function responseXml(
@@ -811,7 +920,7 @@ async function proppatch(
   if (!(await authorize(ctx, "write"))) return problem(403, "Forbidden");
   const blocking = ctx.backend.locks.blockingLock(
     ctx.path,
-    presentedToken(ctx.request),
+    presentedTokens(ctx.request),
   );
   if (blocking) return lockedResponse(blocking, resolved);
   const stat = await ctx.backend.stat(ctx.path);
@@ -874,7 +983,7 @@ async function lock(
 
   // An empty body refreshes the lock named by the `If:` header (RFC 4918 §9.10).
   if (bodyText === "") {
-    const token = presentedToken(ctx.request);
+    const token = presentedTokens(ctx.request)[0];
     if (token === undefined)
       return problem(400, "LOCK refresh needs a lock token");
     if (!(await authorize(ctx, "write"))) return problem(403, "Forbidden");
@@ -887,7 +996,7 @@ async function lock(
 
   if (!(await authorize(ctx, "write"))) return problem(403, "Forbidden");
 
-  let info: { depth: "0" | "infinity"; ownerHref: string };
+  let info: { depth: "0" | "infinity"; scope: LockScope; ownerHref: string };
   try {
     guardCharset(ctx.request);
     info = parseLockInfo(parseXml(bodyText, XML_LIMITS), ctx.request);
@@ -899,6 +1008,7 @@ async function lock(
   const result = ctx.backend.locks.acquire({
     path: ctx.path,
     depth: info.depth,
+    scope: info.scope,
     ownerHref: info.ownerHref,
     webid: ctx.principal.webid,
     timeoutSeconds: timeout,
@@ -946,18 +1056,24 @@ async function unlock(ctx: RequestContext): Promise<Response> {
 function parseLockInfo(
   root: XmlElement,
   request: Request,
-): { depth: "0" | "infinity"; ownerHref: string } {
+): { depth: "0" | "infinity"; scope: LockScope; ownerHref: string } {
   if (root.ns !== "DAV:" || root.local !== "lockinfo") {
     throw new XmlError("expected a DAV:lockinfo body");
   }
-  const scope = root.children.find(
+  const scopeElement = root.children.find(
     (c) => c.ns === "DAV:" && c.local === "lockscope",
   );
-  if (
-    !scope?.children.some((c) => c.ns === "DAV:" && c.local === "exclusive")
-  ) {
-    // Shared locks are deferred (spec §2); only exclusive write locks exist.
-    throw new XmlError("only exclusive write locks are supported");
+  const scope: LockScope | null = scopeElement?.children.some(
+    (c) => c.ns === "DAV:" && c.local === "exclusive",
+  )
+    ? "exclusive"
+    : scopeElement?.children.some(
+          (c) => c.ns === "DAV:" && c.local === "shared",
+        )
+      ? "shared"
+      : null;
+  if (scope === null) {
+    throw new XmlError("expected an exclusive or shared lockscope");
   }
   const owner = root.children.find(
     (c) => c.ns === "DAV:" && c.local === "owner",
@@ -969,6 +1085,7 @@ function parseLockInfo(
   const depth = (request.headers.get("depth") ?? "infinity").toLowerCase();
   return {
     depth: depth === "0" ? "0" : "infinity",
+    scope,
     ownerHref: ownerHref.trim(),
   };
 }
@@ -989,7 +1106,7 @@ function lockDiscovery(
       return (
         "<D:activelock>" +
         "<D:locktype><D:write/></D:locktype>" +
-        "<D:lockscope><D:exclusive/></D:lockscope>" +
+        `<D:lockscope><D:${l.scope === "shared" ? "shared" : "exclusive"}/></D:lockscope>` +
         `<D:depth>${l.depth}</D:depth>` +
         owner +
         `<D:timeout>Second-${timeout}</D:timeout>` +
@@ -1038,12 +1155,27 @@ function preconditionsOf(request: Request): {
 } {
   const ifMatch = request.headers.get("if-match");
   const ifNoneMatch = request.headers.get("if-none-match");
-  // The `If:` header's `[etag]` production is a state condition the request must
-  // satisfy (RFC 4918 §10.4.2); map it onto `If-Match` so the TOCTOU-free write
-  // path enforces it. An explicit `If-Match` header takes precedence.
+  // The `If:` header's `[etag]` production is a state condition the request
+  // must satisfy (RFC 4918 §10.4.2). The router already evaluated the full
+  // header (412 on false), but for the unambiguous shape — a single untagged
+  // list with exactly one positive ETag — it is additionally mapped onto
+  // `If-Match` so the TOCTOU-free write path re-checks it inside the DO
+  // transaction. Multi-list (OR) shapes cannot collapse to one `If-Match`,
+  // so they rely on the router evaluation alone. An explicit `If-Match`
+  // header takes precedence.
   const parsed = parseIfHeader(request.headers.get("if"));
-  const ifEtag =
-    parsed.kind === "supported" ? parsed.condition.etag : undefined;
+  let ifEtag: string | undefined;
+  if (parsed.kind === "lists" && parsed.lists.length === 1) {
+    const only = parsed.lists[0];
+    if (only !== undefined && only.resourceTag === undefined) {
+      const positiveEtags = only.conditions.filter(
+        (c) => c.etag !== undefined && !c.not,
+      );
+      if (positiveEtags.length === 1 && only.conditions.every((c) => !c.not)) {
+        ifEtag = positiveEtags[0]?.etag;
+      }
+    }
+  }
   return {
     ...(ifMatch !== null
       ? { ifMatch: ifMatch.trim() }
