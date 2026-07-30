@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createMicrosubStore,
@@ -60,6 +60,16 @@ describe("channels", () => {
   it("reports unknown channels on rename/delete", async () => {
     expect(await store.renameChannel("ghost", "x")).toBeNull();
     expect(await store.deleteChannel("ghost")).toBe(false);
+  });
+
+  it("generates a channel uid using crypto.randomUUID, not Math.random", async () => {
+    const spy = vi.spyOn(Math, "random");
+    const channel = await store.createChannel("TestChannel", 100);
+    expect(spy).not.toHaveBeenCalled();
+    expect(channel.uid).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    spy.mockRestore();
   });
 });
 
