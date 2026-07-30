@@ -2227,6 +2227,118 @@ describe("owner follower control (#447)", () => {
       expect(written.status).toBe(404);
     });
   });
+
+  it("Accept: confirms a pending follower and delivers Accept(Follow) to them alone, setting accepted_at", async () => {
+    const { username, stub } = freshUser();
+    const iris = deriveIris(BASE, username);
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      // A second follower must not see the Accept.
+      seedFollower(state, "https://other.example/users/carol", null);
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).not.toBeNull();
+
+      // Targeted at the confirmed follower only — never the follower fan-out.
+      expect(counts(state, "delivery")).toBe(0);
+      const queued = targetedDeliveries(state);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.actor).toBe(REMOTE);
+      expect(queued[0]?.activity.type).toBe("Accept");
+      expect(queued[0]?.activity.actor).toBe(iris.id);
+      expect(queued[0]?.activity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+
+      // Never lands in the publicly served outbox.
+      expect(counts(state, "outbox")).toBe(0);
+    });
+  });
+
+  it("Accept: accepts the actor-IRI shorthand and the stored Follow id, same as Reject", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      const byActor = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(byActor.status).toBe(202);
+      expect(
+        ((await byActor.json()) as { object: Record<string, unknown> }).object
+          .actor,
+      ).toBe(REMOTE);
+    });
+  });
+
+  it("Accept: no-ops (still 202, no queued delivery) for an actor with no followers row", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(targetedDeliveries(state)).toHaveLength(0);
+      const armed = await state.storage.getAlarm();
+      expect(armed).toBeNull();
+    });
+  });
+
+  it("Accept: with ?skipDelivery=1, still marks accepted_at but queues no delivery", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(targetedDeliveries(state)).toHaveLength(0);
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).not.toBeNull();
+    });
+  });
 });
 
 describe("followers.accepted_at migration (#473)", () => {

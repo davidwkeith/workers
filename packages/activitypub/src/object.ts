@@ -122,21 +122,29 @@ function text(status: number, body: string): Response {
 }
 
 /**
- * Whether an owner-published activity is a **follower-control** activity (#447)
- * — one aimed at a single actor's relationship with this one, rather than
- * content for the follower set: `Reject` (of a `Follow`), `Block`, and
- * `Undo(Block)`.
+ * Whether an owner-published activity is a **single-target relationship**
+ * activity (#447, #473) — one aimed at a single actor's relationship with
+ * this one, rather than content for the follower set: `Reject` (of a
+ * `Follow`), `Block`, `Undo(Block)`, and `Accept` (confirming a pending
+ * follower).
  *
- * Every `Reject` qualifies, not only one carrying a well-formed `Follow`: the
- * failure this guards against is a control activity leaking into the follower
- * fan-out, so an unroutable one is claimed here and dropped rather than
- * broadcast. `Reject` of an event `Join` is not a case this actor can produce —
- * manual `Join` approval is out of scope for v1 (spec §"Events & RSVPs").
+ * Every `Reject`/`Accept` qualifies, not only one carrying a well-formed
+ * `Follow`: the failure this guards against is a control activity leaking
+ * into the follower fan-out, so an unroutable one is claimed here and
+ * dropped rather than broadcast. `Reject`/`Accept` of an event `Join` is not
+ * a case this actor can produce — manual `Join` approval is out of scope
+ * for v1 (spec §"Events & RSVPs").
  */
 function isFollowerControlActivity(
   activity: Record<string, JsonValue>,
 ): boolean {
-  if (activity.type === "Block" || activity.type === "Reject") return true;
+  if (
+    activity.type === "Block" ||
+    activity.type === "Reject" ||
+    activity.type === "Accept"
+  ) {
+    return true;
+  }
   return (
     activity.type === "Undo" &&
     objectType(activity.object as JsonValue) === "Block"
@@ -1399,8 +1407,39 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // `#undos/…`).
     activity.id = `${iris.id}#${(activity.type as string).toLowerCase()}s/${crypto.randomUUID()}`;
 
+    if (activity.type === "Accept") {
+      const follower = this.#singleFollowTarget(activity);
+      if (!follower) return false;
+      const row = this.#sql
+        .exec<{
+          follow_id: string | null;
+        }>(`SELECT follow_id FROM followers WHERE actor = ?`, follower)
+        .toArray()[0];
+      // Unlike Reject's drift-repair looseness: confirming a follow that was
+      // never recorded doesn't make sense, so an unknown actor no-ops.
+      if (!row) return false;
+      // Local state always applies, independent of `deliver`/skipDelivery,
+      // which only gates the outbound notification below — same rule every
+      // other branch in this method follows.
+      this.#sql.exec(
+        `UPDATE followers SET accepted_at = COALESCE(accepted_at, ?) WHERE actor = ?`,
+        now,
+        follower,
+      );
+      activity.object = {
+        ...(row.follow_id ? { id: row.follow_id } : {}),
+        type: "Follow",
+        actor: follower,
+        object: iris.id,
+      };
+      addressPrivately(activity, follower);
+      if (!deliver || !isSafeTarget(follower)) return false;
+      this.#enqueuePendingDelivery(follower, JSON.stringify(activity));
+      return true;
+    }
+
     if (activity.type === "Reject") {
-      const follower = this.#rejectTarget(activity);
+      const follower = this.#singleFollowTarget(activity);
       if (!follower) return false;
       // The `Follow` being rejected, named by its own IRI when we recorded one
       // (either from the caller or from the row the inbound `Follow` wrote).
@@ -1473,24 +1512,21 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
-   * The follower an owner `Reject` names. Canonically its `object` is the
-   * `Follow` being rejected (target = that activity's `actor`). As a shorthand
-   * the owner may pass a bare IRI, which is read as the stored `Follow`'s id
-   * when it matches one we recorded and as the follower's actor IRI otherwise
-   * — the two readings a client can reasonably take of "reject this follow".
+   * The follower a single-target `Reject`/`Accept` names. Canonically its
+   * `object` is the `Follow` being rejected/accepted (target = that
+   * activity's `actor`). As a shorthand the owner may pass a bare IRI, which
+   * is read as the stored `Follow`'s id when it matches one we recorded and
+   * as the follower's actor IRI otherwise — the two readings a client can
+   * reasonably take of "reject/accept this follow".
    *
-   * That last fallback deliberately does **not** require a matching `followers`
-   * row. A `Reject` is most needed exactly when our state and the peer's
-   * disagree — they believe they follow us, our row is already gone — and
-   * demanding local proof of the relationship would refuse the one message that
-   * repairs the drift. What the owner can reach this way is bounded: the target
-   * still passes the SSRF guard before anything leaves, and the delivered body
-   * asserts nothing about a third party (it tells one actor "you do not follow
-   * me", which is true however they got the message). The cost of the looseness
-   * is an owner typo sending a stray `Reject` that its recipient no-ops on;
-   * the cost of tightening it is a silent no-op in the case that matters.
+   * That last fallback deliberately does **not** require a matching
+   * `followers` row for `Reject` — a `Reject` is most needed exactly when
+   * our state and the peer's disagree — see `#routeFollowerControl`'s
+   * `Reject` branch for that looseness; `Accept` layers its own stricter
+   * "row must exist" check on top, since confirming a follow that was never
+   * recorded doesn't make sense.
    */
-  #rejectTarget(activity: Record<string, JsonValue>): string | undefined {
+  #singleFollowTarget(activity: Record<string, JsonValue>): string | undefined {
     const object = activity.object;
     if (typeof object === "string") {
       const row = this.#sql
