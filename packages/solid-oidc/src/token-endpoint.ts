@@ -9,6 +9,7 @@
 
 import { verifyDpopProof } from "@dwk/dpop";
 
+import { readRequestBodyCapped } from "./body.js";
 import type { ResolvedSolidOidcConfig } from "./config.js";
 import { oauthError, json } from "./http.js";
 import { importSigningKey } from "./jws.js";
@@ -16,17 +17,23 @@ import { verifyPkce } from "./pkce.js";
 import type { CodeStore } from "./store.js";
 import { mintAccessToken, mintIdToken } from "./token.js";
 
-async function readForm(request: Request): Promise<URLSearchParams> {
-  const params = new URLSearchParams();
+/**
+ * Cap on the token endpoint's form body (8 KiB). This endpoint is public and
+ * unauthenticated prior to code/PKCE/DPoP validation, and its form fields
+ * (grant type, code, redirect URI, client ID, PKCE verifier) are all short
+ * opaque tokens, so a generous cap still refuses to buffer an unbounded body.
+ */
+const MAX_TOKEN_BODY_BYTES = 8 * 1024;
+
+async function readForm(request: Request): Promise<URLSearchParams | null> {
+  const bytes = await readRequestBodyCapped(request, MAX_TOKEN_BODY_BYTES);
+  if (bytes === null) return null;
   try {
-    const form = await request.formData();
-    for (const [key, value] of form) {
-      if (typeof value === "string") params.set(key, value);
-    }
+    return new URLSearchParams(new TextDecoder().decode(bytes));
   } catch {
     // Malformed body → empty params; validation reports the error below.
+    return new URLSearchParams();
   }
-  return params;
 }
 
 export async function handleToken(
@@ -35,6 +42,13 @@ export async function handleToken(
   codes: CodeStore,
 ): Promise<Response> {
   const form = await readForm(request);
+  if (form === null) {
+    return oauthError(
+      400,
+      "invalid_request",
+      "request body exceeds the maximum allowed size",
+    );
+  }
 
   if (form.get("grant_type") !== "authorization_code") {
     return oauthError(400, "unsupported_grant_type");

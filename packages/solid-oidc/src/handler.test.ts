@@ -349,4 +349,37 @@ describe("createSolidOidc — authorization-code + PKCE + DPoP flow", () => {
     const res = await handler(new Request(url.toString()), testEnv, ctx);
     expect(res.status).toBe(400);
   });
+
+  it("rejects an oversized token request body as invalid_request", async () => {
+    const handler = await makeHandler();
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    // A full, otherwise-valid request (would succeed with 200 absent the
+    // cap) plus an oversized extra field, so the cap is what's under test —
+    // not a coincidental "missing required field" 400.
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: `grant_type=authorization_code&code=${encodeURIComponent(
+          code,
+        )}&redirect_uri=${encodeURIComponent(
+          REDIRECT,
+        )}&client_id=${encodeURIComponent(
+          CLIENT_ID,
+        )}&code_verifier=${encodeURIComponent(
+          verifier,
+        )}&padding=${"x".repeat(16 * 1024)}`,
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("invalid_request");
+  });
 });
