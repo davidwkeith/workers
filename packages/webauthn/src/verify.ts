@@ -32,6 +32,7 @@ import {
   bytesToUtf8,
   normalizeBase64url,
   sha256,
+  timingSafeEqual,
 } from "./encoding.js";
 
 /** Stable, locale-independent verification failure codes. */
@@ -222,8 +223,10 @@ function checkClientData(
   if (clientData === null) return "client_data_malformed";
   if (clientData.type !== expectedType) return "client_data_type";
   if (
-    normalizeBase64url(clientData.challenge) !==
-    normalizeBase64url(expectedChallenge)
+    !timingSafeEqual(
+      normalizeBase64url(clientData.challenge),
+      normalizeBase64url(expectedChallenge),
+    )
   ) {
     return "challenge_mismatch";
   }

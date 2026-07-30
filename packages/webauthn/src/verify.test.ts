@@ -111,6 +111,18 @@ describe("@dwk/webauthn verifyRegistration", () => {
     });
   });
 
+  it("rejects a same-length, different-content challenge without leaking length via early exit", async () => {
+    // A same-length mismatch is the case a naive `!==` string compare and a
+    // proper constant-time compare both reject — this asserts behavior, not
+    // timing, but guards against a regression to the old `!==` form.
+    const sameLengthWrongChallenge = "x".repeat(REG_CHALLENGE.length);
+    const result = await register({ challenge: sameLengthWrongChallenge });
+    expect(result).toMatchObject({
+      verified: false,
+      reason: "challenge_mismatch",
+    });
+  });
+
   it("rejects an origin mismatch", async () => {
     const result = await register({ origin: "https://evil.example" });
     expect(result).toMatchObject({

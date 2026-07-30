@@ -51,6 +51,22 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+/**
+ * Constant-time string comparison via the Workers runtime's
+ * `crypto.subtle.timingSafeEqual`. Unlike `bytesEqual`, this must not
+ * short-circuit on a length mismatch (that itself leaks the length via
+ * timing) — compare the value against itself instead, per Cloudflare's
+ * documented safe pattern.
+ */
+export function timingSafeEqual(a: string, b: string): boolean {
+  const bytesA = utf8ToBytes(a);
+  const bytesB = utf8ToBytes(b);
+  const lengthsMatch = bytesA.byteLength === bytesB.byteLength;
+  return lengthsMatch
+    ? crypto.subtle.timingSafeEqual(bytesA, bytesB)
+    : !crypto.subtle.timingSafeEqual(bytesA, bytesA);
+}
+
 /** SHA-256 digest of the input bytes as a fresh `Uint8Array`. */
 export async function sha256(input: Uint8Array): Promise<Uint8Array> {
   const digest = await crypto.subtle.digest("SHA-256", input as BufferSource);
