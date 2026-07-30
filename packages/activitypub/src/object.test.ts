@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -2148,6 +2148,71 @@ describe("owner follower control (#447)", () => {
         new Request(`${iris.id}/blocked`, { method: "DELETE", headers: owner }),
       );
       expect(written.status).toBe(404);
+    });
+  });
+});
+
+describe("followers.accepted_at migration (#473)", () => {
+  it("backfills accepted_at = added_at for pre-existing rows on first migration, and never re-runs on a later construction", async () => {
+    const { stub } = freshUser();
+
+    // First construction: this object is brand new, so its constructor
+    // already creates `followers` with `accepted_at` present (current code
+    // has always had this column, for a fresh install). To exercise the
+    // additive-migration path honestly, drop the column right back off again
+    // — reproducing the on-disk shape of an object that predates #473 — then
+    // insert a row directly (bypassing #onFollow) with no `accepted_at` value
+    // at all, exactly like a real pre-migration follower row.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`ALTER TABLE followers DROP COLUMN accepted_at`);
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1234,
+      );
+    });
+
+    // Without an explicit eviction, `runInDurableObject` reuses the still-live
+    // instance from the block above (it just replaces `fetch()` and sends a
+    // request — see the `cloudflare:test` types) rather than reconstructing
+    // it, so the constructor's migration logic would not run again here. Evict
+    // to force a genuine fresh construction against the same stub id — the
+    // column is missing again (we dropped it above; SQLite storage persists
+    // across the eviction), so this exercises the constructor's
+    // `#ensureColumn` path adding the column back and running the one-time
+    // backfill, exactly like a real cold start after deploying #473.
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).toBe(1234);
+
+      // Simulate a genuinely-still-pending row created after migration.
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, NULL)`,
+        "https://remote.example/users/pending-carol",
+        null,
+        5678,
+      );
+    });
+
+    // A third construction (again forced via eviction) must NOT re-run the
+    // backfill: the genuinely-NULL row from the previous block must stay
+    // NULL.
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          "https://remote.example/users/pending-carol",
+        )
+        .one();
+      expect(row.accepted_at).toBeNull();
     });
   });
 });

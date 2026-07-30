@@ -328,6 +328,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#ensureColumn("following", "actor_type", "TEXT");
     this.#ensureColumn("following", "inbox", "TEXT");
     this.#ensureColumn("following", "shared_inbox", "TEXT");
+    // Owner-admin follow confirmation (#473): NULL means still awaiting the
+    // owner's `Accept`; non-NULL (the timestamp) means confirmed — either
+    // auto-accepted at insert time (#onFollow) or owner-triggered later
+    // (#routeFollowerControl's Accept branch). Every pre-existing row
+    // predates this column and has no other stored signal of whether it was
+    // genuinely still pending at migration time; backfilling all of them to
+    // "already settled" (their `added_at`) avoids surfacing years of
+    // ordinary auto-accepted followers as false "pending" requests. This
+    // must run only the one time the column is actually added — never on
+    // every cold start, or it would silently re-confirm every currently-
+    // pending follower on every restart.
+    if (this.#ensureColumn("followers", "accepted_at", "INTEGER")) {
+      this.#sql.exec(
+        `UPDATE followers SET accepted_at = added_at WHERE accepted_at IS NULL`,
+      );
+    }
   }
 
   /**
@@ -338,13 +354,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * unrelated SQLite error (e.g. a disk-full write failure) that happens to
    * mention "duplicate column" in its own message, or miss a legitimate
    * duplicate-column error phrased differently by a future SQLite version.
+   * Returns whether the column was just added, so a caller can run a
+   * one-time backfill exactly once (see the `followers.accepted_at` call
+   * site below) rather than on every constructor invocation.
    */
-  #ensureColumn(table: string, column: string, type: string): void {
+  #ensureColumn(table: string, column: string, type: string): boolean {
     const columns = this.#sql
       .exec<{ name: string }>(`PRAGMA table_info(${table})`)
       .toArray();
-    if (columns.some((c) => c.name === column)) return;
+    if (columns.some((c) => c.name === column)) return false;
     this.#sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    return true;
   }
 
   override async fetch(request: Request): Promise<Response> {
