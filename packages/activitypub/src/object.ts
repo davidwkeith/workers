@@ -442,6 +442,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return this.#listFollowing(request);
     }
+    // Owner-only pending-follower listing (internal, like `__following`):
+    // backs @dwk/mastodon-api's GET /api/v1/follow_requests (#473).
+    if (path === `${pathOf(iris.id)}/__client/follow_requests`) {
+      if (request.headers.get(INTERNAL_HEADERS.internal) !== "1") {
+        return text(404, "not found");
+      }
+      return this.#listFollowRequests();
+    }
     // Owner-only cursor-paginated reads for the Mastodon client API phase 2
     // (`@dwk/mastodon-api`'s `MastodonBackend` seam, #349): timeline (posts
     // from followed accounts), notifications (favourite/reblog/mention), and
@@ -1830,6 +1838,23 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    * would invite exactly that. Unpaged: a personal blocklist is small, and
    * capping it would silently hide blocks from the only view of them there is.
    */
+  /**
+   * Pending follow requests (#473): followers awaiting the owner's `Accept`.
+   * Unpaged flat JSON, like `#listBlocked` — this list is small, and capping
+   * it would silently hide requests from the only view of them there is.
+   */
+  #listFollowRequests(): Response {
+    const items = this.#sql
+      .exec<{
+        actor: string;
+        added_at: number;
+      }>(
+        `SELECT actor, added_at FROM followers WHERE accepted_at IS NULL ORDER BY added_at ASC`,
+      )
+      .toArray();
+    return json(200, { items, total: items.length } as unknown as JsonValue);
+  }
+
   #listBlocked(): Response {
     const items = this.#sql
       .exec<{

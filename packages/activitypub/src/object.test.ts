@@ -4309,3 +4309,57 @@ describe("__client/entry", () => {
     });
   });
 });
+
+describe("__client/follow_requests (#473)", () => {
+  function followRequestsRequest(username: string, internal = true): Request {
+    const iris = deriveIris(BASE, username);
+    const headers: Record<string, string> = {
+      [INTERNAL_HEADERS.config]: cfgHeader(username),
+    };
+    if (internal) headers[INTERNAL_HEADERS.internal] = "1";
+    return new Request(`${iris.id}/__client/follow_requests`, { headers });
+  }
+
+  it("404s without the internal header", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(followRequestsRequest(username, false));
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("lists only accepted_at IS NULL rows, oldest first", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/newer-pending",
+        20,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/older-pending",
+        10,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/already-confirmed",
+        "https://remote.example/users/already-confirmed/inbox",
+        5,
+        999,
+      );
+
+      const res = await instance.fetch(followRequestsRequest(username));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { actor: string; added_at: number }[];
+        total: number;
+      };
+      expect(body.total).toBe(2);
+      expect(body.items.map((i) => i.actor)).toEqual([
+        "https://remote.example/users/older-pending",
+        "https://remote.example/users/newer-pending",
+      ]);
+    });
+  });
+});
