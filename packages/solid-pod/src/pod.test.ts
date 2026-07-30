@@ -445,6 +445,93 @@ _:p a solid:InsertDeletePatch ;
   });
 });
 
+describe("@dwk/solid-pod DO WebSocket notification WAC filtering", () => {
+  /** Owner-only ACL over `/private/`, seeded through the DO's own door. */
+  async function seedPrivateAcl(
+    stub: DurableObjectStub<SolidPodObject>,
+  ): Promise<void> {
+    const res = await run(stub, "PUT", "/private/.acl", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      headers: { "content-type": TURTLE },
+      body: `
+        @prefix acl: <http://www.w3.org/ns/auth/acl#>.
+        <#owner> a acl:Authorization;
+          acl:agent <${OWNER}>;
+          acl:accessTo <./>;
+          acl:default <./>;
+          acl:mode acl:Read, acl:Write, acl:Control.
+      `,
+    });
+    expect(res.status).toBe(201);
+  }
+
+  /** Open a hibernatable subscription and collect what the DO sends it. */
+  async function subscribe(
+    stub: DurableObjectStub<SolidPodObject>,
+    webid?: string,
+  ): Promise<string[]> {
+    // The upgrade goes through the stub rather than `runInDurableObject`: the
+    // client half of the pair is an I/O object that must belong to the test's
+    // context, not the Durable Object's, for the test to listen on it.
+    const upgrade = await stub.fetch(
+      buildReq("GET", "/", {
+        ...(webid !== undefined ? { webid } : {}),
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    const client = upgrade.webSocket;
+    expect(upgrade.status).toBe(101);
+    expect(client).toBeDefined();
+    client!.accept();
+    const received: string[] = [];
+    client!.addEventListener("message", (event) => {
+      received.push(String((event as MessageEvent).data));
+    });
+    return received;
+  }
+
+  it("does not broadcast a change to a private resource to an unauthorized WebSocket subscriber", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    const received = await subscribe(stub);
+
+    // The owner writes a private resource — this triggers #broadcast.
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    // Give the DO's synchronous send a turn to reach the test's client socket.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(received).toHaveLength(0);
+  });
+
+  it("still broadcasts to a subscriber authorized to read the changed resource", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    const received = await subscribe(stub, OWNER);
+
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!)).toMatchObject({
+      type: "Create",
+      object: `${BASE}/private/secret`,
+    });
+  });
+});
+
 describe("@dwk/solid-pod DO Solid-door DELETE × WebDAV dead properties", () => {
   it("drops the resource's dead-property rows on an LDP DELETE", async () => {
     const stub = freshStub();

@@ -208,10 +208,6 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
-      return this.#handleWebSocketUpgrade();
-    }
-
     const config: ForwardedConfig = (() => {
       const raw = request.headers.get(INTERNAL_HEADERS.config);
       if (!raw) return {};
@@ -234,6 +230,15 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     const webidHeader = request.headers.get(INTERNAL_HEADERS.webid);
     const agent =
       webidHeader && webidHeader.length > 0 ? webidHeader : undefined;
+
+    // The upgrade branch sits *after* the config/agent extraction so the
+    // subscription carries the connecting agent's WebID (and so the forwarded
+    // owners/storage-root are set on the object) — `#broadcast` WAC-filters
+    // per subscriber and cannot do that without them.
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      return this.#handleWebSocketUpgrade(agent);
+    }
+
     const jti = request.headers.get(INTERNAL_HEADERS.jti) ?? undefined;
     const requestOrigin = request.headers.get("origin") ?? undefined;
 
@@ -633,7 +638,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     this.#ensureContainerChain(store, origin, path);
     await this.#drainOrphans(store);
 
-    this.#broadcast(toIri(origin, path), existed ? "Update" : "Create");
+    this.#broadcast(
+      store,
+      origin,
+      path,
+      toIri(origin, path),
+      existed ? "Update" : "Create",
+    );
     const meta = store.head(path);
     return new Response(null, {
       status: existed ? 204 : 201,
@@ -681,8 +692,11 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     await this.#drainOrphans(store);
 
     const childIri = toIri(origin, key);
-    this.#broadcast(childIri, "Create");
-    this.#broadcast(toIri(origin, path), "Update");
+    // Each notification is filtered against the resource it announces: the new
+    // child (`key`) for the creation, the parent container (`path`) for its
+    // containment update.
+    this.#broadcast(store, origin, key, childIri, "Create");
+    this.#broadcast(store, origin, path, toIri(origin, path), "Update");
     const meta = store.head(key);
     return new Response(null, {
       status: 201,
@@ -783,7 +797,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     this.#ensureContainerChain(store, origin, path);
     await this.#drainOrphans(store);
 
-    this.#broadcast(toIri(origin, path), existed ? "Update" : "Create");
+    this.#broadcast(
+      store,
+      origin,
+      path,
+      toIri(origin, path),
+      existed ? "Update" : "Create",
+    );
     const meta = store.head(path);
     return new Response(null, {
       status: existed ? 204 : 201,
@@ -841,7 +861,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     this.#webdavProperties().removeTree(path);
     this.#removeContainment(store, origin, path);
     await this.#drainOrphans(store);
-    this.#broadcast(toIri(origin, path), "Delete");
+    this.#broadcast(store, origin, path, toIri(origin, path), "Delete");
     return new Response(null, {
       status: 204,
       headers: { allow: this.#allow(path) },
@@ -1166,7 +1186,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         }
         this.#ensureContainerChain(store, origin, path);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, path), existed ? "Update" : "Create");
+        this.#broadcast(
+          store,
+          origin,
+          path,
+          toIri(origin, path),
+          existed ? "Update" : "Create",
+        );
         const meta = store.head(path);
         return { created: !existed, ...(meta ? { etag: meta.etag } : {}) };
       },
@@ -1184,7 +1210,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         }
         this.#ensureContainerChain(store, origin, path);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, path), "Create");
+        this.#broadcast(store, origin, path, toIri(origin, path), "Create");
         const meta = store.head(path);
         return { created: true, ...(meta ? { etag: meta.etag } : {}) };
       },
@@ -1216,7 +1242,7 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         this.#webdavProperties().removeTree(path);
         this.#removeContainment(store, origin, path);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, path), "Delete");
+        this.#broadcast(store, origin, path, toIri(origin, path), "Delete");
       },
 
       copy: async (
@@ -1244,7 +1270,13 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         this.#webdavProperties().copyTree(from, dest, depth === "infinity");
         this.#ensureContainerChain(store, origin, dest);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, dest), destExisted ? "Update" : "Create");
+        this.#broadcast(
+          store,
+          origin,
+          dest,
+          toIri(origin, dest),
+          destExisted ? "Update" : "Create",
+        );
         return { created: !destExisted };
       },
 
@@ -1270,8 +1302,14 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
         this.#webdavDeleteTree(store, from);
         this.#removeContainment(store, origin, from);
         await this.#drainOrphans(store);
-        this.#broadcast(toIri(origin, dest), destExisted ? "Update" : "Create");
-        this.#broadcast(toIri(origin, from), "Delete");
+        this.#broadcast(
+          store,
+          origin,
+          dest,
+          toIri(origin, dest),
+          destExisted ? "Update" : "Create",
+        );
+        this.#broadcast(store, origin, from, toIri(origin, from), "Delete");
         return { created: !destExisted };
       },
 
@@ -1585,13 +1623,15 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
 
   /**
    * Accept a hibernatable WebSocket subscription. v1 channels carry only the
-   * changed resource IRI (no body), and are not WAC-filtered per subscriber —
-   * a deliberate, documented simplification.
+   * changed resource IRI (no body). The connecting agent's WebID is attached
+   * to the socket — it survives hibernation — so `#broadcast` can WAC-filter
+   * per subscriber.
    */
-  #handleWebSocketUpgrade(): Response {
+  #handleWebSocketUpgrade(agent: string | undefined): Response {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ agent });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -1618,15 +1658,58 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     }
   }
 
-  /** Fan a change notification out to every connected subscriber. */
-  #broadcast(objectIri: string, type: ChangeType): void {
+  /**
+   * Whether `agent` may read `path`, reusing the same owner-bypass + WAC
+   * evaluation every request path uses (`#decide` returns `null` for
+   * "granted"). No `requestOrigin` is threaded through: a subscription is not
+   * a browser-originated request against the resource, so origin-scoped trust
+   * cannot widen it — the agent's own grant has to stand on its own.
+   */
+  #allowedToRead(
+    store: Store,
+    origin: string,
+    path: string,
+    agent: string | undefined,
+  ): boolean {
+    return this.#decide(store, origin, path, "read", agent, undefined) === null;
+  }
+
+  /**
+   * Fan a change notification out to every connected subscriber authorized to
+   * read the changed resource. An anonymous or unauthorized socket must not
+   * learn that a private resource changed at all — the notification stream
+   * would otherwise be a passive enumeration channel for pod contents.
+   */
+  #broadcast(
+    store: Store,
+    origin: string,
+    path: string,
+    objectIri: string,
+    type: ChangeType,
+  ): void {
     const notification = JSON.stringify({
       "@context": ACTIVITYSTREAMS,
       type,
       object: objectIri,
       published: new Date().toISOString(),
     });
+    // Sockets commonly share an agent (every anonymous one shares `undefined`),
+    // and this loop is synchronous over an unchanged store inside the
+    // single-threaded DO — so memoizing the decision *within one broadcast* is
+    // equivalent to re-deciding per socket, without N ACL walks per write. The
+    // map dies with the call: no decision is cached across requests.
+    const decided = new Map<string | undefined, boolean>();
     for (const ws of this.ctx.getWebSockets()) {
+      const attachment = ws.deserializeAttachment() as {
+        agent?: string;
+      } | null;
+      const agent = attachment?.agent;
+      let allowed = decided.get(agent);
+      if (allowed === undefined) {
+        allowed = this.#allowedToRead(store, origin, path, agent);
+        decided.set(agent, allowed);
+      }
+      if (!allowed) continue;
       try {
         ws.send(notification);
       } catch {
