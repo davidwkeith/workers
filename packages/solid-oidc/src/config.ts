@@ -8,7 +8,7 @@
  */
 
 import type { D1Database } from "@cloudflare/workers-types";
-import type { Logger, Metrics } from "@dwk/log";
+import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
 import type { Jwk } from "./jws.js";
 
@@ -111,8 +111,8 @@ export interface ResolvedSolidOidcConfig {
   readonly idTokenLifetimeSeconds: number;
   readonly authorizationCodeLifetimeSeconds: number;
   readonly mountPath: string;
-  readonly logger?: Logger;
-  readonly metrics?: Metrics;
+  readonly logger: Logger;
+  readonly metrics: Metrics;
   readonly now: () => number;
   /** Absolute endpoint URLs derived from `issuer` + `mountPath`. */
   readonly endpoints: {
@@ -156,8 +156,8 @@ export function resolveConfig(
     authorizationCodeLifetimeSeconds:
       config.authorizationCodeLifetimeSeconds ?? 600,
     mountPath: prefix,
-    ...(config.logger ? { logger: config.logger } : {}),
-    ...(config.metrics ? { metrics: config.metrics } : {}),
+    logger: config.logger ?? noopLogger,
+    metrics: config.metrics ?? noopMetrics,
     now: config.now ?? (() => Date.now()),
     endpoints: {
       authorization: `${issuer}${authPath}`,

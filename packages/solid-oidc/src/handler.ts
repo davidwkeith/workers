@@ -34,15 +34,24 @@ export type SolidOidcHandler = (
  */
 export function createSolidOidc(config: SolidOidcConfig): SolidOidcHandler {
   const resolved: ResolvedSolidOidcConfig = resolveConfig(config);
+  let codes: ReturnType<typeof createCodeStore> | null = null;
 
   return async (request, env) => {
     if (!env.AUTH_DB) {
       throw new Error("@dwk/solid-oidc: required binding AUTH_DB is missing");
     }
+    // The D1 binding is fixed for the life of this Worker isolate (it is not
+    // a per-request value), so the store — and its one-time schema-check —
+    // only needs to be built once, not on every /authorize or /token call.
+    // This memoizes against the *first* `env.AUTH_DB` this closure ever sees:
+    // fine for a real deployment, but a caller that reuses one
+    // `createSolidOidc(...)` handler across requests carrying different
+    // `env.AUTH_DB` values (e.g. an unusual multi-tenant embedding, or a test
+    // harness) would silently keep querying the first one forever.
+    codes ??= createCodeStore(env.AUTH_DB);
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
-    const codes = createCodeStore(env.AUTH_DB);
 
     // Discovery — GET only, cacheable public document.
     if (path === resolved.paths.discovery) {

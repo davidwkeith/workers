@@ -16,7 +16,7 @@
  * the published packages experiences.
  */
 
-import { createHostMeta } from "@dwk/host-meta";
+import { createHostMeta, type HostMetaEnv } from "@dwk/host-meta";
 import { createWebfinger, type WebfingerEnv } from "@dwk/webfinger";
 
 /** The local part of the `acct:` handle this Worker answers for. */
@@ -111,4 +111,4 @@ export default {
     }
     return new Response("Not found", { status: 404 });
   },
-} satisfies ExportedHandler<WebfingerEnv>;
+} satisfies ExportedHandler<WebfingerEnv & HostMetaEnv>;

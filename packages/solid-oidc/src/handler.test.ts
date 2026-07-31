@@ -9,6 +9,7 @@ import {
   sha256Base64url,
   textToBase64url,
 } from "./encoding.js";
+import { SolidOidcLogEvent } from "./log.js";
 import type { SolidOidcConfig, SolidOidcEnv } from "./index.js";
 
 const testEnv = env as unknown as SolidOidcEnv;
@@ -348,5 +349,304 @@ describe("createSolidOidc — authorization-code + PKCE + DPoP flow", () => {
     url.searchParams.set("redirect_uri", "notaurl");
     const res = await handler(new Request(url.toString()), testEnv, ctx);
     expect(res.status).toBe(400);
+  });
+
+  it("rejects an oversized token request body as invalid_request", async () => {
+    const handler = await makeHandler();
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    // A full, otherwise-valid request (would succeed with 200 absent the
+    // cap) plus an oversized extra field, so the cap is what's under test —
+    // not a coincidental "missing required field" 400.
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: `grant_type=authorization_code&code=${encodeURIComponent(
+          code,
+        )}&redirect_uri=${encodeURIComponent(
+          REDIRECT,
+        )}&client_id=${encodeURIComponent(
+          CLIENT_ID,
+        )}&code_verifier=${encodeURIComponent(
+          verifier,
+        )}&padding=${"x".repeat(16 * 1024)}`,
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("invalid_request");
+  });
+});
+
+describe("createSolidOidc — logger/metrics on token-endpoint rejections", () => {
+  beforeEach(resetDb);
+
+  /** A logger + metrics spy pair, plus the config overrides to wire them in. */
+  function spyLogging(): {
+    logged: Array<["warn" | "error", string, unknown]>;
+    counted: Array<[string, unknown]>;
+    overrides: Partial<SolidOidcConfig>;
+  } {
+    const logged: Array<["warn" | "error", string, unknown]> = [];
+    const counted: Array<[string, unknown]> = [];
+    return {
+      logged,
+      counted,
+      overrides: {
+        logger: {
+          debug: () => {},
+          info: () => {},
+          warn: (event, fields) => logged.push(["warn", event, fields]),
+          error: (event, fields) => logged.push(["error", event, fields]),
+        },
+        metrics: {
+          count: (event, fields) => counted.push([event, fields]),
+          observe: () => {},
+        },
+      },
+    };
+  }
+
+  it("logs+counts a warn event when the DPoP proof is missing", async () => {
+    const { logged, counted, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.DpopRejected,
+      { reason: "missing" },
+    ]);
+    expect(counted).toContainEqual([
+      SolidOidcLogEvent.DpopRejected,
+      { reason: "missing" },
+    ]);
+  });
+
+  it("logs a warn event when the DPoP proof is invalid", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: "not-a-valid-proof",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(
+      logged.some(
+        ([level, event]) =>
+          level === "warn" && event === SolidOidcLogEvent.DpopRejected,
+      ),
+    ).toBe(true);
+  });
+
+  it("logs a warn event when the code is invalid/replayed", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "no-such-code",
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: "whatever-whatever-whatever-whatever-whatever12",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.InvalidGrant,
+      { reason: "code_invalid_used_or_expired" },
+    ]);
+  });
+
+  it("logs a warn event on client_id/redirect_uri mismatch", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: "https://not-the-registered-client.example/callback",
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.InvalidGrant,
+      { reason: "client_or_redirect_mismatch" },
+    ]);
+  });
+
+  it("logs a warn event on PKCE mismatch", async () => {
+    const { logged, overrides } = spyLogging();
+    const handler = await makeHandler(overrides);
+    const { challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const { proof } = await dpopProof("POST", `${ISSUER}/token`);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          DPoP: proof,
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: "wrong-verifier-wrong-verifier-wrong-verifier-xx",
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(logged).toContainEqual([
+      "warn",
+      SolidOidcLogEvent.PkceMismatch,
+      undefined,
+    ]);
+  });
+
+  it("stays silent (noop) when no logger/metrics is configured", async () => {
+    // No overrides — default config resolves to noopLogger/noopMetrics, so
+    // this must not throw even though every rejection path calls them.
+    const handler = await makeHandler();
+    const { verifier, challenge } = await pkce();
+    const code = await getCode(handler, challenge);
+    const res = await handler(
+      new Request(`${ISSUER}/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT,
+          client_id: CLIENT_ID,
+          code_verifier: verifier,
+        }),
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("createSolidOidc — performance (CodeStore memoization)", () => {
+  beforeEach(resetDb);
+
+  it("does not rebuild CodeStore's D1 schema check on every /authorize request", async () => {
+    let schemaCheckCalls = 0;
+
+    // Wrap the D1Database to track CREATE TABLE calls
+    const wrappedDb: typeof testEnv.AUTH_DB = {
+      prepare: (sql: string) => {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS solid_oidc_codes")) {
+          schemaCheckCalls += 1;
+        }
+        return testEnv.AUTH_DB.prepare(sql);
+      },
+      exec: testEnv.AUTH_DB.exec.bind(testEnv.AUTH_DB),
+      batch: testEnv.AUTH_DB.batch.bind(testEnv.AUTH_DB),
+      dump: testEnv.AUTH_DB.dump.bind(testEnv.AUTH_DB),
+      withSession: testEnv.AUTH_DB.withSession.bind(testEnv.AUTH_DB),
+    };
+
+    const handler = await makeHandler();
+    const { challenge } = await pkce();
+
+    // Create an authorize request helper
+    const makeAuthorizeRequest = () => {
+      const url = new URL(`${ISSUER}/authorize`);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("client_id", CLIENT_ID);
+      url.searchParams.set("redirect_uri", REDIRECT);
+      url.searchParams.set("scope", "openid webid");
+      url.searchParams.set("state", "xyz");
+      url.searchParams.set("nonce", "n-1");
+      url.searchParams.set("code_challenge", challenge);
+      url.searchParams.set("code_challenge_method", "S256");
+      return new Request(url.toString());
+    };
+
+    // Make multiple authorize requests
+    await handler(
+      makeAuthorizeRequest(),
+      { ...testEnv, AUTH_DB: wrappedDb },
+      ctx,
+    );
+    await handler(
+      makeAuthorizeRequest(),
+      { ...testEnv, AUTH_DB: wrappedDb },
+      ctx,
+    );
+
+    // Schema check should only happen once, not on every request
+    expect(schemaCheckCalls).toBe(1);
   });
 });

@@ -251,13 +251,9 @@ function publishedToEpoch(entry: Jf2Entry): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-/** A short, URL-safe channel uid: base36 timestamp plus random suffix. */
+/** Generate a channel uid using crypto.randomUUID. */
 function generateUid(): string {
-  const time = Date.now().toString(36);
-  const rand = Math.floor(Math.random() * 36 ** 5)
-    .toString(36)
-    .padStart(5, "0");
-  return `${time}${rand}`;
+  return crypto.randomUUID();
 }
 
 /**

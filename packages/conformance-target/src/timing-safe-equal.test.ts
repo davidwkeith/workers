@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { timingSafeEqual } from "./timing-safe-equal.js";
 
@@ -21,5 +21,12 @@ describe("timingSafeEqual", () => {
 
   it("is case-sensitive", () => {
     expect(timingSafeEqual("Secret", "secret")).toBe(false);
+  });
+
+  it("uses crypto.subtle.timingSafeEqual under the hood", () => {
+    const spy = vi.spyOn(crypto.subtle, "timingSafeEqual");
+    timingSafeEqual("same-length-a", "same-length-b");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

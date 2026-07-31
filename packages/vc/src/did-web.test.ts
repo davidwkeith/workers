@@ -152,6 +152,39 @@ describe("findVerificationMethod / createDidWebResolver", () => {
     });
     expect(await resolve("did:web:example.com#key-0")).toBeUndefined();
   });
+
+  it("does not return an entry whose type fields are the wrong shape", () => {
+    const didDocument = {
+      id: "did:web:example.com",
+      verificationMethod: [
+        {
+          id: "did:web:example.com#key-0",
+          type: 12345, // wrong shape: should be a string
+          controller: "did:web:example.com",
+          publicKeyJwk: { kty: "EC" },
+        },
+      ],
+    };
+    expect(
+      findVerificationMethod(didDocument, "did:web:example.com#key-0"),
+    ).toBeUndefined();
+  });
+
+  it("does not return an entry whose publicKeyJwk is an array instead of an object", () => {
+    const didDocument = {
+      id: "did:web:example.com",
+      verificationMethod: [
+        {
+          id: "did:web:example.com#key-0",
+          type: "JsonWebKey2020",
+          publicKeyJwk: ["not", "an", "object"],
+        },
+      ],
+    };
+    expect(
+      findVerificationMethod(didDocument, "did:web:example.com#key-0"),
+    ).toBeUndefined();
+  });
 });
 
 describe("createDidWebResolver fetchAllowedHosts (local-dev opt-in, issue #257)", () => {

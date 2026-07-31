@@ -26,6 +26,7 @@ import type { D1Database } from "@cloudflare/workers-types";
 import {
   installCryptoDigestStream,
   installHTMLRewriter,
+  installTimingSafeEqual,
   installWebSocketGlobals,
   type QueueBroker,
   type CronScheduler,
@@ -199,6 +200,7 @@ export function createServer(config: HostConfig): DwkServer {
   installRequestDuplex();
   installWebSocketGlobals();
   installCryptoDigestStream();
+  installTimingSafeEqual();
 
   // Central mode: replicas are supposed to coexist (the per-id lease, once
   // Durable Objects land in phase 3, is the single-writer mechanism there),

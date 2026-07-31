@@ -38,6 +38,25 @@ describe("WebSocket hibernation primitives", () => {
     expect(() => new WebSocketPair()[0].accept()).not.toThrow();
   });
 
+  it("deserializeAttachment() returns null before anything was ever attached", () => {
+    const server = new WebSocketPair()[1];
+    expect(server.deserializeAttachment()).toBeNull();
+  });
+
+  it("serializeAttachment()/deserializeAttachment() round-trip a value", () => {
+    const server = new WebSocketPair()[1];
+    server.serializeAttachment({ agent: "https://example.com/actor" });
+    expect(server.deserializeAttachment()).toEqual({
+      agent: "https://example.com/actor",
+    });
+
+    // A later call overwrites, matching workerd's "last write wins" semantics.
+    server.serializeAttachment({ agent: "https://example.com/other" });
+    expect(server.deserializeAttachment()).toEqual({
+      agent: "https://example.com/other",
+    });
+  });
+
   it("installs globals (idempotent) and a 101 Response carries the socket", () => {
     installWebSocketGlobals();
     installWebSocketGlobals(); // idempotent: second call returns early

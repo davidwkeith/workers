@@ -74,6 +74,41 @@ async function call(
   return handler(request, testEnv, ctx);
 }
 
+/**
+ * A request body stream with no declared length whose reads/cancellation are
+ * observable, so a test can assert a capped read aborts partway through
+ * instead of buffering the whole body — the gap the streaming rewrite closes
+ * for `#uploadBlob` / `#importRepo` (a missing or understated
+ * `Content-Length` must not let a client force full buffering).
+ */
+function trackedStream(
+  chunkBytes: number,
+  chunkCount: number,
+): {
+  stream: ReadableStream<Uint8Array>;
+  pulls: () => number;
+  cancelled: () => boolean;
+} {
+  let pulls = 0;
+  let cancelled = false;
+  let emitted = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (emitted >= chunkCount) {
+        controller.close();
+        return;
+      }
+      pulls++;
+      emitted++;
+      controller.enqueue(new Uint8Array(chunkBytes));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return { stream, pulls: () => pulls, cancelled: () => cancelled };
+}
+
 async function login(
   handler: ReturnType<typeof pds>,
   host: string,
@@ -137,6 +172,42 @@ describe("AT Protocol PDS", () => {
       },
     );
     expect(bad.status).toBe(401);
+  });
+
+  it("rejects an oversized createSession body with no Content-Length by aborting the stream, not buffering it first", async () => {
+    // createSession is the login endpoint — reachable with **no**
+    // authentication at all, unlike uploadBlob/importRepo which at least run
+    // #requireAuth first. It's the most severe instance of the "buffer
+    // first, check later" gap: any anonymous caller could otherwise force an
+    // unbounded buffer here.
+    const host = "streamed-bigsession.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxJsonBodyBytes: 10,
+    });
+    // 5 chunks of 10 bytes (50 total) against a 10-byte cap, no auth token,
+    // no Content-Length header.
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("content-type", "application/json");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.server.createSession`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "RequestTooLarge",
+    });
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
   });
 
   it("refuses record writes without a valid session", async () => {
@@ -369,6 +440,92 @@ describe("AT Protocol PDS", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: "BlobTooLarge",
     });
+  });
+
+  it("rejects an oversized blob with no Content-Length by aborting the stream, not buffering it first", async () => {
+    const host = "streamed-bigblob.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxBlobSizeBytes: 10,
+    });
+    const token = await login(handler, host);
+    // 5 chunks of 10 bytes (50 total) against a 10-byte cap, with no
+    // Content-Length header at all — the declared-length fast path cannot
+    // help here, so only an incremental capped read protects memory.
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/octet-stream");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.uploadBlob`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "BlobTooLarge",
+    });
+    // The gap: buffering the whole body via `request.arrayBuffer()` first
+    // would drain all 5 chunks before ever checking the size. A correct
+    // capped read must cancel the reader as soon as the running total
+    // exceeds the cap, well before the stream is fully drained.
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
+  });
+
+  it("reassembles a multi-chunk streamed blob upload byte-for-byte", async () => {
+    // Distinct, non-repeating chunk contents, across three separate
+    // `resize()` calls on `readRequestBodyCapped`'s resizable backing
+    // buffer, so an offset-tracking bug (writing a chunk at the wrong
+    // offset, or the length-tracking view ending up the wrong size after the
+    // final resize) would corrupt the reassembled bytes — or produce a
+    // wrong-length blob — rather than passing by coincidence.
+    const host = "multichunk-blob.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const chunk1 = new Uint8Array([1, 2, 3]);
+    const chunk2 = new Uint8Array([4, 5, 6, 7]);
+    const chunk3 = new Uint8Array([8]);
+    const expected = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let step = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const parts = [chunk1, chunk2, chunk3];
+        if (step >= parts.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(parts[step]!);
+        step++;
+      },
+    });
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/octet-stream");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.uploadBlob`,
+      { method: "POST", headers, body: stream as unknown as BodyInit },
+    );
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(200);
+    const uploaded = (await res.json()) as {
+      blob: { ref: { $link: string }; size: number };
+    };
+    expect(uploaded.blob.size).toBe(expected.length);
+    const fetched = await call(
+      handler,
+      host,
+      `/xrpc/com.atproto.sync.getBlob?cid=${uploaded.blob.ref.$link}`,
+    );
+    const fetchedBytes = new Uint8Array(await fetched.arrayBuffer());
+    expect(fetchedBytes).toEqual(expected);
   });
 
   it("resolves its own handle and describes the repo", async () => {
@@ -996,6 +1153,207 @@ describe("AT Protocol PDS", () => {
     const commit = decodeCbor(rootBlock.bytes) as unknown as SignedCommit;
     expect(commit.did).toBe(did);
     expect(commit.prev?.toString()).toBe(importedHead);
+  });
+
+  it("rejects an oversized migration CAR by declared Content-Length before buffering it", async () => {
+    const host = "bigcar.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxImportCarSizeBytes: 1024,
+    });
+    const token = await login(handler, host);
+    const oversizedCar = new Uint8Array(2048);
+    const res = await call(handler, host, "/xrpc/com.atproto.repo.importRepo", {
+      raw: oversizedCar,
+      contentType: "application/vnd.ipld.car",
+      token,
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "CarTooLarge",
+    });
+  });
+
+  it("rejects an oversized migration CAR with no Content-Length by aborting the stream, not buffering it first", async () => {
+    const host = "streamed-bigcar.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxImportCarSizeBytes: 10,
+    });
+    const token = await login(handler, host);
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/vnd.ipld.car");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.importRepo`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "CarTooLarge",
+    });
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
+  });
+});
+
+/**
+ * Front-door logging when the DO returns a 500. These stub `env.REPO` rather
+ * than routing to the real Durable Object, since the behaviour under test —
+ * `forwardToDo` reading the response the DO handed back — doesn't depend on
+ * why the DO failed, only on the response shape it failed with.
+ */
+describe("front-door unhandled-error logging", () => {
+  function fakeEnv(fetchImpl: (request: Request) => Promise<Response>) {
+    const stub = { fetch: fetchImpl };
+    return {
+      REPO: {
+        idFromName: () => "fake-id",
+        get: () => stub,
+      },
+      BLOBS: {},
+    } as unknown as AtprotoPdsEnv;
+  }
+
+  it("logs an aggregate event when the DO returns the generic InternalServerError envelope", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const counted: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+      metrics: {
+        count: (event, fields) => counted.push([event, fields]),
+        observe: () => {},
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: "InternalServerError",
+            message: "Internal server error",
+          }),
+          { status: 500, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const res = await handler(
+      new Request("https://logging.example/xrpc/com.atproto.repo.createRecord"),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    // The real caller still gets the full, unconsumed response body.
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "InternalServerError",
+      message: "Internal server error",
+    });
+    expect(logged).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      { path: "/xrpc/com.atproto.repo.createRecord" },
+    ]);
+    expect(counted).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      undefined,
+    ]);
+  });
+
+  it("logs when the DO 500s before it can even produce the XRPC envelope", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-bypass.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () => new Response("missing internal config", { status: 500 }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-bypass.example/xrpc/com.atproto.server.getSession",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("missing internal config");
+    expect(logged).toContainEqual([
+      "atproto_pds.xrpc.internal_error",
+      { path: "/xrpc/com.atproto.server.getSession" },
+    ]);
+  });
+
+  it("does not log a legitimate XRPC error that happens to carry a 500 status", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-legit.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () =>
+        new Response(JSON.stringify({ error: "SomeOtherError" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-legit.example/xrpc/com.atproto.repo.createRecord",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    expect(logged).toEqual([]);
+  });
+
+  it("does not log for a 2xx response", async () => {
+    const logged: Array<[string, unknown]> = [];
+    const handler = createAtprotoPds({
+      baseUrl: "https://logging-ok.example",
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: (event, fields) => logged.push([event, fields]),
+      },
+    });
+    const fakeAtprotoEnv = fakeEnv(
+      async () => new Response(JSON.stringify({}), { status: 200 }),
+    );
+    const res = await handler(
+      new Request(
+        "https://logging-ok.example/xrpc/com.atproto.server.getSession",
+      ),
+      fakeAtprotoEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(logged).toEqual([]);
   });
 });
 

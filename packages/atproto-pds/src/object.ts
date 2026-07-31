@@ -22,6 +22,7 @@ import {
   verifyJwt,
   type SessionClaims,
 } from "./auth.js";
+import { readJsonBodyCapped, readRequestBodyCapped } from "./body.js";
 import { writeCar, writeCarStream, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
@@ -649,10 +650,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (!cfg.password || !cfg.jwtSecret) {
       throw forbidden("This server does not accept sessions");
     }
-    const body = (await request.json()) as {
+    // Unauthenticated (this *is* the login endpoint) — unlike the other four
+    // JSON-body writes below, there's no #requireAuth call ahead of this to
+    // lean on, so the capped read is the only thing standing between an
+    // anonymous caller and an unbounded buffer here.
+    const body = await readJsonBodyCapped<{
       identifier?: string;
       password?: string;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     if (!body.password) throw invalidRequest("`password` is required");
     if (!(await constantTimeEqual(body.password, cfg.password))) {
       throw namedError(
@@ -743,7 +753,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     await this.#requireAuth(request, ACCESS_SCOPE);
     // The body is untrusted: a non-string `handle` must fail as a clean 400, not
     // throw a TypeError on `.toLowerCase()` (which would surface as a 500).
-    const body = (await request.json()) as { handle?: unknown };
+    const body = await readJsonBodyCapped<{ handle?: unknown }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const handle =
       typeof body.handle === "string" ? body.handle.toLowerCase() : undefined;
     if (!handle || !isValidHandle(handle)) {
@@ -826,11 +841,16 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #createRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
       record?: JsonValue;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const collection = body.collection;
     if (!collection || !isValidNsid(collection)) {
       throw invalidRequest("`collection` must be a valid NSID");
@@ -858,11 +878,16 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #putRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
       record?: JsonValue;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const collection = body.collection;
     const rkey = body.rkey;
     if (!collection || !isValidNsid(collection)) {
@@ -891,10 +916,15 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #deleteRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const { collection, rkey } = body;
     if (!collection || !rkey)
       throw invalidRequest("`collection` and `rkey` are required");
@@ -1046,16 +1076,22 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #uploadBlob(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    // Reject an oversized upload by its declared length *before* buffering it,
-    // so a hostile Content-Length cannot push the DO past its 128 MB ceiling.
-    const declared = Number(request.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > this.#cfg.maxBlobSizeBytes) {
-      throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");
-    }
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.length > this.#cfg.maxBlobSizeBytes) {
-      throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");
-    }
+    // Reject an oversized upload by its declared Content-Length up front when
+    // present; either way the body is read incrementally into a resizable
+    // buffer capped at maxBlobSizeBytes (see readRequestBodyCapped), with the
+    // reader cancelled the instant a chunk would grow it past that cap — so a
+    // missing or lying Content-Length can no longer grow the buffer past the
+    // configured cap, and memory used tracks the bytes actually received
+    // rather than the cap itself. (That cap still has to stay well under the
+    // DO's 128 MB ceiling for this to bound memory in practice for a body
+    // that actually reaches it — this only closes the "buffer first, check
+    // later" gap, it doesn't make an oversized cap safe.)
+    const bytes = await readRequestBodyCapped(
+      request,
+      this.#cfg.maxBlobSizeBytes,
+      "BlobTooLarge",
+      "Blob exceeds the size limit",
+    );
     const cid = await CID.create(RAW_CODEC, bytes);
     const mime =
       request.headers.get("content-type") ?? "application/octet-stream";
@@ -1193,11 +1229,31 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
    */
   async #importRepo(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
+    // Reject an oversized migration CAR *before* resolving the source signing
+    // key: a declared Content-Length over the cap is rejected up front, and
+    // either way the body is read incrementally into a resizable buffer
+    // capped at maxImportCarSizeBytes (see readRequestBodyCapped), with the
+    // reader cancelled the instant a chunk would grow it past that cap — so a
+    // missing or lying Content-Length can no longer grow the buffer past the
+    // configured cap, and memory used tracks the bytes actually received
+    // rather than the cap itself. Note `maxImportCarSizeBytes` defaults to
+    // 128 MiB — the same order of magnitude as the DO's 128 MB ceiling — so a
+    // fully honest import that actually reaches the default cap is still an
+    // OOM risk in its own right; this fix closes the "buffer first, check
+    // later" gap, it does not make an oversized default cap safe on its own.
+    // Reading the (capped) body first also means a hostile oversized request
+    // never triggers the DID-resolution fetch below for a request we're
+    // going to reject anyway (mirrors #uploadBlob).
+    const carBytes = await readRequestBodyCapped(
+      request,
+      this.#cfg.maxImportCarSizeBytes,
+      "CarTooLarge",
+      "Import CAR exceeds the size limit",
+    );
     const did = this.#accountDid();
     const verifyKey = await resolveSigningKey(did, {
       plcDirectoryUrl: this.#cfg.plcDirectoryUrl,
     });
-    const carBytes = new Uint8Array(await request.arrayBuffer());
     const imported = await importRepoFromCar(carBytes, { verifyKey });
     if (imported.did !== did) {
       throw invalidRequest(

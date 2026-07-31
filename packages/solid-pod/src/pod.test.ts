@@ -24,6 +24,8 @@ const harness = env as unknown as SolidPodEnv & {
 
 const BASE = "https://pod.test";
 const OWNER = "https://owner.example/profile#me";
+/** A non-owner WebID, granted read only where an ACL says so. */
+const FRIEND = "https://friend.example/profile#me";
 const TURTLE = "text/turtle";
 const OCTET = "application/octet-stream";
 
@@ -442,6 +444,132 @@ _:p a solid:InsertDeletePatch ;
       jti: crypto.randomUUID(),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("@dwk/solid-pod DO WebSocket notification WAC filtering", () => {
+  /**
+   * A non-public ACL over `/private/`: full control for the owner, and an
+   * explicit `acl:Read` grant for one named non-owner. The second block is what
+   * forces `#allowedToRead` through the real `authorize()`/WAC evaluation —
+   * the owner is short-circuited by `#decide`'s owner bypass before WAC runs,
+   * and the anonymous case is decided by default-deny, so without a granted
+   * non-owner neither of those paths would catch an `#allowedToRead` that
+   * denied every non-owner outright.
+   */
+  async function seedPrivateAcl(
+    stub: DurableObjectStub<SolidPodObject>,
+  ): Promise<void> {
+    const res = await run(stub, "PUT", "/private/.acl", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      headers: { "content-type": TURTLE },
+      body: `
+        @prefix acl: <http://www.w3.org/ns/auth/acl#>.
+        <#owner> a acl:Authorization;
+          acl:agent <${OWNER}>;
+          acl:accessTo <./>;
+          acl:default <./>;
+          acl:mode acl:Read, acl:Write, acl:Control.
+        <#friend> a acl:Authorization;
+          acl:agent <${FRIEND}>;
+          acl:accessTo <./>;
+          acl:default <./>;
+          acl:mode acl:Read.
+      `,
+    });
+    expect(res.status).toBe(201);
+  }
+
+  /** Open a hibernatable subscription and collect what the DO sends it. */
+  async function subscribe(
+    stub: DurableObjectStub<SolidPodObject>,
+    webid?: string,
+  ): Promise<string[]> {
+    // The upgrade goes through the stub rather than `runInDurableObject`: the
+    // client half of the pair is an I/O object that must belong to the test's
+    // context, not the Durable Object's, for the test to listen on it.
+    const upgrade = await stub.fetch(
+      buildReq("GET", "/", {
+        ...(webid !== undefined ? { webid } : {}),
+        headers: { upgrade: "websocket" },
+      }),
+    );
+    const client = upgrade.webSocket;
+    expect(upgrade.status).toBe(101);
+    expect(client).toBeDefined();
+    client!.accept();
+    const received: string[] = [];
+    client!.addEventListener("message", (event) => {
+      received.push(String((event as MessageEvent).data));
+    });
+    return received;
+  }
+
+  it("does not broadcast a change to a private resource to an unauthorized WebSocket subscriber", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    const received = await subscribe(stub);
+
+    // The owner writes a private resource — this triggers #broadcast.
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    // Give the DO's synchronous send a turn to reach the test's client socket.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(received).toHaveLength(0);
+  });
+
+  it("still broadcasts to a subscriber authorized to read the changed resource", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    const received = await subscribe(stub, OWNER);
+
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!)).toMatchObject({
+      type: "Create",
+      object: `${BASE}/private/secret`,
+    });
+  });
+
+  it("broadcasts to a WAC-granted non-owner but not to an ungranted one", async () => {
+    const stub = freshStub();
+    await seedPrivateAcl(stub);
+    // `friend` holds an explicit acl:Read grant; `stranger` is authenticated but
+    // appears in no ACL, so only the real WAC evaluation can tell them apart —
+    // the owner bypass never fires for either.
+    const friend = await subscribe(stub, FRIEND);
+    const stranger = await subscribe(stub, "https://stranger.example/#me");
+
+    const put = await run(stub, "PUT", "/private/secret", {
+      webid: OWNER,
+      jti: crypto.randomUUID(),
+      body: "top secret",
+      headers: { "content-type": OCTET },
+    });
+    expect(put.status).toBe(201);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(friend).toHaveLength(1);
+    expect(JSON.parse(friend[0]!)).toMatchObject({
+      type: "Create",
+      object: `${BASE}/private/secret`,
+    });
+    expect(stranger).toHaveLength(0);
   });
 });
 

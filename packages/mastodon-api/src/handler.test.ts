@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import * as authModule from "./auth.js";
 import { createMastodonApi } from "./index.js";
 import type { MastodonApiEnv } from "./index.js";
 import { api, testConfig, testCtx } from "./test-harness.js";
@@ -51,5 +52,27 @@ describe("createMastodonApi shell", () => {
     );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Record not found" });
+  });
+
+  it("returns a Mastodon-shaped 500 instead of throwing when a route handler throws", async () => {
+    // Simulate a D1 failure (or any other unexpected route-handler throw) via
+    // the auth seam every route calls, rather than inventing a raw D1 mock —
+    // mirrors the `verifyRegistration` spy used for @dwk/webauthn's analogous
+    // dispatch-wrapping fix.
+    const spy = vi
+      .spyOn(authModule, "authenticateBearer")
+      .mockRejectedValueOnce(new Error("D1 failure"));
+    try {
+      const res = await api()(
+        new Request(
+          "https://owner.example/api/v1/accounts/verify_credentials",
+          { headers: { authorization: "Bearer valid-test-token" } },
+        ),
+      );
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "Internal server error" });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

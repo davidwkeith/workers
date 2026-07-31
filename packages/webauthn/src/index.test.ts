@@ -7,6 +7,7 @@ import {
   type WebAuthnEnv,
 } from "./index.js";
 import { bytesToBase64url } from "./encoding.js";
+import * as verifyModule from "./verify.js";
 import {
   buildAttestationObject,
   buildAuthData,
@@ -309,5 +310,67 @@ describe("@dwk/webauthn handler", () => {
     };
     rp("guarded-quiet", { authorize: () => true, logger });
     expect(warnings).not.toContain("webauthn.config.registration_unguarded");
+  });
+
+  it("returns a structured 400 instead of throwing when the DO's ceremony verification throws unexpectedly", async () => {
+    const { rpId, origin, handler } = rp("do-throws");
+    const credential = await createTestCredential();
+
+    const optionsResponse = await post(handler, origin, "/register/options", {
+      user: { id: "dXNlci0x", name: "alice", displayName: "Alice" },
+    });
+    const options = (await optionsResponse.json()) as { challenge: string };
+    const clientDataJSON = buildClientDataJSON({
+      type: "webauthn.create",
+      challenge: options.challenge,
+      origin,
+    });
+    const authData = await buildAuthData({ rpId, signCount: 0, credential });
+
+    // Simulate a parse/verification failure that escapes the normal `reject(...)`
+    // paths inside the DO (e.g. a bug in a future code path, or a CBOR/COSE
+    // structure that isn't yet translated to a `VerifyFailureReason`).
+    const verifySpy = vi
+      .spyOn(verifyModule, "verifyRegistration")
+      .mockRejectedValueOnce(new Error("unexpected internal failure"));
+    try {
+      const verifyResponse = await post(handler, origin, "/register/verify", {
+        id: credential.credentialIdB64,
+        rawId: credential.credentialIdB64,
+        type: "public-key",
+        response: {
+          clientDataJSON: bytesToBase64url(clientDataJSON),
+          attestationObject: bytesToBase64url(buildAttestationObject(authData)),
+        },
+      });
+      expect(verifyResponse.status).not.toBe(500);
+      const body = await verifyResponse.json();
+      expect(body).toHaveProperty("error", "internal_error");
+    } finally {
+      verifySpy.mockRestore();
+    }
+  });
+
+  it("returns a structured 500 instead of throwing when the front door's DO invocation fails", async () => {
+    const { origin, handler } = rp("do-invocation-fails");
+    const failingEnv: WebAuthnEnv = {
+      WEBAUTHN: {
+        idFromName: () => "failing-id" as unknown as DurableObjectId,
+        get: () =>
+          ({
+            fetch: () => {
+              throw new Error("DO invocation failed");
+            },
+          }) as unknown as DurableObjectStub,
+      } as unknown as WebAuthnEnv["WEBAUTHN"],
+    };
+    const request = new Request(`${origin}/register/options`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    const response = await handler(request, failingEnv, {} as ExecutionContext);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "internal_error" });
   });
 });

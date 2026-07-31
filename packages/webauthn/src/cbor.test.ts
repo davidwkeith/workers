@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeFirst, CborError } from "./cbor.js";
+import { decodeFirst, CborError, type CborValue } from "./cbor.js";
 import { encodeCbor } from "./test-harness.js";
 
 describe("@dwk/webauthn cbor decoder", () => {
@@ -71,5 +71,47 @@ describe("@dwk/webauthn cbor decoder", () => {
     expect(() => decodeFirst(new Uint8Array([0x1b, 0x00]))).toThrow(CborError);
     // Truncated argument inside a byte-string length prefix, too.
     expect(() => decodeFirst(new Uint8Array([0x59, 0x01]))).toThrow(CborError);
+  });
+
+  it("throws CborError on CBOR nested past the depth limit", () => {
+    // Build 40 nested single-element arrays: [[[[...]]]] — each level is a
+    // major-type-4 array header `0x81` (array, length 1) followed by its child.
+    const DEPTH = 40;
+    const bytes = new Uint8Array(DEPTH + 1);
+    bytes.fill(0x81, 0, DEPTH); // 40 "array of length 1" headers
+    bytes[DEPTH] = 0x00; // innermost item: unsigned integer 0
+    expect(() => decodeFirst(bytes)).toThrow(CborError);
+  });
+
+  /**
+   * Build `headers` nested single-element arrays followed by an innermost
+   * unsigned-integer-0 item: `headers` bytes of `0x81` (array, length 1),
+   * then a trailing `0x00`.
+   */
+  function nestedArrays(headers: number): Uint8Array {
+    const bytes = new Uint8Array(headers + 1);
+    bytes.fill(0x81, 0, headers);
+    bytes[headers] = 0x00;
+    return bytes;
+  }
+
+  it("accepts exactly the documented maximum nesting depth (32 levels)", () => {
+    // 31 array headers wrapping one scalar = 32 total decoded items (the
+    // level count the `MAX_DEPTH = 32` doc comment promises) — must decode
+    // cleanly, not throw.
+    const { value } = decodeFirst(nestedArrays(31));
+    let cursor: CborValue = value;
+    for (let i = 0; i < 31; i++) {
+      expect(Array.isArray(cursor)).toBe(true);
+      cursor = (cursor as CborValue[])[0]!;
+    }
+    expect(cursor).toBe(0);
+  });
+
+  it("rejects one level past the documented maximum (off-by-one boundary)", () => {
+    // 32 array headers wrapping one scalar = 33 total decoded items — one
+    // past the documented 32-level maximum, so this must throw. (Before the
+    // off-by-one fix, `depth > MAX_DEPTH` accepted this case too.)
+    expect(() => decodeFirst(nestedArrays(32))).toThrow(CborError);
   });
 });

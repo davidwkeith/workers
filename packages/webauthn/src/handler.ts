@@ -154,9 +154,22 @@ export function createWebAuthn(config: WebAuthnConfig): WebAuthnHandler {
 
     // One Durable Object per relying party, keyed by the rpId (no sharding).
     const id = env.WEBAUTHN.idFromName(resolved.rpId);
-    const response = await env.WEBAUTHN.get(id).fetch(
-      internalRequest(request, resolved, op),
-    );
+    let response: Response;
+    try {
+      response = await env.WEBAUTHN.get(id).fetch(
+        internalRequest(request, resolved, op),
+      );
+    } catch (error) {
+      console.error("@dwk/webauthn: DO invocation failed", error);
+      const rejectedEvent = op.startsWith("register/")
+        ? WebAuthnLogEvent.RegisterRejected
+        : WebAuthnLogEvent.AuthenticateRejected;
+      emit(resolved, "warn", rejectedEvent, { reason: "internal_error" });
+      return new Response(JSON.stringify({ error: "internal_error" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
+    }
     return logOutcome(resolved, response);
   };
 }

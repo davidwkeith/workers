@@ -14,7 +14,9 @@
  * (`node:sqlite`, `node:fs`, `node:crypto`, `node:stream`) plus
  * `@worker-tools/html-rewriter`, never a host framework (no Express) — so any
  * Node host (a bare `node:http` server, a test harness, `@dwk/server`) can
- * compose it unchanged.
+ * compose it unchanged. Also included: `crypto.subtle.timingSafeEqual`, a
+ * real but Cloudflare-Workers-proprietary `SubtleCrypto` extension several
+ * endpoint packages rely on for constant-time comparisons.
  *
  * Extracted from `@dwk/server`'s internal `./shims` (see
  * [self-hosting.md §16](../../../spec/self-hosting.md#16-resolved-decisions)
@@ -57,6 +59,8 @@ export {
 export { installHTMLRewriter } from "./html-rewriter.js";
 
 export { installCryptoDigestStream } from "./crypto-digest-stream.js";
+
+export { installTimingSafeEqual } from "./timing-safe-equal.js";
 
 export {
   installWebSocketGlobals,

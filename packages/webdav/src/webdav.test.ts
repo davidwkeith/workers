@@ -1395,4 +1395,21 @@ describe("createWebdav — RFC 4918 conformance (§9/§10)", () => {
       expect(res.status).toBe(502);
     });
   });
+
+  // An exception the backend throws that isn't PreconditionFailed/
+  // ResourceConflict (mapWriteError's rethrow target) must still answer as a
+  // well-formed DAV response, not escape the composing Worker as a bare crash.
+  it("returns a well-formed 500 instead of throwing when the backend throws unexpectedly", async () => {
+    await withHandler(async ({ call, backend }) => {
+      backend.stat = () => {
+        throw new Error("unexpected backend failure");
+      };
+      const res = await call("PROPFIND", "/file.txt", {
+        headers: { depth: "0" },
+      });
+      expect(res.status).toBe(500);
+      expect(res.headers.get("DAV")).toBe("1, 2");
+      expect(await res.text()).not.toBe("");
+    });
+  });
 });

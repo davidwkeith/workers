@@ -13,6 +13,14 @@
       "@cloudflare/workers-types",
       "@cloudflare/vitest-pool-workers/types"
     ],
+    // The shared tsconfig.base.json pins `lib` to ES2022, which predates
+    // resizable ArrayBuffer (`maxByteLength` / `.resize()`), used by
+    // `readRequestBodyCapped` (src/body.ts) to bound a capped body read to
+    // the actual bytes received instead of pre-allocating the full cap.
+    // TypeScript's `lib` array override replaces rather than merges with the
+    // parent config, so the full array is repeated here — this is scoped to
+    // this package only; other packages don't need it.
+    "lib": ["ES2022", "ES2024.ArrayBuffer"],
     "noEmit": true
   },
   "include": ["src"]

@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import { ensureGcSchema } from "@dwk/store";
 
@@ -354,6 +354,45 @@ describe("conflict detection", () => {
         expect(check.status).toBe(404);
       },
     );
+  });
+});
+
+describe("unexpected storage errors", () => {
+  it("logs an unexpected storage error before rethrowing it", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ns = (testEnv as unknown as { STORAGE: DurableObjectNamespace })
+      .STORAGE;
+    const stub = ns.get(ns.idFromName(crypto.randomUUID()));
+    const origin = "https://storage.example";
+    // A request body that throws mid-read is a genuine unrecognized failure
+    // inside `#writeBody` (via `readUpToLimit`) — not a `PreconditionFailedError`
+    // or `LengthRequiredError`, so it exercises the catch-all's rethrow path.
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error("unexpected body read failure");
+      },
+    });
+
+    await runInDurableObject(
+      stub,
+      async (instance: { fetch(request: Request): Promise<Response> }) => {
+        await expect(
+          instance.fetch(
+            new Request(`${origin}/documents/x`, {
+              method: "PUT",
+              body,
+              headers: { "content-type": "text/plain" },
+              duplex: "half",
+            } as RequestInit),
+          ),
+        ).rejects.toThrow("unexpected body read failure");
+      },
+    );
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("remotestorage.storage.error"),
+    );
+    logSpy.mockRestore();
   });
 });
 

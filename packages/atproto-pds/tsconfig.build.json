@@ -3,7 +3,11 @@
   "compilerOptions": {
     "rootDir": "src",
     "types": ["@cloudflare/workers-types"],
-    "outDir": "dist"
+    "outDir": "dist",
+    // See tsconfig.json: resizable ArrayBuffer (src/body.ts) needs a lib
+    // newer than the shared ES2022 baseline. `lib` replaces rather than
+    // merges, so repeat the full array here too.
+    "lib": ["ES2022", "ES2024.ArrayBuffer"]
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/test-harness.ts"]

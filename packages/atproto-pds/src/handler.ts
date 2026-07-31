@@ -53,8 +53,26 @@ function repoStub(config: ResolvedConfig, env: AtprotoPdsEnv) {
   return env.REPO.get(id);
 }
 
+/**
+ * Whether a response body is genuinely an unhandled-error signal from the DO
+ * — `errorResponse`'s generic `InternalServerError` envelope, or a non-JSON
+ * body (the DO's pre-config-parse "missing internal config" bypass) — as
+ * opposed to a legitimate XRPC error that happens to carry a 500 status (none
+ * exist in this package today, but this keeps the signal precise if one ever
+ * does). Takes a `response.clone()` so reading the body here never consumes
+ * it for the real caller.
+ */
+async function isUnhandledErrorBody(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return body.error === "InternalServerError";
+  } catch {
+    return true;
+  }
+}
+
 /** Forward a request to the DO, attaching the internal config header. */
-function forwardToDo(
+async function forwardToDo(
   config: ResolvedConfig,
   env: AtprotoPdsEnv,
   request: Request,
@@ -70,7 +88,23 @@ function forwardToDo(
         : request.body,
     ...(request.body ? { duplex: "half" } : {}),
   } as RequestInit);
-  return repoStub(config, env).fetch(forwarded);
+  const response = await repoStub(config, env).fetch(forwarded);
+  // The DO cannot hold the injected logger/metrics across the fetch()
+  // boundary (see xrpc.ts's errorResponse) — this is where the real seams are
+  // still in scope, so an aggregate signal is recorded here instead. The
+  // response body only ever carries the generic "Internal server error"
+  // message (see errorResponse), so there is no real detail to forward — the
+  // path is the only useful dimension available at this layer.
+  if (
+    response.status === 500 &&
+    (await isUnhandledErrorBody(response.clone()))
+  ) {
+    config.logger.error("atproto_pds.xrpc.internal_error", {
+      path: new URL(request.url).pathname,
+    });
+    config.metrics.count("atproto_pds.xrpc.internal_error");
+  }
+  return response;
 }
 
 /**

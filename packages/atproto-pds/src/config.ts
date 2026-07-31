@@ -97,6 +97,20 @@ export interface AtprotoPdsConfig {
   readonly refreshTokenTtlSeconds?: number;
   /** Maximum accepted blob size in bytes. Defaults to 5 MiB. */
   readonly maxBlobSizeBytes?: number;
+  /** Maximum accepted migration-CAR size in bytes. Defaults to 128 MiB. */
+  readonly maxImportCarSizeBytes?: number;
+  /**
+   * Maximum accepted size in bytes for a JSON control-payload body —
+   * `createSession` credentials, `updateHandle`, and `createRecord` /
+   * `putRecord` / `deleteRecord` (which carry a caller-supplied AT Protocol
+   * `record`). Defaults to 2 MiB: generous for a lexicon record (which itself
+   * only ever references blob bytes by CID, never embeds them), but far below
+   * {@link maxBlobSizeBytes} / {@link maxImportCarSizeBytes}, since these are
+   * small structured-data endpoints, not bulk-transfer ones — and
+   * `createSession` in particular is unauthenticated, so its cap can't lean on
+   * `#requireAuth` running first the way the other four do.
+   */
+  readonly maxJsonBodyBytes?: number;
   /**
    * Maximum size in bytes of a `#commit` event's blocks CAR before the firehose
    * marks it `tooBig` (sending an empty CAR and no ops, so a consumer falls back
@@ -135,6 +149,8 @@ export interface ResolvedConfig {
   readonly accessTokenTtlSeconds: number;
   readonly refreshTokenTtlSeconds: number;
   readonly maxBlobSizeBytes: number;
+  readonly maxImportCarSizeBytes: number;
+  readonly maxJsonBodyBytes: number;
   readonly firehoseMaxBlocksBytes: number;
   readonly now: () => number;
   readonly logger: Logger;
@@ -161,12 +177,16 @@ export interface ForwardedConfig {
   readonly accessTokenTtlSeconds: number;
   readonly refreshTokenTtlSeconds: number;
   readonly maxBlobSizeBytes: number;
+  readonly maxImportCarSizeBytes: number;
+  readonly maxJsonBodyBytes: number;
   readonly firehoseMaxBlocksBytes: number;
 }
 
 const DEFAULT_ACCESS_TTL = 7200;
 const DEFAULT_REFRESH_TTL = 90 * 24 * 60 * 60;
 const DEFAULT_MAX_BLOB = 5 * 1024 * 1024;
+const DEFAULT_MAX_IMPORT_CAR = 128 * 1024 * 1024;
+const DEFAULT_MAX_JSON_BODY = 2 * 1024 * 1024;
 const DEFAULT_FIREHOSE_MAX_BLOCKS = 1024 * 1024;
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -218,6 +238,9 @@ export function resolveConfig(config: AtprotoPdsConfig): ResolvedConfig {
     refreshTokenTtlSeconds:
       config.refreshTokenTtlSeconds ?? DEFAULT_REFRESH_TTL,
     maxBlobSizeBytes: config.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB,
+    maxImportCarSizeBytes:
+      config.maxImportCarSizeBytes ?? DEFAULT_MAX_IMPORT_CAR,
+    maxJsonBodyBytes: config.maxJsonBodyBytes ?? DEFAULT_MAX_JSON_BODY,
     firehoseMaxBlocksBytes:
       config.firehoseMaxBlocksBytes ?? DEFAULT_FIREHOSE_MAX_BLOCKS,
     now: config.now ?? (() => Date.now()),
@@ -242,6 +265,8 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     accessTokenTtlSeconds: config.accessTokenTtlSeconds,
     refreshTokenTtlSeconds: config.refreshTokenTtlSeconds,
     maxBlobSizeBytes: config.maxBlobSizeBytes,
+    maxImportCarSizeBytes: config.maxImportCarSizeBytes,
+    maxJsonBodyBytes: config.maxJsonBodyBytes,
     firehoseMaxBlocksBytes: config.firehoseMaxBlocksBytes,
   };
 }
