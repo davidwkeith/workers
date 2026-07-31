@@ -295,6 +295,35 @@ export function remoteAccountEntity(
   };
 }
 
+/**
+ * A Mastodon `Relationship` entity (#473), returned by the
+ * `follow_requests` authorize/reject write routes. Every boolean beyond
+ * `followed_by` is a fixed, honest default: this deployment tracks none of
+ * muting/blocking/endorsement state per remote actor beyond what's already
+ * modeled elsewhere (blocklist, bans), and a stale `true` here would mislead
+ * a client more than an honest `false`.
+ */
+export function relationshipEntity(
+  actorIri: string,
+  opts: { readonly followedBy: boolean },
+): Record<string, unknown> {
+  return {
+    id: encodeRemoteAccountId(actorIri),
+    following: false,
+    showing_reblogs: true,
+    notifying: false,
+    followed_by: opts.followedBy,
+    blocking: false,
+    blocked_by: false,
+    muting: false,
+    muting_notifications: false,
+    requested: false,
+    domain_blocking: false,
+    endorsed: false,
+    note: "",
+  };
+}
+
 interface RawAttachment {
   readonly type?: string;
   readonly url?: string;

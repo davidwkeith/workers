@@ -138,6 +138,15 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
 - **`?skipDelivery=1`** keeps its literal meaning on these activities: the local
   state change still applies, only the federated notification is suppressed — a
   silent removal.
+- **Owner Accept / Group moderation (#473).** `Accept` (confirm a pending
+  follower) and `Remove` (ban a member / un-announce a post, `Group` actors
+  only) published to `POST <actor>/outbox` are routed the same way as
+  `Reject`/`Block`: `Accept` delivers privately to the one follower it names
+  and marks the `followers` row confirmed; `Remove` reuses exactly the same
+  moderator-`Remove` effects as the inbound path (`#onModerationRemove`) but
+  is authorized by the bearer `publishToken` alone — the owner is implicitly
+  the top moderator of their own actor, independent of the configured
+  `moderators` allowlist.
 - **`GET <actor>/blocked`** returns the blocklist (`{ items, total }`, flat JSON
   rather than an AS2 collection, unpaged) behind the same bearer token. It is
   never public: a block that can be created but never reviewed could not be

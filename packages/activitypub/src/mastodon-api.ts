@@ -301,6 +301,52 @@ export function buildMastodonBackend(options: {
       const row = (await response.json()) as ClientEntryRow;
       return toBackendEntry(row);
     },
+
+    async followRequests() {
+      const response = await stub().fetch(
+        new Request(`${config.iris.id}/__client/follow_requests`, {
+          headers: internalHeaders(),
+        }),
+      );
+      if (!response.ok) return [];
+      const body = (await response.json()) as {
+        items: { actor: string; added_at: number }[];
+      };
+      return body.items.map((row) => ({
+        actor: row.actor,
+        addedAt: row.added_at,
+      }));
+    },
+
+    async respondToFollowRequest(
+      actor: string,
+      action: "authorize" | "reject",
+    ): Promise<void> {
+      // POSTs directly to the DO's #publish route (config.iris.outbox),
+      // internal fetch — the same "trusted-caller-sets-the-internal-header-
+      // directly" pattern mcp-tools.ts's activitypub_publish already uses for
+      // /publish. "reject" lands on the existing #447 Reject branch verbatim
+      // (zero new DO logic); "authorize" lands on the new (#473) Accept
+      // branch. One DO code path, two front doors.
+      const headers = internalHeaders();
+      headers.set(INTERNAL_HEADERS.publish, "1");
+      headers.set("content-type", "application/json");
+      const response = await stub().fetch(
+        new Request(config.iris.outbox, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            type: action === "authorize" ? "Accept" : "Reject",
+            object: actor,
+          }),
+        }),
+      );
+      if (!response.ok) {
+        throw new Error(
+          `respondToFollowRequest failed (${response.status}): ${await response.text()}`,
+        );
+      }
+    },
   };
 }
 

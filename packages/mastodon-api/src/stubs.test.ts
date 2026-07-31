@@ -53,7 +53,6 @@ describe("stub roster", () => {
         "/api/v1/lists",
         "/api/v1/custom_emojis",
         "/api/v1/announcements",
-        "/api/v1/follow_requests",
         "/api/v1/conversations",
         "/api/v1/favourites",
         "/api/v1/bookmarks",

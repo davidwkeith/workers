@@ -14,6 +14,10 @@ import {
 import { handleCreateApp, handleVerifyAppCredentials } from "./apps.js";
 import type { MastodonApiConfig, MastodonApiEnv } from "./config.js";
 import { mastodonError, recordNotFound } from "./errors.js";
+import {
+  handleFollowRequestRespond,
+  handleFollowRequests,
+} from "./follow-requests.js";
 import { handleInstanceV1, handleInstanceV2 } from "./instance.js";
 import { handleGetMarkers, handleSaveMarkers } from "./markers.js";
 import { handleNotifications } from "./notifications.js";
@@ -46,6 +50,7 @@ const ROUTES: ReadonlyMap<string, RouteHandler> = new Map<string, RouteHandler>(
     ["GET /api/v1/timelines/home", handleHomeTimeline],
     ["POST /api/v1/statuses", handleCreateStatus],
     ["GET /api/v1/notifications", handleNotifications],
+    ["GET /api/v1/follow_requests", handleFollowRequests],
     ["GET /oauth/authorize", handleAuthorize],
     ["POST /oauth/token", handleToken],
     ["POST /oauth/revoke", handleRevoke],
@@ -76,6 +81,16 @@ const DYNAMIC_ROUTES: readonly [string, RegExp, DynamicRouteHandler][] = [
     "GET",
     /^\/api\/v1\/accounts\/([^/]+)\/(?:followers|following|featured_tags)$/,
     (ctx, id) => handleAccountCompanionStub(ctx, id),
+  ],
+  [
+    "POST",
+    /^\/api\/v1\/follow_requests\/([^/]+)\/authorize$/,
+    (ctx, id) => handleFollowRequestRespond(ctx, id, "authorize"),
+  ],
+  [
+    "POST",
+    /^\/api\/v1\/follow_requests\/([^/]+)\/reject$/,
+    (ctx, id) => handleFollowRequestRespond(ctx, id, "reject"),
   ],
 ];
 

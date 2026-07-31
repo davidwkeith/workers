@@ -47,7 +47,10 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   to the publicly-served outbox. A `Block` also persists to the `blocked` table,
   and every inbound activity from a blocked actor is refused `403` — distinct
   from `banned`, which is a `Group` moderator's decision and is not reversible
-  through this path.
+  through this path. Owner `Accept` (confirm a pending follower) and
+  `Group`-moderation `Remove` (ban a member / un-announce a post) follow the
+  identical `POST <actor>/outbox` pattern (#473) — see `object.ts`
+  `#routeFollowerControl`'s `Accept` branch and `#applyModerationRemove`.
 - **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
   community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
   the Group actor itself rather than one of its owned events, is the same

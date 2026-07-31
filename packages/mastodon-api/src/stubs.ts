@@ -38,7 +38,6 @@ export const STUB_ROUTES: readonly StubRoute[] = [
   { path: "/api/v1/lists", auth: true, body: [] },
   { path: "/api/v1/custom_emojis", auth: false, body: [] },
   { path: "/api/v1/announcements", auth: true, body: [] },
-  { path: "/api/v1/follow_requests", auth: true, body: [] },
   { path: "/api/v1/conversations", auth: true, body: [] },
   { path: "/api/v1/favourites", auth: true, body: [] },
   { path: "/api/v1/bookmarks", auth: true, body: [] },

@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -844,6 +844,26 @@ describe("publish endpoint", () => {
       expect(activity.type).toBe("Announce");
       // The server mints the activity id under our outbox IRI space.
       expect(String(activity.id).startsWith(iris.outbox)).toBe(true);
+    });
+  });
+
+  it("passes Accept through as a real activity, not wrapped in a Create", async () => {
+    // `Remove` was covered here too until #473 gave it real Group-moderation
+    // semantics in #publish (a Person-actor Remove now 400s instead of
+    // passing through raw) — see "owner Remove: Group moderation (#473)"
+    // for its current, superseding coverage.
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const acceptRes = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      const accept = (await acceptRes.json()) as Record<string, unknown>;
+      expect(accept.type).toBe("Accept");
+      expect(accept.actor).toBe(iris.id);
     });
   });
 
@@ -1755,6 +1775,66 @@ function seedFollower(
   );
 }
 
+/**
+ * The queued follow-confirmation pending-accepts (`pending_accept`
+ * `kind = 'follow'`), newest last. Owner `Accept` (#473) routes through this
+ * same queue #onFollow's own auto-accept uses — see `#routeFollowerControl`'s
+ * `Accept` branch — so confirming a manually-approved follower does not skip
+ * inbox resolution (`resolvePendingFollowAccept` below drives it).
+ */
+function pendingFollowAccepts(state: DurableObjectState): {
+  actor: string;
+  activity: Record<string, unknown>;
+}[] {
+  return state.storage.sql
+    .exec<{
+      actor: string;
+      json: string;
+    }>(
+      `SELECT actor, json FROM pending_accept WHERE kind = 'follow' ORDER BY seq`,
+    )
+    .toArray()
+    .map((row) => ({
+      actor: row.actor,
+      activity: JSON.parse(row.json) as Record<string, unknown>,
+    }));
+}
+
+/**
+ * Drive the alarm-equivalent resolution of a queued `kind = 'follow'`
+ * pending-accept for `actor`: stub the actor-document fetch and hit
+ * `POST <actor>/__resolve` (mirrors {@link followWith}'s auto-accept
+ * counterpart), so the confirmed follower's inbox is resolved and persisted
+ * to `followers.inbox`, and the queued `Accept` is handed to the ordinary
+ * delivery queue.
+ */
+async function resolvePendingFollowAccept(
+  instance: { fetch: (request: Request) => Promise<Response> },
+  username: string,
+  actor: string,
+  inbox = `${actor}/inbox`,
+): Promise<void> {
+  const iris = deriveIris(BASE, username);
+  await withFetch(
+    async (url) => {
+      const href = typeof url === "string" ? url : url.toString();
+      if (href === actor) {
+        return new Response(JSON.stringify({ id: actor, inbox }), {
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 202 });
+    },
+    async () => {
+      await instance.fetch(
+        new Request(`${iris.id}/__resolve`, {
+          headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+        }),
+      );
+    },
+  );
+}
+
 describe("owner follower control (#447)", () => {
   it("records the inbound Follow's id so a later Reject can name it", async () => {
     const { username, stub } = freshUser();
@@ -1779,6 +1859,83 @@ describe("owner follower control (#447)", () => {
         }>(`SELECT follow_id FROM followers WHERE actor = ?`, REMOTE)
         .one();
       expect(row.follow_id).toBe(followId);
+    });
+  });
+
+  it("sets accepted_at immediately on auto-accept, leaves it NULL under manual approval, and never un-sets it on a re-Follow", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Auto-accept (default config): accepted_at is set immediately.
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${REMOTE}/activities/follow-auto`,
+            type: "Follow",
+            actor: REMOTE,
+            object: deriveIris(BASE, username).id,
+          },
+          REMOTE,
+        ),
+      );
+      const auto = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(auto.accepted_at).not.toBeNull();
+
+      // Manual approval, a different follower: accepted_at stays NULL.
+      const PENDING = "https://remote.example/users/pending";
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${PENDING}/activities/follow-1`,
+            type: "Follow",
+            actor: PENDING,
+            object: deriveIris(BASE, username).id,
+          },
+          PENDING,
+          { manuallyApprovesFollowers: true },
+        ),
+      );
+      const pending = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          PENDING,
+        )
+        .one();
+      expect(pending.accepted_at).toBeNull();
+
+      // Manually mark it accepted (simulating Task 4's Accept branch, not yet
+      // implemented), then re-Follow: accepted_at must not be reset to NULL.
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = ? WHERE actor = ?`,
+        9999,
+        PENDING,
+      );
+      await instance.fetch(
+        signedInboxRequest(
+          username,
+          {
+            id: `${PENDING}/activities/follow-2`,
+            type: "Follow",
+            actor: PENDING,
+            object: deriveIris(BASE, username).id,
+          },
+          PENDING,
+          { manuallyApprovesFollowers: true },
+        ),
+      );
+      const reFollowed = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          PENDING,
+        )
+        .one();
+      expect(reFollowed.accepted_at).toBe(9999);
     });
   });
 
@@ -2138,6 +2295,305 @@ describe("owner follower control (#447)", () => {
         new Request(`${iris.id}/blocked`, { method: "DELETE", headers: owner }),
       );
       expect(written.status).toBe(404);
+    });
+  });
+
+  it("Accept: confirms a pending follower and, once the alarm resolves the follower's inbox, delivers Accept(Follow) to them alone and persists the inbox, setting accepted_at", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // A manually-approved follower: recorded, but with no resolved inbox
+      // yet and accepted_at still NULL — exactly the state #onFollow leaves
+      // under manuallyApprovesFollowers (only the auto-accept path resolves
+      // the inbox inline).
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = NULL, inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      // A second follower must not see the Accept.
+      seedFollower(state, "https://other.example/users/carol", null);
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).not.toBeNull();
+
+      // Routed through the same `kind = 'follow'` pending-accept queue
+      // #onFollow's own auto-accept uses — not immediately in the delivery
+      // table — so the alarm resolves the follower's inbox before the
+      // Accept goes out (this is the #473 final-review fix: Accept used to
+      // go straight to a targeted 'deliver' row and never persist the
+      // resolved inbox onto `followers.inbox`, so all later fan-out to this
+      // follower silently skipped them forever).
+      expect(counts(state, "delivery")).toBe(0);
+      const pending = pendingFollowAccepts(state);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.actor).toBe(REMOTE);
+      expect(pending[0]?.activity.type).toBe("Accept");
+      expect(pending[0]?.activity.actor).toBe(iris.id);
+      expect(pending[0]?.activity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+
+      // Drive the alarm-equivalent resolution.
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+
+      expect(counts(state, "pending_accept")).toBe(0);
+      const resolvedFollower = state.storage.sql
+        .exec<{ inbox: string | null }>(
+          `SELECT inbox FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      // The resolved inbox is persisted, so every future `WHERE inbox IS
+      // NOT NULL` fan-out query reaches this follower.
+      expect(resolvedFollower.inbox).toBe(`${REMOTE}/inbox`);
+
+      const delivered = state.storage.sql
+        .exec<{ inbox: string; json: string }>(
+          `SELECT inbox, json FROM delivery`,
+        )
+        .toArray();
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.inbox).toBe(`${REMOTE}/inbox`);
+      const deliveredActivity = JSON.parse(delivered[0]!.json) as Record<
+        string,
+        unknown
+      >;
+      expect(deliveredActivity.type).toBe("Accept");
+      expect(deliveredActivity.actor).toBe(iris.id);
+      expect(deliveredActivity.object).toEqual({
+        id: `${REMOTE}/activities/follow-1`,
+        type: "Follow",
+        actor: REMOTE,
+        object: iris.id,
+      });
+
+      // Never lands in the publicly served outbox.
+      expect(counts(state, "outbox")).toBe(0);
+    });
+  });
+
+  it("Accept: accepts the actor-IRI shorthand, the stored Follow id, and an embedded Follow object, same as Reject", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      // Shape 1: the follower's bare actor IRI.
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const byActor = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(byActor.status).toBe(202);
+      expect(
+        ((await byActor.json()) as { object: Record<string, unknown> }).object
+          .actor,
+      ).toBe(REMOTE);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
+
+      // Shape 2: the stored Follow's own id.
+      state.storage.sql.exec(`DELETE FROM followers WHERE actor = ?`, REMOTE);
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const byFollowId = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Accept",
+            object: `${REMOTE}/activities/follow-1`,
+          }),
+          true,
+        ),
+      );
+      expect(byFollowId.status).toBe(202);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
+
+      // Shape 3: an embedded Follow object.
+      state.storage.sql.exec(`DELETE FROM followers WHERE actor = ?`, REMOTE);
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET inbox = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const byEmbedded = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Accept",
+            object: { type: "Follow", actor: REMOTE, object: iris.id },
+          }),
+          true,
+        ),
+      );
+      expect(byEmbedded.status).toBe(202);
+      expect(pendingFollowAccepts(state).map((row) => row.actor)).toEqual([
+        REMOTE,
+      ]);
+      await resolvePendingFollowAccept(instance, username, REMOTE);
+      expect(
+        state.storage.sql
+          .exec<{ inbox: string | null }>(
+            `SELECT inbox FROM followers WHERE actor = ?`,
+            REMOTE,
+          )
+          .one().inbox,
+      ).toBe(`${REMOTE}/inbox`);
+    });
+  });
+
+  it("Accept: no-ops (still 202, no queued delivery) for an actor with no followers row", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "pending_accept")).toBe(0);
+      const armed = await state.storage.getAlarm();
+      expect(armed).toBeNull();
+    });
+  });
+
+  it("Accept: with ?skipDelivery=1, still marks accepted_at but queues no delivery", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      state.storage.sql.exec(
+        `UPDATE followers SET accepted_at = NULL WHERE actor = ?`,
+        REMOTE,
+      );
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({ type: "Accept", object: REMOTE }),
+          true,
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      expect(targetedDeliveries(state)).toHaveLength(0);
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).not.toBeNull();
+    });
+  });
+});
+
+describe("followers.accepted_at migration (#473)", () => {
+  it("backfills accepted_at = added_at for pre-existing rows on first migration, and never re-runs on a later construction", async () => {
+    const { stub } = freshUser();
+
+    // First construction: this object is brand new, so its constructor
+    // already creates `followers` with `accepted_at` present (current code
+    // has always had this column, for a fresh install). To exercise the
+    // additive-migration path honestly, drop the column right back off again
+    // — reproducing the on-disk shape of an object that predates #473 — then
+    // insert a row directly (bypassing #onFollow) with no `accepted_at` value
+    // at all, exactly like a real pre-migration follower row.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`ALTER TABLE followers DROP COLUMN accepted_at`);
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1234,
+      );
+    });
+
+    // Without an explicit eviction, `runInDurableObject` reuses the still-live
+    // instance from the block above (it just replaces `fetch()` and sends a
+    // request — see the `cloudflare:test` types) rather than reconstructing
+    // it, so the constructor's migration logic would not run again here. Evict
+    // to force a genuine fresh construction against the same stub id — the
+    // column is missing again (we dropped it above; SQLite storage persists
+    // across the eviction), so this exercises the constructor's
+    // `#ensureColumn` path adding the column back and running the one-time
+    // backfill, exactly like a real cold start after deploying #473.
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          REMOTE,
+        )
+        .one();
+      expect(row.accepted_at).toBe(1234);
+
+      // Simulate a genuinely-still-pending row created after migration.
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, NULL)`,
+        "https://remote.example/users/pending-carol",
+        null,
+        5678,
+      );
+    });
+
+    // A third construction (again forced via eviction) must NOT re-run the
+    // backfill: the genuinely-NULL row from the previous block must stay
+    // NULL.
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ accepted_at: number | null }>(
+          `SELECT accepted_at FROM followers WHERE actor = ?`,
+          "https://remote.example/users/pending-carol",
+        )
+        .one();
+      expect(row.accepted_at).toBeNull();
     });
   });
 });
@@ -2757,6 +3213,209 @@ describe("Group actor hosting (#376)", () => {
       );
       const timelineBody = (await timeline.json()) as { items: unknown[] };
       expect(timelineBody.items).toHaveLength(0);
+    });
+  });
+});
+
+describe("owner Remove: Group moderation (#473)", () => {
+  it("bans a member without requiring the owner's actor IRI in config.moderators", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+              moderators: [], // deliberately empty
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: iris.followers,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "followers")).toBe(0);
+      const banned = state.storage.sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM banned WHERE actor = ?`,
+          REMOTE,
+        )
+        .one().n;
+      expect(banned).toBe(1);
+    });
+  });
+
+  it("un-announces a post, still fanning out Undo(Announce)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const announceId = `${iris.outbox}/announce-1`;
+      const innerId = `${AUTHOR}/activities/post-3`;
+      const announce = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: announceId,
+        type: "Announce",
+        actor: iris.id,
+        object: {
+          id: innerId,
+          type: "Create",
+          actor: AUTHOR,
+          object: { id: `${innerId}/object`, type: "Note" },
+        },
+      };
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        announceId,
+        JSON.stringify(announce),
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at) VALUES (?, ?, ?)`,
+        innerId,
+        JSON.stringify(announce.object),
+        1,
+      );
+
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: announceId,
+            target: iris.outbox,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "outbox")).toBe(0);
+      const removedAt = state.storage.sql
+        .exec<{ removed_at: number | null }>(
+          `SELECT removed_at FROM inbox WHERE id = ?`,
+          innerId,
+        )
+        .one().removed_at;
+      expect(removedAt).not.toBeNull();
+      expect(counts(state, "delivery")).toBe(1);
+    });
+  });
+
+  it("un-announcing with ?skipDelivery=1 still tombstones locally but queues no Undo(Announce)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        AUTHOR,
+        `${AUTHOR}/inbox`,
+        1,
+      );
+      const announceId = `${iris.outbox}/announce-2`;
+      const innerId = `${AUTHOR}/activities/post-4`;
+      const announce = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: announceId,
+        type: "Announce",
+        actor: iris.id,
+        object: { id: innerId, type: "Create", actor: AUTHOR },
+      };
+      state.storage.sql.exec(
+        `INSERT INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+        announceId,
+        JSON.stringify(announce),
+        1,
+      );
+
+      const res = await instance.fetch(
+        new Request(`${iris.outbox}?skipDelivery=1`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username, {
+              actorType: "Group",
+            }),
+            [INTERNAL_HEADERS.publish]: "1",
+            [INTERNAL_HEADERS.skipDelivery]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: announceId,
+            target: iris.outbox,
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+      expect(counts(state, "outbox")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+    });
+  });
+
+  it("400s on a non-Group actor", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username), // default actorType: "Person"
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: iris.followers,
+          }),
+        }),
+      );
+      expect(res.status).toBe(400);
+    });
+  });
+
+  it("does not 400 a Remove on a non-Group actor when target isn't a moderation collection (#473 review)", async () => {
+    // The 400 is scoped to the two Group-moderation targets this feature
+    // defines (`iris.followers`/`iris.outbox`) so AS2 `Remove`'s other,
+    // not-yet-implemented collection-removal uses (e.g. featured/pinned-post
+    // retraction) aren't foreclosed by a hard block here.
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers: {
+            "content-type": "application/activity+json",
+            [INTERNAL_HEADERS.config]: cfgHeader(username), // default actorType: "Person"
+            [INTERNAL_HEADERS.publish]: "1",
+          },
+          body: JSON.stringify({
+            type: "Remove",
+            object: REMOTE,
+            target: `${iris.id}/collections/featured`,
+          }),
+        }),
+      );
+      expect(res.status).toBe(201);
+      // Falls through to the generic publish path, not moderation — no
+      // moderation state mutated.
+      expect(counts(state, "banned")).toBe(0);
+      expect(counts(state, "outbox")).toBe(1);
     });
   });
 });
@@ -3515,8 +4174,21 @@ describe("delivery outcome logging", () => {
         REMOTE,
         async () => new Response(null, { status: 500 }),
       );
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(parseLogLine(warnSpy.mock.calls[0]?.[0] as string)).toEqual({
+      // Filter to the specific event/actor this test cares about rather than
+      // asserting the spy's total call count: under the combined
+      // @dwk/activitypub + @dwk/mastodon-api run, a `DeliveryFailed` warn from
+      // some other test's armed alarm can land inside this test's spy window
+      // in the same workerd isolate, which would otherwise make the raw
+      // call-count assertion order/isolate-dependent (flaky).
+      const matching = warnSpy.mock.calls
+        .map((call) => parseLogLine(call[0] as string))
+        .filter(
+          (line) =>
+            line.event === ActivityPubLogEvent.DeliveryFailed &&
+            line.targetHost === "remote.example",
+        );
+      expect(matching).toHaveLength(1);
+      expect(matching[0]).toEqual({
         level: "warn",
         event: ActivityPubLogEvent.DeliveryFailed,
         targetHost: "remote.example",
@@ -3924,6 +4596,60 @@ describe("__client/entry", () => {
         clientRequest(username, "/__client/entry?received_at=999999999"),
       );
       expect(missing.status).toBe(404);
+    });
+  });
+});
+
+describe("__client/follow_requests (#473)", () => {
+  function followRequestsRequest(username: string, internal = true): Request {
+    const iris = deriveIris(BASE, username);
+    const headers: Record<string, string> = {
+      [INTERNAL_HEADERS.config]: cfgHeader(username),
+    };
+    if (internal) headers[INTERNAL_HEADERS.internal] = "1";
+    return new Request(`${iris.id}/__client/follow_requests`, { headers });
+  }
+
+  it("404s without the internal header", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance) => {
+      const res = await instance.fetch(followRequestsRequest(username, false));
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it("lists only accepted_at IS NULL rows, oldest first", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/newer-pending",
+        20,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        "https://remote.example/users/older-pending",
+        10,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/already-confirmed",
+        "https://remote.example/users/already-confirmed/inbox",
+        5,
+        999,
+      );
+
+      const res = await instance.fetch(followRequestsRequest(username));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        items: { actor: string; added_at: number }[];
+        total: number;
+      };
+      expect(body.total).toBe(2);
+      expect(body.items.map((i) => i.actor)).toEqual([
+        "https://remote.example/users/older-pending",
+        "https://remote.example/users/newer-pending",
+      ]);
     });
   });
 });

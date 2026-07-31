@@ -717,8 +717,30 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
     jti: string | undefined,
     requestOrigin: string | undefined,
   ): Promise<Response> {
+    // Every patch requires at least Append access — Write is satisfied by
+    // either an Append or Write grant (`@dwk/wac`), so an agent denied here
+    // cannot hold Write either. Gate on this *before* buffering or parsing
+    // the body so an unauthorized caller can't force the single-threaded DO
+    // to do that work at all.
+    const appendDenied = this.#decide(
+      store,
+      origin,
+      path,
+      "append",
+      agent,
+      requestOrigin,
+    );
+    if (appendDenied) return this.#denied(appendDenied.status);
+
+    const blocked = this.#denyAnonymousWrite(jti);
+    if (blocked) return blocked;
+
     const contentType = request.headers.get("content-type") ?? "";
-    const body = await request.text();
+    const peeked = await readUpToLimit(request.body, store.maxInlineBytes);
+    if (peeked.kind === "overflow") {
+      return text(413, "Patch document too large");
+    }
+    const body = new TextDecoder().decode(peeked.bytes);
 
     let parsed;
     try {
@@ -739,20 +761,20 @@ export class SolidPodObject extends DurableObject<SolidPodEnv> {
       throw error;
     }
 
-    // Append authorizes insert-only patches; any delete requires Write.
-    const mode: AccessMode = parsed.deletes.length > 0 ? "write" : "append";
-    const denied = this.#decide(
-      store,
-      origin,
-      path,
-      mode,
-      agent,
-      requestOrigin,
-    );
-    if (denied) return this.#denied(denied.status);
-
-    const blocked = this.#denyAnonymousWrite(jti);
-    if (blocked) return blocked;
+    // Append authorizes insert-only patches; any delete requires Write. The
+    // Append-level gate above already covers the append case, so only a
+    // delete-bearing patch needs the stronger re-check here.
+    if (parsed.deletes.length > 0) {
+      const writeDenied = this.#decide(
+        store,
+        origin,
+        path,
+        "write",
+        agent,
+        requestOrigin,
+      );
+      if (writeDenied) return this.#denied(writeDenied.status);
+    }
 
     const existed = store.head(path) !== null;
     const current = store.readQuads(path);
