@@ -22,7 +22,7 @@ import {
   verifyJwt,
   type SessionClaims,
 } from "./auth.js";
-import { readRequestBodyCapped } from "./body.js";
+import { readJsonBodyCapped, readRequestBodyCapped } from "./body.js";
 import { writeCar, writeCarStream, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
@@ -650,10 +650,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     if (!cfg.password || !cfg.jwtSecret) {
       throw forbidden("This server does not accept sessions");
     }
-    const body = (await request.json()) as {
+    // Unauthenticated (this *is* the login endpoint) — unlike the other four
+    // JSON-body writes below, there's no #requireAuth call ahead of this to
+    // lean on, so the capped read is the only thing standing between an
+    // anonymous caller and an unbounded buffer here.
+    const body = await readJsonBodyCapped<{
       identifier?: string;
       password?: string;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     if (!body.password) throw invalidRequest("`password` is required");
     if (!(await constantTimeEqual(body.password, cfg.password))) {
       throw namedError(
@@ -744,7 +753,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     await this.#requireAuth(request, ACCESS_SCOPE);
     // The body is untrusted: a non-string `handle` must fail as a clean 400, not
     // throw a TypeError on `.toLowerCase()` (which would surface as a 500).
-    const body = (await request.json()) as { handle?: unknown };
+    const body = await readJsonBodyCapped<{ handle?: unknown }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const handle =
       typeof body.handle === "string" ? body.handle.toLowerCase() : undefined;
     if (!handle || !isValidHandle(handle)) {
@@ -827,11 +841,16 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #createRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
       record?: JsonValue;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const collection = body.collection;
     if (!collection || !isValidNsid(collection)) {
       throw invalidRequest("`collection` must be a valid NSID");
@@ -859,11 +878,16 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #putRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
       record?: JsonValue;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const collection = body.collection;
     const rkey = body.rkey;
     if (!collection || !isValidNsid(collection)) {
@@ -892,10 +916,15 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #deleteRecord(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    const body = (await request.json()) as {
+    const body = await readJsonBodyCapped<{
       collection?: string;
       rkey?: string;
-    };
+    }>(
+      request,
+      this.#cfg.maxJsonBodyBytes,
+      "RequestTooLarge",
+      "Request body exceeds the size limit",
+    );
     const { collection, rkey } = body;
     if (!collection || !rkey)
       throw invalidRequest("`collection` and `rkey` are required");

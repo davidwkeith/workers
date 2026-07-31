@@ -1,19 +1,24 @@
 /**
- * `@dwk/atproto-pds` — a capped read for inbound request bodies (blob
- * uploads via `com.atproto.repo.uploadBlob`, migration CAR imports via
- * `com.atproto.repo.importRepo`).
+ * `@dwk/atproto-pds` — a capped read for inbound request bodies: blob
+ * uploads (`com.atproto.repo.uploadBlob`), migration CAR imports
+ * (`com.atproto.repo.importRepo`), and small JSON control payloads
+ * (`createSession`, `updateHandle`, `createRecord`, `putRecord`,
+ * `deleteRecord`).
  *
- * Both endpoints are authenticated but still let the caller choose the body
- * size, so without a cap the Durable Object would buffer the whole body
- * before ever checking it, risking the 128 MB isolate memory ceiling. A
- * declared `Content-Length` over the limit is rejected up front as a cheap
- * optimization, but the stream is always read incrementally and aborted
- * (`reader.cancel()`) the moment the running total exceeds the cap — so a
- * missing or understated `Content-Length` (e.g. chunked transfer-encoding)
- * cannot force a buffer bigger than `maxBytes` regardless of what it claims.
- * This bounds memory to the caller's configured cap, not to some fixed safe
- * size — a cap set close to (or at) the isolate ceiling is still an OOM risk
- * in its own right; see the `maxBytes` callers for what they pass.
+ * All of these let the caller choose the body size, so without a cap the
+ * Durable Object would buffer the whole body before ever checking it,
+ * risking the 128 MB isolate memory ceiling. `createSession` in particular
+ * is reachable with **no authentication at all** — it's the login endpoint —
+ * so its cap can't lean on an auth check running first the way the other
+ * four (all behind `#requireAuth`) can. A declared `Content-Length` over the
+ * limit is rejected up front as a cheap optimization, but the stream is
+ * always read incrementally and aborted (`reader.cancel()`) the moment the
+ * running total exceeds the cap — so a missing or understated
+ * `Content-Length` (e.g. chunked transfer-encoding) cannot force a buffer
+ * bigger than `maxBytes` regardless of what it claims. This bounds memory to
+ * the caller's configured cap, not to some fixed safe size — a cap set close
+ * to (or at) the isolate ceiling is still an OOM risk in its own right; see
+ * the `maxBytes` callers for what they pass.
  *
  * This mirrors the capped-read pattern in `@dwk/activitypub`'s
  * `readRequestBodyCapped` (also copied into `@dwk/solid-oidc`'s `body.ts`),
@@ -92,4 +97,31 @@ export async function readRequestBodyCapped(
     chunks[i] = undefined;
   }
   return merged;
+}
+
+/**
+ * Read a request body as JSON, throwing `namedError(400, errorName, message)`
+ * if the (undecoded) byte size exceeds `maxBytes` — via
+ * {@link readRequestBodyCapped}, so the size cap is enforced the same
+ * incremental, `Content-Length`-independent way as the blob/CAR reads above.
+ *
+ * A malformed body that fails `JSON.parse` is **not** caught here: it throws
+ * the same native `SyntaxError` `request.json()` always has, which the XRPC
+ * error boundary (`xrpc.ts`'s `errorResponse`) already turns into a generic
+ * `InternalServerError` 500 — unchanged from every call site's behavior
+ * before this helper existed. Only the size-cap behavior is new.
+ */
+export async function readJsonBodyCapped<T>(
+  request: Request,
+  maxBytes: number,
+  errorName: string,
+  message: string,
+): Promise<T> {
+  const bytes = await readRequestBodyCapped(
+    request,
+    maxBytes,
+    errorName,
+    message,
+  );
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }

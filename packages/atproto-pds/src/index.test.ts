@@ -174,6 +174,42 @@ describe("AT Protocol PDS", () => {
     expect(bad.status).toBe(401);
   });
 
+  it("rejects an oversized createSession body with no Content-Length by aborting the stream, not buffering it first", async () => {
+    // createSession is the login endpoint — reachable with **no**
+    // authentication at all, unlike uploadBlob/importRepo which at least run
+    // #requireAuth first. It's the most severe instance of the "buffer
+    // first, check later" gap: any anonymous caller could otherwise force an
+    // unbounded buffer here.
+    const host = "streamed-bigsession.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxJsonBodyBytes: 10,
+    });
+    // 5 chunks of 10 bytes (50 total) against a 10-byte cap, no auth token,
+    // no Content-Length header.
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("content-type", "application/json");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.server.createSession`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "RequestTooLarge",
+    });
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
+  });
+
   it("refuses record writes without a valid session", async () => {
     const host = "noauth.example";
     const res = await call(
