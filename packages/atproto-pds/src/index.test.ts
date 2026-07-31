@@ -444,6 +444,51 @@ describe("AT Protocol PDS", () => {
     expect(tracked.cancelled()).toBe(true);
   });
 
+  it("reassembles a multi-chunk streamed blob upload byte-for-byte", async () => {
+    // Distinct, non-repeating chunk contents so a merge-order or
+    // off-by-one bug in `readRequestBodyCapped`'s chunk-copy loop would
+    // corrupt the reassembled bytes rather than passing by coincidence.
+    const host = "multichunk-blob.example";
+    const handler = pds(host);
+    const token = await login(handler, host);
+    const chunk1 = new Uint8Array([1, 2, 3]);
+    const chunk2 = new Uint8Array([4, 5, 6, 7]);
+    const chunk3 = new Uint8Array([8]);
+    const expected = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    let step = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const parts = [chunk1, chunk2, chunk3];
+        if (step >= parts.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(parts[step]!);
+        step++;
+      },
+    });
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/octet-stream");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.uploadBlob`,
+      { method: "POST", headers, body: stream as unknown as BodyInit },
+    );
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(200);
+    const uploaded = (await res.json()) as {
+      blob: { ref: { $link: string }; size: number };
+    };
+    expect(uploaded.blob.size).toBe(expected.length);
+    const fetched = await call(
+      handler,
+      host,
+      `/xrpc/com.atproto.sync.getBlob?cid=${uploaded.blob.ref.$link}`,
+    );
+    const fetchedBytes = new Uint8Array(await fetched.arrayBuffer());
+    expect(fetchedBytes).toEqual(expected);
+  });
+
   it("resolves its own handle and describes the repo", async () => {
     const host = "resolve.example";
     const handler = pds(host);

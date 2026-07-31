@@ -10,7 +10,10 @@
  * optimization, but the stream is always read incrementally and aborted
  * (`reader.cancel()`) the moment the running total exceeds the cap — so a
  * missing or understated `Content-Length` (e.g. chunked transfer-encoding)
- * cannot force the whole body into memory before the limit is enforced.
+ * cannot force a buffer bigger than `maxBytes` regardless of what it claims.
+ * This bounds memory to the caller's configured cap, not to some fixed safe
+ * size — a cap set close to (or at) the isolate ceiling is still an OOM risk
+ * in its own right; see the `maxBytes` callers for what they pass.
  *
  * This mirrors the capped-read pattern in `@dwk/activitypub`'s
  * `readRequestBodyCapped` (also copied into `@dwk/solid-oidc`'s `body.ts`),
@@ -59,7 +62,7 @@ export async function readRequestBodyCapped(
     return new Uint8Array(buffer);
   }
 
-  const chunks: Uint8Array[] = [];
+  const chunks: (Uint8Array | undefined)[] = [];
   let total = 0;
   const reader = body.getReader();
   for (;;) {
@@ -75,11 +78,18 @@ export async function readRequestBodyCapped(
     }
   }
 
+  // Copy each chunk into `merged` and drop this function's own reference to
+  // it immediately after, so the copied chunk becomes collectible before the
+  // next one is read/copied. Without this, `chunks` stays live for the whole
+  // loop and peak memory is ~2x the body size (the still-referenced chunks
+  // plus the `merged` copy) instead of the ~1x a capped read should cost.
   const merged = new Uint8Array(total);
   let offset = 0;
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
     merged.set(chunk, offset);
     offset += chunk.byteLength;
+    chunks[i] = undefined;
   }
   return merged;
 }

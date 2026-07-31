@@ -1049,9 +1049,12 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     await this.#requireAuth(request, ACCESS_SCOPE);
     // Reject an oversized upload by its declared Content-Length up front when
     // present; either way the body is read incrementally and the reader is
-    // cancelled the instant the cap is exceeded, so a missing or lying
-    // Content-Length can never push the DO past its 128 MB ceiling by forcing
-    // a full buffer before the size is known.
+    // cancelled the instant the running total exceeds maxBlobSizeBytes, so a
+    // missing or lying Content-Length can no longer force a buffer bigger
+    // than the configured cap. (That cap itself still has to stay well under
+    // the DO's 128 MB ceiling for this to bound memory in practice — this
+    // only closes the "buffer first, check later" gap, it doesn't make an
+    // oversized cap safe.)
     const bytes = await readRequestBodyCapped(
       request,
       this.#cfg.maxBlobSizeBytes,
@@ -1198,10 +1201,16 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     // Reject an oversized migration CAR *before* resolving the source signing
     // key: a declared Content-Length over the cap is rejected up front, and
     // either way the body is read incrementally with the reader cancelled the
-    // instant the cap is exceeded, so a missing or lying Content-Length can
-    // never force a full buffer. Reading the (capped) body first also means a
-    // hostile oversized request never triggers the DID-resolution fetch below
-    // for a request we're going to reject anyway (mirrors #uploadBlob).
+    // instant the running total exceeds maxImportCarSizeBytes, so a missing
+    // or lying Content-Length can no longer force a buffer bigger than the
+    // configured cap. Note `maxImportCarSizeBytes` defaults to 128 MiB — the
+    // same order of magnitude as the DO's 128 MB ceiling — so a fully honest,
+    // in-cap import at the default is still an OOM risk in its own right;
+    // this fix closes the "buffer first, check later" gap, it does not make
+    // an oversized default cap safe on its own. Reading the (capped) body
+    // first also means a hostile oversized request never triggers the
+    // DID-resolution fetch below for a request we're going to reject anyway
+    // (mirrors #uploadBlob).
     const carBytes = await readRequestBodyCapped(
       request,
       this.#cfg.maxImportCarSizeBytes,
