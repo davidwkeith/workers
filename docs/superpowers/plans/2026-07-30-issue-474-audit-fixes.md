@@ -14,7 +14,7 @@
 - **No silent degradation.** A missing required Cloudflare binding must throw at first request (already true everywhere touched here — do not weaken it).
 - **Config is injected, never read from global environment** (composition contract) — every fix stays inside the existing factory/config shape.
 - **Commit messages:** Conventional Commits, `<type>(<scope>): <subject>` — lowercase type, subject not capitalized, scope = package name minus `@dwk/` prefix. Every task in this plan uses `fix(<pkg>): <subject>`.
-- **Changesets:** every touched *publishable* package (i.e. not `examples/deploy-to-cloudflare`, which is `"private": true`) gets a `patch` changeset in the same commit as its fix, written directly as a file (do not run the interactive `pnpm changeset` prompt) at `.changeset/<slug>.md`:
+- **Changesets:** every touched _publishable_ package (i.e. not `examples/deploy-to-cloudflare`, which is `"private": true`) gets a `patch` changeset in the same commit as its fix, written directly as a file (do not run the interactive `pnpm changeset` prompt) at `.changeset/<slug>.md`:
   ```markdown
   ---
   "@dwk/<pkg>": patch
@@ -39,10 +39,12 @@
 ### Task 1: webauthn — cap CBOR reader recursion depth (HIGH)
 
 **Files:**
+
 - Modify: `packages/webauthn/src/cbor.ts:59-99` (`Reader.readItem`)
 - Test: `packages/webauthn/src/cbor.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `CborError` (exported, `cbor.ts:35`, `class CborError extends Error {}`), existing `decodeFirst(bytes, start = 0)` (unchanged signature).
 - Produces: `Reader.readItem` gains an internal `depth` parameter (default `0`) — not part of any public API, so no downstream task depends on this signature.
 
@@ -142,6 +144,7 @@ Expected: PASS, including all pre-existing `cbor.test.ts` cases (the depth check
 - [ ] **Step 5: Changeset + commit**
 
 Create `.changeset/webauthn-cbor-depth-limit.md`:
+
 ```markdown
 ---
 "@dwk/webauthn": patch
@@ -162,13 +165,15 @@ git commit -m "fix(webauthn): cap CBOR reader recursion depth"
 ### Task 2: webauthn — wrap ceremony dispatch in try/catch (HIGH)
 
 **Files:**
+
 - Modify: `packages/webauthn/src/rp.ts:82-101` (`WebAuthnObject.fetch`)
 - Modify: `packages/webauthn/src/handler.ts:127-161` (`createWebAuthn`'s returned handler)
 - Test: `packages/webauthn/src/index.test.ts`, `packages/webauthn/src/rp.test.ts` (or `pod`-equivalent DO test file for this package — confirm the exact filename with `ls packages/webauthn/src/*.test.ts` before writing; use whichever already exercises `WebAuthnObject` directly)
 
 **Interfaces:**
+
 - Consumes: existing `rejected(event: WebAuthnLogEvent, reason: VerifyFailureReason | string): Response` (`rp.ts:468-477`), existing `WebAuthnLogEvent.RegisterRejected` / `.AuthenticateRejected` (`log.ts`), existing `emit(config, level, event, fields?)` (`handler.ts:52-60`).
-- Produces: no new exports — only closes the two unguarded call chains the finding names (Task 1 depends on this defense-in-depth existing, but does not require it — Task 1's fix is what actually prevents the stack overflow; this task ensures *any other* future parse failure fails safe too).
+- Produces: no new exports — only closes the two unguarded call chains the finding names (Task 1 depends on this defense-in-depth existing, but does not require it — Task 1's fix is what actually prevents the stack overflow; this task ensures _any other_ future parse failure fails safe too).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -301,11 +306,13 @@ git commit -m "fix(webauthn): return structured errors instead of throwing on ce
 ### Task 3: webauthn — timing-safe challenge comparison (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/webauthn/src/encoding.ts` (add helper near `bytesEqual`, line ~46)
 - Modify: `packages/webauthn/src/verify.ts:224-229` (`checkClientData`) and its import block (`verify.ts:29-35`)
 - Test: `packages/webauthn/src/verify.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `utf8ToBytes(input: string): Uint8Array` (`encoding.ts:61-63`).
 - Produces: new export `timingSafeEqual(a: string, b: string): boolean` from `encoding.ts` — synchronous, so `checkClientData`'s signature and every caller of it (`verifyRegistration`, `verifyAuthentication`) needs **no** change.
 
@@ -340,7 +347,7 @@ it("rejects a same-length, different-content challenge without leaking length vi
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm test --project @dwk/webauthn verify -t "leaking length"`
-Expected: PASS already (this specific case passes even with the old `!==`) — this step confirms the *new* helper doesn't change observable behavior for the equal-length case before wiring it in; the real regression guard is Step 4's full-suite run.
+Expected: PASS already (this specific case passes even with the old `!==`) — this step confirms the _new_ helper doesn't change observable behavior for the equal-length case before wiring it in; the real regression guard is Step 4's full-suite run.
 
 - [ ] **Step 3: Add the helper and use it**
 
@@ -377,14 +384,14 @@ import {
 
 ```ts
 // verify.ts — checkClientData
-  if (
-    !timingSafeEqual(
-      normalizeBase64url(clientData.challenge),
-      normalizeBase64url(expectedChallenge),
-    )
-  ) {
-    return "challenge_mismatch";
-  }
+if (
+  !timingSafeEqual(
+    normalizeBase64url(clientData.challenge),
+    normalizeBase64url(expectedChallenge),
+  )
+) {
+  return "challenge_mismatch";
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -414,13 +421,15 @@ git commit -m "fix(webauthn): compare challenge with constant-time byte comparis
 ### Task 4: solid-pod — WAC-filter the WebSocket broadcast (HIGH)
 
 **Files:**
+
 - Modify: `packages/solid-pod/src/pod.ts:210-238` (`fetch`, move config/agent extraction above the WS branch)
 - Modify: `packages/solid-pod/src/pod.ts:1584-1636` (`#handleWebSocketUpgrade`, `#broadcast`)
 - Modify: `packages/solid-pod/src/pod.ts` — all 11 `#broadcast(...)` call sites (lines ~636, 684-685, 786, 844, 1169, 1187, 1219, 1247, 1273-1274 — re-grep before editing, since earlier tasks in this same file shift line numbers)
 - Test: `packages/solid-pod/src/pod.test.ts`
 
 **Interfaces:**
-- Consumes: existing `authorize(store, origin, path, request: AccessRequest): AccessDecision` is *not* called directly — reuse the DO's own existing `#decide(store, origin, path, mode, agent, requestOrigin): {granted:false,status}|null` (`pod.ts:346-368`), which already encodes the owner-bypass + `.acl`-path special-casing every other code path uses.
+
+- Consumes: existing `authorize(store, origin, path, request: AccessRequest): AccessDecision` is _not_ called directly — reuse the DO's own existing `#decide(store, origin, path, mode, agent, requestOrigin): {granted:false,status}|null` (`pod.ts:346-368`), which already encodes the owner-bypass + `.acl`-path special-casing every other code path uses.
 - Produces: new private method `#allowedToRead(store, origin, path, agent): boolean`; `#broadcast` signature changes from `(objectIri, type)` to `(store, origin, path, objectIri, type)`; `#handleWebSocketUpgrade` signature changes from `()` to `(agent: string | undefined)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -603,7 +612,13 @@ Re-grep first — earlier steps in this task do not shift these line numbers, bu
 // before
 this.#broadcast(toIri(origin, path), existed ? "Update" : "Create");
 // after
-this.#broadcast(store, origin, path, toIri(origin, path), existed ? "Update" : "Create");
+this.#broadcast(
+  store,
+  origin,
+  path,
+  toIri(origin, path),
+  existed ? "Update" : "Create",
+);
 ```
 
 Apply the equivalent transform at all 11 call sites (the two-line "move + delete" pair at ~684-685 uses `childIri`/`path` — pass `store, origin, path` there too, since `path` is the relevant resource for the child-creation event; the copy/move pair at ~1247/~1273-1274 uses `dest`/`from` as the second positional path argument to `toIri`, matching those local variables instead of `path`).
@@ -611,7 +626,7 @@ Apply the equivalent transform at all 11 call sites (the two-line "move + delete
 - [ ] **Step 6: Run test to verify it passes**
 
 Run: `pnpm test --project @dwk/solid-pod pod`
-Expected: PASS (full `pod.test.ts` — this is a widely-called private method, so run the whole file, not just the new test). Add a second assertion case (owner's own second socket *does* receive the notification) to guard against over-filtering; extend the same test or add a sibling one before considering this task done.
+Expected: PASS (full `pod.test.ts` — this is a widely-called private method, so run the whole file, not just the new test). Add a second assertion case (owner's own second socket _does_ receive the notification) to guard against over-filtering; extend the same test or add a sibling one before considering this task done.
 
 - [ ] **Step 7: Changeset + commit**
 
@@ -636,10 +651,12 @@ git commit -m "fix(solid-pod): WAC-filter WebSocket broadcast per subscriber"
 ### Task 5: mastodon-api — wrap route dispatch in try/catch (HIGH)
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/handler.ts:104-135` (`createMastodonApi`'s returned closure)
 - Test: `packages/mastodon-api/src/handler.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `mastodonError(status: number, message: string): Response` (`errors.ts:6-10`), existing `recordNotFound()`, `withCors(...)`.
 - Produces: none new — internal wrapping only.
 
@@ -666,7 +683,7 @@ it("returns a Mastodon-shaped 500 instead of throwing when a route handler throw
 });
 ```
 
-(Read `handler.test.ts` first to find the lightest-weight existing route + D1-failure seam already used elsewhere in the file, rather than inventing a new one — the file's existing `AUTH_DB` missing-binding test at lines 8-17 is a *different* case (a fail-fast startup guard, not a route throw) and its `.rejects.toThrow(...)` expectation must stay as-is per Step 4 below.)
+(Read `handler.test.ts` first to find the lightest-weight existing route + D1-failure seam already used elsewhere in the file, rather than inventing a new one — the file's existing `AUTH_DB` missing-binding test at lines 8-17 is a _different_ case (a fail-fast startup guard, not a route throw) and its `.rejects.toThrow(...)` expectation must stay as-is per Step 4 below.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -679,44 +696,40 @@ Expected: FAIL — the promise rejects instead of resolving to a `500` `Response
 // handler.ts
 import { mastodonError, recordNotFound } from "./errors.js";
 // ...
-  return async (request, env, _ctx) => {
-    if (!env.AUTH_DB) {
-      throw new Error(
-        "@dwk/mastodon-api: missing required D1 binding `AUTH_DB`",
-      );
+return async (request, env, _ctx) => {
+  if (!env.AUTH_DB) {
+    throw new Error("@dwk/mastodon-api: missing required D1 binding `AUTH_DB`");
+  }
+  try {
+    if (request.method.toUpperCase() === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
-    try {
-      if (request.method.toUpperCase() === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
-      }
-      const url = new URL(request.url);
-      const route = ROUTES.get(
-        `${request.method.toUpperCase()} ${url.pathname}`,
-      );
-      if (route) {
-        return withCors(await route({ config, env, request, url }));
-      }
-      for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
-        if (request.method.toUpperCase() !== method) continue;
-        const match = pattern.exec(url.pathname);
-        if (match?.[1]) {
-          let id: string;
-          try {
-            id = decodeURIComponent(match[1]);
-          } catch {
-            return withCors(recordNotFound());
-          }
-          return withCors(
-            await dynamicHandler({ config, env, request, url }, id),
-          );
+    const url = new URL(request.url);
+    const route = ROUTES.get(`${request.method.toUpperCase()} ${url.pathname}`);
+    if (route) {
+      return withCors(await route({ config, env, request, url }));
+    }
+    for (const [method, pattern, dynamicHandler] of DYNAMIC_ROUTES) {
+      if (request.method.toUpperCase() !== method) continue;
+      const match = pattern.exec(url.pathname);
+      if (match?.[1]) {
+        let id: string;
+        try {
+          id = decodeURIComponent(match[1]);
+        } catch {
+          return withCors(recordNotFound());
         }
+        return withCors(
+          await dynamicHandler({ config, env, request, url }, id),
+        );
       }
-      return withCors(recordNotFound());
-    } catch (err) {
-      console.error("@dwk/mastodon-api: unhandled route error", err);
-      return withCors(mastodonError(500, "Internal server error"));
     }
-  };
+    return withCors(recordNotFound());
+  } catch (err) {
+    console.error("@dwk/mastodon-api: unhandled route error", err);
+    return withCors(mastodonError(500, "Internal server error"));
+  }
+};
 ```
 
 (Match the exact existing dispatcher body — read `handler.ts:104-135` immediately before editing to confirm variable names `ROUTES`/`DYNAMIC_ROUTES`/`CORS_HEADERS`/`config` match current `HEAD`; the shape above is what the research pass observed.)
@@ -748,10 +761,12 @@ git commit -m "fix(mastodon-api): return Mastodon-shaped errors instead of throw
 ### Task 6: mastodon-api — constant-time client-secret comparison (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/mastodon-api/src/encoding.ts:46-53` (`timingSafeEqualHex`)
 - Test: `packages/mastodon-api/src/encoding.test.ts:30-34`
 
 **Interfaces:**
+
 - Consumes: none new.
 - Produces: `timingSafeEqualHex(a: string, b: string): boolean` — signature unchanged (still synchronous), so the sole call site `auth.ts:43` needs no edit.
 
@@ -827,10 +842,12 @@ git commit -m "fix(mastodon-api): use crypto.subtle.timingSafeEqual for hex comp
 ### Task 7: micropub — background fediverse syndication via ctx.waitUntil (HIGH)
 
 **Files:**
+
 - Modify: `packages/micropub/src/handler.ts:1441-1449` (`publishPost`), `:1608-1611` (factory), `handleAction`/`doCreate` call chain between them
 - Test: `packages/micropub/src/index.test.ts` or `composition.test.ts` (whichever already builds a `config.fediverse` fixture — check both; add one if neither does)
 
 **Interfaces:**
+
 - Consumes: existing `syndicateEntry(...)` (`fediverse.ts:230-267`, unchanged), existing `MicropubHandler` type (`handler.ts:79-83`, `(request, env, ctx) => Promise<Response>` — `ctx: ExecutionContext`).
 - Produces: `publishPost` gains an optional trailing parameter `waitUntil?: (promise: Promise<unknown>) => void`; `doCreate`/`handleAction` thread the same optional parameter through unchanged otherwise. `mcp-tools.ts:140`'s direct call to `publishPost(mf2, commands, config, store)` needs **no** change (omitting the new optional param preserves today's awaited behavior for the MCP path).
 
@@ -966,10 +983,12 @@ git commit -m "fix(micropub): background fediverse syndication via ctx.waitUntil
 ### Task 8: micropub — stop leaking raw D1 error messages to clients (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/micropub/src/handler.ts:429-461` (`storeMedia`'s fail-closed catch branch)
 - Test: `packages/micropub/src/media.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `config.logger` (already injected per `config.ts:239`), existing `MicropubLogEvent.MediaMetadataFailed` (`log.ts:44-50`), existing `MediaMetadataError` class.
 - Produces: none new — `MediaMetadataError`'s message text changes from embedding the raw D1 error to a fixed, generic string; both catch sites that relay it (`handleMediaUpload:535-537`, `handleAction`'s multipart-create fold `:1312-1314`) inherit the fix with no code change of their own, since they just relay `err.message`.
 
@@ -990,13 +1009,18 @@ it("logs the D1 failure and does not leak its message to the client", async () =
   // Stub env.MEDIA_DB (or whichever binding storeMedia's insert uses) to
   // reject with a message that must never reach the client, e.g. one
   // containing a table/column name.
-  const env = { ...baseEnv, MEDIA_DB: rejectingD1("no such column: internal_col") };
+  const env = {
+    ...baseEnv,
+    MEDIA_DB: rejectingD1("no such column: internal_col"),
+  };
 
   const res = await handleMediaUpload(/* ...request, config, env... */);
   const body = await res.json();
 
   expect(body.error_description).not.toContain("internal_col");
-  expect(logged.some(([event]) => event === MicropubLogEvent.MediaMetadataFailed)).toBe(true);
+  expect(
+    logged.some(([event]) => event === MicropubLogEvent.MediaMetadataFailed),
+  ).toBe(true);
 });
 ```
 
@@ -1005,7 +1029,7 @@ it("logs the D1 failure and does not leak its message to the client", async () =
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm test --project @dwk/micropub media -t "does not leak"`
-Expected: FAIL — `body.error_description` currently contains the raw D1 message, and today's `emit(config, "warn", ...)` call sits in the *other* (non-fail-closed) branch, not this one.
+Expected: FAIL — `body.error_description` currently contains the raw D1 message, and today's `emit(config, "warn", ...)` call sits in the _other_ (non-fail-closed) branch, not this one.
 
 - [ ] **Step 3: Log before throwing, and stop embedding the raw message**
 
@@ -1056,11 +1080,13 @@ git commit -m "fix(micropub): stop leaking raw D1 errors, log them instead"
 ### Task 9: solid-oidc — cap the token endpoint's form-body read (MEDIUM)
 
 **Files:**
+
 - Create: `packages/solid-oidc/src/body.ts` (ported, `Request`-flavored capped reader — mirrors `@dwk/activitypub`'s `packages/activitypub/src/body.ts:33-84`, the established precedent for this exact scenario)
 - Modify: `packages/solid-oidc/src/token-endpoint.ts:19-30` (`readForm`)
 - Test: `packages/solid-oidc/src/body.test.ts` (new), `packages/solid-oidc/src/handler.test.ts`
 
 **Interfaces:**
+
 - Consumes: none new (no new dependency — ports the existing pattern locally rather than depending on `@dwk/activitypub`, which would be a layering violation; `@dwk/safe-fetch`'s existing `readBodyCapped` takes a `Response`, not a `Request`, so it doesn't fit here without its own change, which is out of scope).
 - Produces: `readRequestBodyCapped(request: Request, maxBytes: number): Promise<Uint8Array | null>` (returns `null` when the body exceeds `maxBytes`, mirroring the activitypub original).
 
@@ -1176,10 +1202,14 @@ async function readForm(request: Request): Promise<URLSearchParams | null> {
 
 ```ts
 // token-endpoint.ts — handleToken, right after reading the form
-  const form = await readForm(request);
-  if (form === null) {
-    return oauthError(400, "invalid_request", "request body exceeds the maximum allowed size");
-  }
+const form = await readForm(request);
+if (form === null) {
+  return oauthError(
+    400,
+    "invalid_request",
+    "request body exceeds the maximum allowed size",
+  );
+}
 ```
 
 - [ ] **Step 8: Run test to verify it passes**
@@ -1209,10 +1239,12 @@ git commit -m "fix(solid-oidc): cap token endpoint body size before validation"
 ### Task 10: solid-oidc — construct `CodeStore` once per Worker isolate (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/solid-oidc/src/handler.ts:35-45` (`createSolidOidc`)
 - Test: `packages/solid-oidc/src/handler.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `createCodeStore(db: D1Database): CodeStore` (`store.ts:48-67`, unchanged).
 - Produces: none new.
 
@@ -1242,7 +1274,7 @@ it("does not rebuild CodeStore's D1 schema check on every request", async () => 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm test --project @dwk/solid-oidc handler -t "does not rebuild"`
-Expected: PASS already for *discovery specifically* under today's code, actually — re-derive this test to hit `/token` or `/authorize` three times instead, which do construct `CodeStore` every request today:
+Expected: PASS already for _discovery specifically_ under today's code, actually — re-derive this test to hit `/token` or `/authorize` three times instead, which do construct `CodeStore` every request today:
 
 ```ts
 it("does not rebuild CodeStore's D1 schema check on every /authorize request", async () => {
@@ -1310,12 +1342,14 @@ git commit -m "fix(solid-oidc): construct CodeStore once per isolate"
 ### Task 11: solid-oidc — wire logger/metrics at security-relevant rejection points (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/solid-oidc/src/config.ts:95-98,114-115,159-160` (`logger`/`metrics` defaults)
 - Modify: `packages/solid-oidc/src/log.ts` (create — new `SolidOidcLogEvent` enum, mirroring `packages/micropub/src/log.ts` / `packages/activitypub/src/log.ts`'s shape)
 - Modify: `packages/solid-oidc/src/token-endpoint.ts:57-98` (five rejection points)
 - Test: `packages/solid-oidc/src/handler.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `noopLogger`, `noopMetrics` from `@dwk/log`.
 - Produces: `ResolvedSolidOidcConfig.logger`/`.metrics` become non-optional (`Logger`/`Metrics` instead of `Logger?`/`Metrics?`); new `SolidOidcLogEvent` enum exported from a new `log.ts`.
 
@@ -1503,10 +1537,12 @@ git commit -m "fix(solid-oidc): log security-relevant token rejections"
 ### Task 12: indieauth — constant-time PKCE/HMAC comparison (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/indieauth/src/encoding.ts:53-58` (`timingSafeEqual`)
 - Test: `packages/indieauth/src/encoding.test.ts`
 
 **Interfaces:**
+
 - Consumes: none new.
 - Produces: `timingSafeEqual(a: string, b: string): boolean` — signature unchanged (stays synchronous), so `pkce.ts:9,45` and `token.ts:23,236` need **no** edits.
 
@@ -1584,10 +1620,12 @@ git commit -m "fix(indieauth): use crypto.subtle.timingSafeEqual for PKCE/HMAC c
 ### Task 13: microsub — replace `Math.random()` in channel uid generation (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/microsub/src/store.ts:255-261` (`generateUid`)
 - Test: `packages/microsub/src/store.test.ts`
 
 **Interfaces:**
+
 - Consumes: none new (`crypto.randomUUID()` is a standard Workers-runtime global, already used elsewhere in the monorepo e.g. `packages/micropub/src/handler.ts:435,1130`).
 - Produces: `generateUid(): string` — same signature, different format (a UUID instead of a base36 timestamp+suffix string). Confirm no test or consumer asserts the old format (`store.test.ts` was confirmed to only assert equality/membership, not format).
 
@@ -1648,11 +1686,13 @@ git commit -m "fix(microsub): use crypto.randomUUID for channel uid generation"
 ### Task 14: activitypub — enforce `readBodyCapped` in `object.ts`'s two remaining fetch sites (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts:2860-2866` (`#processVerifications`)
 - Modify: `packages/activitypub/src/object.ts:3293-3299` (`#resolveInbox`)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `readBodyCapped(response: Response, maxBytes?: number): Promise<string | null>` from `@dwk/safe-fetch` (already imported at `object.ts:29`), existing `ACTOR_PROFILE_MAX_BODY_BYTES = 128 * 1024` (`object.ts:76`) — reuse it rather than defining a new constant, since both sites parse the same kind of remote JSON document (an actor/verification document) at the same trust boundary.
 - Produces: none new.
 
@@ -1663,9 +1703,12 @@ Add to `object.test.ts`, mirroring the existing oversized-body test pattern from
 ```ts
 it("does not buffer an oversized verification document body", async () => {
   const oversized = "x".repeat(ACTOR_PROFILE_MAX_BODY_BYTES + 1024);
-  withFetch(async () => new Response(oversized, {
-    headers: { "content-length": String(oversized.length) },
-  }));
+  withFetch(
+    async () =>
+      new Response(oversized, {
+        headers: { "content-length": String(oversized.length) },
+      }),
+  );
 
   const result = await runInDurableObject(stub, (instance) =>
     instance.processVerificationsForTest(/* ...existing fixture args... */),
@@ -1678,7 +1721,7 @@ it("does not buffer an oversized verification document body", async () => {
 });
 ```
 
-(Read `object.test.ts:95-107` and `:684-736` first to match the exact fetch-stubbing helper name and the exact "gave up" assertion shape already established for the parse-failure case — this new test should look like a sibling of that one, differing only in *why* the body was rejected.)
+(Read `object.test.ts:95-107` and `:684-736` first to match the exact fetch-stubbing helper name and the exact "gave up" assertion shape already established for the parse-failure case — this new test should look like a sibling of that one, differing only in _why_ the body was rejected.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1765,10 +1808,12 @@ git commit -m "fix(activitypub): cap two remaining unbounded remote-fetch reads"
 ### Task 15: vc — real type guard for `findVerificationMethod` (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/vc/src/did-web.ts:187-206` (`findVerificationMethod`)
 - Test: `packages/vc/src/did-web.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `VerificationMethod` type (`packages/vc/src/data-integrity.ts:208-214`: `{ id: string; type?: string; controller?: string; publicKeyMultibase?: string; publicKeyJwk?: JsonWebKey }`).
 - Produces: new (unexported, module-local) `isVerificationMethodShape` guard; `findVerificationMethod`'s exported signature is unchanged (`(didDocument: JsonObject, id: string) => VerificationMethod | undefined`).
 
@@ -1828,10 +1873,7 @@ function isVerificationMethodShape(
   if (entry.type !== undefined && typeof entry.type !== "string") {
     return false;
   }
-  if (
-    entry.controller !== undefined &&
-    typeof entry.controller !== "string"
-  ) {
+  if (entry.controller !== undefined && typeof entry.controller !== "string") {
     return false;
   }
   if (
@@ -1854,11 +1896,11 @@ function isVerificationMethodShape(
 
 ```ts
 // did-web.ts — findVerificationMethod, replacing the final branch
-    if (resolved === id) {
-      return isVerificationMethodShape(entry as JsonObject)
-        ? (entry as JsonObject as VerificationMethod)
-        : undefined;
-    }
+if (resolved === id) {
+  return isVerificationMethodShape(entry as JsonObject)
+    ? (entry as JsonObject as VerificationMethod)
+    : undefined;
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1887,10 +1929,12 @@ git commit -m "fix(vc): add runtime type guard for DID verification method entri
 ### Task 16: webdav — wrap the top-level handler in try/catch (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/webdav/src/webdav.ts:289-317` (`createWebdav`'s returned `webdav` function)
 - Test: `packages/webdav/src/webdav.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `problem(status: number, message: string): Response` (`webdav.ts:164-173`, plain-text `Content-Type: text/plain; charset=utf-8` — the file's established convention for a generic status error, as opposed to `xml()` which is reserved for errors carrying a DAV-specific structured body).
 - Produces: none new.
 
@@ -1926,22 +1970,22 @@ Expected: FAIL — the thrown `Error` propagates out of `createWebdav`'s handler
 
 ```ts
 // webdav.ts
-  return async function webdav(request, env): Promise<Response> {
-    let response: Response;
-    try {
-      response = await route(request, env);
-    } catch (error) {
-      // An unexpected backend exception must still answer as a well-formed
-      // DAV response (every reply carries `DAV: 1, 2` etc. per spec) rather
-      // than escape as a bare crash from the composing Worker.
-      console.error("@dwk/webdav: unexpected error", error);
-      response = problem(500, "Internal Server Error");
-    }
-    if (request.body !== null && !request.bodyUsed) {
-      // ...unchanged body-drain logic...
-    }
-    return response;
-  };
+return async function webdav(request, env): Promise<Response> {
+  let response: Response;
+  try {
+    response = await route(request, env);
+  } catch (error) {
+    // An unexpected backend exception must still answer as a well-formed
+    // DAV response (every reply carries `DAV: 1, 2` etc. per spec) rather
+    // than escape as a bare crash from the composing Worker.
+    console.error("@dwk/webdav: unexpected error", error);
+    response = problem(500, "Internal Server Error");
+  }
+  if (request.body !== null && !request.bodyUsed) {
+    // ...unchanged body-drain logic...
+  }
+  return response;
+};
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1971,11 +2015,13 @@ git commit -m "fix(webdav): return a well-formed 500 instead of throwing"
 ### Task 17: remotestorage — log unexpected DO storage errors (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/remotestorage/src/log.ts` (add one event constant)
 - Modify: `packages/remotestorage/src/storage.ts:107-129` (`RemoteStorageObject.fetch`'s catch-all)
 - Test: `packages/remotestorage/src/index.test.ts` (the only file that currently exercises `RemoteStorageObject` — no `storage.test.ts` exists)
 
 **Interfaces:**
+
 - Consumes: none new (deliberately does **not** attempt to thread the front door's injected `Logger`/`Metrics` across the DO `fetch()` boundary — functions don't survive `JSON.stringify`, which is how config already crosses that boundary elsewhere in this package. `console.error` is the only signal that can reach the DO side, matching the precedent in `@dwk/activitypub`'s `object.ts` `#logDelivery`).
 - Produces: new `RemoteStorageLogEvent.StorageError` constant.
 
@@ -2077,11 +2123,13 @@ git commit -m "fix(remotestorage): log unexpected DO storage errors before rethr
 ### Task 18: atproto-pds — cap `#importRepo`'s CAR buffering (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/atproto-pds/src/config.ts` (add `maxImportCarSizeBytes`, mirroring `maxBlobSizeBytes` at lines 99/137/163/169/220/244)
 - Modify: `packages/atproto-pds/src/object.ts:1194-1201` (`#importRepo`)
 - Test: `packages/atproto-pds/src/index.test.ts` (around the existing `importRepo` test at line 894)
 
 **Interfaces:**
+
 - Consumes: existing `namedError(status, errorName, message?): XrpcError` (`xrpc.ts:41-47`).
 - Produces: `AtprotoPdsConfig.maxImportCarSizeBytes?: number` (new, optional, defaults to 128 MiB), threaded onto `ResolvedConfig` and `ForwardedConfig` identically to `maxBlobSizeBytes`.
 
@@ -2204,11 +2252,13 @@ git commit -m "fix(atproto-pds): cap migration CAR size before buffering"
 ### Task 19: atproto-pds — surface unhandled XRPC errors (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/atproto-pds/src/xrpc.ts:58-69` (`errorResponse`)
 - Modify: `packages/atproto-pds/src/handler.ts:57-74` (`forwardToDo`)
 - Test: `packages/atproto-pds/src/xrpc.test.ts:21-27`, `packages/atproto-pds/src/index.test.ts` (for the front-door log assertion)
 
 **Interfaces:**
+
 - Consumes: existing `config.logger: Logger` / `config.metrics: Metrics` on `ResolvedConfig` (already defaulted to noop, currently unused anywhere in the package).
 - Produces: none new — this deliberately does **not** add a `logger`/`metrics` field to `ForwardedConfig` (functions cannot survive the `JSON.stringify` that already carries config across the DO `fetch()` boundary); instead the DO side gets a `console.error` (always-visible, matching the `@dwk/activitypub` `object.ts` `#logDelivery` precedent) and the front door — which still holds the real injected seams — logs an aggregate signal whenever the DO returns a `500`.
 
@@ -2359,10 +2409,12 @@ git commit -m "fix(atproto-pds): surface unhandled XRPC errors via logging"
 ### Task 20: conformance-target — fix timing-safe-equal length leak (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/timing-safe-equal.ts:6-12`
 - Test: `packages/conformance-target/src/timing-safe-equal.test.ts`
 
 **Interfaces:**
+
 - Consumes: none new.
 - Produces: `timingSafeEqual(a: string, b: string): boolean` — signature unchanged (stays synchronous, since `crypto.subtle.timingSafeEqual` is not a `Promise`-returning API), so call sites in `admin.ts`/`approval.ts` need **no** edits.
 
@@ -2423,10 +2475,12 @@ git commit -m "fix(conformance-target): use crypto.subtle.timingSafeEqual, avoid
 ### Task 21: conformance-target — wrap `fetch()` in try/catch (MEDIUM)
 
 **Files:**
+
 - Modify: `packages/conformance-target/src/index.ts:42-56`
 - Test: a new or existing `packages/conformance-target/src/index.test.ts`
 
 **Interfaces:**
+
 - Consumes: none new.
 - Produces: none new — this package's mounts already answer with plain-text `new Response("...", {status})` (confirmed: `admin.ts:50,53`, `approval.ts:231,240,250`, `home.ts:130`), so the fallback matches that convention, not a JSON envelope.
 
@@ -2486,10 +2540,12 @@ git commit -m "fix(conformance-target): wrap fetch dispatch in try/catch"
 ### Task 22: examples/deploy-to-cloudflare — fix the `Env` type to cover both mounted packages (MEDIUM)
 
 **Files:**
+
 - Modify: `examples/deploy-to-cloudflare/src/index.ts:114` (and its import block)
 - No test file exists for this directory (no test tooling configured) — verify with `tsc --noEmit`.
 
 **Interfaces:**
+
 - Consumes: existing `WebfingerEnv` (`packages/webfinger/src/handler.ts:25`, `Record<never, never>`), existing `HostMetaEnv` (`packages/host-meta/src/handler.ts:25`, `Record<never, never>`).
 - Produces: none new — type-only change.
 
