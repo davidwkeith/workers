@@ -42,6 +42,7 @@ export {
   type IdTokenInput,
 } from "./token.js";
 export { verifyPkce, isValidChallenge } from "./pkce.js";
+export { SolidOidcLogEvent } from "./log.js";
 export {
   createCodeStore,
   type CodeStore,
