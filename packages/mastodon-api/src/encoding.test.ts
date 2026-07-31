@@ -33,6 +33,14 @@ describe("encoding", () => {
     expect(timingSafeEqualHex("abcd", "abc")).toBe(false);
   });
 
+  it("returns false for a trailing odd hex character rather than truncating", () => {
+    expect(timingSafeEqualHex("abcd", "abcde")).toBe(false);
+  });
+
+  it("returns false for a non-hex character rather than coercing it to 0", () => {
+    expect(timingSafeEqualHex("zz", "zy")).toBe(false);
+  });
+
   it("uses crypto.subtle.timingSafeEqual under the hood", () => {
     const spy = vi.spyOn(crypto.subtle, "timingSafeEqual");
     timingSafeEqualHex("ab".repeat(32), "ab".repeat(32));
