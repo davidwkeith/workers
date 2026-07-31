@@ -377,5 +377,12 @@ describe("@dwk/micropub media logging", () => {
     expect(errorRec?.fields).toMatchObject({
       reason: "no such column: internal_col",
     });
+    // Metrics parity: the fail-closed rollback must be counted, same as the
+    // fail-open path, so an operator counting this metric sees both.
+    expect(
+      metrics.counts.some(
+        (c) => c.event === MicropubLogEvent.MediaMetadataFailed,
+      ),
+    ).toBe(true);
   });
 });

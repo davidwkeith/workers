@@ -116,12 +116,13 @@ function noContent(): Response {
 /**
  * Emit a structured event on both the logger and the metrics seam, which share
  * one event vocabulary (see `@dwk/log`): `warn` for handled-but-notable
- * rejections, `info` for normal outcomes. Honors the redaction policy — callers
- * pass only reason codes, the action verb, scopes, and counts.
+ * rejections, `info` for normal outcomes, `error` for a fail-closed rollback.
+ * Honors the redaction policy — callers pass only reason codes, the action
+ * verb, scopes, and counts.
  */
 function emit(
   config: ResolvedConfig,
-  level: "info" | "warn",
+  level: "info" | "warn" | "error",
   event: string,
   fields?: LogFields,
 ): void {
@@ -446,7 +447,7 @@ async function storeMedia(
     });
   } catch (err) {
     if (config.extensions.proposed) {
-      config.logger.error(MicropubLogEvent.MediaMetadataFailed, {
+      emit(config, "error", MicropubLogEvent.MediaMetadataFailed, {
         reason: err instanceof Error ? err.message : String(err),
       });
       try {
