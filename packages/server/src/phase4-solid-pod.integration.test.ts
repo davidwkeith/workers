@@ -209,7 +209,13 @@ describe("Phase 4 — solid-pod on the emulated Durable Object", () => {
   it("delivers change notifications over a WebSocket subscription", async () => {
     const pod = await startPod();
     const wsUrl = `${pod.origin.replace(/^http/, "ws")}/doc`;
-    const ws = new WsClient(wsUrl);
+    // `#broadcast` WAC-filters per subscriber (issue #336): an unauthenticated
+    // socket is not the owner and `/doc` has no ACL granting public read, so
+    // it would never be sent the notification below. Authenticate the
+    // subscription as the owner via the test's `x-test-as` hook, matching
+    // `@dwk/solid-pod`'s own "still broadcasts to a subscriber authorized to
+    // read the changed resource" coverage.
+    const ws = new WsClient(wsUrl, { headers: { "x-test-as": OWNER } });
     try {
       // Subscribe: the upgrade routes to the DO, which accepts the socket.
       await new Promise<void>((resolve, reject) => {

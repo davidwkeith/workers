@@ -31,7 +31,8 @@ function dataEvent(type: string, data: unknown): Event {
 /**
  * One end of a {@link WebSocketPair}: an `EventTarget` whose `send` delivers to
  * its peer's listeners. Implements just the surface the DO and the upgrade
- * bridge use (`send`, `close`, `accept`, `readyState`, events).
+ * bridge use (`send`, `close`, `accept`, `readyState`, events,
+ * `serializeAttachment`/`deserializeAttachment`).
  */
 export class EmulatedWebSocket extends EventTarget {
   static readonly OPEN = 1;
@@ -39,6 +40,7 @@ export class EmulatedWebSocket extends EventTarget {
 
   readyState = EmulatedWebSocket.OPEN;
   #peer?: EmulatedWebSocket;
+  #attachment: unknown = null;
 
   /** Link the two ends (called by {@link WebSocketPair}). */
   _pair(peer: EmulatedWebSocket): void {
@@ -47,6 +49,23 @@ export class EmulatedWebSocket extends EventTarget {
 
   /** workerd requires `accept()` on the non-hibernated path; a no-op here. */
   accept(): void {}
+
+  /**
+   * workerd's Hibernation API persists this value across the DO's
+   * hibernate/wake cycle, so a DO can attach per-connection state (e.g. the
+   * accepted request's authenticated identity) without keeping the whole
+   * object resident. This shim never hibernates, so a plain in-memory field
+   * is a faithful-enough emulation: the value simply outlives the process,
+   * not a restart.
+   */
+  serializeAttachment(attachment: unknown): void {
+    this.#attachment = attachment;
+  }
+
+  /** Read back the value last passed to {@link serializeAttachment}, or `null`. */
+  deserializeAttachment(): unknown {
+    return this.#attachment;
+  }
 
   send(data: string | ArrayBufferLike | ArrayBufferView): void {
     if (this.readyState !== EmulatedWebSocket.OPEN) return;
