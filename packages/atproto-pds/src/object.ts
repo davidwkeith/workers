@@ -22,6 +22,7 @@ import {
   verifyJwt,
   type SessionClaims,
 } from "./auth.js";
+import { readRequestBodyCapped } from "./body.js";
 import { writeCar, writeCarStream, type CarBlock } from "./car.js";
 import { decodeCbor, encodeCbor } from "./cbor.js";
 import { CID, DAG_CBOR_CODEC, RAW_CODEC } from "./cid.js";
@@ -1046,16 +1047,17 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
 
   async #uploadBlob(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    // Reject an oversized upload by its declared length *before* buffering it,
-    // so a hostile Content-Length cannot push the DO past its 128 MB ceiling.
-    const declared = Number(request.headers.get("content-length"));
-    if (Number.isFinite(declared) && declared > this.#cfg.maxBlobSizeBytes) {
-      throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");
-    }
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.length > this.#cfg.maxBlobSizeBytes) {
-      throw namedError(400, "BlobTooLarge", "Blob exceeds the size limit");
-    }
+    // Reject an oversized upload by its declared Content-Length up front when
+    // present; either way the body is read incrementally and the reader is
+    // cancelled the instant the cap is exceeded, so a missing or lying
+    // Content-Length can never push the DO past its 128 MB ceiling by forcing
+    // a full buffer before the size is known.
+    const bytes = await readRequestBodyCapped(
+      request,
+      this.#cfg.maxBlobSizeBytes,
+      "BlobTooLarge",
+      "Blob exceeds the size limit",
+    );
     const cid = await CID.create(RAW_CODEC, bytes);
     const mime =
       request.headers.get("content-type") ?? "application/octet-stream";
@@ -1193,26 +1195,23 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
    */
   async #importRepo(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
-    // Reject an oversized migration CAR by its declared length *before*
-    // resolving the source signing key or buffering the body, so a hostile
-    // Content-Length cannot push the DO past its 128 MB ceiling or trigger a
-    // wasted DID-resolution fetch for a request we're going to reject anyway
-    // (mirrors #uploadBlob).
-    const declared = Number(request.headers.get("content-length"));
-    if (
-      Number.isFinite(declared) &&
-      declared > this.#cfg.maxImportCarSizeBytes
-    ) {
-      throw namedError(400, "CarTooLarge", "Import CAR exceeds the size limit");
-    }
+    // Reject an oversized migration CAR *before* resolving the source signing
+    // key: a declared Content-Length over the cap is rejected up front, and
+    // either way the body is read incrementally with the reader cancelled the
+    // instant the cap is exceeded, so a missing or lying Content-Length can
+    // never force a full buffer. Reading the (capped) body first also means a
+    // hostile oversized request never triggers the DID-resolution fetch below
+    // for a request we're going to reject anyway (mirrors #uploadBlob).
+    const carBytes = await readRequestBodyCapped(
+      request,
+      this.#cfg.maxImportCarSizeBytes,
+      "CarTooLarge",
+      "Import CAR exceeds the size limit",
+    );
     const did = this.#accountDid();
     const verifyKey = await resolveSigningKey(did, {
       plcDirectoryUrl: this.#cfg.plcDirectoryUrl,
     });
-    const carBytes = new Uint8Array(await request.arrayBuffer());
-    if (carBytes.length > this.#cfg.maxImportCarSizeBytes) {
-      throw namedError(400, "CarTooLarge", "Import CAR exceeds the size limit");
-    }
     const imported = await importRepoFromCar(carBytes, { verifyKey });
     if (imported.did !== did) {
       throw invalidRequest(

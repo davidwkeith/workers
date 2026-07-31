@@ -74,6 +74,41 @@ async function call(
   return handler(request, testEnv, ctx);
 }
 
+/**
+ * A request body stream with no declared length whose reads/cancellation are
+ * observable, so a test can assert a capped read aborts partway through
+ * instead of buffering the whole body — the gap the streaming rewrite closes
+ * for `#uploadBlob` / `#importRepo` (a missing or understated
+ * `Content-Length` must not let a client force full buffering).
+ */
+function trackedStream(
+  chunkBytes: number,
+  chunkCount: number,
+): {
+  stream: ReadableStream<Uint8Array>;
+  pulls: () => number;
+  cancelled: () => boolean;
+} {
+  let pulls = 0;
+  let cancelled = false;
+  let emitted = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (emitted >= chunkCount) {
+        controller.close();
+        return;
+      }
+      pulls++;
+      emitted++;
+      controller.enqueue(new Uint8Array(chunkBytes));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return { stream, pulls: () => pulls, cancelled: () => cancelled };
+}
+
 async function login(
   handler: ReturnType<typeof pds>,
   host: string,
@@ -369,6 +404,44 @@ describe("AT Protocol PDS", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: "BlobTooLarge",
     });
+  });
+
+  it("rejects an oversized blob with no Content-Length by aborting the stream, not buffering it first", async () => {
+    const host = "streamed-bigblob.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxBlobSizeBytes: 10,
+    });
+    const token = await login(handler, host);
+    // 5 chunks of 10 bytes (50 total) against a 10-byte cap, with no
+    // Content-Length header at all — the declared-length fast path cannot
+    // help here, so only an incremental capped read protects memory.
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/octet-stream");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.uploadBlob`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "BlobTooLarge",
+    });
+    // The gap: buffering the whole body via `request.arrayBuffer()` first
+    // would drain all 5 chunks before ever checking the size. A correct
+    // capped read must cancel the reader as soon as the running total
+    // exceeds the cap, well before the stream is fully drained.
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
   });
 
   it("resolves its own handle and describes the repo", async () => {
@@ -1017,6 +1090,37 @@ describe("AT Protocol PDS", () => {
     expect((await res.json()) as { error: string }).toMatchObject({
       error: "CarTooLarge",
     });
+  });
+
+  it("rejects an oversized migration CAR with no Content-Length by aborting the stream, not buffering it first", async () => {
+    const host = "streamed-bigcar.example";
+    const handler = createAtprotoPds({
+      baseUrl: `https://${host}`,
+      password: PASSWORD,
+      jwtSecret: SECRET,
+      maxImportCarSizeBytes: 10,
+    });
+    const token = await login(handler, host);
+    const tracked = trackedStream(10, 5);
+    const headers = new Headers();
+    headers.set("authorization", `Bearer ${token}`);
+    headers.set("content-type", "application/vnd.ipld.car");
+    const request = new Request(
+      `https://${host}/xrpc/com.atproto.repo.importRepo`,
+      {
+        method: "POST",
+        headers,
+        body: tracked.stream as unknown as BodyInit,
+      },
+    );
+    expect(request.headers.get("content-length")).toBe(null);
+    const res = await handler(request, testEnv, ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: "CarTooLarge",
+    });
+    expect(tracked.pulls()).toBeLessThan(5);
+    expect(tracked.cancelled()).toBe(true);
   });
 });
 
