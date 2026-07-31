@@ -1077,13 +1077,15 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
   async #uploadBlob(request: Request): Promise<Response> {
     await this.#requireAuth(request, ACCESS_SCOPE);
     // Reject an oversized upload by its declared Content-Length up front when
-    // present; either way the body is read incrementally and the reader is
-    // cancelled the instant the running total exceeds maxBlobSizeBytes, so a
-    // missing or lying Content-Length can no longer force a buffer bigger
-    // than the configured cap. (That cap itself still has to stay well under
-    // the DO's 128 MB ceiling for this to bound memory in practice — this
-    // only closes the "buffer first, check later" gap, it doesn't make an
-    // oversized cap safe.)
+    // present; either way the body is read incrementally into a resizable
+    // buffer capped at maxBlobSizeBytes (see readRequestBodyCapped), with the
+    // reader cancelled the instant a chunk would grow it past that cap — so a
+    // missing or lying Content-Length can no longer grow the buffer past the
+    // configured cap, and memory used tracks the bytes actually received
+    // rather than the cap itself. (That cap still has to stay well under the
+    // DO's 128 MB ceiling for this to bound memory in practice for a body
+    // that actually reaches it — this only closes the "buffer first, check
+    // later" gap, it doesn't make an oversized cap safe.)
     const bytes = await readRequestBodyCapped(
       request,
       this.#cfg.maxBlobSizeBytes,
@@ -1229,17 +1231,19 @@ export class AtprotoRepoObject extends DurableObject<AtprotoPdsEnv> {
     await this.#requireAuth(request, ACCESS_SCOPE);
     // Reject an oversized migration CAR *before* resolving the source signing
     // key: a declared Content-Length over the cap is rejected up front, and
-    // either way the body is read incrementally with the reader cancelled the
-    // instant the running total exceeds maxImportCarSizeBytes, so a missing
-    // or lying Content-Length can no longer force a buffer bigger than the
-    // configured cap. Note `maxImportCarSizeBytes` defaults to 128 MiB — the
-    // same order of magnitude as the DO's 128 MB ceiling — so a fully honest,
-    // in-cap import at the default is still an OOM risk in its own right;
-    // this fix closes the "buffer first, check later" gap, it does not make
-    // an oversized default cap safe on its own. Reading the (capped) body
-    // first also means a hostile oversized request never triggers the
-    // DID-resolution fetch below for a request we're going to reject anyway
-    // (mirrors #uploadBlob).
+    // either way the body is read incrementally into a resizable buffer
+    // capped at maxImportCarSizeBytes (see readRequestBodyCapped), with the
+    // reader cancelled the instant a chunk would grow it past that cap — so a
+    // missing or lying Content-Length can no longer grow the buffer past the
+    // configured cap, and memory used tracks the bytes actually received
+    // rather than the cap itself. Note `maxImportCarSizeBytes` defaults to
+    // 128 MiB — the same order of magnitude as the DO's 128 MB ceiling — so a
+    // fully honest import that actually reaches the default cap is still an
+    // OOM risk in its own right; this fix closes the "buffer first, check
+    // later" gap, it does not make an oversized default cap safe on its own.
+    // Reading the (capped) body first also means a hostile oversized request
+    // never triggers the DID-resolution fetch below for a request we're
+    // going to reject anyway (mirrors #uploadBlob).
     const carBytes = await readRequestBodyCapped(
       request,
       this.#cfg.maxImportCarSizeBytes,
