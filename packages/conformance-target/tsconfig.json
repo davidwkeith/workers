@@ -1,6 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // `@dwk/atproto-pds`'s `body.ts` uses a resizable `ArrayBuffer`
+    // (`maxByteLength`/`resize`), which needs the ES2024 ArrayBuffer lib —
+    // pulled in transitively here since `paths` maps straight to its source.
+    "lib": ["ES2022", "ES2024.ArrayBuffer"],
     "paths": {
       "@dwk/activitypub": ["../activitypub/src/index.ts"],
       "@dwk/atproto-pds": ["../atproto-pds/src/index.ts"],
