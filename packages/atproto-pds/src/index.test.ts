@@ -481,9 +481,11 @@ describe("AT Protocol PDS", () => {
   });
 
   it("reassembles a multi-chunk streamed blob upload byte-for-byte", async () => {
-    // Distinct, non-repeating chunk contents so a merge-order or
-    // off-by-one bug in `readRequestBodyCapped`'s chunk-copy loop would
-    // corrupt the reassembled bytes rather than passing by coincidence.
+    // Distinct, non-repeating chunk contents so an offset-tracking bug in
+    // `readRequestBodyCapped`'s incremental in-place write (each chunk is
+    // written directly into the pre-allocated buffer at the running
+    // `offset`) would corrupt the reassembled bytes rather than passing by
+    // coincidence.
     const host = "multichunk-blob.example";
     const handler = pds(host);
     const token = await login(handler, host);

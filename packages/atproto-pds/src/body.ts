@@ -12,13 +12,20 @@
  * so its cap can't lean on an auth check running first the way the other
  * four (all behind `#requireAuth`) can. A declared `Content-Length` over the
  * limit is rejected up front as a cheap optimization, but the stream is
- * always read incrementally and aborted (`reader.cancel()`) the moment the
- * running total exceeds the cap — so a missing or understated
- * `Content-Length` (e.g. chunked transfer-encoding) cannot force a buffer
- * bigger than `maxBytes` regardless of what it claims. This bounds memory to
- * the caller's configured cap, not to some fixed safe size — a cap set close
- * to (or at) the isolate ceiling is still an OOM risk in its own right; see
- * the `maxBytes` callers for what they pass.
+ * always read incrementally and written directly into a single buffer
+ * pre-allocated to `maxBytes`, aborting (`reader.cancel()`) the moment a
+ * chunk would overflow it — so a missing or understated `Content-Length`
+ * (e.g. chunked transfer-encoding) cannot force an allocation bigger than
+ * `maxBytes` regardless of what it claims. This bounds memory to the
+ * caller's configured cap, not to some fixed safe size — a cap set close to
+ * (or at) the isolate ceiling is still an OOM risk in its own right; see the
+ * `maxBytes` callers for what they pass. Note the pre-allocated buffer costs
+ * `maxBytes` bytes momentarily on *every* call regardless of how much data
+ * actually arrives (a 10-byte body against a 2 MiB cap still allocates 2 MiB
+ * up front) — that's the deliberate trade this makes for a genuine, provable
+ * single-allocation bound instead of accumulating chunks and copying them
+ * into a second buffer sized to the real total (which would briefly hold
+ * both the chunks and the copy at once).
  *
  * This mirrors the capped-read pattern in `@dwk/activitypub`'s
  * `readRequestBodyCapped` (also copied into `@dwk/solid-oidc`'s `body.ts`),
@@ -39,10 +46,15 @@ import { namedError } from "./xrpc.js";
  * message)` if it exceeds `maxBytes`.
  *
  * A declared `Content-Length` over the cap is rejected up front without
- * touching the body. Otherwise the stream is read incrementally and the
- * reader is cancelled the instant the running total exceeds `maxBytes`, so
- * the buffer this function builds never grows past the cap regardless of
- * what `Content-Length` claims — or omits.
+ * touching the body. Otherwise a single buffer sized to `maxBytes` is
+ * allocated once, up front, and each chunk is written directly into it as it
+ * arrives — the reader is cancelled the instant a chunk would overflow the
+ * buffer, so nothing is ever allocated or copied past the cap regardless of
+ * what `Content-Length` claims or omits. There is no intermediate
+ * chunk-array-then-copy step: peak memory is the single `maxBytes`
+ * allocation, not that plus a second buffer sized to the actual total. The
+ * returned array is a zero-copy `subarray` view over the pre-allocated
+ * buffer, trimmed to the bytes actually received.
  */
 export async function readRequestBodyCapped(
   request: Request,
@@ -67,36 +79,34 @@ export async function readRequestBodyCapped(
     return new Uint8Array(buffer);
   }
 
-  const chunks: (Uint8Array | undefined)[] = [];
-  let total = 0;
+  // Allocate the one buffer this read will ever need, sized to the cap,
+  // *before* reading anything. Each chunk is written straight into it as it
+  // arrives (checking the cap before the write, so a chunk can never be
+  // written past the buffer's end), and there is no separate `chunks` array
+  // to hold onto: at no point does this function reference both a
+  // fully-populated buffer and the raw chunks that filled it, which is what
+  // an "accumulate chunks, then copy them into a merged buffer" approach
+  // would do (that shape briefly holds ~2x the data — the chunks plus the
+  // copy — no matter when the chunk references are dropped, since the copy
+  // target is allocated in full before any copying/releasing starts).
+  const merged = new Uint8Array(maxBytes);
+  let offset = 0;
   const reader = body.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     if (value !== undefined) {
-      total += value.byteLength;
-      if (total > maxBytes) {
+      if (offset + value.byteLength > maxBytes) {
         await reader.cancel();
         throw namedError(400, errorName, message);
       }
-      chunks.push(value);
+      merged.set(value, offset);
+      offset += value.byteLength;
     }
   }
-
-  // Copy each chunk into `merged` and drop this function's own reference to
-  // it immediately after, so the copied chunk becomes collectible before the
-  // next one is read/copied. Without this, `chunks` stays live for the whole
-  // loop and peak memory is ~2x the body size (the still-referenced chunks
-  // plus the `merged` copy) instead of the ~1x a capped read should cost.
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i]!;
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-    chunks[i] = undefined;
-  }
-  return merged;
+  // A zero-copy view over the bytes actually received — trimming via
+  // `subarray` (not `slice`) costs nothing extra.
+  return merged.subarray(0, offset);
 }
 
 /**
