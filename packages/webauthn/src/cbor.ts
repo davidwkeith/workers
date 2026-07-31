@@ -61,7 +61,7 @@ class Reader {
   }
 
   readItem(depth = 0): CborValue {
-    if (depth > Reader.MAX_DEPTH) {
+    if (depth >= Reader.MAX_DEPTH) {
       throw new CborError("CBOR nesting exceeds maximum depth");
     }
     const initial = this.#byte();
