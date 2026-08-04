@@ -1,5 +1,13 @@
 # @dwk/server
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+  - @dwk/cf-shims@1.0.0-beta.2
+
 ## 1.0.0-beta.2
 
 ### Minor Changes

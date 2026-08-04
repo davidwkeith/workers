@@ -1,5 +1,45 @@
 # @dwk/conformance-target
 
+## 1.0.0-beta.4
+
+### Patch Changes
+
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [096d04b]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [b1e0fc4]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [b1e0fc4]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [b1e0fc4]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [ec0f4a2]
+- Updated dependencies [d54ad2d]
+  - @dwk/activitypub@1.0.0-beta.3
+  - @dwk/mastodon-api@1.0.0-beta.2
+  - @dwk/atproto-pds@1.0.0-beta.2
+  - @dwk/indieauth@1.0.0-beta.2
+  - @dwk/micropub@1.0.0-beta.2
+  - @dwk/microsub@1.0.0-beta.2
+  - @dwk/remotestorage@1.0.0-beta.2
+  - @dwk/solid-pod@1.0.0-beta.3
+  - @dwk/vc@1.0.0-beta.2
+  - @dwk/webauthn@1.0.0-beta.2
+  - @dwk/webfinger@1.0.0-beta.2
+  - @dwk/host-meta@1.0.0-beta.2
+
 ## 1.0.0-beta.3
 
 ### Patch Changes

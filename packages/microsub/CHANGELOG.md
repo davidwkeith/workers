@@ -1,5 +1,16 @@
 # @dwk/microsub
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- b1e0fc4: Send the poll-priming queue message in `follow` via `ctx.waitUntil` instead of
+  blocking the HTTP response on it.
+- ec0f4a2: Generate channel uids with `crypto.randomUUID()` instead of `Math.random()`.
+- Updated dependencies [b1e0fc4]
+- Updated dependencies [ec0f4a2]
+  - @dwk/indieauth@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes

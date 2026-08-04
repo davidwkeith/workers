@@ -1,5 +1,15 @@
 # @dwk/vc
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- b1e0fc4: Scope the signer cache to each `createVc()` instance instead of a module-level
+  global, so independently configured instances in the same isolate no longer
+  share cache state.
+- ec0f4a2: Add a real runtime type guard to `findVerificationMethod` instead of blind-
+  casting an attacker-reachable DID document entry to `VerificationMethod`.
+
 ## 1.0.0-beta.1
 
 ### Major Changes

@@ -1,5 +1,20 @@
 # @dwk/micropub
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Background fediverse syndication via `ctx.waitUntil` instead of awaiting it
+  inline in the create-post response path, so a slow or unreachable fediverse
+  peer no longer delays the client's response. The MCP tool path (which has no
+  `ExecutionContext`) is unaffected and still awaits syndication inline.
+- ec0f4a2: Log the underlying D1 failure via the injected logger and return a generic
+  `error_description` when media metadata insert fails, instead of relaying
+  the raw database error message verbatim to the client.
+- Updated dependencies [b1e0fc4]
+- Updated dependencies [ec0f4a2]
+  - @dwk/indieauth@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes

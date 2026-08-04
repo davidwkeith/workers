@@ -1,5 +1,12 @@
 # @dwk/host-meta
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- Updated dependencies [d54ad2d]
+  - @dwk/webfinger@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes

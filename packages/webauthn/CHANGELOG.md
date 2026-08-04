@@ -1,5 +1,26 @@
 # @dwk/webauthn
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Cap the CBOR decoder's recursion depth at 32 levels. A crafted `attestationObject`
+  with deeply nested arrays/maps could previously stack-overflow the Worker
+  (denial of service); it now throws `CborError` instead.
+- ec0f4a2: Fix an off-by-one in the CBOR decoder's depth guard: `depth > MAX_DEPTH`
+  let a 33-level-deep structure through even though `MAX_DEPTH = 32` and its
+  doc comment promise a 32-level maximum. The guard is now `depth >=
+MAX_DEPTH`, so the accepted maximum matches what's documented. Not
+  exploitable on its own (32 is already generous headroom over the 2-3 levels
+  real WebAuthn CBOR needs) — a correctness nit, not a new mitigation.
+- ec0f4a2: Wrap ceremony dispatch (both the per-relying-party Durable Object and the
+  front door's invocation of it) in try/catch. A parse or verification failure
+  that previously escaped as an unhandled exception now returns the package's
+  structured `{error}` JSON contract.
+- ec0f4a2: Compare the WebAuthn challenge with a constant-time byte comparison
+  (`crypto.subtle.timingSafeEqual`) instead of a plain string `!==`, closing a
+  timing side channel on challenge verification.
+
 ## 1.0.0-beta.1
 
 ### Major Changes
