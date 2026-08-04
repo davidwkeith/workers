@@ -37,6 +37,12 @@ export const IndieAuthLogEvent = {
   TokenRejected: "indieauth.token.rejected",
   /** A token was revoked at the revocation endpoint. */
   TokenRevoked: "indieauth.token.revoked",
+  /**
+   * An unexpected exception escaped route dispatch (e.g. a D1 failure) instead
+   * of being reported as a structured rejection. Field: `message` (the
+   * exception's message, logged only — never returned to the client).
+   */
+  UnhandledError: "indieauth.error.unhandled",
 } as const;
 
 /** Union of the event-name string literals in {@link IndieAuthLogEvent}. */

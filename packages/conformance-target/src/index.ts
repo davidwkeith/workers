@@ -49,9 +49,10 @@ export default {
       // drainBody middleware otherwise reads it after the response and, across
       // the Durable Object fetch boundary, that late read crashes workerd
       // (litmus `locks` never finished locally until this; harmless in
-      // production, where no such middleware exists).
+      // production, where no such middleware exists). Backgrounded via
+      // waitUntil so the isolate isn't torn down before it settles.
       if (request.body !== null && !request.bodyUsed) {
-        request.body.cancel().catch(() => undefined);
+        ctx.waitUntil(request.body.cancel().catch(() => undefined));
       }
       return response;
     } catch (error) {

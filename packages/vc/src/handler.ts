@@ -84,13 +84,19 @@ function emit(
   config.metrics.count(event, fields);
 }
 
-// Importing a key with crypto.subtle is comparatively expensive, and the secret
-// binding is stable for the life of the isolate. Cache the resolved Signer by the
-// raw JWK string so a hot issuance path imports the key once, not per request.
-const signerCache = new Map<string, Signer>();
-
-/** Parse and validate the signing-key secret binding (fail loudly). */
-async function loadSigner(env: VcEnv): Promise<Signer> {
+/**
+ * Parse and validate the signing-key secret binding (fail loudly).
+ *
+ * Importing a key with crypto.subtle is comparatively expensive, and the secret
+ * binding is stable for the life of the isolate. Cache the resolved Signer by the
+ * raw JWK string so a hot issuance path imports the key once, not per request.
+ * The cache is passed in by the caller (one per `createVc()` instance) so state
+ * is never shared across independently-configured handlers in the same isolate.
+ */
+async function loadSigner(
+  env: VcEnv,
+  signerCache: Map<string, Signer>,
+): Promise<Signer> {
   if (!env.VC_SIGNING_KEY || typeof env.VC_SIGNING_KEY !== "string") {
     throw new Error(
       "@dwk/vc: missing required secret binding `VC_SIGNING_KEY`",
@@ -141,6 +147,7 @@ async function handleIssue(
   request: Request,
   env: VcEnv,
   config: ResolvedVcConfig,
+  signerCache: Map<string, Signer>,
 ): Promise<Response> {
   if (!(await config.authorize("issue", request))) {
     emit(config, "warn", VcLogEvent.Rejected, { reason: "unauthorized" });
@@ -186,7 +193,7 @@ async function handleIssue(
 
   let signer: Signer;
   try {
-    signer = await loadSigner(env);
+    signer = await loadSigner(env, signerCache);
   } catch (error) {
     return problem("server_error", (error as Error).message, 500);
   }
@@ -378,6 +385,7 @@ async function handleStatusList(
   env: VcEnv,
   config: ResolvedVcConfig,
   purposeSegment: string,
+  signerCache: Map<string, Signer>,
 ): Promise<Response> {
   if (!config.statusEnabled) {
     return problem("status_disabled", "status lists are not enabled", 404);
@@ -401,7 +409,7 @@ async function handleStatusList(
 
   let signer: Signer;
   try {
-    signer = await loadSigner(env);
+    signer = await loadSigner(env, signerCache);
   } catch (error) {
     return problem("server_error", (error as Error).message, 500);
   }
@@ -430,6 +438,11 @@ export function createVc(config: VcConfig): VcHandler {
     createDidWebResolver({
       fetchAllowedHosts: resolved.fetchAllowedHosts,
     });
+  // Per-instance signer cache: see `loadSigner`. Scoped to this `createVc()`
+  // call so independently-configured handlers in the same isolate never share
+  // cache state, while still reusing the imported key across requests to this
+  // one handler for the lifetime of the isolate.
+  const signerCache = new Map<string, Signer>();
 
   return async (request, env, _ctx) => {
     const url = new URL(request.url);
@@ -438,7 +451,7 @@ export function createVc(config: VcConfig): VcHandler {
 
     if (path === resolved.issuePath) {
       if (method !== "POST") return methodNotAllowed(resolved, "POST");
-      return handleIssue(request, env, resolved);
+      return handleIssue(request, env, resolved, signerCache);
     }
     if (path === resolved.verifyPath) {
       if (method !== "POST") return methodNotAllowed(resolved, "POST");
@@ -456,7 +469,12 @@ export function createVc(config: VcConfig): VcHandler {
       if (segment.length === 0 || segment.includes("/")) {
         return problem("not_found", "no such status list", 404);
       }
-      const response = await handleStatusList(env, resolved, segment);
+      const response = await handleStatusList(
+        env,
+        resolved,
+        segment,
+        signerCache,
+      );
       return method === "HEAD"
         ? new Response(null, {
             status: response.status,

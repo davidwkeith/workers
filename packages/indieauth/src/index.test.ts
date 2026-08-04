@@ -538,6 +538,76 @@ describe("@dwk/indieauth profile-URL exchange", () => {
   });
 });
 
+describe("@dwk/indieauth stored-profile shape validation", () => {
+  async function codeWithStoredProfile(profile: string): Promise<string> {
+    const store = createIndieAuthStore(harness);
+    const code = `profile-shape-${crypto.randomUUID()}`;
+    await store.saveAuthorizationCode({
+      code,
+      clientId: CLIENT_ID,
+      redirectUri: REDIRECT_URI,
+      scope: "create",
+      me: ME,
+      codeChallenge: await s256(CODE_VERIFIER),
+      codeChallengeMethod: "S256",
+      profile,
+      expiresAt: Math.floor(Date.now() / 1000) + 600,
+    });
+    return code;
+  }
+
+  async function redeemAtAuthorizeEndpoint(
+    handler: ReturnType<typeof createIndieAuth>,
+    code: string,
+  ): Promise<Record<string, unknown>> {
+    const res = await handler(
+      new Request(`${BASE}/authorize`, {
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    return (await res.json()) as Record<string, unknown>;
+  }
+
+  it("omits a stored profile that is not an object", async () => {
+    const handler = autoApproveHandler();
+    const code = await codeWithStoredProfile(
+      JSON.stringify(["not", "an", "object"]),
+    );
+    const body = await redeemAtAuthorizeEndpoint(handler, code);
+    expect(body.me).toBe(ME);
+    expect(body.profile).toBeUndefined();
+  });
+
+  it("omits a stored profile with a wrong-typed field", async () => {
+    const handler = autoApproveHandler();
+    const code = await codeWithStoredProfile(JSON.stringify({ name: 42 }));
+    const body = await redeemAtAuthorizeEndpoint(handler, code);
+    expect(body.profile).toBeUndefined();
+  });
+
+  it("still returns a well-formed stored profile", async () => {
+    const handler = autoApproveHandler();
+    const code = await codeWithStoredProfile(
+      JSON.stringify({ name: "Alice", url: "https://alice.example.com/" }),
+    );
+    const body = await redeemAtAuthorizeEndpoint(handler, code);
+    expect(body.profile).toEqual({
+      name: "Alice",
+      url: "https://alice.example.com/",
+    });
+  });
+});
+
 describe("@dwk/indieauth revocation", () => {
   it("revokes an issued token", async () => {
     const handler = autoApproveHandler();
@@ -1191,5 +1261,52 @@ describe("@dwk/indieauth fails loudly on missing bindings", () => {
         ctx,
       ),
     ).rejects.toThrow(/AUTH_DB/);
+  });
+});
+
+describe("@dwk/indieauth unhandled dispatch errors", () => {
+  it("returns a structured 500 instead of throwing when the approval hook throws", async () => {
+    const handler = createIndieAuth(
+      baseConfig(() => {
+        throw new Error("sensitive backend detail");
+      }),
+    );
+    const res = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as {
+      error: string;
+      error_description: string;
+    };
+    expect(body.error).toBe("server_error");
+    expect(body.error_description).not.toContain("sensitive backend detail");
+  });
+
+  it("returns a structured 500 instead of throwing on an unexpected D1 failure", async () => {
+    const handler = autoApproveHandler();
+    const brokenDb = {
+      prepare: () => {
+        throw new Error("simulated D1 outage: internal detail");
+      },
+    } as unknown as D1Database;
+    const res = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      { ...harness, AUTH_DB: brokenDb },
+      ctx,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as {
+      error: string;
+      error_description: string;
+    };
+    expect(body.error).toBe("server_error");
+    expect(body.error_description).not.toContain("simulated D1 outage");
   });
 });

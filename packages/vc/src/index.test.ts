@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, vi } from "vitest";
 
 import {
   addProof,
@@ -303,6 +303,51 @@ describe("createVc — routing", () => {
       ctx,
     );
     expect(res.status).toBe(404);
+  });
+});
+
+describe("createVc — signer cache isolation", () => {
+  it("caches the imported signer per createVc() instance, not globally", async () => {
+    const importKeySpy = vi.spyOn(crypto.subtle, "importKey");
+    const before = importKeySpy.mock.calls.length;
+
+    const handlerA = makeHandler();
+    const handlerB = makeHandler();
+
+    await handlerA(
+      post("/credentials/issue", { credential: sampleCredential() }),
+      testEnv,
+      ctx,
+    );
+    const afterFirstA = importKeySpy.mock.calls.length;
+    expect(afterFirstA).toBe(before + 1);
+
+    // A second request on the same instance reuses its cached signer.
+    await handlerA(
+      post("/credentials/issue", { credential: sampleCredential() }),
+      testEnv,
+      ctx,
+    );
+    expect(importKeySpy.mock.calls.length).toBe(afterFirstA);
+
+    // A separate createVc() instance — even given the identical raw JWK —
+    // does not share the first instance's cache: it imports its own key once.
+    await handlerB(
+      post("/credentials/issue", { credential: sampleCredential() }),
+      testEnv,
+      ctx,
+    );
+    expect(importKeySpy.mock.calls.length).toBe(afterFirstA + 1);
+
+    // handlerB's own cache is now warm too.
+    await handlerB(
+      post("/credentials/issue", { credential: sampleCredential() }),
+      testEnv,
+      ctx,
+    );
+    expect(importKeySpy.mock.calls.length).toBe(afterFirstA + 1);
+
+    importKeySpy.mockRestore();
   });
 });
 
