@@ -16,7 +16,7 @@ import {
   type MintedToken,
 } from "./test-harness.js";
 
-const ctx = {} as ExecutionContext;
+const ctx = { waitUntil: () => {} } as unknown as ExecutionContext;
 
 const JSON_FEED = JSON.stringify({
   version: "https://jsonfeed.org/version/1.1",
@@ -372,6 +372,57 @@ describe("following & timeline", () => {
         }
       ).items,
     ).toHaveLength(0);
+  });
+
+  it("does not block the follow response on the poll queue send", async () => {
+    const handler = makeHandler(feedFetch());
+    const { env: testEnv } = makeEnv();
+    const token = await mintToken(testEnv, "read follow channels");
+    const channel = (await (
+      await post(handler, testEnv, { action: "channels", name: "Blogs" }, token)
+    ).json()) as { uid: string };
+
+    let resolveSend!: () => void;
+    const sendBlocked = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+    const waited: Promise<unknown>[] = [];
+    const waitCtx = {
+      waitUntil: (p: Promise<unknown>) => {
+        waited.push(p);
+      },
+    } as unknown as ExecutionContext;
+    const blockedEnv = {
+      ...testEnv,
+      MICROSUB_QUEUE: {
+        send: vi.fn(async () => {
+          await sendBlocked;
+        }),
+      },
+    } as unknown as MicrosubEnv;
+
+    const followed = await handler(
+      new Request(MICROSUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(token, "POST", MICROSUB)),
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          action: "follow",
+          channel: channel.uid,
+          url: "https://blog.example/feed.json",
+        }).toString(),
+      }),
+      blockedEnv,
+      waitCtx,
+    );
+
+    // The response returns without waiting on the queue send.
+    expect(followed.status).toBe(200);
+    expect(waited).toHaveLength(1);
+    resolveSend();
+    await waited[0];
   });
 
   it("supports mark_unread, last_read_entry, and remove", async () => {

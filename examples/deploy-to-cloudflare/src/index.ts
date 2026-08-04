@@ -94,21 +94,26 @@ into this Worker — IndieAuth, Micropub, Webmention, an edge Solid Pod, Activit
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
-    const url = new URL(request.url);
-    const { webfinger, hostMeta } = createHandlers(url.hostname);
+    try {
+      const url = new URL(request.url);
+      const { webfinger, hostMeta } = createHandlers(url.hostname);
 
-    if (url.pathname === "/.well-known/webfinger") {
-      return webfinger(request, env, ctx);
+      if (url.pathname === "/.well-known/webfinger") {
+        return await webfinger(request, env, ctx);
+      }
+      if (
+        url.pathname === "/.well-known/host-meta" ||
+        url.pathname === "/.well-known/host-meta.json"
+      ) {
+        return await hostMeta(request, env, ctx);
+      }
+      if (url.pathname === "/") {
+        return landing(url.hostname);
+      }
+      return new Response("Not found", { status: 404 });
+    } catch (error) {
+      console.error("dwk-discovery-starter: unhandled fetch error", error);
+      return new Response("Internal Server Error", { status: 500 });
     }
-    if (
-      url.pathname === "/.well-known/host-meta" ||
-      url.pathname === "/.well-known/host-meta.json"
-    ) {
-      return hostMeta(request, env, ctx);
-    }
-    if (url.pathname === "/") {
-      return landing(url.hostname);
-    }
-    return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<WebfingerEnv & HostMetaEnv>;

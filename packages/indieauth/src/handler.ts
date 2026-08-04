@@ -63,12 +63,13 @@ function oauthError(
 /**
  * Emit a structured event on both the logger and the metrics seam, which share
  * one event vocabulary (see `@dwk/log`): `warn` for handled-but-notable
- * rejections, `info` for normal outcomes. Honors the redaction policy — callers
+ * rejections, `info` for normal outcomes, `error` for an unexpected exception
+ * that escaped normal request handling. Honors the redaction policy — callers
  * pass only reason codes, sanitized hosts, and scopes, never codes or tokens.
  */
 function emit(
   config: ResolvedConfig,
-  level: "info" | "warn",
+  level: "info" | "warn" | "error",
   event: string,
   fields?: LogFields,
 ): void {
@@ -112,10 +113,29 @@ function redirectError(
   return Response.redirect(url.toString(), 302);
 }
 
+/** Optional `ProfileInfo` keys, each required to be a string when present. */
+const PROFILE_INFO_KEYS = ["name", "url", "photo", "email"] as const;
+
+/**
+ * Whether `value` has the {@link ProfileInfo} shape: a non-null, non-array
+ * object whose `name`/`url`/`photo`/`email` keys, if present, are strings. All
+ * keys are optional, so an empty object passes.
+ */
+function isProfileInfo(value: unknown): value is ProfileInfo {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return PROFILE_INFO_KEYS.every(
+    (key) => !(key in record) || typeof record[key] === "string",
+  );
+}
+
 function parseProfile(profile: string | null): ProfileInfo | undefined {
   if (profile === null) return undefined;
   try {
-    return JSON.parse(profile) as ProfileInfo;
+    const parsed: unknown = JSON.parse(profile);
+    return isProfileInfo(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -654,32 +674,43 @@ export function createIndieAuth(config: IndieAuthConfig): IndieAuthHandler {
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
 
-    if (pathname === resolved.metadataPath) {
-      if (method !== "GET") return methodNotAllowed("GET");
-      return json(buildServerMetadata(resolved));
-    }
-
-    if (pathname === resolved.authorizationPath) {
-      if (method === "GET") {
-        return handleAuthorizationGet(request, resolved, store);
+    // Everything below can throw on an unexpected failure (e.g. D1 rejecting a
+    // query) after the fail-loudly binding checks above have already run — a
+    // bare exception here must not escape as an unhandled Worker crash, so it
+    // is reported as a well-formed (and non-leaky) OAuth error instead.
+    try {
+      if (pathname === resolved.metadataPath) {
+        if (method !== "GET") return methodNotAllowed("GET");
+        return json(buildServerMetadata(resolved));
       }
-      if (method === "POST") {
-        return handleProfileExchange(request, store, resolved);
+
+      if (pathname === resolved.authorizationPath) {
+        if (method === "GET") {
+          return await handleAuthorizationGet(request, resolved, store);
+        }
+        if (method === "POST") {
+          return await handleProfileExchange(request, store, resolved);
+        }
+        return methodNotAllowed("GET, POST");
       }
-      return methodNotAllowed("GET, POST");
-    }
 
-    if (pathname === resolved.tokenPath) {
-      if (method !== "POST") return methodNotAllowed("POST");
-      return handleToken(request, resolved, store, signingKey);
-    }
+      if (pathname === resolved.tokenPath) {
+        if (method !== "POST") return methodNotAllowed("POST");
+        return await handleToken(request, resolved, store, signingKey);
+      }
 
-    if (pathname === resolved.revocationPath) {
-      if (method !== "POST") return methodNotAllowed("POST");
-      return handleRevocation(request, store, resolved, signingKey);
-    }
+      if (pathname === resolved.revocationPath) {
+        if (method !== "POST") return methodNotAllowed("POST");
+        return await handleRevocation(request, store, resolved, signingKey);
+      }
 
-    return new Response("Not Found", { status: 404 });
+      return new Response("Not Found", { status: 404 });
+    } catch (err) {
+      emit(resolved, "error", IndieAuthLogEvent.UnhandledError, {
+        message: err instanceof Error ? err.message : "unknown error",
+      });
+      return oauthError("server_error", "an unexpected error occurred", 500);
+    }
   };
 }
 

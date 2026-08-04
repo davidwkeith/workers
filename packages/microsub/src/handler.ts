@@ -308,6 +308,7 @@ async function handleFollow(
   config: ResolvedConfig,
   params: URLSearchParams,
   store: MicrosubStore,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const auth = await requireAuth(
     request,
@@ -349,7 +350,7 @@ async function handleFollow(
     );
   }
   // Prime the poll cache and pick up anything discovery did not.
-  await env.MICROSUB_QUEUE.send({ kind: "poll", feedUrl });
+  ctx.waitUntil(env.MICROSUB_QUEUE.send({ kind: "poll", feedUrl }));
 
   emit(config, "info", MicrosubLogEvent.ActionCompleted, { action: "follow" });
   return json({ type: "feed", url });
@@ -541,7 +542,7 @@ function rejected(config: ResolvedConfig, reason: string): Response {
 export function createMicrosub(config: MicrosubConfig): MicrosubHandler {
   const resolved = resolveConfig(config);
 
-  return async (request, env, _ctx) => {
+  return async (request, env, ctx) => {
     assertBindings(env);
     const { pathname } = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -584,7 +585,7 @@ export function createMicrosub(config: MicrosubConfig): MicrosubHandler {
       case "channels":
         return handleChannelsPost(request, env, resolved, params, store);
       case "follow":
-        return handleFollow(request, env, resolved, params, store);
+        return handleFollow(request, env, resolved, params, store, ctx);
       case "unfollow":
         return handleUnfollow(request, env, resolved, params, store);
       case "timeline":
