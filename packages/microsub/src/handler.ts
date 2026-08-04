@@ -349,8 +349,16 @@ async function handleFollow(
       config.maxItemsPerChannel,
     );
   }
-  // Prime the poll cache and pick up anything discovery did not.
-  ctx.waitUntil(env.MICROSUB_QUEUE.send({ kind: "poll", feedUrl }));
+  // Prime the poll cache and pick up anything discovery did not. Best-effort:
+  // a failed send is logged, not surfaced, since the next scheduled poll
+  // still picks up the feed.
+  ctx.waitUntil(
+    env.MICROSUB_QUEUE.send({ kind: "poll", feedUrl }).catch((err: unknown) => {
+      emit(config, "warn", MicrosubLogEvent.PollPrimeFailed, {
+        message: err instanceof Error ? err.message : "unknown error",
+      });
+    }),
+  );
 
   emit(config, "info", MicrosubLogEvent.ActionCompleted, { action: "follow" });
   return json({ type: "feed", url });

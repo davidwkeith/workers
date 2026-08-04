@@ -39,6 +39,12 @@ export const MicrosubLogEvent = {
   PollRetry: "microsub.poll.retry",
   /** An outbound fetch was refused on SSRF grounds. Fields: `reason`, `host`. */
   SsrfBlocked: "microsub.ssrf.blocked",
+  /**
+   * The backgrounded poll-priming queue send for a new follow failed. Not
+   * fatal — the next scheduled poll picks up the feed regardless. Field:
+   * `message`.
+   */
+  PollPrimeFailed: "microsub.poll.prime_failed",
 } as const;
 
 /** Union of the event-name string literals in {@link MicrosubLogEvent}. */

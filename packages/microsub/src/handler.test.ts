@@ -425,6 +425,65 @@ describe("following & timeline", () => {
     await waited[0];
   });
 
+  it("logs (and does not throw) when the backgrounded poll-priming send fails", async () => {
+    const warn = vi.fn();
+    const handler = createMicrosub({
+      baseUrl: BASE,
+      me: ME,
+      pageSize: 20,
+      fetch: feedFetch(),
+      logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+    });
+    const { env: testEnv } = makeEnv();
+    const token = await mintToken(testEnv, "read follow channels");
+    const channel = (await (
+      await post(handler, testEnv, { action: "channels", name: "Blogs" }, token)
+    ).json()) as { uid: string };
+
+    const waited: Promise<unknown>[] = [];
+    const waitCtx = {
+      waitUntil: (p: Promise<unknown>) => {
+        waited.push(p);
+      },
+    } as unknown as ExecutionContext;
+    const failingEnv = {
+      ...testEnv,
+      MICROSUB_QUEUE: {
+        send: vi.fn(async () => {
+          throw new Error("queue unavailable");
+        }),
+      },
+    } as unknown as MicrosubEnv;
+
+    const followed = await handler(
+      new Request(MICROSUB, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders(token, "POST", MICROSUB)),
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          action: "follow",
+          channel: channel.uid,
+          url: "https://blog.example/feed.json",
+        }).toString(),
+      }),
+      failingEnv,
+      waitCtx,
+    );
+
+    // The follow still succeeds — the queue send is best-effort.
+    expect(followed.status).toBe(200);
+    expect(waited).toHaveLength(1);
+    // Awaiting the backgrounded promise must not throw: the failure is caught
+    // internally and logged instead of escaping as an unhandled rejection.
+    await expect(waited[0]).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      "microsub.poll.prime_failed",
+      expect.objectContaining({ message: "queue unavailable" }),
+    );
+  });
+
   it("supports mark_unread, last_read_entry, and remove", async () => {
     const handler = makeHandler(feedFetch());
     const { env: testEnv } = makeEnv();
