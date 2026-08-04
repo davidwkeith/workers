@@ -1,5 +1,21 @@
 # @dwk/solid-oidc
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Call the injected `logger`/`metrics` seam at the token endpoint's
+  security-relevant rejection points (DPoP proof rejected, invalid/replayed
+  code, PKCE mismatch) — previously wired but never invoked anywhere in the
+  package.
+- ec0f4a2: Construct `CodeStore` once per Worker isolate instead of once per request,
+  avoiding a redundant D1 schema-check round trip on every `/authorize` and
+  `/token` call (and skipping it entirely for discovery/JWKS requests, which
+  never touch it).
+- ec0f4a2: Cap the token endpoint's form-body read at 8 KiB before PKCE/code/DPoP
+  validation runs, instead of buffering an unbounded body on this public,
+  unauthenticated endpoint.
+
 ## 1.0.0-beta.1
 
 ### Major Changes

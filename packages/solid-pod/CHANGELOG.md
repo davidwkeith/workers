@@ -1,5 +1,47 @@
 # @dwk/solid-pod
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- ec0f4a2: WAC-filter WebSocket change notifications per subscriber instead of
+  broadcasting every resource change (including private resources) to every
+  connected socket unfiltered. An anonymous or unauthorized client can no
+  longer passively enumerate pod contents by watching the notification stream.
+
+  **Behaviour change for subscribers.** A subscription is authenticated from its
+  upgrade request's `Authorization` header, which the browser `WebSocket` API
+  cannot set — so browser-originated subscriptions authenticate as anonymous and
+  now receive notifications only for publicly-readable resources, where before
+  they received every change in the pod. Server-side subscribers that can set the
+  header (and the pod owner) are unaffected. Carrying a token on a browser
+  handshake — e.g. a Solid Notifications subscription endpoint that mints a
+  bearer-bound channel URL, or a token passed via `Sec-WebSocket-Protocol` — is
+  not implemented here.
+
+- d54ad2d: Close three gaps found in a Cloudflare Workers best-practices audit:
+
+  - `@dwk/solid-pod`: `PATCH` now checks WAC Append authorization (which every
+    patch requires; `Write` implies `Append`) _before_ buffering or parsing the
+    request body, and caps the read at `store.maxInlineBytes` (413 on overflow)
+    instead of an unbounded `request.text()`. Previously any caller — even an
+    unauthenticated one — could force the single-threaded per-pod Durable
+    Object to buffer and N3-parse an arbitrarily large body before any
+    permission check ran.
+  - `@dwk/activitypub`: `deliverActivity`'s outbound `POST` now routes through
+    `@dwk/safe-fetch`'s `safeFetch` instead of a bare `fetch`, so redirect hops
+    get the same SSRF re-validation as the pre-flight target check. A hostile
+    inbox that 3xx-redirects a signed delivery to a private/internal target is
+    now rejected the same way an unsafe initial target already was (dropped,
+    not retried).
+  - `@dwk/webfinger`: `resolveHandle` now reads the WebFinger response through
+    `readBodyCapped` (2 MB default) before parsing it as JSON, instead of an
+    unbounded `response.json()` — a malicious or compromised host could
+    otherwise return an arbitrarily large body.
+
+- Updated dependencies [ec0f4a2]
+  - @dwk/webdav@1.0.0-beta.3
+
 ## 1.0.0-beta.2
 
 ### Minor Changes

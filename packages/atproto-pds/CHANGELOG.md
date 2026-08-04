@@ -1,5 +1,44 @@
 # @dwk/atproto-pds
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Reject an oversized migration CAR by its declared `Content-Length` before
+  buffering it in `#importRepo`, mirroring the existing `#uploadBlob` size
+  check instead of buffering an unbounded body.
+- ec0f4a2: Cap `createSession`, `updateHandle`, `createRecord`, `putRecord`, and
+  `deleteRecord`'s JSON body reads at a new `maxJsonBodyBytes` (default 2
+  MiB), stream-read the same way as the `#uploadBlob`/`#importRepo` fix in the
+  previous patch, instead of an uncapped `request.json()`. `createSession` is
+  the most severe of the five: it's the unauthenticated login endpoint, so
+  unlike the other four (all behind `#requireAuth`) it had no auth check ahead
+  of the buffer to limit who could trigger it.
+- ec0f4a2: Log unhandled XRPC errors: `console.error` at the Durable Object layer (the
+  only signal that survives the fetch() boundary) and an aggregate
+  `logger`/`metrics` event at the front door, where the real injected seams are
+  still in scope, whenever the DO returns a 500.
+- ec0f4a2: Stream-cap `#uploadBlob` and `#importRepo`'s request body reads instead of
+  buffering the whole body before checking its size. The declared
+  `Content-Length` pre-check (added in a prior patch) only helped when the
+  header was present and truthful — a request with no `Content-Length` (or an
+  understated one, e.g. via chunked transfer-encoding) still buffered
+  unbounded into memory before the post-hoc length check ran. The body is now
+  read incrementally via a local `readRequestBodyCapped` helper
+  (`src/body.ts`) into a resizable `ArrayBuffer` (`maxByteLength:` the
+  configured limit — `maxBlobSizeBytes` / `maxImportCarSizeBytes`), grown by
+  exactly each chunk's size as it arrives and cancelling the reader the
+  instant a chunk would grow it past the limit. Memory committed tracks the
+  bytes actually received, not the configured limit — a small body costs
+  proportionally little, not the full cap — while the limit is still a hard
+  ceiling the buffer can never be grown past, regardless of what
+  `Content-Length` claims or omits. This closes the "buffer first, check
+  later" gap; it does not by itself guarantee the DO can never exceed its
+  memory ceiling: `maxImportCarSizeBytes` still defaults to 128 MiB, the same
+  order of magnitude as the DO's 128 MB limit, so a fully honest import that
+  actually reaches the default cap remains a real memory risk that a smaller
+  configured cap should address.
+
 ## 1.0.0-beta.1
 
 ### Major Changes

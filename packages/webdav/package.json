@@ -1,6 +1,6 @@
 {
   "name": "@dwk/webdav",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "WebDAV (RFC 4918, Class 2) façade over a Solid pod: mount your own storage as a native network drive. Protocol core — bounded XXE-safe XML, app-password auth, If-header parsing.",
   "keywords": [
     "webdav",

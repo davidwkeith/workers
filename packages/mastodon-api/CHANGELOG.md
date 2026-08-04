@@ -1,5 +1,23 @@
 # @dwk/mastodon-api
 
+## 1.0.0-beta.2
+
+### Minor Changes
+
+- 096d04b: Add owner-admin endpoints: `Accept` (confirm a pending follower) and `Remove`
+  (ban a `Group` member / un-announce a post) via `POST <actor>/outbox`, and a
+  `@dwk/mastodon-api` `follow_requests` write surface (`GET`/`POST
+.../authorize`/`POST .../reject`) so off-the-shelf Mastodon clients can manage
+  pending follows too.
+
+### Patch Changes
+
+- ec0f4a2: Wrap route dispatch in try/catch so a D1 failure or internal invariant throw
+  returns the documented Mastodon JSON error shape (`{"error": "..."}`,
+  via `mastodonError`) instead of an unhandled exception.
+- ec0f4a2: Use `crypto.subtle.timingSafeEqual` for client-secret/token hex comparison
+  instead of a hand-rolled constant-time loop.
+
 ## 1.0.0-beta.1
 
 ### Major Changes

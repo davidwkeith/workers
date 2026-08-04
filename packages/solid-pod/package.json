@@ -1,6 +1,6 @@
 {
   "name": "@dwk/solid-pod",
-  "version": "1.0.0-beta.2",
+  "version": "1.0.0-beta.3",
   "description": "Edge-native Solid Pod: LDP verbs, content negotiation, N3 Patch, WAC, notifications. Ships the per-pod Durable Object.",
   "keywords": [
     "solid",

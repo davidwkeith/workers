@@ -1,5 +1,17 @@
 # @dwk/remotestorage
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Log an unexpected Durable Object storage error via `console.error` (in the
+  `@dwk/log` `consoleLogger` record shape) before rethrowing it, instead of the
+  error vanishing silently — the front door's injected `Logger`/`Metrics`
+  cannot cross the DO `fetch()` boundary, so this is the only signal available
+  at that layer.
+- Updated dependencies [d54ad2d]
+  - @dwk/webfinger@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Major Changes

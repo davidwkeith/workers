@@ -1,5 +1,13 @@
 # @dwk/webdav
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- ec0f4a2: Wrap the top-level handler in try/catch so an unexpected backend exception
+  returns a well-formed DAV 500 response instead of escaping as a non-DAV
+  crash.
+
 ## 1.0.0-beta.2
 
 ### Minor Changes

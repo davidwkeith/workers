@@ -1,6 +1,6 @@
 {
   "name": "@dwk/indieauth",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "IndieAuth authorization, token, and metadata endpoints with PKCE and DPoP-bound tokens.",
   "keywords": [
     "indieauth",

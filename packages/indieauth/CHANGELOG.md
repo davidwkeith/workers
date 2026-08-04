@@ -1,5 +1,17 @@
 # @dwk/indieauth
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- b1e0fc4: Wrap the handler's route dispatch in a try/catch so an unexpected exception
+  (e.g. a D1 failure) returns a structured `server_error` OAuth response instead
+  of crashing unhandled. Also add a runtime shape guard on the stored `profile`
+  JSON before trusting it as `ProfileInfo`, instead of blind-casting it.
+- ec0f4a2: Use `crypto.subtle.timingSafeEqual` for PKCE and HMAC signature comparison
+  instead of a hand-rolled loop that short-circuited (and leaked timing) on a
+  length mismatch.
+
 ## 1.0.0-beta.1
 
 ### Major Changes

@@ -1,5 +1,30 @@
 # @dwk/cf-shims
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- ec0f4a2: Add `installTimingSafeEqual`, a Node polyfill for
+  `crypto.subtle.timingSafeEqual`. That method is a real, synchronous
+  `SubtleCrypto` extension but is Cloudflare-Workers-proprietary — it does not
+  exist on Node or Deno. `@dwk/indieauth`, `@dwk/webauthn`, `@dwk/mastodon-api`,
+  and `@dwk/conformance-target` all use it for constant-time PKCE/HMAC/
+  challenge/client-secret comparisons, so without this shim every package
+  composed into `@dwk/server` (the Node self-hosting host) that reaches one of
+  those code paths throws a `TypeError`. The polyfill is a pure-JS
+  constant-time XOR-accumulator comparison, idempotent (installed via `??=`,
+  matching `installCryptoDigestStream`'s pattern) and a no-op wherever a native
+  implementation already exists.
+- ec0f4a2: Add `serializeAttachment`/`deserializeAttachment` to `EmulatedWebSocket`, the
+  Node shim `installWebSocketGlobals` installs for workerd's WebSocket
+  Hibernation API. A Durable Object (e.g. `@dwk/solid-pod`'s WAC-filtered
+  broadcast) calling `server.serializeAttachment(...)` on an accepted socket
+  previously threw `TypeError: server.serializeAttachment is not a function`
+  on Node, since the shim implemented `send`/`close`/`accept` but not the
+  attachment methods. Since this shim never actually hibernates, a plain
+  in-memory field is a faithful-enough emulation: `serializeAttachment` sets
+  it, `deserializeAttachment` reads it back (`null` if never set).
+
 ## 1.0.0-beta.1
 
 ### Major Changes

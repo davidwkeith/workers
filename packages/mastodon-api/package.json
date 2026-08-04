@@ -1,6 +1,6 @@
 {
   "name": "@dwk/mastodon-api",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "Mastodon-compatible client API subset: app OAuth login, instance metadata, and read-only account/timeline endpoints for off-the-shelf fediverse clients.",
   "keywords": [
     "mastodon",
