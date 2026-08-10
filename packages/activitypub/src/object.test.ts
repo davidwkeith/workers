@@ -2298,6 +2298,54 @@ describe("owner follower control (#447)", () => {
     });
   });
 
+  it("serves pending follow requests only behind the owner marker (#487)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        REMOTE,
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/already-confirmed",
+        "https://remote.example/users/already-confirmed/inbox",
+        2,
+        999,
+      );
+
+      const headers: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+      };
+      const unmarked = await instance.fetch(
+        new Request(`${iris.id}/follow_requests`, { headers }),
+      );
+      expect(unmarked.status).toBe(404);
+
+      const owner = { ...headers, [INTERNAL_HEADERS.publish]: "1" };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/follow_requests`, { headers: owner }),
+      );
+      expect(listed.status).toBe(200);
+      const body = (await listed.json()) as {
+        total: number;
+        items: { actor: string }[];
+      };
+      expect(body.total).toBe(1);
+      expect(body.items[0]?.actor).toBe(REMOTE);
+
+      // Anything but an authorized GET is 404, never 405 — same reasoning as
+      // `/blocked`.
+      const written = await instance.fetch(
+        new Request(`${iris.id}/follow_requests`, {
+          method: "DELETE",
+          headers: owner,
+        }),
+      );
+      expect(written.status).toBe(404);
+    });
+  });
+
   it("Accept: confirms a pending follower and, once the alarm resolves the follower's inbox, delivers Accept(Follow) to them alone and persists the inbox, setting accepted_at", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {

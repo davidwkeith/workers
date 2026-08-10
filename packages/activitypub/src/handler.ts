@@ -247,6 +247,7 @@ export function createActivityPub(
   const outboxPath = pathOf(iris.outbox);
   const publishPath = `${actorPath}/publish`;
   const blockedPath = `${actorPath}/blocked`;
+  const followRequestsPath = `${actorPath}/follow_requests`;
   const followersPath = pathOf(iris.followers);
   const followingPath = pathOf(iris.following);
   const sharedInboxPath = resolved.sharedInbox
@@ -436,6 +437,32 @@ export function createActivityPub(
     // blocklist must not do — the same reason a publish `POST` answers `404`
     // rather than `405` when no publish token is configured.
     if (path === blockedPath && method === "GET") {
+      if (!resolved.publishToken) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "disabled",
+        });
+        return text(404, "Not Found");
+      }
+      if (!(await authorizedPublish(request, resolved.publishToken))) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "unauthorized",
+        });
+        return text(401, "Unauthorized");
+      }
+      return forwardToDo(resolved, env, request.url, {
+        method,
+        extra: { [INTERNAL_HEADERS.publish]: "1" },
+      });
+    }
+
+    // --- Owner pending-follower read (#487) ---------------------------------
+    // Bearer-gated equivalent of the internal-marker-gated
+    // `__client/follow_requests` route `@dwk/mastodon-api` uses, so an
+    // owner-facing client (e.g. a moderation UI) can list the approval queue
+    // without standing up an OAuth flow — the same reasoning `/blocked` above
+    // already applies to the owner's blocklist, including the 404-not-405
+    // asymmetry on the wrong verb.
+    if (path === followRequestsPath && method === "GET") {
       if (!resolved.publishToken) {
         emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
           reason: "disabled",

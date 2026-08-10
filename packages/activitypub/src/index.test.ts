@@ -946,6 +946,88 @@ describe("owner follower control (#447)", () => {
     );
     expect(disabled.status).toBe(404);
   });
+
+  it("lists pending followers behind the owner token (#487)", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const iris = deriveIris(config.baseUrl, config.actor.username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, NULL, ?, NULL)`,
+        REMOTE,
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at, accepted_at) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/users/already-confirmed",
+        "https://remote.example/users/already-confirmed/inbox",
+        2,
+        999,
+      );
+    });
+
+    const res = await handler(
+      new Request(`${actorUrl(config)}/follow_requests`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { actor: string }[];
+      total: number;
+    };
+    expect(body.total).toBe(1);
+    expect(body.items.map((item) => item.actor)).toEqual([REMOTE]);
+  });
+
+  it("keeps the follow-requests list behind the owner token (#487)", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+
+    const anonymous = await handler(
+      new Request(`${actorUrl(config)}/follow_requests`),
+      testEnv,
+      ctx,
+    );
+    expect(anonymous.status).toBe(401);
+
+    const wrongToken = await handler(
+      new Request(`${actorUrl(config)}/follow_requests`, {
+        headers: { authorization: "Bearer wrong" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(wrongToken.status).toBe(401);
+
+    // A non-GET verb is 404, not 405: the route never confirms its existence
+    // to anything but an authorized read.
+    const written = await handler(
+      new Request(`${actorUrl(config)}/follow_requests`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(written.status).toBe(404);
+
+    // With no publish token configured the route does not exist at all.
+    const openConfig = makeConfig();
+    const noToken = createActivityPub(openConfig);
+    const disabled = await noToken(
+      new Request(`${actorUrl(openConfig)}/follow_requests`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(disabled.status).toBe(404);
+  });
 });
 
 // ---------------------------------------------------------------------------

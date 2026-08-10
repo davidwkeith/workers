@@ -524,6 +524,19 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return this.#listBlocked();
     }
+    // Owner pending-follower read (#487): bearer-gated equivalent of
+    // `__client/follow_requests` above, reachable from the public front door
+    // behind the owner's publish token rather than only the internal marker
+    // trusted in-process callers set. Same `404`-not-`405` rule as `/blocked`.
+    if (path === `${pathOf(iris.id)}/follow_requests`) {
+      if (
+        method !== "GET" ||
+        request.headers.get(INTERNAL_HEADERS.publish) !== "1"
+      ) {
+        return text(404, "Not Found");
+      }
+      return this.#listFollowRequests();
+    }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
       // The inbox is write-only to peers; reads are not part of S2S.
