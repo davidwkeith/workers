@@ -2329,10 +2329,16 @@ describe("owner follower control (#447)", () => {
       expect(listed.status).toBe(200);
       const body = (await listed.json()) as {
         total: number;
-        items: { actor: string }[];
+        items: { actor: string; addedAt: string }[];
       };
       expect(body.total).toBe(1);
       expect(body.items[0]?.actor).toBe(REMOTE);
+      // Normalized like `/blocked`'s `blockedAt`: camelCase, ISO string — not
+      // the raw storage row's snake_case epoch ms `#listFollowRequests()`
+      // (the internal `__client/follow_requests` route) still returns.
+      expect(Number.isNaN(Date.parse(body.items[0]?.addedAt ?? ""))).toBe(
+        false,
+      );
 
       // Anything but an authorized GET is 404, never 405 — same reasoning as
       // `/blocked`.

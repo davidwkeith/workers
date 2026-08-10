@@ -977,11 +977,14 @@ describe("owner follower control (#447)", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: { actor: string }[];
+      items: { actor: string; addedAt: string }[];
       total: number;
     };
     expect(body.total).toBe(1);
     expect(body.items.map((item) => item.actor)).toEqual([REMOTE]);
+    // Normalized like `/blocked`'s `blockedAt`: camelCase, ISO string — not
+    // the raw storage row's snake_case epoch ms.
+    expect(Number.isNaN(Date.parse(body.items[0]?.addedAt ?? ""))).toBe(false);
   });
 
   it("keeps the follow-requests list behind the owner token (#487)", async () => {

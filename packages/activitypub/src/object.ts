@@ -535,7 +535,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       ) {
         return text(404, "Not Found");
       }
-      return this.#listFollowRequests();
+      return this.#listPendingFollowers();
     }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
@@ -1863,13 +1863,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     );
   }
 
-  /**
-   * Pending follow requests (#473): followers awaiting the owner's `Accept`.
-   * Unpaged flat JSON, like `#listBlocked` — this list is small, and capping
-   * it would silently hide requests from the only view of them there is.
-   */
-  #listFollowRequests(): Response {
-    const items = this.#sql
+  /** Pending followers (accepted_at IS NULL), oldest request first. */
+  #pendingFollowers(): { actor: string; added_at: number }[] {
+    return this.#sql
       .exec<{
         actor: string;
         added_at: number;
@@ -1877,7 +1873,38 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         `SELECT actor, added_at FROM followers WHERE accepted_at IS NULL ORDER BY added_at ASC`,
       )
       .toArray();
+  }
+
+  /**
+   * Pending follow requests (#473): followers awaiting the owner's `Accept`.
+   * Unpaged flat JSON, like `#listBlocked` — this list is small, and capping
+   * it would silently hide requests from the only view of them there is.
+   * Raw storage shape (snake_case, epoch ms): this backs only the
+   * internal-marker-gated `__client/follow_requests` route, whose sole
+   * consumer (`mastodon-api.ts`'s `followRequests()`) already remaps it to
+   * the `BackendFollowRequest` contract's `addedAt: number`.
+   */
+  #listFollowRequests(): Response {
+    const items = this.#pendingFollowers();
     return json(200, { items, total: items.length } as unknown as JsonValue);
+  }
+
+  /**
+   * Pending follow requests (#487), normalized like `#listBlocked` —
+   * camelCase `addedAt` as an ISO string — because this backs the
+   * bearer-gated *public* `/follow_requests` route: unlike `__client/*`,
+   * its response shape is an external wire contract, not an internal-only
+   * payload whose raw column names only `mastodon-api.ts` ever sees.
+   */
+  #listPendingFollowers(): Response {
+    const items = this.#pendingFollowers().map(
+      (row) =>
+        ({
+          actor: row.actor,
+          addedAt: new Date(row.added_at).toISOString(),
+        }) as JsonValue,
+    );
+    return json(200, { items, total: items.length });
   }
 
   /**
