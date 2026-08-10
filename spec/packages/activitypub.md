@@ -151,6 +151,17 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
   rather than an AS2 collection, unpaged) behind the same bearer token. It is
   never public: a block that can be created but never reviewed could not be
   undone.
+- **`GET <actor>/follow_requests`** (#487) returns pending followers awaiting
+  the owner's `Accept` — `{ items, total }`, flat JSON, unpaged, behind the
+  same bearer token as `/blocked`, oldest first. Items are
+  `{ actor, addedAt }` with `addedAt` an ISO 8601 string, matching
+  `/blocked`'s `{ actor, blockedAt }` shape — not the raw storage row's
+  snake_case epoch ms, which stays an internal-only detail of the
+  internal-marker-gated `__client/follow_requests` route `@dwk/mastodon-api`'s
+  `GET /api/v1/follow_requests` already uses (#473). This is a bearer-gated
+  equivalent of that route: an owner-facing client (e.g. a moderation UI) can
+  list the approval queue
+  without standing up a separate OAuth flow just to see who is pending.
 
 ### Group actors (communities, FEP-1b12 producer side, #376)
 

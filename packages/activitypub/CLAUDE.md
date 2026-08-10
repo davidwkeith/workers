@@ -51,6 +51,10 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   `Group`-moderation `Remove` (ban a member / un-announce a post) follow the
   identical `POST <actor>/outbox` pattern (#473) — see `object.ts`
   `#routeFollowerControl`'s `Accept` branch and `#applyModerationRemove`.
+  `GET <actor>/follow_requests` (#487) lists pending followers behind the same
+  bearer token, mirroring `/blocked` — a bearer-gated equivalent of the
+  internal-marker-gated `__client/follow_requests` route `@dwk/mastodon-api`
+  uses, so an owner client doesn't need OAuth just to see who is pending.
 - **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
   community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
   the Group actor itself rather than one of its owned events, is the same
