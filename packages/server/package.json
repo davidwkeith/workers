@@ -61,7 +61,7 @@
     "clean": "rm -rf dist dist-bundle"
   },
   "dependencies": {
-    "@dotenvx/dotenvx": "2.19.2",
+    "@dotenvx/dotenvx": "2.21.0",
     "@dwk/cf-shims": "workspace:*",
     "@dwk/deno-host": "workspace:*",
     "@dwk/log": "workspace:*",
