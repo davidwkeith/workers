@@ -50,6 +50,6 @@
   "dependencies": {
     "@dwk/log": "workspace:*",
     "@dwk/safe-fetch": "workspace:*",
-    "@noble/curves": "2.2.0"
+    "@noble/curves": "2.3.0"
   }
 }
