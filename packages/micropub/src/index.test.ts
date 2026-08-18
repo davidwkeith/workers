@@ -1672,6 +1672,27 @@ describe("@dwk/micropub stable extensions", () => {
     expect(body.properties.visibility).toEqual(["unlisted"]);
   });
 
+  it("accepts the contacts visibility value", async () => {
+    const minted = await mintToken("create");
+    const res = await createEntry(minted, {
+      content: ["for contacts only"],
+      visibility: ["contacts"],
+    });
+    expect(res.status).toBe(201);
+    const location = res.headers.get("location")!;
+    const source = await handler(
+      new Request(`${MICROPUB}?q=source&url=${encodeURIComponent(location)}`, {
+        headers: await authHeaders(minted, "GET", MICROPUB),
+      }),
+      harness,
+      ctx,
+    );
+    const body = (await source.json()) as {
+      properties: Record<string, unknown[]>;
+    };
+    expect(body.properties.visibility).toEqual(["contacts"]);
+  });
+
   it("rejects an unknown post-status value", async () => {
     const minted = await mintToken("create");
     const res = await createEntry(minted, {
