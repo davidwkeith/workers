@@ -69,13 +69,18 @@ group is enabled.
 Currently implemented (all **stable**):
 
 - **Post Status** (`post-status`: `published` | `draft`) and **Visibility**
-  (`visibility`: `public` | `unlisted` | `private`). Validated on create and on
-  the merged result of an update, so a stored post only ever carries a known
-  value; an unrecognised value is rejected `400 invalid_request`. An absent
-  property is the extension's documented default (`published` / `public`).
+  (`visibility`: `public` | `unlisted` | `private` | `contacts`). Validated on
+  create and on the merged result of an update, so a stored post only ever
+  carries a known value; an unrecognised value is rejected `400
+  invalid_request`. An absent property is the extension's documented default
+  (`published` / `public`). `contacts` is a kept-as-string-enum audience tier
+  (not a boolean) so finer-grained tiers can layer on later without breaking
+  stored posts; this package only accepts and persists the value — checking
+  the authenticated `me` against a contact allowlist is a consuming app's
+  concern, not this endpoint's.
   **Scope of enforcement:** the endpoint *stores and advertises* these — it does
   **not** itself gate reads. Hiding a `draft` from public listings and
-  access-controlling a `private` post are the **serving layer's**
+  access-controlling a `private` or `contacts` post are the **serving layer's**
   responsibility (the consuming site, or WAC in [`@dwk/solid-pod`](solid-pod.md)).
   This boundary is deliberate: `@dwk/micropub` is a publishing endpoint, not the
   renderer.

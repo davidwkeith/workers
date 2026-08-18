@@ -324,7 +324,12 @@ export const POST_STATUS_VALUES = ["published", "draft"] as const;
  *
  * @see https://indieweb.org/Micropub-extensions#Visibility
  */
-export const VISIBILITY_VALUES = ["public", "unlisted", "private"] as const;
+export const VISIBILITY_VALUES = [
+  "public",
+  "unlisted",
+  "private",
+  "contacts",
+] as const;
 
 /**
  * Allowed values for the proposed `location-visibility` property. `text`
