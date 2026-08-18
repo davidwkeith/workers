@@ -36,6 +36,12 @@ This is the second `@dwk` package to ship a Durable Object.
   the outbox without follower fan-out, and a caller-supplied `published`
   (ISO-8601) is preserved instead of stamped to `now` — the backfill seam for
   syncing pre-existing content (#451).
+- **Blind-addressed restricted delivery** (`bto`/`bcc`, #496) — both publish
+  seams accept blind recipients, each delivered to their own inbox with the
+  blind addressing stripped (AP §6.1). An activity addressed *only* blindly is
+  restricted: no follower fan-out and no public outbox listing. Best-effort,
+  honor-system distribution — AS2 addressing is a delivery hint, not access
+  control; enforce reads elsewhere if you need actual privacy.
 
 ## Usage
 

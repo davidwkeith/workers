@@ -163,6 +163,40 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
   list the approval queue
   without standing up a separate OAuth flow just to see who is pending.
 
+### Blind-addressed restricted delivery (`bto`/`bcc`, #496)
+
+The owner publish seams — raw AS2 `POST <actor>/outbox` and the shaped
+`PostInput` on `POST <actor>/publish` (`bto`: an array of actor IRIs; the
+Public collection is not a valid blind recipient) — accept blind addressing.
+The concrete consumer is Anglesite's contacts-only posting tier
+([Anglesite#1565](https://github.com/Anglesite/Anglesite/issues/1565)).
+
+- **Blind recipients are delivered to individually.** Each `bto`/`bcc` actor
+  IRI gets a targeted delivery through the pending-resolution queue, aimed at
+  the recipient's **own** `inbox` — never `endpoints.sharedInbox`, and never a
+  cached shared-preferred inbox: the delivered payload carries no blind
+  addressing, so only the inbox itself still identifies the recipient.
+- **`bto`/`bcc` are stripped from every delivered and every publicly-served
+  copy** (AP §6.1), on the activity and its embedded object alike. The stored
+  outbox row keeps the original addressing (the owner's own record).
+- **Blind-only means restricted.** An activity whose *visible* addressing
+  (`to`/`cc`/`audience`) names neither the Public collection nor this actor's
+  `followers` collection is restricted: no follower fan-out, no community
+  `audience` delivery (the Group would `Announce` it to its membership), and
+  the row never surfaces in the public outbox collection — items,
+  `totalItems`, or the NodeInfo `localPosts` count. A shaped `PostInput`
+  carrying `bto` therefore derives **empty** default addressing instead of
+  the public default, and a bare object wrapped by the outbox keeps its blind
+  fields hoisted onto the `Create` rather than gaining the public defaults.
+- **Public-plus-blind is allowed.** Explicit public addressing alongside
+  `bto` keeps the ordinary fan-out and public listing; the blind recipients
+  are simply additional targeted deliveries, invisible in every served copy.
+- **Honest framing (carried into consuming products' UX/docs):** blind
+  delivery is best-effort, honor-system distribution. AS2 addressing is a
+  delivery hint, not access control — once a copy lands on a remote server,
+  its handling is that server's policy. An enforced read gate is the
+  consumer's job (in Anglesite, the Worker-gated canonical copy).
+
 ### Group actors (communities, FEP-1b12 producer side, #376)
 
 `actor.type` (default `"Person"`) may be set to `"Group"` to host a FEP-1b12

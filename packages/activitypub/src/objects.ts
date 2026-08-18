@@ -87,6 +87,15 @@ export interface PostInput {
   /** Advanced addressing override — mentions / secondary audiences (`cc`). */
   readonly cc?: readonly string[];
   /**
+   * Blind direct recipients (AS2 `bto`): actor IRIs each delivered to
+   * individually and stripped from every delivered or served copy (AP §6.1).
+   * A post carrying `bto` with no explicit `to`/`cc` derives **restricted**
+   * (empty) addressing rather than the public default, so a contacts-only
+   * post is expressed by `bto` alone (#496). Best-effort, honor-system
+   * distribution: addressing is a delivery hint, not access control.
+   */
+  readonly bto?: readonly string[];
+  /**
    * ISO-8601 publish timestamp override. Defaults to `now`; used to backdate
    * backfilled historical content so it doesn't sort as newly posted (#451).
    */
@@ -239,6 +248,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     tags?: string[];
     to?: string[];
     cc?: string[];
+    bto?: string[];
     published?: string;
   } = { kind: kind as PostKind, content };
 
@@ -336,14 +346,42 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     if (value.length > 0) input[key] = value as string[];
   }
 
+  if (record.bto !== undefined) {
+    const value = record.bto;
+    // A blind recipient is an actor to deliver to — the Public collection is
+    // not deliverable, so unlike `to`/`cc` it is not addressable here (and
+    // being an https URL itself, it must be excluded by name).
+    if (
+      !Array.isArray(value) ||
+      value.some(
+        (v) => typeof v !== "string" || v === PUBLIC_AUDIENCE || !isHttpUrl(v),
+      )
+    ) {
+      return {
+        ok: false,
+        error: "`bto` must be an array of actor IRIs",
+      };
+    }
+    if (value.length > 0) input.bto = value as string[];
+  }
+
   return { ok: true, input };
 }
 
-/** The `to`/`cc` a post derives when the input does not override them. */
+/**
+ * The `to`/`cc` a post derives when the input does not override them. A post
+ * carrying `bto` derives **empty** defaults instead of the public ones: blind
+ * recipients alone mean a restricted post, and implicitly adding `as:Public`
+ * or the followers collection would silently publish it (#496). Explicit
+ * `to`/`cc` overrides still win either way.
+ */
 export function postAddressing(
   input: PostInput,
   iris: ActorIris,
 ): { to: readonly string[]; cc: readonly string[] } {
+  if (input.bto?.length) {
+    return { to: input.to ?? [], cc: input.cc ?? [] };
+  }
   const to =
     input.to ??
     (input.audience ? [input.audience, PUBLIC_AUDIENCE] : [PUBLIC_AUDIENCE]);
@@ -382,6 +420,7 @@ export function buildPostObject(
   if (input.sensitive !== undefined) object.sensitive = input.sensitive;
   if (input.inReplyTo !== undefined) object.inReplyTo = input.inReplyTo;
   if (input.audience !== undefined) object.audience = input.audience;
+  if (input.bto !== undefined) object.bto = input.bto as JsonValue;
   if (input.attachments !== undefined) {
     object.attachment = input.attachments.map((attachment) => {
       const entry: Record<string, JsonValue> = {
@@ -430,6 +469,7 @@ export function buildPostActivity(
     object: buildPostObject(input, iris, ids),
   };
   if (input.audience !== undefined) activity.audience = input.audience;
+  if (input.bto !== undefined) activity.bto = input.bto as JsonValue;
   return activity;
 }
 

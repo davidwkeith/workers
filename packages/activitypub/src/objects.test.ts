@@ -19,6 +19,7 @@ const IDS = {
   published: "2026-07-19T00:00:00.000Z",
 };
 const GROUP = "https://lemmy.example/c/birding";
+const FRIEND = "https://friend.example/users/bob";
 
 function parsed(value: unknown) {
   const result = parsePostInput(value);
@@ -181,6 +182,47 @@ describe("postAddressing", () => {
     // An empty cc array is dropped at parse time, so the default applies.
     expect(cc).toEqual([IRIS.followers]);
   });
+
+  it("derives restricted (empty) addressing when bto is present", () => {
+    const { to, cc } = postAddressing(
+      parsed({ kind: "note", content: "x", bto: [FRIEND] }),
+      IRIS,
+    );
+    expect(to).toEqual([]);
+    expect(cc).toEqual([]);
+  });
+
+  it("keeps explicit to/cc overrides alongside bto", () => {
+    const { to } = postAddressing(
+      parsed({
+        kind: "note",
+        content: "x",
+        bto: [FRIEND],
+        to: [PUBLIC_AUDIENCE],
+      }),
+      IRIS,
+    );
+    expect(to).toEqual([PUBLIC_AUDIENCE]);
+  });
+});
+
+describe("parsePostInput bto", () => {
+  it("accepts an array of actor IRIs", () => {
+    const input = parsed({ kind: "note", content: "x", bto: [FRIEND] });
+    expect(input.bto).toEqual([FRIEND]);
+  });
+
+  it("rejects the Public collection as a blind recipient", () => {
+    expect(
+      rejected({ kind: "note", content: "x", bto: [PUBLIC_AUDIENCE] }),
+    ).toMatch(/`bto`/);
+  });
+
+  it("rejects non-IRI entries", () => {
+    expect(rejected({ kind: "note", content: "x", bto: ["bob"] })).toMatch(
+      /`bto`/,
+    );
+  });
 });
 
 describe("buildPostObject / buildPostActivity", () => {
@@ -219,6 +261,18 @@ describe("buildPostObject / buildPostActivity", () => {
       },
     ]);
     expect(object.tag).toEqual([{ type: "Hashtag", name: "#birds" }]);
+  });
+
+  it("carries bto on both the activity and its object", () => {
+    const activity = buildPostActivity(
+      parsed({ kind: "note", content: "<p>psst</p>", bto: [FRIEND] }),
+      IRIS,
+      IDS,
+    );
+    expect(activity.bto).toEqual([FRIEND]);
+    expect((activity.object as Record<string, unknown>).bto).toEqual([FRIEND]);
+    expect(activity.to).toEqual([]);
+    expect(activity.cc).toEqual([]);
   });
 
   it("builds a titled Page addressed to the community", () => {
