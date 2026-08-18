@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import type { MastodonApiEnv } from "@dwk/mastodon-api";
 import { decodeSnowflake, encodeSnowflake } from "@dwk/mastodon-api";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   INTERNAL_HEADERS,
@@ -19,13 +19,44 @@ const testEnv = env as unknown as ActivityPubEnv & MastodonApiEnv;
 const testCtx = {} as ExecutionContext;
 
 /** A fresh actor config, isolated per test via a random username (⇒ a fresh DO). */
-function freshConfig(): ResolvedConfig {
+function freshConfig(extra: { privateKeyPem?: string } = {}): ResolvedConfig {
   return resolveConfig({
     baseUrl: "https://owner.example",
     actor: { username: `owner-${crypto.randomUUID().slice(0, 8)}` },
     publicKeyPem: "PUBLIC-PEM",
+    ...extra,
   });
 }
+
+// A real signing key, for the one test that counts queued `delivery` rows:
+// without a signer, the DO's alarm — armed for `now` by the publish itself —
+// DROPS every queued delivery ("we can never deliver"), so the count races
+// the alarm and loses on a slow runner. With a signer the alarm's attempt is
+// an unresolvable-host fetch: retryable, so the row deterministically stays.
+let privateKeyPem: string;
+
+beforeAll(async () => {
+  const pair = (await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const der = new Uint8Array(
+    (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer,
+  );
+  let binary = "";
+  for (const b of der) binary += String.fromCharCode(b);
+  const b64 =
+    btoa(binary)
+      .match(/.{1,64}/g)
+      ?.join("\n") ?? "";
+  privateKeyPem = `-----BEGIN PRIVATE KEY-----\n${b64}\n-----END PRIVATE KEY-----`;
+});
 
 /** Deliver an activity straight into the actor's inbox via the DO's own `fetch`, bypassing HTTP signature verification (only the front door checks it). */
 async function seedActivity(
@@ -845,7 +876,9 @@ describe("buildMastodonBackend", () => {
   });
 
   it("publishStatus() escapes HTML metacharacters in both content and the CW summary", async () => {
-    const config = freshConfig();
+    // The signer keeps the queued-delivery count below deterministic — see
+    // the `privateKeyPem` note at the top of this file.
+    const config = freshConfig({ privateKeyPem });
     const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
     const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
     await runInDurableObject(stub, async (_instance, state) => {
