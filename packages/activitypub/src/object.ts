@@ -336,6 +336,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#ensureColumn("following", "actor_type", "TEXT");
     this.#ensureColumn("following", "inbox", "TEXT");
     this.#ensureColumn("following", "shared_inbox", "TEXT");
+    // Blind-addressed restricted publishes (#496): a non-zero value keeps the
+    // row out of the public outbox collection and the NodeInfo counts. NULL
+    // (every pre-existing row) reads as public.
+    this.#ensureColumn("outbox", "restricted", "INTEGER");
     // Owner-admin follow confirmation (#473): NULL means still awaiting the
     // owner's `Accept`; non-NULL (the timestamp) means confirmed — either
     // auto-accepted at insert time (#onFollow) or owner-triggered later
@@ -1364,11 +1368,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
     }
 
+    // Blind addressing (#496): `bto`/`bcc` recipients are delivered to
+    // individually; an activity addressed ONLY blindly is restricted — stored
+    // out of the public outbox collection and never fanned out to followers.
+    const blind = blindRecipients(activity, config.iris);
+    const restricted =
+      blind.length > 0 && !isPubliclyAddressed(activity, config.iris);
     this.#sql.exec(
-      `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO outbox (id, json, published_at, restricted) VALUES (?, ?, ?, ?)`,
       id,
       JSON.stringify(activity),
       Date.parse(activity.published as string),
+      restricted ? 1 : 0,
     );
 
     // Quiet-insert mode (#451, backfill): write the historical activity to
@@ -1389,21 +1400,34 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       return json(201, activity as JsonValue, { location: id });
     }
 
-    for (const row of this.#sql
-      .exec<{
-        inbox: string | null;
-      }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
-      .toArray()) {
-      if (row.inbox) this.#enqueueDelivery(row.inbox, body);
+    // Every delivered copy drops the blind addressing (AP §6.1) — a peer must
+    // learn only that IT was a recipient, never the rest of the list.
+    const deliveredBody =
+      blind.length > 0
+        ? JSON.stringify(withoutBlindAddressing(activity))
+        : body;
+    for (const recipient of blind) {
+      this.#enqueueBlindDelivery(recipient, deliveredBody);
     }
-    // A vote (Like/Dislike) or any other activity naming a community
-    // `audience` (e.g. a Lemmy downvote) additionally reaches that community's
-    // inbox — the raw outbox never infers a delivery target from `object`
-    // itself (a vote's `object` is a content IRI, not an actor), so this is
-    // the only way an outbox-published Like/Dislike reaches anyone but our own
-    // followers. Same mechanism {@link #publishPost} uses for community posts.
-    if (typeof activity.audience === "string") {
-      this.#deliverToAudience(activity.audience, body);
+    if (!restricted) {
+      for (const row of this.#sql
+        .exec<{
+          inbox: string | null;
+        }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+        .toArray()) {
+        if (row.inbox) this.#enqueueDelivery(row.inbox, deliveredBody);
+      }
+      // A vote (Like/Dislike) or any other activity naming a community
+      // `audience` (e.g. a Lemmy downvote) additionally reaches that community's
+      // inbox — the raw outbox never infers a delivery target from `object`
+      // itself (a vote's `object` is a content IRI, not an actor), so this is
+      // the only way an outbox-published Like/Dislike reaches anyone but our own
+      // followers. Same mechanism {@link #publishPost} uses for community posts.
+      // A restricted activity never reaches a community: the Group would
+      // `Announce` it to its whole membership.
+      if (typeof activity.audience === "string") {
+        this.#deliverToAudience(activity.audience, deliveredBody);
+      }
     }
     // Fan-out runs in the background alarm worker, not inline, so a large
     // follower set never slows the owner's publish response.
@@ -1630,6 +1654,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
+   * Queue a blind (`bto`/`bcc`) delivery to one recipient (#496). Resolution
+   * runs from the alarm like {@link #enqueuePendingDelivery}, but the
+   * delivery targets the recipient's **own** inbox, never
+   * `endpoints.sharedInbox`: the payload carries no blind addressing
+   * (AP §6.1), so only the inbox itself still identifies the recipient — a
+   * shared-inbox copy would be unattributable on the receiving side. Cached
+   * `followers`/`following` inboxes are not reused for the same reason: they
+   * store the shared-preferred inbox.
+   */
+  #enqueueBlindDelivery(actor: string, body: string): void {
+    if (!isSafeTarget(actor)) return;
+    this.#sql.exec(
+      `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at)
+         VALUES ('deliver_direct', ?, NULL, ?, 0, ?)`,
+      actor,
+      body,
+      Date.now(),
+    );
+  }
+
+  /**
    * Additionally deliver an owner-published activity to a named `audience`
    * Group's inbox, when it resolves to a safe target (FEP-1b12 §2.3): a
    * community post or vote reaches the community this way, which then
@@ -1710,27 +1755,41 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       published,
     });
     const publishedAt = Date.parse(published);
+    // Blind addressing (#496), exactly as `#publish`: blind recipients are
+    // delivered to individually; a post addressed only blindly is restricted.
+    const blind = blindRecipients(activity, config.iris);
+    const restricted =
+      blind.length > 0 && !isPubliclyAddressed(activity, config.iris);
     this.#sql.exec(
-      `INSERT OR IGNORE INTO outbox (id, json, published_at) VALUES (?, ?, ?)`,
+      `INSERT OR IGNORE INTO outbox (id, json, published_at, restricted) VALUES (?, ?, ?, ?)`,
       activityId,
       JSON.stringify(activity),
       publishedAt,
+      restricted ? 1 : 0,
     );
 
     // Quiet-insert mode (#451, backfill): store the row and stop — no
     // follower fan-out, no community delivery, no alarm. `#clientPublish`
     // never sets this, so its live-posting behavior is unchanged.
     if (!opts.skipDelivery) {
-      const json_ = JSON.stringify(activity);
-      for (const row of this.#sql
-        .exec<{
-          inbox: string | null;
-        }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
-        .toArray()) {
-        if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+      const json_ =
+        blind.length > 0
+          ? JSON.stringify(withoutBlindAddressing(activity))
+          : JSON.stringify(activity);
+      for (const recipient of blind) {
+        this.#enqueueBlindDelivery(recipient, json_);
       }
-      if (input.audience) {
-        this.#deliverToAudience(input.audience, json_);
+      if (!restricted) {
+        for (const row of this.#sql
+          .exec<{
+            inbox: string | null;
+          }>(`SELECT inbox FROM followers WHERE inbox IS NOT NULL`)
+          .toArray()) {
+          if (row.inbox) this.#enqueueDelivery(row.inbox, json_);
+        }
+        if (input.audience) {
+          this.#deliverToAudience(input.audience, json_);
+        }
       }
       await this.#armAlarm();
     }
@@ -1823,15 +1882,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         published,
       };
     }
-    // A bare object: wrap it in a Create addressed to the public + followers.
+    // A bare object: wrap it in a Create addressed to the public + followers
+    // — unless it carries blind addressing and no visible addressing of its
+    // own, in which case defaulting to public would silently publish a
+    // restricted post (#496): the blind fields are hoisted onto the wrapper
+    // and the public defaults are withheld.
+    const blind = input.bto !== undefined || input.bcc !== undefined;
+    const addressing: Record<string, JsonValue> = blind
+      ? {
+          to: (input.to ?? []) as JsonValue,
+          cc: (input.cc ?? []) as JsonValue,
+          ...(input.bto !== undefined && { bto: input.bto as JsonValue }),
+          ...(input.bcc !== undefined && { bcc: input.bcc as JsonValue }),
+        }
+      : { to: [PUBLIC_AUDIENCE], cc: [iris.followers] };
     return {
       "@context": "https://www.w3.org/ns/activitystreams",
       id: activityId,
       type: "Create",
       actor: iris.id,
       published,
-      to: [PUBLIC_AUDIENCE],
-      cc: [iris.followers],
+      ...addressing,
       object: {
         ...(input as Record<string, JsonValue>),
         id: typeof input.id === "string" ? input.id : `${activityId}/object`,
@@ -1937,7 +2008,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         : kind === "followers"
           ? "followers"
           : "following";
-    const where = kind === "following" ? " WHERE state = 'accepted'" : "";
+    // Restricted (blind-addressed) publishes are invisible to the public
+    // collection and every count derived from it (#496).
+    const where =
+      kind === "following"
+        ? " WHERE state = 'accepted'"
+        : kind === "outbox"
+          ? " WHERE COALESCE(restricted, 0) = 0"
+          : "";
     return this.#sql
       .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM ${table}${where}`)
       .one().n;
@@ -1950,14 +2028,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   ): JsonValue[] {
     const offset = (page - 1) * pageSize;
     if (kind === "outbox") {
+      // Restricted rows never appear; a public row that carried `bto` is
+      // served without it — blind addressing is delivery-only (AP §6.1).
       return this.#sql
         .exec<{ json: string }>(
-          `SELECT json FROM outbox ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
+          `SELECT json FROM outbox WHERE COALESCE(restricted, 0) = 0
+             ORDER BY published_at DESC, seq DESC LIMIT ? OFFSET ?`,
           pageSize,
           offset,
         )
         .toArray()
-        .map((row) => JSON.parse(row.json) as JsonValue);
+        .map(
+          (row) =>
+            withoutBlindAddressing(
+              JSON.parse(row.json) as Record<string, JsonValue>,
+            ) as JsonValue,
+        );
     }
     const table = kind === "followers" ? "followers" : "following";
     const where = kind === "following" ? " WHERE state = 'accepted'" : "";
@@ -3254,9 +3340,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     actor: string;
     event: string | null;
   }): boolean {
-    // A targeted delivery ('deliver') is always worth attempting; a profile
-    // resolution ('profile') only while the following row still exists.
-    if (row.kind === "deliver") return true;
+    // A targeted delivery ('deliver' / blind 'deliver_direct') is always
+    // worth attempting; a profile resolution ('profile') only while the
+    // following row still exists.
+    if (row.kind === "deliver" || row.kind === "deliver_direct") return true;
     if (row.kind === "profile") {
       return (
         this.#sql
@@ -3376,7 +3463,15 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         row.actor,
       );
       if (row.kind !== "profile") {
-        this.#enqueueDelivery(resolved.inbox, row.json);
+        // A blind delivery must land in the recipient's own inbox — the
+        // payload has no `bto`/`bcc` left, so a shared-inbox copy could not
+        // be attributed to anyone (see `#enqueueBlindDelivery`).
+        this.#enqueueDelivery(
+          row.kind === "deliver_direct"
+            ? (resolved.personalInbox ?? resolved.inbox)
+            : resolved.inbox,
+          row.json,
+        );
       }
       this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
     }
@@ -3464,6 +3559,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   async #resolveInbox(actor: string): Promise<{
     inbox: string;
     sharedInbox: string | null;
+    /** The actor's own `inbox`, for blind deliveries that must not batch. */
+    personalInbox: string | null;
     actorType: string | null;
   } | null> {
     try {
@@ -3506,7 +3603,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const personal = typeof record.inbox === "string" ? record.inbox : null;
     const inbox = sharedInbox ?? personal;
     const actorType = typeof record.type === "string" ? record.type : null;
-    return inbox === null ? null : { inbox, sharedInbox, actorType };
+    return inbox === null
+      ? null
+      : { inbox, sharedInbox, personalInbox: personal, actorType };
   }
 
   #deliverySigner(): { keyId: string; privateKeyPem: string } | null {
@@ -3637,6 +3736,64 @@ function audienceValues(value: JsonValue | undefined): string[] {
     return value.filter((v): v is string => typeof v === "string");
   }
   return [];
+}
+
+/**
+ * The deduplicated blind recipients (`bto`/`bcc`) of an owner-published
+ * activity (#496) — each an actor to deliver to individually. The Public
+ * collection and this actor itself are not deliverable recipients.
+ */
+function blindRecipients(
+  activity: Record<string, JsonValue>,
+  iris: ActorIris,
+): string[] {
+  const recipients = new Set<string>();
+  for (const field of ["bto", "bcc"] as const) {
+    for (const value of audienceValues(activity[field])) {
+      if (value === PUBLIC_AUDIENCE || value === iris.id) continue;
+      recipients.add(value);
+    }
+  }
+  return [...recipients];
+}
+
+/**
+ * Whether the activity's VISIBLE addressing (`to`/`cc`/`audience` — not the
+ * blind fields) names the Public collection or our followers collection. An
+ * owner activity with blind recipients and no such visible addressing is
+ * restricted (#496).
+ */
+function isPubliclyAddressed(
+  activity: Record<string, JsonValue>,
+  iris: ActorIris,
+): boolean {
+  for (const field of ["to", "cc", "audience"] as const) {
+    for (const value of audienceValues(activity[field])) {
+      if (value === PUBLIC_AUDIENCE || value === iris.followers) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A copy of the activity with `bto`/`bcc` removed from it and its embedded
+ * object — the shape every delivered or publicly-served copy takes (AP §6.1):
+ * a recipient learns only that IT was addressed, never the rest of the list.
+ */
+function withoutBlindAddressing(
+  activity: Record<string, JsonValue>,
+): Record<string, JsonValue> {
+  const { bto: _bto, bcc: _bcc, ...rest } = activity;
+  const object = rest.object;
+  if (object && typeof object === "object" && !Array.isArray(object)) {
+    const {
+      bto: _objectBto,
+      bcc: _objectBcc,
+      ...objectRest
+    } = object as Record<string, JsonValue>;
+    rest.object = objectRest;
+  }
+  return rest;
 }
 
 /**
