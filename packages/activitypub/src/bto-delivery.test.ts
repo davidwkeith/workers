@@ -403,6 +403,86 @@ describe("blind delivery inbox resolution", () => {
       expect(counts(state, "pending_accept")).toBe(0);
     });
   });
+
+  it("treats bto on the embedded object as restricted addressing", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      seedFollower(state);
+      // AS2 addressing lives on Object as much as on Activity: a raw Create
+      // carrying `bto` ONLY on its nested object must be detected as
+      // restricted all the same — reading just the top level would fan this
+      // out to every follower with the "blind" list intact.
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Create",
+            object: {
+              type: "Note",
+              content: "nested secret",
+              bto: [FRIEND],
+            },
+          }),
+        ),
+      );
+      expect(res.status).toBe(201);
+
+      expect(counts(state, "delivery")).toBe(0);
+      const blind = blindDeliveries(state);
+      expect(blind.map((d) => d.actor)).toEqual([FRIEND]);
+      const object = blind[0]!.activity.object as Record<string, unknown>;
+      expect(object.bto).toBeUndefined();
+
+      const head = (await (
+        await instance.fetch(collectionRequest(username, iris.outbox))
+      ).json()) as Record<string, unknown>;
+      expect(head.totalItems).toBe(0);
+    });
+  });
+
+  it("drops a blind delivery when the actor doc has no personal inbox", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Create",
+            bto: [FRIEND],
+            object: { type: "Note", content: "psst" },
+          }),
+        ),
+      );
+      await withFetch(
+        async (url) => {
+          const href = typeof url === "string" ? url : url.toString();
+          if (href === FRIEND) {
+            // A malformed/atypical actor doc: shared inbox only. The resolved
+            // fallback inbox IS the shared inbox, so a blind delivery has no
+            // usable target — it must be dropped, never delivered shared.
+            return new Response(
+              JSON.stringify({
+                id: FRIEND,
+                type: "Person",
+                endpoints: { sharedInbox: "https://friend.example/inbox" },
+              }),
+              { status: 200 },
+            );
+          }
+          return new Response(null, { status: 404 });
+        },
+        async () => {
+          await instance.fetch(
+            new Request(`${iris.id}/__resolve`, {
+              headers: { [INTERNAL_HEADERS.config]: cfgHeader(username) },
+            }),
+          );
+        },
+      );
+      expect(counts(state, "delivery")).toBe(0);
+      expect(counts(state, "pending_accept")).toBe(0);
+    });
+  });
 });
 
 describe("shaped-post publish (PostInput) with bto", () => {
