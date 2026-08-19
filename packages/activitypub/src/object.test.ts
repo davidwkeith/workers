@@ -2566,6 +2566,72 @@ describe("owner follower control (#447)", () => {
     });
   });
 
+  it("paginates /reports by page/pageSize and clamps a client-requested pageSize (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const flag = (
+        id: string,
+        receivedAt: number,
+        resolvedAt: number | null,
+      ) => {
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+          id,
+          JSON.stringify({
+            id,
+            type: "Flag",
+            actor: REMOTE,
+            object: iris.id,
+            content: "spam",
+          }),
+          receivedAt,
+          "Flag",
+          resolvedAt,
+        );
+      };
+      flag("https://remote.example/flags/1", 1, null);
+      flag("https://remote.example/flags/2", 2, null);
+      flag("https://remote.example/flags/3", 3, null);
+
+      const owner: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+
+      // Newest-first order is flags/3, flags/2, flags/1 — page 2 with
+      // pageSize 1 must land on flags/2, the second-newest, and `total`
+      // must stay the full open-report count, not the page's item count.
+      const page2 = await instance.fetch(
+        new Request(`${iris.id}/reports?page=2&pageSize=1`, {
+          headers: owner,
+        }),
+      );
+      expect(page2.status).toBe(200);
+      const page2Body = (await page2.json()) as {
+        items: { id: string }[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+      expect(page2Body.page).toBe(2);
+      expect(page2Body.pageSize).toBe(1);
+      expect(page2Body.total).toBe(3);
+      expect(page2Body.items).toHaveLength(1);
+      expect(page2Body.items[0]?.id).toBe("https://remote.example/flags/2");
+
+      // A client can't request an unbounded pageSize — it's clamped to the
+      // actor's configured `pageSize` (50, per `cfgHeader`'s default).
+      const clamped = await instance.fetch(
+        new Request(`${iris.id}/reports?pageSize=999999`, {
+          headers: owner,
+        }),
+      );
+      expect(clamped.status).toBe(200);
+      const clampedBody = (await clamped.json()) as { pageSize: number };
+      expect(clampedBody.pageSize).toBe(50);
+    });
+  });
+
   it("Accept: confirms a pending follower and, once the alarm resolves the follower's inbox, delivers Accept(Follow) to them alone and persists the inbox, setting accepted_at", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
