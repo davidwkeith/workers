@@ -449,6 +449,68 @@ describe("inbox handling", () => {
     });
   });
 
+  it("stores an inbound Flag (report) without forwarding it, even when addressed to followers (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/flags/1",
+            type: "Flag",
+            actor: REMOTE,
+            object: [iris.id, "https://remote.example/notes/1"],
+            content: "spam",
+            to: [iris.followers],
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ type: string | null; resolved_at: number | null }>(
+          `SELECT type, resolved_at FROM inbox WHERE id = ?`,
+          "https://remote.example/flags/1",
+        )
+        .one();
+      expect(row.type).toBe("Flag");
+      expect(row.resolved_at).toBeNull();
+      // Reports are private: never forwarded, even though `to` names followers
+      // (unlike a `Create`/`Like`/`Announce` addressed the same way).
+      expect(counts(state, "delivery")).toBe(0);
+    });
+  });
+
+  it("records the top-level activity type on every stored inbox row, not only Flag (#489)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/likes/1",
+            type: "Like",
+            actor: REMOTE,
+            object: "https://example.example/post/1",
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ type: string | null }>(
+          `SELECT type FROM inbox WHERE id = ?`,
+          "https://remote.example/likes/1",
+        )
+        .one();
+      expect(row.type).toBe("Like");
+    });
+  });
+
   it("ignores a Follow that targets a different actor", async () => {
     const { username, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {

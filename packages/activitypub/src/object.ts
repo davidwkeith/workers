@@ -330,6 +330,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Set when a moderator un-announces a member post (#376 remove-post); a
     // non-NULL value tombstones the row for reads without deleting history.
     this.#ensureColumn("inbox", "removed_at", "INTEGER");
+    // The activity's own top-level AS2 `type` (#489) — distinct from
+    // `object_type`, which classifies the *embedded* object and is null for
+    // bare-IRI objects like most `Flag`s/`Like`s. Populated going forward by
+    // `#storeInbox`; no backfill needed, because no `Flag` was ever stored
+    // before this feature (it hit the `default` switch case and was
+    // dropped), so a NULL `type` on a pre-existing row can never
+    // misclassify it as an open report.
+    this.#ensureColumn("inbox", "type", "TEXT");
+    // Report resolution (#489): NULL means still open; a timestamp means the
+    // owner dismissed it via `Ignore` (see `#publish`). Mirrors `removed_at`'s
+    // tombstone pattern.
+    this.#ensureColumn("inbox", "resolved_at", "INTEGER");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
     // The rejected `Follow`'s own IRI, for owner follower-control (#447).
     this.#ensureColumn("followers", "follow_id", "TEXT");
@@ -688,6 +700,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // FEP-1b12: a followed Group relays member activities wrapped in its
         // own Announce — unwrap and store the inner activity too (§2.2).
         await this.#maybeUnwrapAnnounce(activity, config);
+        break;
+      case "Flag":
+        // A report (#489). Stored like Like/Dislike/Announce, but
+        // deliberately WITHOUT #maybeForward — a report must never fan out
+        // to followers or anyone else, even if it happened to name the
+        // followers collection as its audience.
+        await this.#storeInbox(activity);
         break;
       default:
         // Be liberal: an unknown activity is accepted (and ignored) so we do not
@@ -1189,10 +1208,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // filter without re-parsing JSON; never validation — unknown shapes store
     // with NULL columns exactly as before.
     const { objectType, audience } = classifyActivity(activity);
+    const type = typeof activity.type === "string" ? activity.type : null;
     this.#sql.exec(
       `INSERT OR IGNORE INTO inbox
-         (id, json, received_at, object_type, audience, relayed_by, verify_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, json, received_at, object_type, audience, relayed_by, verify_state, type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       JSON.stringify(activity),
       Date.now(),
@@ -1200,6 +1220,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       audience ?? relay?.audienceFallback ?? null,
       relay?.relayedBy ?? null,
       relay?.verifyState ?? null,
+      type,
     );
     const actor = actorIri(activity.actor);
     if (actor && isSafeTarget(actor)) this.#queueActorProfile(actor);
