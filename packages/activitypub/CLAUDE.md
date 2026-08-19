@@ -59,7 +59,11 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   way (paginated, unlike `/blocked`/`/follow_requests`, since reports arrive
   from arbitrary peers); the owner resolves one via `POST <actor>/outbox`
   with `{ "type": "Ignore", "object": "<flag-id>" }`, mirroring `Accept`/
-  `Remove`.
+  `Remove`. `Ignore` only tombstones the report (`resolved_at`); it stays
+  hard-deleted only once `reportRetentionMs` (config `reportRetentionDays`,
+  default 30) elapses — a `report_prune` queue row scheduled at resolution
+  time and swept from the alarm (#502), the same off-critical-path pattern
+  as `pending_accept`/`verify_queue`/`actor_profile_queue`.
 - **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
   community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
   the Group actor itself rather than one of its owned events, is the same

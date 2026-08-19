@@ -38,6 +38,8 @@ describe("resolveConfig defaults and derivation", () => {
     expect(resolved.pageSize).toBe(50);
     expect(resolved.deliveryMaxAttempts).toBe(8);
     expect(resolved.deliveryBaseDelayMs).toBe(60_000);
+    // 30-day default retention for resolved reports (#502).
+    expect(resolved.reportRetentionMs).toBe(30 * 24 * 60 * 60 * 1000);
     expect(resolved.clockSkewSeconds).toBe(300);
     expect(resolved.software.name).toBe("dwk-activitypub");
     expect(resolved.iris).toEqual(deriveIris("https://example.com", "alice"));
@@ -80,10 +82,12 @@ describe("resolveConfig defaults and derivation", () => {
       pageSize: 10,
       deliveryMaxAttempts: 3,
       clockSkewSeconds: 60,
+      reportRetentionDays: 7,
     });
     expect(resolved.pageSize).toBe(10);
     expect(resolved.deliveryMaxAttempts).toBe(3);
     expect(resolved.clockSkewSeconds).toBe(60);
+    expect(resolved.reportRetentionMs).toBe(7 * 24 * 60 * 60 * 1000);
   });
 });
 

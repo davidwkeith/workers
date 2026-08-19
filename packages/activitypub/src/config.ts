@@ -139,6 +139,16 @@ export interface ActivityPubConfig {
   /** Base backoff (ms) for delivery retries (doubled per attempt). Defaults to 60_000. */
   readonly deliveryBaseDelayMs?: number;
 
+  /**
+   * How long a resolved (`Ignore`d) inbound `Flag` report is kept before its
+   * `inbox` row is hard-deleted (#502). `Ignore` only tombstones a report
+   * (sets `resolved_at`); this bounds how long a dismissed report still
+   * occupies DO SQLite storage — otherwise a hostile peer directly controls
+   * how much storage its reports cost, even after every one is resolved.
+   * Defaults to 30 days.
+   */
+  readonly reportRetentionDays?: number;
+
   /** Accepted clock skew (seconds) on inbound signed `Date` headers. Defaults to 300. */
   readonly clockSkewSeconds?: number;
 
@@ -191,6 +201,8 @@ export interface ResolvedConfig {
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
   readonly deliveryBaseDelayMs: number;
+  /** Retention window (ms) for a resolved `Flag` report before hard-delete (#502). */
+  readonly reportRetentionMs: number;
   readonly clockSkewSeconds: number;
   readonly software: SoftwareInfo;
   readonly keyResolver: KeyResolver;
@@ -252,6 +264,8 @@ export interface ForwardedConfig {
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
   readonly deliveryBaseDelayMs: number;
+  /** Retention window (ms) for a resolved `Flag` report before hard-delete (#502). */
+  readonly reportRetentionMs: number;
   readonly keyId: string;
   /** Private key (PKCS#8 PEM) so the DO can sign deliveries from its alarm. */
   readonly privateKeyPem?: string;
@@ -261,6 +275,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_ATTEMPTS = 8;
 const DEFAULT_BASE_DELAY_MS = 60_000;
 const DEFAULT_CLOCK_SKEW_SECONDS = 300;
+const DEFAULT_REPORT_RETENTION_DAYS = 30;
 
 const DEFAULT_SOFTWARE: SoftwareInfo = {
   name: "dwk-activitypub",
@@ -405,6 +420,12 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     pageSize: config.pageSize ?? DEFAULT_PAGE_SIZE,
     deliveryMaxAttempts: config.deliveryMaxAttempts ?? DEFAULT_MAX_ATTEMPTS,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs ?? DEFAULT_BASE_DELAY_MS,
+    reportRetentionMs:
+      (config.reportRetentionDays ?? DEFAULT_REPORT_RETENTION_DAYS) *
+      24 *
+      60 *
+      60 *
+      1000,
     clockSkewSeconds: config.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS,
     software: config.software ?? DEFAULT_SOFTWARE,
     keyResolver: config.keyResolver ?? defaultKeyResolver(fetchImpl),

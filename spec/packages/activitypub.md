@@ -177,6 +177,17 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
   written to the outbox or delivered to anyone; it only clears the report
   from `/reports`. An unknown or already-resolved id is a silent no-op,
   matching `Accept`'s convention for a similar race.
+- **Resolved-report retention (#502).** `Ignore`(Flag) only tombstones a
+  report (`resolved_at`), so a resolved report still occupies DO SQLite
+  storage — otherwise a hostile peer directly controls how much storage its
+  reports cost even after every one is dismissed. `reportRetentionDays`
+  (`ActivityPubConfig`, default 30) bounds how long a resolved report is
+  kept before its `inbox` row is hard-deleted. Resolving a report schedules
+  its eventual delete (`report_prune`, keyed by the report's own id so a
+  replayed `Ignore` cannot reset an already-scheduled prune); the delete
+  itself runs off the alarm like every other queue table (delivery retries,
+  pending accepts, relay verification, actor-profile hydration), never
+  inline on `Ignore`.
 
 ### Blind-addressed restricted delivery (`bto`/`bcc`, #496)
 
