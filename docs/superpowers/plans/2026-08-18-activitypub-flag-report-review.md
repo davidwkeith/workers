@@ -23,12 +23,14 @@
 ### Task 1: Store inbound `Flag`, add `type`/`resolved_at` columns
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts:326-332` (schema migration block)
 - Modify: `packages/activitypub/src/object.ts:1175-1210` (`#storeInbox`)
 - Modify: `packages/activitypub/src/object.ts:613-696` (`#handleInbox`'s dispatch switch)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `#storeInbox(activity, relay?)`, `#ensureColumn(table, column, type)`, `#sql` (the DO's `SqlStorage`), `ActivityObject` (from `./as2.js`).
 - Produces: every stored `inbox` row now has a `type` column (the activity's own top-level AS2 `type`, e.g. `"Flag"`, `"Like"`) and a `resolved_at` column (`INTEGER`, `NULL` until resolved) — later tasks read both.
 
@@ -112,19 +114,19 @@ Expected: FAIL — `type`/`resolved_at` are not real columns yet (`SqlStorage` t
 In `packages/activitypub/src/object.ts`, immediately after the existing `removed_at` migration line (currently line 332):
 
 ```ts
-    this.#ensureColumn("inbox", "removed_at", "INTEGER");
-    // The activity's own top-level AS2 `type` (#489) — distinct from
-    // `object_type`, which classifies the *embedded* object and is null for
-    // bare-IRI objects like most `Flag`s/`Like`s. Populated going forward by
-    // `#storeInbox`; no backfill needed, because no `Flag` was ever stored
-    // before this feature (it hit the `default` switch case and was
-    // dropped), so a NULL `type` on a pre-existing row can never
-    // misclassify it as an open report.
-    this.#ensureColumn("inbox", "type", "TEXT");
-    // Report resolution (#489): NULL means still open; a timestamp means the
-    // owner dismissed it via `Ignore` (see `#publish`). Mirrors `removed_at`'s
-    // tombstone pattern.
-    this.#ensureColumn("inbox", "resolved_at", "INTEGER");
+this.#ensureColumn("inbox", "removed_at", "INTEGER");
+// The activity's own top-level AS2 `type` (#489) — distinct from
+// `object_type`, which classifies the *embedded* object and is null for
+// bare-IRI objects like most `Flag`s/`Like`s. Populated going forward by
+// `#storeInbox`; no backfill needed, because no `Flag` was ever stored
+// before this feature (it hit the `default` switch case and was
+// dropped), so a NULL `type` on a pre-existing row can never
+// misclassify it as an open report.
+this.#ensureColumn("inbox", "type", "TEXT");
+// Report resolution (#489): NULL means still open; a timestamp means the
+// owner dismissed it via `Ignore` (see `#publish`). Mirrors `removed_at`'s
+// tombstone pattern.
+this.#ensureColumn("inbox", "resolved_at", "INTEGER");
 ```
 
 - [ ] **Step 4: Populate `type` in `#storeInbox`**
@@ -132,39 +134,39 @@ In `packages/activitypub/src/object.ts`, immediately after the existing `removed
 In `packages/activitypub/src/object.ts`, `#storeInbox` currently reads:
 
 ```ts
-    const { objectType, audience } = classifyActivity(activity);
-    this.#sql.exec(
-      `INSERT OR IGNORE INTO inbox
+const { objectType, audience } = classifyActivity(activity);
+this.#sql.exec(
+  `INSERT OR IGNORE INTO inbox
          (id, json, received_at, object_type, audience, relayed_by, verify_state)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      JSON.stringify(activity),
-      Date.now(),
-      objectType ?? null,
-      audience ?? relay?.audienceFallback ?? null,
-      relay?.relayedBy ?? null,
-      relay?.verifyState ?? null,
-    );
+  id,
+  JSON.stringify(activity),
+  Date.now(),
+  objectType ?? null,
+  audience ?? relay?.audienceFallback ?? null,
+  relay?.relayedBy ?? null,
+  relay?.verifyState ?? null,
+);
 ```
 
 Change it to:
 
 ```ts
-    const { objectType, audience } = classifyActivity(activity);
-    const type = typeof activity.type === "string" ? activity.type : null;
-    this.#sql.exec(
-      `INSERT OR IGNORE INTO inbox
+const { objectType, audience } = classifyActivity(activity);
+const type = typeof activity.type === "string" ? activity.type : null;
+this.#sql.exec(
+  `INSERT OR IGNORE INTO inbox
          (id, json, received_at, object_type, audience, relayed_by, verify_state, type)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      JSON.stringify(activity),
-      Date.now(),
-      objectType ?? null,
-      audience ?? relay?.audienceFallback ?? null,
-      relay?.relayedBy ?? null,
-      relay?.verifyState ?? null,
-      type,
-    );
+  id,
+  JSON.stringify(activity),
+  Date.now(),
+  objectType ?? null,
+  audience ?? relay?.audienceFallback ?? null,
+  relay?.relayedBy ?? null,
+  relay?.verifyState ?? null,
+  type,
+);
 ```
 
 - [ ] **Step 5: Add the `Flag` dispatch case**
@@ -232,12 +234,14 @@ resolve open reports (#489)."
 ### Task 2: `GET <actor>/reports` — bearer-gated, paginated report listing
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (new `#listReports` method + `#route` wiring)
 - Modify: `packages/activitypub/src/handler.ts` (new front-door route)
 - Test: `packages/activitypub/src/object.test.ts`
 - Test: `packages/activitypub/src/index.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1's `inbox.type`/`inbox.resolved_at` columns; existing `#route`'s `iris`/`config`/`pathOf` machinery; `handler.ts`'s existing `resolved.publishToken`/`authorizedPublish`/`forwardToDo`/`emit` machinery.
 - Produces: `GET <actor>/reports` — `200 { items: JsonValue[], total: number, page: number, pageSize: number }` (raw AS2 `Flag` JSON, newest first, open reports only) behind the owner's `publishToken`; `404` when disabled or on any non-`GET` verb; `401` on a bad/missing token.
 
@@ -249,11 +253,21 @@ Add to `packages/activitypub/src/object.test.ts`, directly after the existing `"
 it("serves open reports only behind the owner marker, paginated, newest first (#489)", async () => {
   const { username, iris, stub } = freshUser();
   await runInDurableObject(stub, async (instance, state) => {
-    const flag = (id: string, receivedAt: number, resolvedAt: number | null) => {
+    const flag = (
+      id: string,
+      receivedAt: number,
+      resolvedAt: number | null,
+    ) => {
       state.storage.sql.exec(
         `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
         id,
-        JSON.stringify({ id, type: "Flag", actor: REMOTE, object: iris.id, content: "spam" }),
+        JSON.stringify({
+          id,
+          type: "Flag",
+          actor: REMOTE,
+          object: iris.id,
+          content: "spam",
+        }),
         receivedAt,
         "Flag",
         resolvedAt,
@@ -508,39 +522,39 @@ Expected: FAIL — `handler.ts` doesn't route `/reports` yet, so every case (inc
 In `packages/activitypub/src/handler.ts`, add a new path constant alongside the existing ones (currently lines 249-250):
 
 ```ts
-  const blockedPath = `${actorPath}/blocked`;
-  const followRequestsPath = `${actorPath}/follow_requests`;
-  const reportsPath = `${actorPath}/reports`;
+const blockedPath = `${actorPath}/blocked`;
+const followRequestsPath = `${actorPath}/follow_requests`;
+const reportsPath = `${actorPath}/reports`;
 ```
 
 Then, immediately after the existing `follow_requests` block (which currently ends right before the `--- Collection reads ---` comment), add:
 
 ```ts
-    // --- Owner report read (#489) -------------------------------------------
-    // Bearer-gated, paginated (unlike /blocked and /follow_requests, which
-    // stay unpaged because those lists are owner-curated and small — reports
-    // arrive from arbitrary peers and could be flooded). Same 404-not-405
-    // asymmetry on the wrong verb as every other private owner route here.
-    if (path === reportsPath && method === "GET") {
-      if (!resolved.publishToken) {
-        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
-          reason: "disabled",
-        });
-        return text(404, "Not Found");
-      }
-      if (!(await authorizedPublish(request, resolved.publishToken))) {
-        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
-          reason: "unauthorized",
-        });
-        return text(401, "Unauthorized");
-      }
-      return forwardToDo(resolved, env, request.url, {
-        method,
-        extra: { [INTERNAL_HEADERS.publish]: "1" },
-      });
-    }
+// --- Owner report read (#489) -------------------------------------------
+// Bearer-gated, paginated (unlike /blocked and /follow_requests, which
+// stay unpaged because those lists are owner-curated and small — reports
+// arrive from arbitrary peers and could be flooded). Same 404-not-405
+// asymmetry on the wrong verb as every other private owner route here.
+if (path === reportsPath && method === "GET") {
+  if (!resolved.publishToken) {
+    emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+      reason: "disabled",
+    });
+    return text(404, "Not Found");
+  }
+  if (!(await authorizedPublish(request, resolved.publishToken))) {
+    emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+      reason: "unauthorized",
+    });
+    return text(401, "Unauthorized");
+  }
+  return forwardToDo(resolved, env, request.url, {
+    method,
+    extra: { [INTERNAL_HEADERS.publish]: "1" },
+  });
+}
 
-    // --- Collection reads (authoritative; routed to the DO) -----------------
+// --- Collection reads (authoritative; routed to the DO) -----------------
 ```
 
 - [ ] **Step 9: Run tests to verify they pass**
@@ -571,10 +585,12 @@ flooded, unlike those two owner-curated lists (#489)."
 ### Task 3: Owner `Ignore(Flag)` — resolve/dismiss a report
 
 **Files:**
+
 - Modify: `packages/activitypub/src/object.ts` (`#publish` new branch, `#asOutboxActivity` allowlist)
 - Test: `packages/activitypub/src/object.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1's `inbox.type`/`inbox.resolved_at`; Task 2's `#listReports` (used only to assert end-to-end behavior in the test, not a code dependency); existing `objectId` (from `./as2.js`, already imported), `#publish`, `#asOutboxActivity`.
 - Produces: `POST <actor>/outbox` with `{ "type": "Ignore", "object": "<flag-activity-id>" }` (bearer `publishToken`-gated, same as `Accept`/`Remove`) → `202` with the normalized `Ignore` activity; sets `inbox.resolved_at` on the matching `type = 'Flag'` row; never written to the outbox; never delivered to anyone.
 
@@ -765,11 +781,13 @@ anyone -- purely local review state (#489)."
 ### Task 4: Spec, package docs, and changeset
 
 **Files:**
+
 - Modify: `spec/packages/activitypub.md`
 - Modify: `packages/activitypub/CLAUDE.md`
 - Create: `.changeset/activitypub-flag-report-review.md`
 
 **Interfaces:**
+
 - Consumes: nothing (documentation-only task).
 - Produces: nothing consumed by other tasks — this is the terminal documentation task.
 
@@ -800,11 +818,11 @@ Insert a new bullet immediately after the existing `GET <actor>/follow_requests`
 In the "Key constraints" list, extend the existing "Owner follower control (#447)" bullet's final sentence (which currently ends `"... so an owner client doesn't need OAuth just to see who is pending."`) by appending:
 
 ```markdown
-  `GET <actor>/reports` (#489) lists open inbound `Flag` reports the same
-  way (paginated, unlike `/blocked`/`/follow_requests`, since reports arrive
-  from arbitrary peers); the owner resolves one via `POST <actor>/outbox`
-  with `{ "type": "Ignore", "object": "<flag-id>" }`, mirroring `Accept`/
-  `Remove`.
+`GET <actor>/reports` (#489) lists open inbound `Flag` reports the same
+way (paginated, unlike `/blocked`/`/follow_requests`, since reports arrive
+from arbitrary peers); the owner resolves one via `POST <actor>/outbox`
+with `{ "type": "Ignore", "object": "<flag-id>" }`, mirroring `Accept`/
+`Remove`.
 ```
 
 - [ ] **Step 3: Add the changeset**

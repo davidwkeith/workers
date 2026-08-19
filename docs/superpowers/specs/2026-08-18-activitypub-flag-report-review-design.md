@@ -28,7 +28,7 @@ a `202` and then silently dropped: never stored, never surfaced to the owner.
   both already gated by the owner's `publishToken`.
 - **New HTTP route for resolving a report.** Like `Accept`/`Remove`, the
   resolve action rides the existing `POST <actor>/outbox` seam — what the
-  owner is asking for *is* an AS2 activity, not a bespoke REST call.
+  owner is asking for _is_ an AS2 activity, not a bespoke REST call.
 - **Forwarding/relaying `Flag` activities.** Unlike `Like`/`Dislike`/
   `Announce`, a stored `Flag` never calls `#maybeForward` — a report must
   never fan out to followers or anyone else, even if it happened to name the
@@ -66,7 +66,7 @@ this.#ensureColumn("inbox", "resolved_at", "INTEGER");
 
 - **`type`** — the activity's own top-level AS2 `type`, populated going
   forward by `#storeInbox`. The existing `object_type` column classifies the
-  *embedded* object (`activity.object`'s type), not the activity itself, so
+  _embedded_ object (`activity.object`'s type), not the activity itself, so
   it cannot distinguish a `Flag` — the same limitation `#classifyClientEntry`
   documents ("`object_type` alone can't distinguish these ... is null for
   bare-IRI objects like most `Like`s"). No backfill needed: no `Flag` was
