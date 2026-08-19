@@ -162,6 +162,21 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
   equivalent of that route: an owner-facing client (e.g. a moderation UI) can
   list the approval queue
   without standing up a separate OAuth flow just to see who is pending.
+- **Owner report review (#489).** Inbound `Flag` activities (a peer's report
+  against an actor or content) are stored via the same `#storeInbox` path as
+  `Like`/`Dislike`/`Announce` — but never forwarded (§7.1.2 forwarding is
+  skipped for `Flag`; a report must never fan out to followers, even when
+  addressed to them). **`GET <actor>/reports`** returns open (unresolved)
+  reports behind the same bearer token as `/blocked`/`/follow_requests` —
+  unlike those two, it is page/pageSize-paginated like `#listInbox`, since
+  reports arrive from arbitrary peers rather than being owner-curated. Each
+  item is the raw AS2 `Flag` activity (reporter, reported target, and the
+  free-text `content` reason). The owner resolves/dismisses a report the
+  same way as `Accept`/`Remove` — `POST <actor>/outbox` with
+  `{ "type": "Ignore", "object": "<flag-activity-id>" }` — which is never
+  written to the outbox or delivered to anyone; it only clears the report
+  from `/reports`. An unknown or already-resolved id is a silent no-op,
+  matching `Accept`'s convention for a similar race.
 
 ### Blind-addressed restricted delivery (`bto`/`bcc`, #496)
 

@@ -330,6 +330,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // Set when a moderator un-announces a member post (#376 remove-post); a
     // non-NULL value tombstones the row for reads without deleting history.
     this.#ensureColumn("inbox", "removed_at", "INTEGER");
+    // The activity's own top-level AS2 `type` (#489) — distinct from
+    // `object_type`, which classifies the *embedded* object and is null for
+    // bare-IRI objects like most `Flag`s/`Like`s. Populated going forward by
+    // `#storeInbox`; no backfill needed, because no `Flag` was ever stored
+    // before this feature (it hit the `default` switch case and was
+    // dropped), so a NULL `type` on a pre-existing row can never
+    // misclassify it as an open report.
+    this.#ensureColumn("inbox", "type", "TEXT");
+    // Report resolution (#489): NULL means still open; a timestamp means the
+    // owner dismissed it via `Ignore` (see `#publish`). Mirrors `removed_at`'s
+    // tombstone pattern.
+    this.#ensureColumn("inbox", "resolved_at", "INTEGER");
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
     // The rejected `Follow`'s own IRI, for owner follower-control (#447).
     this.#ensureColumn("followers", "follow_id", "TEXT");
@@ -541,6 +553,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return this.#listPendingFollowers();
     }
+    // Owner report read (#489): bearer-gated, like `/blocked` and
+    // `/follow_requests` above. Same 404-not-405 rule.
+    if (path === `${pathOf(iris.id)}/reports`) {
+      if (
+        method !== "GET" ||
+        request.headers.get(INTERNAL_HEADERS.publish) !== "1"
+      ) {
+        return text(404, "Not Found");
+      }
+      return this.#listReports(request);
+    }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
       // The inbox is write-only to peers; reads are not part of S2S.
@@ -688,6 +711,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // FEP-1b12: a followed Group relays member activities wrapped in its
         // own Announce — unwrap and store the inner activity too (§2.2).
         await this.#maybeUnwrapAnnounce(activity, config);
+        break;
+      case "Flag":
+        // A report (#489). Stored like Like/Dislike/Announce, but
+        // deliberately WITHOUT #maybeForward — a report must never fan out
+        // to followers or anyone else, even if it happened to name the
+        // followers collection as its audience.
+        await this.#storeInbox(activity);
         break;
       default:
         // Be liberal: an unknown activity is accepted (and ignored) so we do not
@@ -1189,10 +1219,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // filter without re-parsing JSON; never validation — unknown shapes store
     // with NULL columns exactly as before.
     const { objectType, audience } = classifyActivity(activity);
+    const type = typeof activity.type === "string" ? activity.type : null;
     this.#sql.exec(
       `INSERT OR IGNORE INTO inbox
-         (id, json, received_at, object_type, audience, relayed_by, verify_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (id, json, received_at, object_type, audience, relayed_by, verify_state, type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       JSON.stringify(activity),
       Date.now(),
@@ -1200,6 +1231,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       audience ?? relay?.audienceFallback ?? null,
       relay?.relayedBy ?? null,
       relay?.verifyState ?? null,
+      type,
     );
     const actor = actorIri(activity.actor);
     if (actor && isSafeTarget(actor)) this.#queueActorProfile(actor);
@@ -1366,6 +1398,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         await this.#applyModerationRemove(activity, config, !skipDelivery);
         return json(202, activity as JsonValue);
       }
+    }
+
+    // Owner report resolution (#489): dismiss an open Flag. Own top-level
+    // branch, like Remove above -- not folded into isFollowerControlActivity,
+    // since Ignore(Flag) never delivers to anyone (purely local review
+    // state, like the ban half of Remove). Not Group-gated: reports apply to
+    // Person actors too. An id with no matching open Flag row is a silent
+    // no-op (UPDATE affects zero rows) -- the same "unroutable → dropped"
+    // convention Accept/Reject/Block already use for a normal race (e.g. the
+    // report was already resolved through another client).
+    if (activity.type === "Ignore") {
+      const target = objectId(activity.object);
+      if (target) {
+        this.#sql.exec(
+          `UPDATE inbox SET resolved_at = COALESCE(resolved_at, ?)
+             WHERE id = ? AND type = 'Flag'`,
+          Date.now(),
+          target,
+        );
+      }
+      return json(202, activity as JsonValue);
     }
 
     // Blind addressing (#496): `bto`/`bcc` recipients are delivered to
@@ -1864,6 +1917,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // same reasoning as Block/Reject above.
         "Accept",
         "Remove",
+        // Owner report review (#489): resolve/dismiss a Flag — same
+        // reasoning again.
+        "Ignore",
       ].includes(input.type);
     const published = isValidPublished(input.published)
       ? new Date(input.published).toISOString()
@@ -1999,6 +2055,49 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           }) as JsonValue,
       );
     return json(200, { items, total: items.length });
+  }
+
+  /**
+   * Open (unresolved) inbound reports, newest first, for the owner-facing
+   * `GET <actor>/reports` route (#489). Unlike `/blocked`/`/follow_requests`
+   * — unpaged, because a personal blocklist/approval-queue stays small —
+   * this is page/pageSize-paginated like `#listInbox`: reports arrive from
+   * arbitrary peers, and a hostile one could flood them. Returns the raw AS2
+   * `Flag` JSON (matching `#listInbox`'s shape) so the owner sees the
+   * reporter, the reported target, and the free-text reason in full.
+   */
+  #listReports(request: Request): Response {
+    const config = this.#config!;
+    const url = new URL(request.url);
+    const page = Math.max(
+      1,
+      Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+    );
+    const requestedPageSize = Number.parseInt(
+      url.searchParams.get("pageSize") ?? "",
+      10,
+    );
+    const pageSize =
+      Number.isFinite(requestedPageSize) && requestedPageSize > 0
+        ? Math.min(requestedPageSize, config.pageSize)
+        : config.pageSize;
+    const offset = (page - 1) * pageSize;
+
+    const total = this.#sql
+      .exec<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM inbox WHERE type = 'Flag' AND resolved_at IS NULL`,
+      )
+      .one().n;
+    const items = this.#sql
+      .exec<{ json: string }>(
+        `SELECT json FROM inbox WHERE type = 'Flag' AND resolved_at IS NULL
+           ORDER BY seq DESC LIMIT ? OFFSET ?`,
+        pageSize,
+        offset,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.json) as JsonValue);
+    return json(200, { items, total, page, pageSize } as JsonValue);
   }
 
   #count(kind: "followers" | "following" | "outbox"): number {

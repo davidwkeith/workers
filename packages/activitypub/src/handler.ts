@@ -248,6 +248,7 @@ export function createActivityPub(
   const publishPath = `${actorPath}/publish`;
   const blockedPath = `${actorPath}/blocked`;
   const followRequestsPath = `${actorPath}/follow_requests`;
+  const reportsPath = `${actorPath}/reports`;
   const followersPath = pathOf(iris.followers);
   const followingPath = pathOf(iris.following);
   const sharedInboxPath = resolved.sharedInbox
@@ -463,6 +464,30 @@ export function createActivityPub(
     // already applies to the owner's blocklist, including the 404-not-405
     // asymmetry on the wrong verb.
     if (path === followRequestsPath && method === "GET") {
+      if (!resolved.publishToken) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "disabled",
+        });
+        return text(404, "Not Found");
+      }
+      if (!(await authorizedPublish(request, resolved.publishToken))) {
+        emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
+          reason: "unauthorized",
+        });
+        return text(401, "Unauthorized");
+      }
+      return forwardToDo(resolved, env, request.url, {
+        method,
+        extra: { [INTERNAL_HEADERS.publish]: "1" },
+      });
+    }
+
+    // --- Owner report read (#489) -------------------------------------------
+    // Bearer-gated, paginated (unlike /blocked and /follow_requests, which
+    // stay unpaged because those lists are owner-curated and small — reports
+    // arrive from arbitrary peers and could be flooded). Same 404-not-405
+    // asymmetry on the wrong verb as every other private owner route here.
+    if (path === reportsPath && method === "GET") {
       if (!resolved.publishToken) {
         emit(resolved, "warn", ActivityPubLogEvent.PublishRejected, {
           reason: "disabled",

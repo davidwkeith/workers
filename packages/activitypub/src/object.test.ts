@@ -449,6 +449,68 @@ describe("inbox handling", () => {
     });
   });
 
+  it("stores an inbound Flag (report) without forwarding it, even when addressed to followers (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO followers (actor, inbox, added_at) VALUES (?, ?, ?)`,
+        REMOTE,
+        `${REMOTE}/inbox`,
+        1,
+      );
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/flags/1",
+            type: "Flag",
+            actor: REMOTE,
+            object: [iris.id, "https://remote.example/notes/1"],
+            content: "spam",
+            to: [iris.followers],
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ type: string | null; resolved_at: number | null }>(
+          `SELECT type, resolved_at FROM inbox WHERE id = ?`,
+          "https://remote.example/flags/1",
+        )
+        .one();
+      expect(row.type).toBe("Flag");
+      expect(row.resolved_at).toBeNull();
+      // Reports are private: never forwarded, even though `to` names followers
+      // (unlike a `Create`/`Like`/`Announce` addressed the same way).
+      expect(counts(state, "delivery")).toBe(0);
+    });
+  });
+
+  it("records the top-level activity type on every stored inbox row, not only Flag (#489)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        inboxRequest(
+          username,
+          JSON.stringify({
+            id: "https://remote.example/likes/1",
+            type: "Like",
+            actor: REMOTE,
+            object: "https://example.example/post/1",
+          }),
+        ),
+      );
+      expect(res.status).toBe(202);
+      const row = state.storage.sql
+        .exec<{ type: string | null }>(
+          `SELECT type FROM inbox WHERE id = ?`,
+          "https://remote.example/likes/1",
+        )
+        .one();
+      expect(row.type).toBe("Like");
+    });
+  });
+
   it("ignores a Follow that targets a different actor", async () => {
     const { username, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {
@@ -864,6 +926,83 @@ describe("publish endpoint", () => {
       const accept = (await acceptRes.json()) as Record<string, unknown>;
       expect(accept.type).toBe("Accept");
       expect(accept.actor).toBe(iris.id);
+    });
+  });
+
+  it("Ignore(Flag): resolves an open report, drops it from /reports, and is never delivered or stored to the outbox (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({
+          id: "https://remote.example/flags/1",
+          type: "Flag",
+          actor: REMOTE,
+          object: iris.id,
+          content: "spam",
+        }),
+        1,
+        "Flag",
+      );
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/1",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const body = (await res.json()) as { type: string; object: string };
+      // Passed through as a real activity, not wrapped in a synthetic Create
+      // (a regression here would show up as body.type === "Create").
+      expect(body.type).toBe("Ignore");
+      expect(body.object).toBe("https://remote.example/flags/1");
+
+      const row = state.storage.sql
+        .exec<{ resolved_at: number | null }>(
+          `SELECT resolved_at FROM inbox WHERE id = ?`,
+          "https://remote.example/flags/1",
+        )
+        .one();
+      expect(row.resolved_at).not.toBeNull();
+
+      expect(counts(state, "outbox")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+
+      const owner = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers: owner }),
+      );
+      const listBody = (await listed.json()) as { total: number };
+      expect(listBody.total).toBe(0);
+    });
+  });
+
+  it("Ignore(Flag) on an unknown or already-resolved id is a silent no-op (#489)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/does-not-exist",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      // Nothing was ever stored for this id -- confirms the UPDATE affected
+      // zero rows without creating one or raising an error.
+      expect(counts(state, "inbox")).toBe(0);
     });
   });
 
@@ -2349,6 +2488,147 @@ describe("owner follower control (#447)", () => {
         }),
       );
       expect(written.status).toBe(404);
+    });
+  });
+
+  it("serves open reports only behind the owner marker, paginated, newest first (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const flag = (
+        id: string,
+        receivedAt: number,
+        resolvedAt: number | null,
+      ) => {
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+          id,
+          JSON.stringify({
+            id,
+            type: "Flag",
+            actor: REMOTE,
+            object: iris.id,
+            content: "spam",
+          }),
+          receivedAt,
+          "Flag",
+          resolvedAt,
+        );
+      };
+      flag("https://remote.example/flags/1", 1, null);
+      flag("https://remote.example/flags/2", 2, 999); // already resolved
+      flag("https://remote.example/flags/3", 3, null);
+      // An unrelated stored activity must never appear in /reports.
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/likes/1",
+        JSON.stringify({
+          id: "https://remote.example/likes/1",
+          type: "Like",
+          actor: REMOTE,
+          object: iris.id,
+        }),
+        4,
+        "Like",
+      );
+
+      const headers: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+      };
+      const unmarked = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers }),
+      );
+      expect(unmarked.status).toBe(404);
+
+      const owner = { ...headers, [INTERNAL_HEADERS.publish]: "1" };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers: owner }),
+      );
+      expect(listed.status).toBe(200);
+      const body = (await listed.json()) as {
+        items: { id: string; type: string }[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+      expect(body.total).toBe(2);
+      expect(body.items.map((item) => item.id)).toEqual([
+        "https://remote.example/flags/3",
+        "https://remote.example/flags/1",
+      ]);
+      expect(body.page).toBe(1);
+
+      // Anything but an authorized GET is 404, never 405 — same reasoning as
+      // `/blocked`/`/follow_requests`.
+      const written = await instance.fetch(
+        new Request(`${iris.id}/reports`, { method: "DELETE", headers: owner }),
+      );
+      expect(written.status).toBe(404);
+    });
+  });
+
+  it("paginates /reports by page/pageSize and clamps a client-requested pageSize (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const flag = (
+        id: string,
+        receivedAt: number,
+        resolvedAt: number | null,
+      ) => {
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+          id,
+          JSON.stringify({
+            id,
+            type: "Flag",
+            actor: REMOTE,
+            object: iris.id,
+            content: "spam",
+          }),
+          receivedAt,
+          "Flag",
+          resolvedAt,
+        );
+      };
+      flag("https://remote.example/flags/1", 1, null);
+      flag("https://remote.example/flags/2", 2, null);
+      flag("https://remote.example/flags/3", 3, null);
+
+      const owner: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+
+      // Newest-first order is flags/3, flags/2, flags/1 — page 2 with
+      // pageSize 1 must land on flags/2, the second-newest, and `total`
+      // must stay the full open-report count, not the page's item count.
+      const page2 = await instance.fetch(
+        new Request(`${iris.id}/reports?page=2&pageSize=1`, {
+          headers: owner,
+        }),
+      );
+      expect(page2.status).toBe(200);
+      const page2Body = (await page2.json()) as {
+        items: { id: string }[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+      expect(page2Body.page).toBe(2);
+      expect(page2Body.pageSize).toBe(1);
+      expect(page2Body.total).toBe(3);
+      expect(page2Body.items).toHaveLength(1);
+      expect(page2Body.items[0]?.id).toBe("https://remote.example/flags/2");
+
+      // A client can't request an unbounded pageSize — it's clamped to the
+      // actor's configured `pageSize` (50, per `cfgHeader`'s default).
+      const clamped = await instance.fetch(
+        new Request(`${iris.id}/reports?pageSize=999999`, {
+          headers: owner,
+        }),
+      );
+      expect(clamped.status).toBe(200);
+      const clampedBody = (await clamped.json()) as { pageSize: number };
+      expect(clampedBody.pageSize).toBe(50);
     });
   });
 

@@ -55,6 +55,11 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   bearer token, mirroring `/blocked` — a bearer-gated equivalent of the
   internal-marker-gated `__client/follow_requests` route `@dwk/mastodon-api`
   uses, so an owner client doesn't need OAuth just to see who is pending.
+  `GET <actor>/reports` (#489) lists open inbound `Flag` reports the same
+  way (paginated, unlike `/blocked`/`/follow_requests`, since reports arrive
+  from arbitrary peers); the owner resolves one via `POST <actor>/outbox`
+  with `{ "type": "Ignore", "object": "<flag-id>" }`, mirroring `Accept`/
+  `Remove`.
 - **Hosting `Group` actors (#376).** `actor.type: "Group"` hosts a FEP-1b12
   community: members are `followers` (a `Follow`, or a `Join`/`Leave` targeting
   the Group actor itself rather than one of its owned events, is the same
