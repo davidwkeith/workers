@@ -2414,6 +2414,81 @@ describe("owner follower control (#447)", () => {
     });
   });
 
+  it("serves open reports only behind the owner marker, paginated, newest first (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const flag = (
+        id: string,
+        receivedAt: number,
+        resolvedAt: number | null,
+      ) => {
+        state.storage.sql.exec(
+          `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+          id,
+          JSON.stringify({
+            id,
+            type: "Flag",
+            actor: REMOTE,
+            object: iris.id,
+            content: "spam",
+          }),
+          receivedAt,
+          "Flag",
+          resolvedAt,
+        );
+      };
+      flag("https://remote.example/flags/1", 1, null);
+      flag("https://remote.example/flags/2", 2, 999); // already resolved
+      flag("https://remote.example/flags/3", 3, null);
+      // An unrelated stored activity must never appear in /reports.
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/likes/1",
+        JSON.stringify({
+          id: "https://remote.example/likes/1",
+          type: "Like",
+          actor: REMOTE,
+          object: iris.id,
+        }),
+        4,
+        "Like",
+      );
+
+      const headers: Record<string, string> = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+      };
+      const unmarked = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers }),
+      );
+      expect(unmarked.status).toBe(404);
+
+      const owner = { ...headers, [INTERNAL_HEADERS.publish]: "1" };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers: owner }),
+      );
+      expect(listed.status).toBe(200);
+      const body = (await listed.json()) as {
+        items: { id: string; type: string }[];
+        total: number;
+        page: number;
+        pageSize: number;
+      };
+      expect(body.total).toBe(2);
+      expect(body.items.map((item) => item.id)).toEqual([
+        "https://remote.example/flags/3",
+        "https://remote.example/flags/1",
+      ]);
+      expect(body.page).toBe(1);
+
+      // Anything but an authorized GET is 404, never 405 — same reasoning as
+      // `/blocked`/`/follow_requests`.
+      const written = await instance.fetch(
+        new Request(`${iris.id}/reports`, { method: "DELETE", headers: owner }),
+      );
+      expect(written.status).toBe(404);
+    });
+  });
+
   it("Accept: confirms a pending follower and, once the alarm resolves the follower's inbox, delivers Accept(Follow) to them alone and persists the inbox, setting accepted_at", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance, state) => {

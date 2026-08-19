@@ -553,6 +553,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return this.#listPendingFollowers();
     }
+    // Owner report read (#489): bearer-gated, like `/blocked` and
+    // `/follow_requests` above. Same 404-not-405 rule.
+    if (path === `${pathOf(iris.id)}/reports`) {
+      if (
+        method !== "GET" ||
+        request.headers.get(INTERNAL_HEADERS.publish) !== "1"
+      ) {
+        return text(404, "Not Found");
+      }
+      return this.#listReports(request);
+    }
     if (path === pathOf(iris.inbox)) {
       if (method === "POST") return this.#handleInbox(request);
       // The inbox is write-only to peers; reads are not part of S2S.
@@ -2020,6 +2031,49 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           }) as JsonValue,
       );
     return json(200, { items, total: items.length });
+  }
+
+  /**
+   * Open (unresolved) inbound reports, newest first, for the owner-facing
+   * `GET <actor>/reports` route (#489). Unlike `/blocked`/`/follow_requests`
+   * — unpaged, because a personal blocklist/approval-queue stays small —
+   * this is page/pageSize-paginated like `#listInbox`: reports arrive from
+   * arbitrary peers, and a hostile one could flood them. Returns the raw AS2
+   * `Flag` JSON (matching `#listInbox`'s shape) so the owner sees the
+   * reporter, the reported target, and the free-text reason in full.
+   */
+  #listReports(request: Request): Response {
+    const config = this.#config!;
+    const url = new URL(request.url);
+    const page = Math.max(
+      1,
+      Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
+    );
+    const requestedPageSize = Number.parseInt(
+      url.searchParams.get("pageSize") ?? "",
+      10,
+    );
+    const pageSize =
+      Number.isFinite(requestedPageSize) && requestedPageSize > 0
+        ? Math.min(requestedPageSize, config.pageSize)
+        : config.pageSize;
+    const offset = (page - 1) * pageSize;
+
+    const total = this.#sql
+      .exec<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM inbox WHERE type = 'Flag' AND resolved_at IS NULL`,
+      )
+      .one().n;
+    const items = this.#sql
+      .exec<{ json: string }>(
+        `SELECT json FROM inbox WHERE type = 'Flag' AND resolved_at IS NULL
+           ORDER BY seq DESC LIMIT ? OFFSET ?`,
+        pageSize,
+        offset,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.json) as JsonValue);
+    return json(200, { items, total, page, pageSize } as JsonValue);
   }
 
   #count(kind: "followers" | "following" | "outbox"): number {

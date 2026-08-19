@@ -1031,6 +1031,86 @@ describe("owner follower control (#447)", () => {
     );
     expect(disabled.status).toBe(404);
   });
+
+  it("lists open reports behind the owner token, paginated (#489)", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const iris = deriveIris(config.baseUrl, config.actor.username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({
+          id: "https://remote.example/flags/1",
+          type: "Flag",
+          actor: REMOTE,
+          object: iris.id,
+          content: "spam",
+        }),
+        1,
+        "Flag",
+      );
+    });
+
+    const res = await handler(
+      new Request(`${actorUrl(config)}/reports`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { id: string }[];
+      total: number;
+    };
+    expect(body.total).toBe(1);
+    expect(body.items[0]?.id).toBe("https://remote.example/flags/1");
+  });
+
+  it("keeps the reports list behind the owner token (#489)", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+
+    const anonymous = await handler(
+      new Request(`${actorUrl(config)}/reports`),
+      testEnv,
+      ctx,
+    );
+    expect(anonymous.status).toBe(401);
+
+    const wrongToken = await handler(
+      new Request(`${actorUrl(config)}/reports`, {
+        headers: { authorization: "Bearer wrong" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(wrongToken.status).toBe(401);
+
+    const written = await handler(
+      new Request(`${actorUrl(config)}/reports`, {
+        method: "DELETE",
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(written.status).toBe(404);
+
+    const openConfig = makeConfig();
+    const noToken = createActivityPub(openConfig);
+    const disabled = await noToken(
+      new Request(`${actorUrl(openConfig)}/reports`, {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(disabled.status).toBe(404);
+  });
 });
 
 // ---------------------------------------------------------------------------
