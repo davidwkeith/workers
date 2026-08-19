@@ -354,6 +354,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // owner dismissed it via `Ignore` (see `#publish`). Mirrors `removed_at`'s
     // tombstone pattern.
     this.#ensureColumn("inbox", "resolved_at", "INTEGER");
+    // Backs both `#listReports` queries (the `COUNT` and the ordered
+    // `LIMIT/OFFSET` read) so the table most exposed to a hostile peer's own
+    // storage growth — inbound `Flag`s — never falls back to a full scan
+    // (#501). `seq` trailing the filter columns means the index also
+    // satisfies the `ORDER BY seq DESC` without a separate sort.
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_inbox_type_resolved_seq
+         ON inbox (type, resolved_at, seq)`,
+    );
+    // Same rationale for `#listInbox`'s equivalent unindexed scan (#501):
+    // `removed_at` doesn't share a column with the index above, so it needs
+    // its own.
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_inbox_removed_seq
+         ON inbox (removed_at, seq)`,
+    );
     this.#ensureColumn("followers", "shared_inbox", "TEXT");
     // The rejected `Follow`'s own IRI, for owner follower-control (#447).
     this.#ensureColumn("followers", "follow_id", "TEXT");
