@@ -168,7 +168,7 @@ than a new endpoint, because what the owner is asking for *is* an AS2 activity.
   skipped for `Flag`; a report must never fan out to followers, even when
   addressed to them). **`GET <actor>/reports`** returns open (unresolved)
   reports behind the same bearer token as `/blocked`/`/follow_requests` —
-  unlike those two, it is page/pageSize-paginated like `/outbox`, since
+  unlike those two, it is page/pageSize-paginated like `#listInbox`, since
   reports arrive from arbitrary peers rather than being owner-curated. Each
   item is the raw AS2 `Flag` activity (reporter, reported target, and the
   free-text `content` reason). The owner resolves/dismisses a report the
