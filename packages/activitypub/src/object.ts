@@ -1400,6 +1400,27 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
     }
 
+    // Owner report resolution (#489): dismiss an open Flag. Own top-level
+    // branch, like Remove above -- not folded into isFollowerControlActivity,
+    // since Ignore(Flag) never delivers to anyone (purely local review
+    // state, like the ban half of Remove). Not Group-gated: reports apply to
+    // Person actors too. An id with no matching open Flag row is a silent
+    // no-op (UPDATE affects zero rows) -- the same "unroutable → dropped"
+    // convention Accept/Reject/Block already use for a normal race (e.g. the
+    // report was already resolved through another client).
+    if (activity.type === "Ignore") {
+      const target = objectId(activity.object);
+      if (target) {
+        this.#sql.exec(
+          `UPDATE inbox SET resolved_at = COALESCE(resolved_at, ?)
+             WHERE id = ? AND type = 'Flag'`,
+          Date.now(),
+          target,
+        );
+      }
+      return json(202, activity as JsonValue);
+    }
+
     // Blind addressing (#496): `bto`/`bcc` recipients are delivered to
     // individually; an activity addressed ONLY blindly is restricted — stored
     // out of the public outbox collection and never fanned out to followers.
@@ -1896,6 +1917,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // same reasoning as Block/Reject above.
         "Accept",
         "Remove",
+        // Owner report review (#489): resolve/dismiss a Flag — same
+        // reasoning again.
+        "Ignore",
       ].includes(input.type);
     const published = isValidPublished(input.published)
       ? new Date(input.published).toISOString()

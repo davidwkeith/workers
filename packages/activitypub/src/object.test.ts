@@ -929,6 +929,83 @@ describe("publish endpoint", () => {
     });
   });
 
+  it("Ignore(Flag): resolves an open report, drops it from /reports, and is never delivered or stored to the outbox (#489)", async () => {
+    const { username, iris, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({
+          id: "https://remote.example/flags/1",
+          type: "Flag",
+          actor: REMOTE,
+          object: iris.id,
+          content: "spam",
+        }),
+        1,
+        "Flag",
+      );
+
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/1",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      const body = (await res.json()) as { type: string; object: string };
+      // Passed through as a real activity, not wrapped in a synthetic Create
+      // (a regression here would show up as body.type === "Create").
+      expect(body.type).toBe("Ignore");
+      expect(body.object).toBe("https://remote.example/flags/1");
+
+      const row = state.storage.sql
+        .exec<{ resolved_at: number | null }>(
+          `SELECT resolved_at FROM inbox WHERE id = ?`,
+          "https://remote.example/flags/1",
+        )
+        .one();
+      expect(row.resolved_at).not.toBeNull();
+
+      expect(counts(state, "outbox")).toBe(0);
+      expect(counts(state, "delivery")).toBe(0);
+
+      const owner = {
+        [INTERNAL_HEADERS.config]: cfgHeader(username),
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+      const listed = await instance.fetch(
+        new Request(`${iris.id}/reports`, { headers: owner }),
+      );
+      const listBody = (await listed.json()) as { total: number };
+      expect(listBody.total).toBe(0);
+    });
+  });
+
+  it("Ignore(Flag) on an unknown or already-resolved id is a silent no-op (#489)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/does-not-exist",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+      // Nothing was ever stored for this id -- confirms the UPDATE affected
+      // zero rows without creating one or raising an error.
+      expect(counts(state, "inbox")).toBe(0);
+    });
+  });
+
   it("mints a server id for an owner activity, ignoring a client-supplied id", async () => {
     const { username, iris, stub } = freshUser();
     await runInDurableObject(stub, async (instance) => {
