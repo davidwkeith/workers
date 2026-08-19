@@ -305,6 +305,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS idx_verify_queue_next_at ON verify_queue (next_at)`,
     );
+    // Resolved-report hard-delete schedule (#502): one row per `Flag` id an
+    // `Ignore` has resolved, so a tombstoned report actually leaves DO
+    // SQLite storage on a retention delay instead of accumulating forever
+    // under a hostile reporter's control. Processed from the alarm like
+    // every other queue table — see `#pruneResolvedReports`.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS report_prune (
+         id TEXT PRIMARY KEY, next_at INTEGER NOT NULL)`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_report_prune_next_at ON report_prune (next_at)`,
+    );
     // Counter deltas for alarm-driven work (delivery outcomes), accumulated
     // here because the DO cannot call the injected `Metrics` seam across the
     // isolate boundary; drained to the front door via a response header on the
@@ -1411,12 +1423,28 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (activity.type === "Ignore") {
       const target = objectId(activity.object);
       if (target) {
+        const resolvedAt = Date.now();
         this.#sql.exec(
           `UPDATE inbox SET resolved_at = COALESCE(resolved_at, ?)
              WHERE id = ? AND type = 'Flag'`,
-          Date.now(),
+          resolvedAt,
           target,
         );
+        // Schedule the resolved report's hard-delete (#502) so dismissed
+        // reports don't accumulate in DO SQLite storage forever under a
+        // hostile reporter's control (see `#pruneResolvedReports`). Harmless
+        // to enqueue even when `target` named no open Flag row -- the sweep
+        // just finds nothing to delete. `ON CONFLICT DO NOTHING` keeps a
+        // replayed Ignore from resetting an already-scheduled prune.
+        this.#sql.exec(
+          `INSERT INTO report_prune (id, next_at) VALUES (?, ?)
+             ON CONFLICT(id) DO NOTHING`,
+          target,
+          // Fallback mirrors config.ts's DEFAULT_REPORT_RETENTION_DAYS (30 days).
+          resolvedAt +
+            this.#deliveryPolicy("reportRetentionMs", 30 * 24 * 60 * 60 * 1000),
+        );
+        await this.#armAlarm();
       }
       return json(202, activity as JsonValue);
     }
@@ -3371,6 +3399,33 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return due.length;
   }
 
+  /**
+   * Hard-delete resolved `Flag` reports past their retention window (#502).
+   * `Ignore`(Flag) only tombstones a report (`resolved_at`); the row itself
+   * keeps occupying DO SQLite storage until this sweep runs, which is what
+   * actually reclaims it, on a delay long enough for post-resolution audit.
+   * Runs from the alarm like every other queue, never inline on `Ignore`, so
+   * a burst of resolutions never blocks a single request.
+   */
+  async #pruneResolvedReports(): Promise<number> {
+    const due = this.#sql
+      .exec<{ id: string }>(
+        `SELECT id FROM report_prune WHERE next_at <= ? ORDER BY next_at ASC LIMIT ?`,
+        Date.now(),
+        DELIVERY_BATCH,
+      )
+      .toArray();
+    for (const row of due) {
+      this.#sql.exec(
+        `DELETE FROM inbox WHERE id = ? AND type = 'Flag' AND resolved_at IS NOT NULL`,
+        row.id,
+      );
+      this.#sql.exec(`DELETE FROM report_prune WHERE id = ?`, row.id);
+    }
+    await this.#armAlarm();
+    return due.length;
+  }
+
   #markVerified(seq: number, activityId: string): void {
     this.#sql.exec(
       `UPDATE inbox SET verify_state = 'verified' WHERE id = ?`,
@@ -3630,6 +3685,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
            SELECT next_at FROM verify_queue
            UNION ALL
            SELECT next_at FROM actor_profile_queue
+           UNION ALL
+           SELECT next_at FROM report_prune
          )`,
       )
       .one().next_at;
@@ -3644,6 +3701,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     await this.#processDeliveries();
     await this.#processVerifications();
     await this.#processActorProfiles();
+    await this.#pruneResolvedReports();
   }
 
   // -- helpers ---------------------------------------------------------------
@@ -3734,6 +3792,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // rather than silently fall back to defaults.
     this.#kvPut("deliveryMaxAttempts", String(config.deliveryMaxAttempts));
     this.#kvPut("deliveryBaseDelayMs", String(config.deliveryBaseDelayMs));
+    // Same for the report-retention window: `#pruneResolvedReports` runs
+    // from the alarm and must honor the configured window on a cold isolate.
+    this.#kvPut("reportRetentionMs", String(config.reportRetentionMs));
     // Same for the relay-verification mode: the verify sweep runs from the
     // alarm and must honor the configured mode on a cold isolate.
     if (config.verifyRelayedObjects) {
@@ -3754,9 +3815,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return "tiered";
   }
 
-  /** A numeric delivery-policy value: live config first, then the persisted copy. */
+  /** A numeric alarm-driven policy value: live config first, then the persisted copy. */
   #deliveryPolicy(
-    key: "deliveryMaxAttempts" | "deliveryBaseDelayMs",
+    key: "deliveryMaxAttempts" | "deliveryBaseDelayMs" | "reportRetentionMs",
     fallback: number,
   ): number {
     const live = this.#config?.[key];

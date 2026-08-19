@@ -1134,6 +1134,7 @@ function forwardedHeader(
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
+    reportRetentionMs: 30 * 24 * 60 * 60 * 1000,
     keyId: iris.keyId,
     privateKeyPem,
   };

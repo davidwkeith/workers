@@ -101,6 +101,7 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     pageSize: config.pageSize,
     deliveryMaxAttempts: config.deliveryMaxAttempts,
     deliveryBaseDelayMs: config.deliveryBaseDelayMs,
+    reportRetentionMs: config.reportRetentionMs,
     keyId: config.iris.keyId,
     sharedInbox: config.sharedInbox,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),

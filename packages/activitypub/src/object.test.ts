@@ -86,6 +86,7 @@ function cfgHeader(
     pageSize: 50,
     deliveryMaxAttempts: 8,
     deliveryBaseDelayMs: 60_000,
+    reportRetentionMs: 30 * 24 * 60 * 60 * 1000,
     keyId: iris.keyId,
     ...overrides,
   };
@@ -1002,6 +1003,144 @@ describe("publish endpoint", () => {
       expect(res.status).toBe(202);
       // Nothing was ever stored for this id -- confirms the UPDATE affected
       // zero rows without creating one or raising an error.
+      expect(counts(state, "inbox")).toBe(0);
+    });
+  });
+
+  it("Ignore(Flag) schedules the resolved report for a later hard-delete instead of deleting it immediately (#502)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({
+          id: "https://remote.example/flags/1",
+          type: "Flag",
+          actor: REMOTE,
+          object: "https://social.example",
+        }),
+        1,
+        "Flag",
+      );
+
+      const before = Date.now();
+      const res = await instance.fetch(
+        outboxRequest(
+          username,
+          JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/1",
+          }),
+          true,
+        ),
+      );
+      expect(res.status).toBe(202);
+
+      // Resolved, but not swept away -- the row is still readable for a
+      // post-resolution audit until the retention window elapses.
+      expect(counts(state, "inbox")).toBe(1);
+
+      const prune = state.storage.sql
+        .exec<{
+          id: string;
+          next_at: number;
+        }>(`SELECT id, next_at FROM report_prune`)
+        .one();
+      expect(prune.id).toBe("https://remote.example/flags/1");
+      // Default retention is 30 days out from resolution.
+      expect(prune.next_at).toBeGreaterThanOrEqual(
+        before + 30 * 24 * 60 * 60 * 1000,
+      );
+    });
+  });
+
+  it("the alarm hard-deletes a resolved report once its retention window has elapsed (#502)", async () => {
+    const { stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({ id: "https://remote.example/flags/1", type: "Flag" }),
+        1,
+        "Flag",
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO report_prune (id, next_at) VALUES (?, ?)`,
+        "https://remote.example/flags/1",
+        1,
+      );
+
+      await instance.alarm();
+
+      expect(counts(state, "inbox")).toBe(0);
+      expect(counts(state, "report_prune")).toBe(0);
+    });
+  });
+
+  it("the alarm leaves a resolved report alone before its retention window elapses (#502)", async () => {
+    const { stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type, resolved_at) VALUES (?, ?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({ id: "https://remote.example/flags/1", type: "Flag" }),
+        1,
+        "Flag",
+        1,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO report_prune (id, next_at) VALUES (?, ?)`,
+        "https://remote.example/flags/1",
+        Date.now() + 60 * 60 * 1000,
+      );
+
+      await instance.alarm();
+
+      expect(counts(state, "inbox")).toBe(1);
+      expect(counts(state, "report_prune")).toBe(1);
+    });
+  });
+
+  it("honors a configured retention window end to end (#502)", async () => {
+    const { username, stub } = freshUser();
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO inbox (id, json, received_at, type) VALUES (?, ?, ?, ?)`,
+        "https://remote.example/flags/1",
+        JSON.stringify({
+          id: "https://remote.example/flags/1",
+          type: "Flag",
+          actor: REMOTE,
+          object: "https://social.example",
+        }),
+        1,
+        "Flag",
+      );
+
+      const headers: Record<string, string> = {
+        "content-type": "application/activity+json",
+        [INTERNAL_HEADERS.config]: cfgHeader(username, {
+          reportRetentionMs: 0,
+        }),
+        [INTERNAL_HEADERS.publish]: "1",
+      };
+      const iris = deriveIris(BASE, username);
+      const res = await instance.fetch(
+        new Request(iris.outbox, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            type: "Ignore",
+            object: "https://remote.example/flags/1",
+          }),
+        }),
+      );
+      expect(res.status).toBe(202);
+
+      // A zero retention window means the row is already due -- the very
+      // next alarm sweep hard-deletes it.
+      await instance.alarm();
       expect(counts(state, "inbox")).toBe(0);
     });
   });
