@@ -366,7 +366,7 @@ describe("createWebmentionQueueConsumer", () => {
       const url = String(input);
       if (url === "https://vouches.example/for-me") {
         return new Response(
-          '<a href="https://example.com/article">I trust this</a>',
+          '<a href="https://other.example/p">I trust this</a>',
           { headers: { "content-type": "text/html" } },
         );
       }
@@ -378,6 +378,7 @@ describe("createWebmentionQueueConsumer", () => {
       ...config,
       inbox,
       fetch: fetchImpl,
+      isTrustedVouchDomain: () => true,
     });
     const { batch } = batchOf([
       {
@@ -412,6 +413,7 @@ describe("createWebmentionQueueConsumer", () => {
       ...config,
       inbox,
       fetch: fetchImpl,
+      isTrustedVouchDomain: () => true,
     });
     const { batch } = batchOf([
       {
@@ -479,5 +481,107 @@ describe("createWebmentionQueueConsumer", () => {
     await consumer(batch, {} as WebmentionEnv, ctx);
 
     expect(fetchedUrls).toEqual(["https://other.example/p"]);
+  });
+
+  it("does not verify vouch when isTrustedVouchDomain is not configured (defaults to always-untrusted)", async () => {
+    const inbox = new MemoryInbox();
+    const fetchedUrls: string[] = [];
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      fetchedUrls.push(String(input));
+      return new Response('<a href="https://example.com/article">x</a>', {
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+      // isTrustedVouchDomain intentionally omitted
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.vouch).toEqual({
+      url: "https://vouches.example/for-me",
+      verified: false,
+    });
+    // The vouch URL itself must never be fetched when it's untrusted (Task 1's contract) —
+    // only the source URL should appear.
+    expect(fetchedUrls).toEqual(["https://other.example/p"]);
+  });
+
+  it("verifies vouch against the source's domain, not the target's", async () => {
+    const inbox = new MemoryInbox();
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      const url = String(input);
+      if (url === "https://vouches.example/for-me") {
+        // Links to the SOURCE, not the target — this must verify true only because
+        // isTrustedVouchDomain is configured and the match is against source.
+        return new Response(
+          '<a href="https://other.example/p">I trust this sender</a>',
+          { headers: { "content-type": "text/html" } },
+        );
+      }
+      return new Response('<a href="https://example.com/article">x</a>', {
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+      isTrustedVouchDomain: () => true,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.vouch).toEqual({
+      url: "https://vouches.example/for-me",
+      verified: true,
+    });
+  });
+
+  it("passes the vouch URL's hostname to isTrustedVouchDomain", async () => {
+    const inbox = new MemoryInbox();
+    const seenHostnames: string[] = [];
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response('<a href="https://example.com/article">x</a>', {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+      isTrustedVouchDomain: (hostname) => {
+        seenHostnames.push(hostname);
+        return true;
+      },
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    expect(seenHostnames).toEqual(["vouches.example"]);
   });
 });

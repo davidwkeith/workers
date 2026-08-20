@@ -33,7 +33,7 @@ export const WebmentionLogEvent = {
   VerifyCompleted: "webmention.verify.completed",
   /** The source fetch failed/was blocked during verification. Field: `error`. */
   VerifyFetchFailed: "webmention.verify.fetch_failed",
-  /** Vouch verification finished. Fields: `verified`. */
+  /** Vouch verification finished (every exit path). Fields: `verified`, `reason`. */
   VouchVerified: "webmention.vouch.verified",
   /** A queue message threw and is being retried. Field: `error`. */
   QueueRetry: "webmention.queue.retry",

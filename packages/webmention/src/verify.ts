@@ -354,29 +354,31 @@ export async function verifySource(
 
 /** Outcome of fetching and checking a Vouch URL. */
 export interface VouchResult {
-  /** Whether the vouch page links anywhere under the target's hostname. */
+  /** Whether the vouch domain was trusted and its page links to the source's hostname. */
   readonly verified: boolean;
 }
 
 /**
- * Fetch `vouchUrl` and check whether it links anywhere under `target`'s
- * hostname — the Vouch protocol's trust signal (indieweb.org/Vouch): a page
- * already known to (or trusted by) the sender is fetched and confirmed to
- * link back to the target's domain, raising confidence the mention isn't
- * spam.
+ * Check whether `vouchUrl` establishes a Vouch trust chain (indieweb.org/Vouch) for `source`:
+ * the vouch URL's own domain must be one the receiver already trusts (`isTrustedDomain`), *and*
+ * the vouch page — once fetched — must link anywhere under the **source's** hostname (not the
+ * target's; per the spec, "the vouch ... contains a hyperlink to the domain used in source").
  *
- * Uses the same SSRF-safe {@link safeFetch} wrapper as {@link verifySource}.
- * Unlike {@link sourceLinksTo}'s exact-URL match, this checks **hostname**
- * equality — any link on the vouch page pointing anywhere under the target's
- * host counts, per the "domain of the target" wording of the spec. Only HTML
- * vouch pages are scanned (this is a hyperlink check, not the multi-format
- * exact-match Webmention verification itself needs). Any fetch failure,
- * non-2xx status, non-HTML response, or oversized/unreadable body yields
- * `{ verified: false }`; this function never throws.
+ * The trust check runs first, before any network access: an untrusted vouch domain returns
+ * `{ verified: false }` immediately, with no fetch at all — this also bounds the fetch
+ * amplification an attacker-named vouch URL could otherwise cause (every verified mention would
+ * otherwise trigger a second outbound fetch to a URL the sender picked). Only a trusted domain's
+ * page is fetched, through the same SSRF-safe {@link safeFetch} wrapper {@link verifySource}
+ * uses. Matching is **hostname** equality via {@link extractLinks}, not {@link sourceLinksTo}'s
+ * exact-URL match — any link on the vouch page pointing anywhere under the source's host counts.
+ * Only HTML vouch pages are scanned. `isTrustedDomain` throwing, a fetch failure, non-2xx status,
+ * non-HTML response, or oversized/unreadable body all yield `{ verified: false }`; this function
+ * never throws.
  */
 export async function verifyVouch(
   vouchUrl: string,
-  target: string,
+  source: string,
+  isTrustedDomain: (hostname: string) => boolean | Promise<boolean>,
   options?: VerifyOptions,
 ): Promise<VouchResult> {
   const doFetch: FetchLike =
@@ -384,11 +386,52 @@ export async function verifyVouch(
   const logger = options?.logger ?? noopLogger;
   const metrics = options?.metrics ?? noopMetrics;
 
-  let targetHost: string;
+  const record = (
+    verified: boolean,
+    reason:
+      | "untrusted-domain"
+      | "trust-check-failed"
+      | "invalid-vouch-url"
+      | "invalid-source"
+      | "fetch-failed"
+      | "not-ok"
+      | "not-html"
+      | "body-unreadable"
+      | "ok",
+  ): VouchResult => {
+    const fields = {
+      vouchHost: hostFromUrl(vouchUrl),
+      sourceHost: hostFromUrl(source),
+      verified,
+      reason,
+    };
+    logger.info(WebmentionLogEvent.VouchVerified, fields);
+    metrics.count(WebmentionLogEvent.VouchVerified, fields);
+    return { verified };
+  };
+
+  let vouchHost: string;
   try {
-    targetHost = new URL(target).hostname.toLowerCase();
+    vouchHost = new URL(vouchUrl).hostname.toLowerCase();
   } catch {
-    return { verified: false };
+    return record(false, "invalid-vouch-url");
+  }
+
+  let sourceHost: string;
+  try {
+    sourceHost = new URL(source).hostname.toLowerCase();
+  } catch {
+    return record(false, "invalid-source");
+  }
+
+  let trusted: boolean;
+  try {
+    trusted = await isTrustedDomain(vouchHost);
+  } catch {
+    return record(false, "trust-check-failed");
+  }
+  if (!trusted) {
+    return record(false, "untrusted-domain");
   }
 
   let response: Response;
@@ -408,38 +451,31 @@ export async function verifyVouch(
     response = result.response;
     base = result.url;
   } catch {
-    return { verified: false };
+    return record(false, "fetch-failed");
   }
 
   if (!response.ok) {
-    return { verified: false };
+    return record(false, "not-ok");
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   if (!isHtmlContentType(contentType)) {
-    return { verified: false };
+    return record(false, "not-html");
   }
 
   const body = await readBodyCapped(response);
   if (body === null) {
-    return { verified: false };
+    return record(false, "body-unreadable");
   }
 
   const links = await extractLinks(body, base);
   const verified = links.some((link) => {
     try {
-      return new URL(link).hostname.toLowerCase() === targetHost;
+      return new URL(link).hostname.toLowerCase() === sourceHost;
     } catch {
       return false;
     }
   });
 
-  const fields = {
-    vouchHost: hostFromUrl(vouchUrl),
-    targetHost: hostFromUrl(target),
-    verified,
-  };
-  logger.info(WebmentionLogEvent.VouchVerified, fields);
-  metrics.count(WebmentionLogEvent.VouchVerified, fields);
-  return { verified };
+  return record(verified, "ok");
 }
