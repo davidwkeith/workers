@@ -31,7 +31,7 @@ import type { FetchLike } from "@dwk/safe-fetch";
 import { createD1Inbox, type InboxStore } from "./inbox.js";
 import { WebmentionLogEvent } from "./log.js";
 import { validateWebmentionParams } from "./validate.js";
-import { verifySource } from "./verify.js";
+import { verifySource, verifyVouch } from "./verify.js";
 
 export {
   validateWebmentionParams,
@@ -357,7 +357,7 @@ export function createWebmentionQueueConsumer(
   return async (batch, env, _ctx) => {
     const inbox = resolveInbox(config, env);
     for (const message of batch.messages) {
-      const { source, target } = message.body;
+      const { source, target, vouch } = message.body;
       try {
         const result = await verifySource(source, target, {
           fetch: config.fetch,
@@ -373,6 +373,25 @@ export function createWebmentionQueueConsumer(
             result.published !== undefined
               ? Date.parse(result.published)
               : Number.NaN;
+          // Vouch only runs once the mention itself has verified — it is a
+          // trust signal on top of a real mention, never a substitute for one.
+          // `url` is captured alongside the outcome (rather than read from
+          // the outer `vouch` separately) so its non-optional-ness is tied to
+          // `vouchOutcome`'s own presence for the type checker.
+          const vouchOutcome =
+            vouch !== undefined
+              ? {
+                  url: vouch,
+                  verified: (
+                    await verifyVouch(vouch, target, {
+                      fetch: config.fetch,
+                      logger,
+                      metrics,
+                      fetchAllowedHosts: config.fetchAllowedHosts,
+                    })
+                  ).verified,
+                }
+              : undefined;
           await inbox.store({
             source,
             target,
@@ -386,6 +405,7 @@ export function createWebmentionQueueConsumer(
               ? publishedMs
               : verifiedAt,
             ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+            ...(vouchOutcome !== undefined ? { vouch: vouchOutcome } : {}),
           });
         } else {
           await inbox.remove(source, target);
