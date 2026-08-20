@@ -164,6 +164,16 @@ export interface WebmentionConfig {
    * enable in a production composition.
    */
   readonly fetchAllowedHosts?: readonly string[];
+  /**
+   * Whether a vouch URL's own hostname is one this receiver already trusts (indieweb.org/Vouch)
+   * — checked before any vouch page is fetched. Omitted entirely means "nothing is trusted yet"
+   * (every vouch verifies false, but the mention itself is unaffected — vouch is only ever a
+   * bonus signal on top of source→target verification, never a gate on it), not "everything is
+   * trusted." See {@link verifyVouch} in `verify.ts`.
+   */
+  readonly isTrustedVouchDomain?: (
+    hostname: string,
+  ) => boolean | Promise<boolean>;
 }
 
 /** A `fetch`-compatible Worker handler. */
@@ -383,12 +393,17 @@ export function createWebmentionQueueConsumer(
               ? {
                   url: vouch,
                   verified: (
-                    await verifyVouch(vouch, target, {
-                      fetch: config.fetch,
-                      logger,
-                      metrics,
-                      fetchAllowedHosts: config.fetchAllowedHosts,
-                    })
+                    await verifyVouch(
+                      vouch,
+                      source,
+                      config.isTrustedVouchDomain ?? (() => false),
+                      {
+                        fetch: config.fetch,
+                        logger,
+                        metrics,
+                        fetchAllowedHosts: config.fetchAllowedHosts,
+                      },
+                    )
                   ).verified,
                 }
               : undefined;
