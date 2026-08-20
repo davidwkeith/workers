@@ -300,68 +300,93 @@ describe("verifySource fetchAllowedHosts (local-dev opt-in, issue #257)", () => 
 
 describe("verifyVouch", () => {
   const vouchUrl = "https://vouches.example/for-me";
+  const alwaysTrusted = () => true;
+  const neverTrusted = () => false;
 
-  it("is verified true when the vouch page links to the target's host", async () => {
+  it("is verified true when the vouch domain is trusted and the page links to the source's host", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response(`<a href="${target}">I trust this site</a>`, {
+        new Response(`<a href="${source}">I trust this site</a>`, {
           headers: { "content-type": "text/html" },
         }),
     );
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: true,
-    });
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: true });
   });
 
-  it("is verified true for a link to a different path under the target's host", async () => {
+  it("is verified true for a link to a different path under the source's host", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response('<a href="https://example.com/somewhere-else">x</a>', {
+        new Response('<a href="https://blog.example/somewhere-else">x</a>', {
           headers: { "content-type": "text/html" },
         }),
     );
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: true,
-    });
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: true });
   });
 
-  it("is verified false when the vouch page links elsewhere", async () => {
+  it("is verified false when the vouch domain is not trusted, and never fetches", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("must not be called");
+    });
+    expect(
+      await verifyVouch(vouchUrl, source, neverTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("is verified false when a trusted vouch page links elsewhere", async () => {
     const fetchImpl = vi.fn(
       async () =>
         new Response('<a href="https://elsewhere.example/">x</a>', {
           headers: { "content-type": "text/html" },
         }),
     );
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: false,
-    });
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
   });
 
   it("is verified false for a 404 vouch page", async () => {
     const fetchImpl = vi.fn(async () => new Response("gone", { status: 404 }));
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: false,
-    });
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
   });
 
   it("is verified false when the fetch throws", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("network");
     });
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: false,
-    });
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
   });
 
   it("is verified false for a non-HTML vouch page", async () => {
     const fetchImpl = vi.fn(
       async () =>
-        new Response(JSON.stringify({ ref: target }), {
+        new Response(JSON.stringify({ ref: source }), {
           headers: { "content-type": "application/json" },
         }),
     );
-    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
-      verified: false,
+    expect(
+      await verifyVouch(vouchUrl, source, alwaysTrusted, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
+  });
+
+  it("is verified false when isTrustedDomain itself throws", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("must not be called");
     });
+    const throwing = () => {
+      throw new Error("KV read failed");
+    };
+    expect(
+      await verifyVouch(vouchUrl, source, throwing, { fetch: fetchImpl }),
+    ).toEqual({ verified: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
