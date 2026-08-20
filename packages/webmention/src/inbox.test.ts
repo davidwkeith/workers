@@ -192,4 +192,87 @@ describe("createD1Inbox", () => {
   it("rejects an unsafe table name", () => {
     expect(() => createD1Inbox(db, { table: "bad name;" })).toThrow();
   });
+
+  it("persists and lists a vouch outcome", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_vouch" });
+    await inbox.store({
+      source: "https://a.example/vouch",
+      target: "https://example.com/x",
+      verifiedAt: 1,
+      vouch: { url: "https://trusted.example/", verified: true },
+    });
+    const all = await inbox.list();
+    expect(all[0]?.vouch).toEqual({
+      url: "https://trusted.example/",
+      verified: true,
+    });
+  });
+
+  it("distinguishes a failed vouch attempt from no vouch at all", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_vouch_failed" });
+    await inbox.store({
+      source: "https://a.example/vouch",
+      target: "https://example.com/x",
+      verifiedAt: 1,
+      vouch: { url: "https://untrusted.example/", verified: false },
+    });
+    const all = await inbox.list();
+    expect(all[0]?.vouch).toEqual({
+      url: "https://untrusted.example/",
+      verified: false,
+    });
+  });
+
+  it("omits vouch on a mention stored without one", async () => {
+    const inbox = createD1Inbox(db, { table: "wm_no_vouch" });
+    await inbox.store({
+      source: "https://a.example/p",
+      target: "https://example.com/x",
+      verifiedAt: 1,
+    });
+    const all = await inbox.list();
+    expect(all[0]?.vouch).toBeUndefined();
+  });
+
+  it("migrates a pre-vouch table additively", async () => {
+    // A table created by a @dwk/webmention version before vouch support
+    // existed — has every enrichment column except vouch_url/vouch_verified.
+    await db
+      .prepare(
+        "CREATE TABLE wm_pre_vouch (source TEXT NOT NULL, target TEXT NOT NULL, " +
+          "verified_at INTEGER NOT NULL, rsvp TEXT, id TEXT, interaction_type TEXT, " +
+          "author_name TEXT, author_url TEXT, author_photo TEXT, content TEXT, " +
+          "published_at INTEGER, PRIMARY KEY (source, target))",
+      )
+      .run();
+    await db
+      .prepare(
+        "INSERT INTO wm_pre_vouch (source, target, verified_at, id) VALUES (?1, ?2, ?3, ?4)",
+      )
+      .bind(
+        "https://old.example/p",
+        "https://example.com/x",
+        7,
+        mentionId("https://old.example/p", "https://example.com/x"),
+      )
+      .run();
+
+    const inbox = createD1Inbox(db, { table: "wm_pre_vouch" });
+    const preExisting = (await inbox.list())[0];
+    expect(preExisting?.vouch).toBeUndefined();
+
+    await inbox.store({
+      source: "https://new.example/vouched",
+      target: "https://example.com/x",
+      verifiedAt: 8,
+      vouch: { url: "https://trusted.example/", verified: true },
+    });
+    const vouched = (await inbox.list()).find(
+      (m) => m.source === "https://new.example/vouched",
+    );
+    expect(vouched?.vouch).toEqual({
+      url: "https://trusted.example/",
+      verified: true,
+    });
+  });
 });
