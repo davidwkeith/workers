@@ -108,6 +108,12 @@ export type { WebmentionMcpToolsConfig } from "./mcp-tools.js";
 export interface WebmentionJob {
   readonly source: string;
   readonly target: string;
+  /**
+   * The sender's Vouch URL (indieweb.org/Vouch), when supplied and
+   * syntactically a valid `http(s)` URL. Verified asynchronously alongside
+   * `source`/`target` — see {@link verifyVouch} in `verify.ts`.
+   */
+  readonly vouch?: string;
 }
 
 /** Cloudflare bindings required by the Webmention handler and queue consumer. */
@@ -200,6 +206,28 @@ function formValue(value: string | File | null): string | null {
 }
 
 /**
+ * Extract and validate the optional `vouch` form field. A missing or
+ * syntactically invalid value returns `undefined` rather than an error —
+ * Vouch is a supplementary trust signal (indieweb.org/Vouch), not a required
+ * one, so a malformed vouch parameter must never turn into a whole-mention
+ * rejection.
+ */
+function validVouchUrl(value: string | File | null): string | undefined {
+  const raw = formValue(value);
+  if (raw === null || raw === "") {
+    return undefined;
+  }
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Whether the request body is `application/x-www-form-urlencoded` — the encoding
  * Webmention §3.1.3 requires. `Request.formData()` would also accept
  * `multipart/form-data`, so the essence is checked up front rather than relying
@@ -269,9 +297,12 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       return textResponse(400, result.error);
     }
 
+    const vouch = validVouchUrl(form.get("vouch"));
+
     await env.WEBMENTION_QUEUE.send({
       source: result.source,
       target: result.target,
+      ...(vouch !== undefined ? { vouch } : {}),
     });
 
     const fields = {

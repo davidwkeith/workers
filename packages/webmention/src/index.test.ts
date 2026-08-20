@@ -29,10 +29,11 @@ function envWithQueue() {
   return { env, sent };
 }
 
-function formPost(source?: string, target?: string): Request {
+function formPost(source?: string, target?: string, vouch?: string): Request {
   const body = new URLSearchParams();
   if (source !== undefined) body.set("source", source);
   if (target !== undefined) body.set("target", target);
+  if (vouch !== undefined) body.set("vouch", vouch);
   return new Request("https://example.com/webmention", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -109,6 +110,49 @@ describe("createWebmention", () => {
         ctx,
       ),
     ).rejects.toThrow(/WEBMENTION_QUEUE/);
+  });
+
+  it("includes a syntactically valid vouch URL in the enqueued job", async () => {
+    const handler = createWebmention(config);
+    const { env, sent } = envWithQueue();
+    const response = await handler(
+      formPost(
+        "https://other.example/p",
+        "https://example.com/article",
+        "https://vouches.example/for-me",
+      ),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(202);
+    expect(sent).toEqual([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+  });
+
+  it("drops a malformed vouch URL instead of rejecting the mention", async () => {
+    const handler = createWebmention(config);
+    const { env, sent } = envWithQueue();
+    const response = await handler(
+      formPost(
+        "https://other.example/p",
+        "https://example.com/article",
+        "not-a-url",
+      ),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(202);
+    expect(sent).toEqual([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+      },
+    ]);
   });
 });
 
