@@ -61,8 +61,10 @@ export {
   verifySource,
   sourceLinksTo,
   extractLinks,
+  verifyVouch,
   type VerifyOptions,
   type VerifyResult,
+  type VouchResult,
 } from "./verify.js";
 export {
   extractRsvp,

@@ -351,3 +351,95 @@ export async function verifySource(
     ...(enrichment ?? {}),
   });
 }
+
+/** Outcome of fetching and checking a Vouch URL. */
+export interface VouchResult {
+  /** Whether the vouch page links anywhere under the target's hostname. */
+  readonly verified: boolean;
+}
+
+/**
+ * Fetch `vouchUrl` and check whether it links anywhere under `target`'s
+ * hostname — the Vouch protocol's trust signal (indieweb.org/Vouch): a page
+ * already known to (or trusted by) the sender is fetched and confirmed to
+ * link back to the target's domain, raising confidence the mention isn't
+ * spam.
+ *
+ * Uses the same SSRF-safe {@link safeFetch} wrapper as {@link verifySource}.
+ * Unlike {@link sourceLinksTo}'s exact-URL match, this checks **hostname**
+ * equality — any link on the vouch page pointing anywhere under the target's
+ * host counts, per the "domain of the target" wording of the spec. Only HTML
+ * vouch pages are scanned (this is a hyperlink check, not the multi-format
+ * exact-match Webmention verification itself needs). Any fetch failure,
+ * non-2xx status, non-HTML response, or oversized/unreadable body yields
+ * `{ verified: false }`; this function never throws.
+ */
+export async function verifyVouch(
+  vouchUrl: string,
+  target: string,
+  options?: VerifyOptions,
+): Promise<VouchResult> {
+  const doFetch: FetchLike =
+    options?.fetch ?? ((input, init) => fetch(input, init));
+  const logger = options?.logger ?? noopLogger;
+  const metrics = options?.metrics ?? noopMetrics;
+
+  let targetHost: string;
+  try {
+    targetHost = new URL(target).hostname.toLowerCase();
+  } catch {
+    return { verified: false };
+  }
+
+  let response: Response;
+  let base: string;
+  try {
+    const result = await safeFetch(
+      doFetch,
+      vouchUrl,
+      { method: "GET", headers: { accept: "text/html, */*" } },
+      {
+        logger,
+        metrics,
+        logEvent: WebmentionLogEvent.SsrfBlocked,
+        allowedHosts: options?.fetchAllowedHosts,
+      },
+    );
+    response = result.response;
+    base = result.url;
+  } catch {
+    return { verified: false };
+  }
+
+  if (!response.ok) {
+    return { verified: false };
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!isHtmlContentType(contentType)) {
+    return { verified: false };
+  }
+
+  const body = await readBodyCapped(response);
+  if (body === null) {
+    return { verified: false };
+  }
+
+  const links = await extractLinks(body, base);
+  const verified = links.some((link) => {
+    try {
+      return new URL(link).hostname.toLowerCase() === targetHost;
+    } catch {
+      return false;
+    }
+  });
+
+  const fields = {
+    vouchHost: hostFromUrl(vouchUrl),
+    targetHost: hostFromUrl(target),
+    verified,
+  };
+  logger.info(WebmentionLogEvent.VouchVerified, fields);
+  metrics.count(WebmentionLogEvent.VouchVerified, fields);
+  return { verified };
+}
