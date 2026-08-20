@@ -66,6 +66,14 @@ export interface VerifiedMention {
    * an ordinary mention. Lets a consumer surface attendee state on the event.
    */
   readonly rsvp?: RsvpValue;
+  /**
+   * The sender's Vouch URL (indieweb.org/Vouch) and whether it was confirmed
+   * to link to the target's domain; omitted when no vouch was sent. A vouch
+   * that was sent but did NOT check out is still recorded (`verified: false`)
+   * — distinct from no vouch at all, since a failed vouch attempt is a
+   * stronger spam signal than silence.
+   */
+  readonly vouch?: { readonly url: string; readonly verified: boolean };
 }
 
 /** Persistence surface for verified mentions. */
@@ -96,6 +104,8 @@ interface MentionRow {
   readonly author_photo: string | null;
   readonly content: string | null;
   readonly published_at: number | null;
+  readonly vouch_url: string | null;
+  readonly vouch_verified: number | null;
 }
 
 /**
@@ -112,6 +122,8 @@ const ADDED_COLUMNS: ReadonlyArray<readonly [name: string, type: string]> = [
   ["author_photo", "TEXT"],
   ["content", "TEXT"],
   ["published_at", "INTEGER"],
+  ["vouch_url", "TEXT"],
+  ["vouch_verified", "INTEGER"],
 ];
 
 /**
@@ -168,8 +180,8 @@ export function createD1Inbox(
         .prepare(
           `INSERT INTO ${table} (source, target, verified_at, rsvp, id, ` +
             `interaction_type, author_name, author_url, author_photo, ` +
-            `content, published_at) ` +
-            `VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ` +
+            `content, published_at, vouch_url, vouch_verified) ` +
+            `VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ` +
             `ON CONFLICT (source, target) ` +
             `DO UPDATE SET verified_at = excluded.verified_at, ` +
             `rsvp = excluded.rsvp, ` +
@@ -179,7 +191,9 @@ export function createD1Inbox(
             `author_url = excluded.author_url, ` +
             `author_photo = excluded.author_photo, ` +
             `content = excluded.content, ` +
-            `published_at = excluded.published_at`,
+            `published_at = excluded.published_at, ` +
+            `vouch_url = excluded.vouch_url, ` +
+            `vouch_verified = excluded.vouch_verified`,
         )
         .bind(
           mention.source,
@@ -193,6 +207,8 @@ export function createD1Inbox(
           mention.author?.photo ?? null,
           mention.content ?? null,
           mention.publishedAt ?? mention.verifiedAt,
+          mention.vouch?.url ?? null,
+          mention.vouch !== undefined ? (mention.vouch.verified ? 1 : 0) : null,
         )
         .run();
     },
@@ -209,7 +225,8 @@ export function createD1Inbox(
       await ensureSchema();
       const columns =
         `id, source, target, verified_at, rsvp, interaction_type, ` +
-        `author_name, author_url, author_photo, content, published_at`;
+        `author_name, author_url, author_photo, content, published_at, ` +
+        `vouch_url, vouch_verified`;
       const statement =
         target === undefined
           ? db.prepare(
@@ -235,6 +252,10 @@ export function createD1Inbox(
                   : {}),
               }
             : undefined;
+        const vouch =
+          row.vouch_url !== null && row.vouch_verified !== null
+            ? { url: row.vouch_url, verified: row.vouch_verified !== 0 }
+            : undefined;
         return {
           // Rows written before the `id` column existed re-derive it: the id
           // is a pure function of the primary key.
@@ -253,6 +274,7 @@ export function createD1Inbox(
           ...(row.rsvp !== null && isRsvpValue(row.rsvp)
             ? { rsvp: row.rsvp }
             : {}),
+          ...(vouch !== undefined ? { vouch } : {}),
         };
       });
     },

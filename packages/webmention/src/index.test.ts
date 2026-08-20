@@ -29,10 +29,11 @@ function envWithQueue() {
   return { env, sent };
 }
 
-function formPost(source?: string, target?: string): Request {
+function formPost(source?: string, target?: string, vouch?: string): Request {
   const body = new URLSearchParams();
   if (source !== undefined) body.set("source", source);
   if (target !== undefined) body.set("target", target);
+  if (vouch !== undefined) body.set("vouch", vouch);
   return new Request("https://example.com/webmention", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -109,6 +110,49 @@ describe("createWebmention", () => {
         ctx,
       ),
     ).rejects.toThrow(/WEBMENTION_QUEUE/);
+  });
+
+  it("includes a syntactically valid vouch URL in the enqueued job", async () => {
+    const handler = createWebmention(config);
+    const { env, sent } = envWithQueue();
+    const response = await handler(
+      formPost(
+        "https://other.example/p",
+        "https://example.com/article",
+        "https://vouches.example/for-me",
+      ),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(202);
+    expect(sent).toEqual([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+  });
+
+  it("drops a malformed vouch URL instead of rejecting the mention", async () => {
+    const handler = createWebmention(config);
+    const { env, sent } = envWithQueue();
+    const response = await handler(
+      formPost(
+        "https://other.example/p",
+        "https://example.com/article",
+        "not-a-url",
+      ),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(202);
+    expect(sent).toEqual([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+      },
+    ]);
   });
 });
 
@@ -314,5 +358,126 @@ describe("createWebmentionQueueConsumer", () => {
     await expect(consumer(batch, {} as WebmentionEnv, ctx)).rejects.toThrow(
       /inbox/,
     );
+  });
+
+  it("verifies and stores a vouch when the job includes one and the mention verifies", async () => {
+    const inbox = new MemoryInbox();
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      const url = String(input);
+      if (url === "https://vouches.example/for-me") {
+        return new Response(
+          '<a href="https://example.com/article">I trust this</a>',
+          { headers: { "content-type": "text/html" } },
+        );
+      }
+      return new Response('<a href="https://example.com/article">x</a>', {
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.vouch).toEqual({
+      url: "https://vouches.example/for-me",
+      verified: true,
+    });
+  });
+
+  it("stores a failed vouch outcome without affecting the mention itself", async () => {
+    const inbox = new MemoryInbox();
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      const url = String(input);
+      if (url === "https://vouches.example/for-me") {
+        return new Response('<a href="https://elsewhere.example/">x</a>', {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response('<a href="https://example.com/article">x</a>', {
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.vouch).toEqual({
+      url: "https://vouches.example/for-me",
+      verified: false,
+    });
+    expect(stored?.source).toBe("https://other.example/p");
+  });
+
+  it("stores no vouch field when the job carries none", async () => {
+    const inbox = new MemoryInbox();
+    const fetchImpl: FetchLike = vi.fn(
+      async () =>
+        new Response('<a href="https://example.com/article">x</a>', {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    const [stored] = await inbox.list();
+    expect(stored?.vouch).toBeUndefined();
+  });
+
+  it("never fetches the vouch URL when the source itself does not verify", async () => {
+    const inbox = new MemoryInbox();
+    const fetchedUrls: string[] = [];
+    const fetchImpl: FetchLike = vi.fn(async (input) => {
+      fetchedUrls.push(String(input));
+      return new Response("<p>link removed</p>", {
+        headers: { "content-type": "text/html" },
+      });
+    });
+    const consumer = createWebmentionQueueConsumer({
+      ...config,
+      inbox,
+      fetch: fetchImpl,
+    });
+    const { batch } = batchOf([
+      {
+        source: "https://other.example/p",
+        target: "https://example.com/article",
+        vouch: "https://vouches.example/for-me",
+      },
+    ]);
+    await consumer(batch, {} as WebmentionEnv, ctx);
+
+    expect(fetchedUrls).toEqual(["https://other.example/p"]);
   });
 });

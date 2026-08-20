@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { extractLinks, sourceLinksTo, verifySource } from "./verify.js";
+import {
+  extractLinks,
+  sourceLinksTo,
+  verifySource,
+  verifyVouch,
+} from "./verify.js";
 
 const source = "https://blog.example/post";
 const target = "https://example.com/article";
@@ -290,5 +295,73 @@ describe("verifySource fetchAllowedHosts (local-dev opt-in, issue #257)", () => 
       }),
     ).toEqual({ links: false, status: 0 });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("verifyVouch", () => {
+  const vouchUrl = "https://vouches.example/for-me";
+
+  it("is verified true when the vouch page links to the target's host", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(`<a href="${target}">I trust this site</a>`, {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: true,
+    });
+  });
+
+  it("is verified true for a link to a different path under the target's host", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('<a href="https://example.com/somewhere-else">x</a>', {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: true,
+    });
+  });
+
+  it("is verified false when the vouch page links elsewhere", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('<a href="https://elsewhere.example/">x</a>', {
+          headers: { "content-type": "text/html" },
+        }),
+    );
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: false,
+    });
+  });
+
+  it("is verified false for a 404 vouch page", async () => {
+    const fetchImpl = vi.fn(async () => new Response("gone", { status: 404 }));
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: false,
+    });
+  });
+
+  it("is verified false when the fetch throws", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("network");
+    });
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: false,
+    });
+  });
+
+  it("is verified false for a non-HTML vouch page", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ref: target }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    expect(await verifyVouch(vouchUrl, target, { fetch: fetchImpl })).toEqual({
+      verified: false,
+    });
   });
 });

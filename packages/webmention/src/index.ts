@@ -31,7 +31,7 @@ import type { FetchLike } from "@dwk/safe-fetch";
 import { createD1Inbox, type InboxStore } from "./inbox.js";
 import { WebmentionLogEvent } from "./log.js";
 import { validateWebmentionParams } from "./validate.js";
-import { verifySource } from "./verify.js";
+import { verifySource, verifyVouch } from "./verify.js";
 
 export {
   validateWebmentionParams,
@@ -61,8 +61,10 @@ export {
   verifySource,
   sourceLinksTo,
   extractLinks,
+  verifyVouch,
   type VerifyOptions,
   type VerifyResult,
+  type VouchResult,
 } from "./verify.js";
 export {
   extractRsvp,
@@ -108,6 +110,12 @@ export type { WebmentionMcpToolsConfig } from "./mcp-tools.js";
 export interface WebmentionJob {
   readonly source: string;
   readonly target: string;
+  /**
+   * The sender's Vouch URL (indieweb.org/Vouch), when supplied and
+   * syntactically a valid `http(s)` URL. Verified asynchronously alongside
+   * `source`/`target` — see {@link verifyVouch} in `verify.ts`.
+   */
+  readonly vouch?: string;
 }
 
 /** Cloudflare bindings required by the Webmention handler and queue consumer. */
@@ -200,6 +208,28 @@ function formValue(value: string | File | null): string | null {
 }
 
 /**
+ * Extract and validate the optional `vouch` form field. A missing or
+ * syntactically invalid value returns `undefined` rather than an error —
+ * Vouch is a supplementary trust signal (indieweb.org/Vouch), not a required
+ * one, so a malformed vouch parameter must never turn into a whole-mention
+ * rejection.
+ */
+function validVouchUrl(value: string | File | null): string | undefined {
+  const raw = formValue(value);
+  if (raw === null || raw === "") {
+    return undefined;
+  }
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Whether the request body is `application/x-www-form-urlencoded` — the encoding
  * Webmention §3.1.3 requires. `Request.formData()` would also accept
  * `multipart/form-data`, so the essence is checked up front rather than relying
@@ -269,9 +299,12 @@ export function createWebmention(config: WebmentionConfig): WebmentionHandler {
       return textResponse(400, result.error);
     }
 
+    const vouch = validVouchUrl(form.get("vouch"));
+
     await env.WEBMENTION_QUEUE.send({
       source: result.source,
       target: result.target,
+      ...(vouch !== undefined ? { vouch } : {}),
     });
 
     const fields = {
@@ -324,7 +357,7 @@ export function createWebmentionQueueConsumer(
   return async (batch, env, _ctx) => {
     const inbox = resolveInbox(config, env);
     for (const message of batch.messages) {
-      const { source, target } = message.body;
+      const { source, target, vouch } = message.body;
       try {
         const result = await verifySource(source, target, {
           fetch: config.fetch,
@@ -340,6 +373,25 @@ export function createWebmentionQueueConsumer(
             result.published !== undefined
               ? Date.parse(result.published)
               : Number.NaN;
+          // Vouch only runs once the mention itself has verified — it is a
+          // trust signal on top of a real mention, never a substitute for one.
+          // `url` is captured alongside the outcome (rather than read from
+          // the outer `vouch` separately) so its non-optional-ness is tied to
+          // `vouchOutcome`'s own presence for the type checker.
+          const vouchOutcome =
+            vouch !== undefined
+              ? {
+                  url: vouch,
+                  verified: (
+                    await verifyVouch(vouch, target, {
+                      fetch: config.fetch,
+                      logger,
+                      metrics,
+                      fetchAllowedHosts: config.fetchAllowedHosts,
+                    })
+                  ).verified,
+                }
+              : undefined;
           await inbox.store({
             source,
             target,
@@ -353,6 +405,7 @@ export function createWebmentionQueueConsumer(
               ? publishedMs
               : verifiedAt,
             ...(result.rsvp !== undefined ? { rsvp: result.rsvp } : {}),
+            ...(vouchOutcome !== undefined ? { vouch: vouchOutcome } : {}),
           });
         } else {
           await inbox.remove(source, target);

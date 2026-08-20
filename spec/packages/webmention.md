@@ -72,6 +72,35 @@ Receives and sends Webmentions for the user's domain.
 - `VerifiedMention` (inbox), `VerifyResult` (verification), and the
   `webmention_list_received` MCP tool output all surface the new fields.
 
+### Vouch (indieweb.org/Vouch)
+
+- Accept an optional `vouch` form field on receive, alongside `source`/
+  `target`: a URL the sender is naming to establish trust. A `vouch` that is
+  present but not a syntactically valid `http(s)` URL is **dropped silently**
+  — the mention is still enqueued without it — never rejected. Vouch is a
+  supplementary spam signal (a SHOULD), not a required parameter.
+- During the same asynchronous verification pass, and **only once the
+  mention itself has verified** (`source` genuinely links to `target`), fetch
+  the vouch URL through the same SSRF-safe wrapper used for source
+  verification and check whether it links anywhere under the target's
+  **hostname** — not an exact-URL match like the target-link check, since the
+  spec's wording is "links to the domain of the target." Only HTML vouch
+  pages are scanned; any fetch failure, non-2xx status, non-HTML response, or
+  oversized/unreadable body yields an unverified outcome. This check never
+  throws and never blocks the mention itself.
+- The outcome is persisted as three states, not two: no `vouch` field at all
+  (no signal sent), `verified: true` (the vouch URL checks out), or
+  `verified: false` (a vouch was attempted but did not check out — kept
+  distinct from "no vouch," since a failed vouch attempt is a stronger spam
+  signal than silence). Vouch never overrides or substitutes for the primary
+  source-links-to-target verification gate.
+- **Inbox schema:** additive nullable columns on the existing table
+  (`vouch_url`, `vouch_verified`), same `ALTER TABLE` migration pattern as
+  `rsvp`/the enrichment columns.
+- `WebmentionJob` (queue message) and `VerifiedMention` (inbox) both gain an
+  optional `vouch`; `verifyVouch`/`VouchResult` are exported alongside the
+  existing `verifySource`/`VerifyResult`.
+
 ### Sender
 
 - Discover Webmention endpoints for outbound links.
