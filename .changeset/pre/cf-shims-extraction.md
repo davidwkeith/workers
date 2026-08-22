@@ -1,6 +1,5 @@
 ---
 "@dwk/cf-shims": minor
-"@dwk/server": patch
 ---
 
 Add `@dwk/cf-shims` (#381): Node-backed implementations of the Cloudflare
