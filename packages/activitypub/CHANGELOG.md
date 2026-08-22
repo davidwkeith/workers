@@ -1,5 +1,43 @@
 # @dwk/activitypub
 
+## 1.0.0-beta.4
+
+### Minor Changes
+
+- 484e1c9: Add `GET <actor>/follow_requests`, a bearer-gated equivalent of the
+  internal-marker-gated `__client/follow_requests` route `@dwk/mastodon-api`
+  uses, so an owner-facing client (e.g. a moderation UI) can list pending
+  followers without standing up a separate OAuth flow (#487).
+- b107de6: Blind-addressed (`bto`/`bcc`) restricted delivery from the outbox (#496):
+  both owner publish seams accept blind recipients (`PostInput` gains `bto`),
+  each delivered individually to the recipient's **own** inbox — never a shared
+  inbox, since the payload has its blind addressing stripped per AP §6.1. An
+  activity addressed only blindly is restricted: no follower fan-out, no
+  community `audience` delivery, and it never surfaces in the public outbox
+  collection or NodeInfo counts. Blind delivery remains best-effort,
+  honor-system distribution — addressing is a delivery hint, not access
+  control.
+- 492dd3d: Store inbound `Flag` (report) activities instead of silently dropping
+  them, add a bearer-gated paginated `GET <actor>/reports` to list open
+  reports, and let the owner resolve one via `POST <actor>/outbox` with
+  `{ "type": "Ignore", "object": "<flag-id>" }` (#489).
+- 548d8cd: Hard-delete a resolved (`Ignore`d) inbound `Flag` report after a
+  configurable retention window (`reportRetentionDays`, default 30) instead
+  of keeping it forever — `Ignore` previously only tombstoned the report
+  (`resolved_at`), so a hostile peer's dismissed reports could accumulate in
+  DO SQLite storage indefinitely. The delete runs off the alarm, on the same
+  schedule as delivery retries, pending accepts, relay verification, and
+  actor-profile hydration (#502).
+
+### Patch Changes
+
+- a25084f: Add composite indexes on the `inbox` table so `GET <actor>/reports` and the
+  `activitypub_list_inbox` MCP tool no longer full-table-scan: `idx_inbox_type_resolved_seq
+ON inbox (type, resolved_at, seq)` backs `#listReports`'s `Flag`/unresolved
+  filter and `idx_inbox_removed_seq ON inbox (removed_at, seq)` backs
+  `#listInbox`'s tombstone filter, both covering the `ORDER BY seq DESC` too
+  (#501).
+
 ## 1.0.0-beta.3
 
 ### Minor Changes
