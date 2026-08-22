@@ -46,11 +46,12 @@
     "@eslint/js": "10.0.1",
     "@fedify/fedify": "2.3.4",
     "@fedify/vocab": "2.3.4",
+    "@types/node": "26.2.0",
     "@vitest/coverage-istanbul": "4.1.10",
-    "eslint": "10.8.0",
+    "eslint": "10.8.1",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.66.0",
+    "typescript-eslint": "8.67.0",
     "vitest": "4.1.10",
     "wrangler": "4.119.0"
   }
