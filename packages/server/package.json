@@ -70,7 +70,7 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260804.1",
+    "@cloudflare/workers-types": "5.20260826.1",
     "@dwk/activitypub": "workspace:*",
     "@dwk/atproto-pds": "workspace:*",
     "@dwk/host-meta": "workspace:*",
@@ -90,7 +90,7 @@
     "@dwk/websub": "workspace:*",
     "@libsql/client": "0.17.4",
     "@types/express": "5.0.6",
-    "@types/node": "26.2.0",
+    "@types/node": "26.3.0",
     "@types/ws": "8.18.1",
     "aws4fetch": "1.0.20",
     "esbuild": "0.28.2",
