@@ -41,6 +41,11 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   handle ↔ actor mapping without a reverse lookup. The handle domain defaults to
   the actor-URL hostname (no port) and is overridable via `acctDomain` config
   (Mastodon 4.6).
+- The actor document links its human-facing profile page via **`url`**, so a
+  peer's "open original profile" action lands on a web page rather than on the
+  AS2 JSON at the actor `id`. Defaults to the `baseUrl` root (one actor per
+  `baseUrl`, so the site's home page is the profile); overridable via
+  `actor.url`.
 - When the owner sets them, the actor document federates the Mastodon 4.6
   **profile-preference flags** `showFeatured` / `showMedia` /
   `showRepliesInMedia` (toot namespace), advertising which profile tabs are

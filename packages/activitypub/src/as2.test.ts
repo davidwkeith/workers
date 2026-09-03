@@ -74,6 +74,16 @@ describe("buildActorDocument", () => {
     expect(doc.webfinger).toBe("acct:bob@example.com");
   });
 
+  it("emits the profile-page url when supplied and omits it otherwise", () => {
+    const doc = buildActorDocument(IRIS, { username: "bob" }, "PEM", {
+      url: "https://example.com/",
+    });
+    expect(doc.url).toBe("https://example.com/");
+    expect(
+      buildActorDocument(IRIS, { username: "bob" }, "PEM").url,
+    ).toBeUndefined();
+  });
+
   it("federates only the profile-preference flags that are set", () => {
     const doc = buildActorDocument(
       IRIS,
