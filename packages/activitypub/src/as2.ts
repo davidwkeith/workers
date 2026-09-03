@@ -147,6 +147,14 @@ export interface ActorProfile {
   readonly summary?: string;
   /** Avatar image URL, surfaced as the actor `icon`. */
   readonly icon?: string;
+  /**
+   * The actor's human-facing profile page, surfaced as the actor `url` — the
+   * link a peer's "open original profile" action follows instead of the actor
+   * `id` (which is this JSON document). Defaults to the `baseUrl` root: v1
+   * serves one actor per `baseUrl`, so the site's home page *is* the profile.
+   * Set it when the profile lives elsewhere, e.g. `https://example.com/about`.
+   */
+  readonly url?: string;
   /** Whether follows require manual approval. Defaults to `false` (auto-accept). */
   readonly manuallyApprovesFollowers?: boolean;
   /** Whether the actor opts into discovery/search (Mastodon `toot:discoverable`). */
@@ -179,6 +187,12 @@ export interface ActorDocumentOptions {
    * supplied.
    */
   readonly webfinger?: string;
+  /**
+   * The resolved profile-page IRI, emitted as the actor `url` (AS2 §4.1: the
+   * human-readable representation of the object, distinct from its `id`).
+   * Omitted when not supplied.
+   */
+  readonly url?: string;
 }
 
 /**
@@ -224,6 +238,8 @@ export function buildActorDocument(
   }
   // FEP-2c59 back-link to the actor's WebFinger handle.
   if (options.webfinger !== undefined) doc.webfinger = options.webfinger;
+  // Profile page for a peer's "open original profile" link.
+  if (options.url !== undefined) doc.url = options.url;
   if (options.sharedInbox !== undefined) {
     doc.endpoints = { sharedInbox: options.sharedInbox };
   }

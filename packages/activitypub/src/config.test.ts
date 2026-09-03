@@ -76,6 +76,21 @@ describe("resolveConfig defaults and derivation", () => {
     expect(override.webfinger).toBe("acct:alice@handles.example");
   });
 
+  it("defaults the profile-page url to the baseUrl root and honours actor.url", () => {
+    expect(resolveConfig(VALID).url).toBe("https://example.com/");
+    // A trailing slash on baseUrl is normalized first, so the root never doubles up.
+    const slashed = resolveConfig({
+      ...VALID,
+      baseUrl: "https://example.com/",
+    });
+    expect(slashed.url).toBe("https://example.com/");
+    const override = resolveConfig({
+      ...VALID,
+      actor: { ...VALID.actor, url: "https://example.com/about" },
+    });
+    expect(override.url).toBe("https://example.com/about");
+  });
+
   it("honors explicit overrides", () => {
     const resolved = resolveConfig({
       ...VALID,

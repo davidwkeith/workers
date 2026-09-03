@@ -188,6 +188,8 @@ export interface ResolvedConfig {
   readonly iris: ActorIris;
   /** The actor's canonical WebFinger handle, `acct:<username>@<domain>` (FEP-2c59). */
   readonly webfinger: string;
+  /** The actor's profile-page IRI, emitted as the actor document's `url`. */
+  readonly url: string;
   /** Instance-level shared inbox IRI, or `undefined` when not served. */
   readonly sharedInbox?: string;
   /** Whether inbound event RSVPs (`Join`) are held `pending` instead of auto-accepted. */
@@ -404,12 +406,16 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   // domain than the actor is served from.
   const acctDomain = config.acctDomain ?? new URL(baseUrl).hostname;
   const webfinger = `acct:${config.actor.username}@${acctDomain}`;
+  // Profile page: one actor per baseUrl, so its home page is the profile
+  // unless the owner points elsewhere.
+  const url = config.actor.url ?? `${baseUrl}/`;
 
   return {
     baseUrl,
     actor: config.actor,
     iris: deriveIris(baseUrl, config.actor.username),
     webfinger,
+    url,
     sharedInbox,
     manuallyApprovesJoins: config.manuallyApprovesJoins ?? false,
     verifyRelayedObjects: config.verifyRelayedObjects ?? "tiered",

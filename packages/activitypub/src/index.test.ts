@@ -121,6 +121,16 @@ describe("actor document", () => {
     expect(doc.webfinger).toBe(`acct:${config.actor.username}@example.com`);
   });
 
+  it("links the profile page via url, defaulting to the base URL root", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    // Not the actor `id` — that is this JSON document, which is what every
+    // platform's "open original profile" fell back to without a `url`.
+    expect(doc.url).toBe(`${BASE}/`);
+  });
+
   it("rejects a write to the actor IRI", async () => {
     const config = makeConfig();
     const handler = createActivityPub(config);

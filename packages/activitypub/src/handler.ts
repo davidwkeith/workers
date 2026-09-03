@@ -292,6 +292,7 @@ export function createActivityPub(
         buildActorDocument(iris, resolved.actor, resolved.publicKeyPem, {
           sharedInbox: resolved.sharedInbox,
           webfinger: resolved.webfinger,
+          url: resolved.url,
         }),
       );
       return new Response(method === "HEAD" ? null : body, {
