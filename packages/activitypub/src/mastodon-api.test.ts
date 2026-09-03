@@ -944,7 +944,12 @@ describe("buildMastodonBackend", () => {
   });
 
   it("respondToFollowRequest(actor, 'authorize') delivers Accept(Follow) to that follower alone, once the alarm resolves their inbox", async () => {
-    const config = freshConfig();
+    // With a signing key: when the real alarm (armed by the external DO stub
+    // `respondToFollowRequest` goes through) wins the race below, its
+    // delivery pass POSTs the Accept through the fetch stub, where the
+    // assertions can see it. Without one, `#processDeliveries` drops the row
+    // as undeliverable and leaves no trace at all.
+    const config = freshConfig({ privateKeyPem });
     const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
     const follower = "https://remote.example/users/pending";
     await runInDurableObject(stub, async (_instance, state) => {
@@ -1067,7 +1072,11 @@ describe("buildMastodonBackend", () => {
   });
 
   it("respondToFollowRequest(actor, 'reject') drops the follower and delivers Reject(Follow)", async () => {
-    const config = freshConfig();
+    // Signing key for the same reason as the 'authorize' case above: a real
+    // alarm's delivery attempt then fails retryably (no fetch stub here, and
+    // `remote.example` does not resolve) and keeps the row, instead of
+    // dropping it as undeliverable.
+    const config = freshConfig({ privateKeyPem });
     const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(config.iris.id));
     const follower = "https://remote.example/users/pending2";
     await runInDurableObject(stub, async (_instance, state) => {
