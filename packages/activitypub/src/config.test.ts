@@ -91,6 +91,20 @@ describe("resolveConfig defaults and derivation", () => {
     expect(override.url).toBe("https://example.com/about");
   });
 
+  it("throws when actor.url is not an absolute URL", () => {
+    // A relative path would federate as a broken "open profile" link on
+    // every peer — fail at startup like the other config checks instead.
+    expect(() =>
+      resolveConfig({ ...VALID, actor: { ...VALID.actor, url: "/about" } }),
+    ).toThrow(/actor\.url/);
+    expect(() =>
+      resolveConfig({
+        ...VALID,
+        actor: { ...VALID.actor, url: "not a url" },
+      }),
+    ).toThrow(/actor\.url/);
+  });
+
   it("honors explicit overrides", () => {
     const resolved = resolveConfig({
       ...VALID,

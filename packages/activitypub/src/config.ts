@@ -407,8 +407,13 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   const acctDomain = config.acctDomain ?? new URL(baseUrl).hostname;
   const webfinger = `acct:${config.actor.username}@${acctDomain}`;
   // Profile page: one actor per baseUrl, so its home page is the profile
-  // unless the owner points elsewhere.
+  // unless the owner points elsewhere. Peers follow this link verbatim, so a
+  // relative or malformed override fails loudly here rather than shipping a
+  // broken "open profile" link to every peer.
   const url = config.actor.url ?? `${baseUrl}/`;
+  if (!URL.canParse(url)) {
+    throw new Error("@dwk/activitypub: `actor.url` must be an absolute URL");
+  }
 
   return {
     baseUrl,
