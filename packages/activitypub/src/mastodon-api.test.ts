@@ -967,14 +967,25 @@ describe("buildMastodonBackend", () => {
     // stub needs to already be in place for whichever gets to the pending
     // `kind = 'follow'` row first, our own explicit `/__resolve` drive below
     // or the real alarm.
+    // The stub also records every POST to the follower's inbox: when the real
+    // alarm wins the race, it drains the queued `Accept` through this stub in
+    // the same pass (a 202 deletes the `delivery` row), so the only trace of
+    // the delivery left for the assertions below is what the stub saw.
     const original = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL) => {
-      const href = typeof url === "string" ? url : url.toString();
-      if (href === follower) {
+    const inboxPosts: { inbox: string; json: string }[] = [];
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const request = new Request(input, init);
+      if (request.url === follower) {
         return new Response(
           JSON.stringify({ id: follower, inbox: `${follower}/inbox` }),
           { status: 200 },
         );
+      }
+      if (request.method === "POST") {
+        inboxPosts.push({ inbox: request.url, json: await request.text() });
       }
       return new Response(null, { status: 202 });
     }) as unknown as typeof fetch;
@@ -1026,11 +1037,19 @@ describe("buildMastodonBackend", () => {
           .one();
         expect(resolvedFollower.inbox).toBe(`${follower}/inbox`);
 
-        const delivered = state.storage.sql
-          .exec<{ inbox: string; json: string }>(
-            `SELECT inbox, json FROM delivery`,
-          )
-          .toArray();
+        // Exactly one `Accept` reached this follower's inbox and nobody
+        // else's — either still queued in `delivery` (our `/__resolve` drive
+        // got there first) or already POSTed through the stub (the real alarm
+        // did, and its 202 removed the row). Which one is alarm-scheduling
+        // luck; the end state is not.
+        const delivered = [
+          ...state.storage.sql
+            .exec<{ inbox: string; json: string }>(
+              `SELECT inbox, json FROM delivery`,
+            )
+            .toArray(),
+          ...inboxPosts,
+        ];
         expect(delivered).toHaveLength(1);
         expect(delivered[0]?.inbox).toBe(`${follower}/inbox`);
         const deliveredActivity = JSON.parse(delivered[0]!.json) as {
@@ -1071,11 +1090,24 @@ describe("buildMastodonBackend", () => {
         )
         .one().n;
       expect(remaining).toBe(0);
-      const queued = state.storage.sql
-        .exec<{ json: string }>(
-          `SELECT json FROM pending_accept WHERE kind = 'deliver'`,
-        )
-        .toArray();
+      // The `Reject` is queued as a `kind = 'deliver'` pending-accept row; the
+      // real alarm (armed by the same external DO stub as production) may
+      // already have promoted it into `delivery` — and, with no fetch stub
+      // here, its POST to `remote.example` fails DNS and leaves the row for
+      // retry — so count it wherever the alarm left it.
+      const queued = [
+        ...state.storage.sql
+          .exec<{ json: string }>(
+            `SELECT json FROM pending_accept WHERE kind = 'deliver'`,
+          )
+          .toArray(),
+        ...state.storage.sql
+          .exec<{ json: string }>(
+            `SELECT json FROM delivery WHERE inbox = ?`,
+            `${follower}/inbox`,
+          )
+          .toArray(),
+      ];
       expect(queued).toHaveLength(1);
       expect((JSON.parse(queued[0]!.json) as { type: string }).type).toBe(
         "Reject",
