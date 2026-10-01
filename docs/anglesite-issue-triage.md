@@ -30,38 +30,81 @@ Each issue carries:
 Issues never contain the error message, request data, logs, span attributes,
 the site's address or its Cloudflare account.
 
-The labels are `source:anglesite-issues` and `pkg:<name>`. For an issue that is
-already open, the relay adds at most one "reported again" comment a day.
+The relay creates each issue and its labels (`source:anglesite-issues`,
+`pkg:<name>`) in a single API call. For an issue that is already open, it adds
+at most one "reported again" comment a day.
 
-## What the agent does
+Volume is capped at the relay, not here. Each site has a daily delivery limit,
+there is a global daily limit on new issues, and errors are de-duplicated
+across sites. Each run of the workflow is limited to 80 agent turns and 45
+minutes.
+
+## How the workflow is built
 
 [`.github/workflows/anglesite-issue-triage.yml`](../.github/workflows/anglesite-issue-triage.yml)
-runs [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action)
-when the relay's GitHub App opens a labelled issue. You can also start it by
-hand: **Actions ▸ Anglesite issue triage ▸ Run workflow**, then enter the issue
-number.
+has two jobs. The agent reads untrusted input, so it never holds a write token,
+and every limit on what it can change is enforced mechanically rather than by
+the prompt.
 
-The agent reproduces the error with a failing colocated test. It then does one
-of the following:
+### `triage`
 
-- **Fixes it.** Opens a PR (`fix(<name>): …`, a changeset, the full CI gate,
-  `Fixes #N`) for a maintainer to review.
-- **Finds it already fixed.** Points at the commit after the site's catalog
-  commit that fixed it.
-- **Traces it to site configuration.** Recommends closing the issue with the
-  `config` label.
-- **Can't reproduce it confidently.** Comments its diagnosis and adds
-  `agent:needs-human`.
+This job has a read-only `GITHUB_TOKEN` and no GitHub access for the agent.
 
-The agent never merges, closes issues or releases anything.
+1. **Provenance check.** The issue must have been opened by
+   `${ANGLESITE_ISSUES_BOT}[bot]` and carry `source:anglesite-issues`. This
+   applies to manual runs too. Without it, the job fails.
+2. **Duplicate check.** For event-driven runs, an issue that already has
+   `agent:triaged` is skipped, so the `opened` and `labeled` events from one
+   issue cause a single run.
+3. **Hand-off.** The issue is written to `.agent/issue.json` for the agent.
+4. **Agent run.**
+   [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action)
+   runs with an exact tool allowlist. It can use file tools, specific `pnpm`
+   gate commands (`build`, `lint`, `format`, `format:check`, `typecheck`,
+   `test`, `test --project …`) and read-only `git`. It has no `push`, `gh`,
+   `dlx` or `exec`. The agent reproduces the error with a failing colocated
+   test, may fix it, and writes `.agent/result.json`.
+5. **Staging.** Only `packages/*/src/` files, `.changeset/*.md` files and the
+   result are copied out, with `rsync --no-links` and no `git`. Symlinks, and
+   anything the agent wrote into `.git/` such as hooks or config, never leave
+   the job. `publish` then narrows this further to a single package.
 
-## Maintainer actions
+### `publish`
+
+This job has a write token and no agent. It starts from a clean checkout of
+`main`, overlays the staged files, and lists what changed. Then
+[`scripts/anglesite-triage.mjs`](../scripts/anglesite-triage.mjs) decides what
+may be published; it is unit-tested by `pnpm test:triage` in CI.
+
+- **A fix** is published only if every changed path is under
+  `packages/<the package>/src/` or is a new `.changeset/*.md`. It must also
+  include both a source change and a changeset, and have a title of the form
+  `fix(<package>): …`. Anything else becomes an `agent:needs-human` comment that
+  lists the rejected paths.
+- **How a fix is published.** Fixed commands commit as `github-actions[bot]`,
+  force-push only `agent/anglesite-issue-<N>`, and open the PR with `Fixes #N`.
+  A PR opened with `GITHUB_TOKEN` doesn't start workflows, so the job then
+  dispatches `ci.yml` on that branch.
+- **Comments and labels.** The job comments on the issue (with @-mentions
+  neutralized) and adds `agent:triaged`, plus `agent:needs-human` when needed.
+
+## What you see on an issue
+
+| Outcome       | Comment                                                                    | Labels                               |
+| ------------- | -------------------------------------------------------------------------- | ------------------------------------ |
+| Fix proposed  | Links the `agent/anglesite-issue-<N>` PR, with `fix(<name>): …` and a test | `agent:triaged`                      |
+| Already fixed | Names the commit after the site's catalog commit                           | `agent:triaged`                      |
+| Configuration | Explains why, and recommends closing with `config`                         | `agent:triaged`                      |
+| Needs a human | Diagnosis, or why a proposed fix was rejected                              | `agent:triaged`, `agent:needs-human` |
+
+What to do with each:
 
 | To                                          | Do                                                                                         |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Ship a fix                                  | Review and merge the agent's PR. `Fixes #N` closes the issue.                              |
 | Stop reports for a site-configuration error | Close the issue with the `config` label. The relay stops filing that fingerprint for good. |
 | Handle a real bug the agent couldn't fix    | Keep `agent:needs-human` and fix it by hand.                                               |
+| Re-run triage after adding context          | **Actions ▸ Anglesite issue triage ▸ Run workflow**, then enter the issue number.          |
 
 If a fixed error happens again after its issue closed, the relay opens a new
 issue that links back as a regression.
@@ -73,10 +116,16 @@ issue that links back as a regression.
    it.
 2. **Set the repository variable** `ANGLESITE_ISSUES_BOT` to that App's slug,
    without the `[bot]` suffix. While it's unset, the workflow never runs.
-3. **Install the [Claude GitHub App](https://github.com/apps/claude)** on this
-   repo. The workflow uses its token so the agent's PRs trigger CI; a PR opened
-   with `GITHUB_TOKEN` would not.
-4. **Add one of these secrets:** `CLAUDE_CODE_OAUTH_TOKEN` (from
+3. **Add exactly one secret:** `CLAUDE_CODE_OAUTH_TOKEN` (from
    `claude setup-token`) or `ANTHROPIC_API_KEY`.
-5. **Create the labels** `source:anglesite-issues`, `agent:needs-human` and
-   `config`. The relay creates `pkg:<name>` labels as needed.
+4. **Create the labels** `source:anglesite-issues`, `agent:triaged`,
+   `agent:needs-human` and `config`. The relay creates `pkg:<name>` labels as
+   needed.
+5. **Let Actions open PRs.** Turn on **Settings ▸ Actions ▸ General ▸ Allow
+   GitHub Actions to create and approve pull requests**, so the publish job can
+   open the fix PR with `GITHUB_TOKEN`. It never approves or merges anything.
+6. **Keep `main` protected.** Require pull requests, so that nothing, including
+   `GITHUB_TOKEN`, can push to it directly. The publish job only ever pushes
+   `agent/anglesite-issue-*` branches, but branch protection is the backstop.
+   `CODEOWNERS` already assigns everything, `.github/` included, to the
+   maintainer.
