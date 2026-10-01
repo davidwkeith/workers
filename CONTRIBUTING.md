@@ -87,7 +87,7 @@ pnpm test        # full vitest suite, Node + workerd projects
 6. **Write commit messages (and the PR title) in Conventional Commits
    style**, matching the history: `<type>(<scope>): <subject>` — lowercase
    type, subject not capitalized, no trailing period. Common types: `feat`,
-   `fix`, `chore`, `docs`, `debug`. Scope is the package name minus the `@dwk/` prefix
+   `fix`, `chore`, `docs`, `debug`, `ci`. Scope is the package name minus the `@dwk/` prefix
    (`fix(solid-pod): …`), a comma-separated list for several packages
    (`fix(store,solid-pod): …`), or omitted for a repo-wide change
    (`chore: …`, `docs: …`).
@@ -221,6 +221,9 @@ cannot publish a stable version until its suites in
 
 - Open a [GitHub issue](https://github.com/davidwkeith/workers/issues) with
   reproduction steps and the package + version affected.
+- Production errors reported automatically by Anglesite sites arrive as
+  `source:anglesite-issues` issues and are triaged by an agent. See
+  [docs/anglesite-issue-triage.md](./docs/anglesite-issue-triage.md).
 - For **security vulnerabilities**, please do not open a public issue — use
   [GitHub private vulnerability reporting](https://github.com/davidwkeith/workers/security/advisories/new)
   instead.

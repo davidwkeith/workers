@@ -176,7 +176,7 @@ new package, use the `add-package` skill.
   `<type>(<scope>): <subject>`, lowercase type, subject not capitalized, scope
   in parentheses (the package name minus the `@dwk/` prefix, comma-separated
   for several packages, omitted only for a repo-wide change). Types in use:
-  `feat`, `fix`, `chore`, `docs`, `debug`. Correct:
+  `feat`, `fix`, `chore`, `docs`, `debug`, `ci`. Correct:
   `fix(solid-pod): strip client-forged ldp:contains from container PUT`.
   Incorrect: `Fix solid-pod: strip client-forged ldp:contains from container PUT`
   (capitalized, colon instead of scope parens) and `Add AGENTS.md symlink to CLAUDE.md`
