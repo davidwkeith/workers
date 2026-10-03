@@ -67,7 +67,7 @@
     "@dwk/log": "workspace:*",
     "express": "5.2.1",
     "helmet": "8.3.0",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260804.1",
@@ -91,7 +91,7 @@
     "@libsql/client": "0.17.4",
     "@types/express": "5.0.6",
     "@types/node": "26.2.0",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "aws4fetch": "1.0.20",
     "esbuild": "0.28.2",
     "libsql": "0.5.29"
