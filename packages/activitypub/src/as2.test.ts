@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACTOR_CONTEXT,
   AS2_CONTENT_TYPE,
   AS2_LD_CONTENT_TYPE,
   actorIri,
@@ -98,6 +99,36 @@ describe("buildActorDocument", () => {
     const bare = buildActorDocument(IRIS, { username: "bob" }, "PEM");
     expect(bare.webfinger).toBeUndefined();
     expect(bare.showFeatured).toBeUndefined();
+  });
+
+  it("emits alsoKnownAs only when set and non-empty (#534)", () => {
+    const doc = buildActorDocument(
+      IRIS,
+      {
+        username: "bob",
+        alsoKnownAs: ["https://xn--4t8h.dwk.io/users/dwk"],
+      },
+      "PEM",
+    );
+    expect(doc.alsoKnownAs).toEqual(["https://xn--4t8h.dwk.io/users/dwk"]);
+    // Omitted entirely when unset, so an existing actor document stays
+    // byte-for-byte unchanged.
+    expect(
+      buildActorDocument(IRIS, { username: "bob" }, "PEM").alsoKnownAs,
+    ).toBeUndefined();
+    // Also omitted when explicitly empty.
+    expect(
+      buildActorDocument(IRIS, { username: "bob", alsoKnownAs: [] }, "PEM")
+        .alsoKnownAs,
+    ).toBeUndefined();
+  });
+
+  it("defines alsoKnownAs in the actor @context as an @id-typed term (#534)", () => {
+    const terms = ACTOR_CONTEXT[2] as Record<string, unknown>;
+    expect(terms.alsoKnownAs).toEqual({
+      "@id": "as:alsoKnownAs",
+      "@type": "@id",
+    });
   });
 
   it("emits type Group when the profile declares it (#376)", () => {
