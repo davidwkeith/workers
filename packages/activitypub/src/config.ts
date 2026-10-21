@@ -17,7 +17,7 @@ import {
   type Metrics,
 } from "@dwk/log";
 
-import { safeFetch } from "@dwk/safe-fetch";
+import { safeFetch, SsrfError } from "@dwk/safe-fetch";
 
 import type { ActorIris, ActorProfile } from "./as2.js";
 import { readJsonCapped } from "./discovery.js";
@@ -166,6 +166,18 @@ export interface ActivityPubConfig {
   readonly software?: SoftwareInfo;
 
   /**
+   * `User-Agent` sent on every outbound fediverse request (key resolution,
+   * delivery, discovery). Defaults to {@link DEFAULT_USER_AGENT}. Some
+   * peers — and the anti-scraper challenge layers (e.g.
+   * [Anubis](https://github.com/TecharoHQ/anubis/issues/31)) a growing number
+   * of hosts run in front of federated software — allow- or deny-list on this
+   * header; override it to identify this deployment specifically (e.g. with
+   * an operator contact URL), the usual courtesy for peers that allowlist by
+   * UA.
+   */
+  readonly userAgent?: string;
+
+  /**
    * Resolve a `keyId` to its owner + PEM key for inbound verification. Defaults
    * to fetching the `keyId` (an actor or key IRI) as AS2 and reading
    * `publicKey`. Supply your own to add caching or a key store.
@@ -217,6 +229,7 @@ export interface ResolvedConfig {
   readonly reportRetentionMs: number;
   readonly clockSkewSeconds: number;
   readonly software: SoftwareInfo;
+  readonly userAgent: string;
   readonly keyResolver: KeyResolver;
   readonly verifyInboxSignature?: InboxVerifier;
   readonly fetch: typeof fetch;
@@ -281,6 +294,8 @@ export interface ForwardedConfig {
   readonly keyId: string;
   /** Private key (PKCS#8 PEM) so the DO can sign deliveries from its alarm. */
   readonly privateKeyPem?: string;
+  /** `User-Agent` the DO sends on outbound deliveries from its alarm. */
+  readonly userAgent: string;
 }
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -339,6 +354,7 @@ const MAX_KEY_DOC_BYTES = 1024 * 1024;
 function defaultKeyResolver(
   fetchImpl: typeof fetch,
   logger: Logger,
+  userAgent: string,
 ): KeyResolver {
   return async (keyId: string): Promise<ResolvedKey | null> => {
     // The key IRI is the actor (or key) document URL with its fragment
@@ -350,7 +366,12 @@ function defaultKeyResolver(
       keyUrl = new URL(keyId);
       keyUrl.hash = "";
     } catch {
-      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+      // `keyId` comes straight off an unauthenticated inbound `Signature`
+      // header, so a malformed one costs an attacker nothing to produce —
+      // `debug`, not `warn`, so spamming it isn't a free way to generate
+      // operator-facing noise. No `host`: the IRI never parsed, so there's
+      // none to report.
+      logger.debug(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "bad_key_id",
       });
       return null;
@@ -368,14 +389,18 @@ function defaultKeyResolver(
       // rejection resolves to `null`. `timeoutMs` bounds the whole chain so a
       // slow remote cannot stall inbox verification. A descriptive `User-Agent`
       // is sent because some hosts' anti-scraper challenge layers treat an
-      // unidentified client as a bot (see {@link DEFAULT_USER_AGENT}).
+      // unidentified client as a bot (see {@link ActivityPubConfig.userAgent}).
+      // Unlike `guardedFetch` (which wraps an arbitrary caller-supplied
+      // `init` and so preserves a caller-set `User-Agent`), this request is
+      // built entirely by this function — there is no caller header to
+      // preserve, so it's set unconditionally.
       ({ response, url: servedUrl } = await safeFetch(
         fetchImpl,
         keyUrl.href,
         {
           headers: {
             accept: "application/activity+json",
-            "user-agent": DEFAULT_USER_AGENT,
+            "user-agent": userAgent,
           },
         },
         { allowedSchemes: ["https:"], timeoutMs: 10_000 },
@@ -383,11 +408,19 @@ function defaultKeyResolver(
     } catch (error) {
       // Covers both a network/timeout failure and `safeFetch` giving up after
       // too many redirect hops — the latter is the shape a challenge/bot-wall
-      // that redirects a cookieless client back to itself produces.
+      // that redirects a cookieless client back to itself produces. The error
+      // `message` is never logged: for `SsrfError` and for the redirect-loop
+      // case it embeds the full requested URL(s) (per `@dwk/log`'s redaction
+      // policy — see `hostFromUrl` — only sanitized hosts belong in a log
+      // line), so only machine-readable detail is recorded: the error's
+      // `name`, and `SsrfError`'s own `reason` and (host-only) `host`.
       logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "fetch_error",
         host,
-        message: error instanceof Error ? error.message : String(error),
+        errorName: error instanceof Error ? error.name : "unknown",
+        ...(error instanceof SsrfError
+          ? { ssrfReason: error.reason, ssrfHost: error.host }
+          : {}),
       });
       return null;
     }
@@ -401,7 +434,10 @@ function defaultKeyResolver(
     }
     const doc = await readJsonCapped(response, MAX_KEY_DOC_BYTES);
     if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+      // The document's shape is fully attacker-controlled once they own (or
+      // merely point `keyId` at) a reachable URL, so this is `debug` noise
+      // alongside `bad_key_id` rather than an operator-facing `warn`.
+      logger.debug(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "bad_shape",
         host,
       });
@@ -409,7 +445,7 @@ function defaultKeyResolver(
     }
     const publicKey = (doc as Record<string, unknown>).publicKey;
     if (!publicKey || typeof publicKey !== "object") {
-      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+      logger.debug(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "no_public_key",
         host,
       });
@@ -420,7 +456,7 @@ function defaultKeyResolver(
       (publicKey as Record<string, unknown>).owner ??
       (doc as Record<string, unknown>).id;
     if (typeof pem !== "string" || typeof owner !== "string") {
-      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+      logger.debug(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "bad_shape",
         host,
       });
@@ -435,13 +471,15 @@ function defaultKeyResolver(
       ownerUrl = new URL(owner);
       servedOrigin = new URL(servedUrl).origin;
     } catch {
-      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+      logger.debug(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "bad_owner_url",
         host,
       });
       return null;
     }
     if (ownerUrl.origin !== servedOrigin) {
+      // An actual impersonation attempt (or a misconfigured peer), not mere
+      // malformed input — worth an operator's attention, so `warn`.
       logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
         reason: "owner_origin_mismatch",
         host,
@@ -493,6 +531,9 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     }
   }
 
+  const logger = config.logger ?? noopLogger;
+  const userAgent = config.userAgent ?? DEFAULT_USER_AGENT;
+
   return {
     baseUrl,
     actor: config.actor,
@@ -517,13 +558,13 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
       1000,
     clockSkewSeconds: config.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS,
     software: config.software ?? DEFAULT_SOFTWARE,
+    userAgent,
     keyResolver:
-      config.keyResolver ??
-      defaultKeyResolver(fetchImpl, config.logger ?? noopLogger),
+      config.keyResolver ?? defaultKeyResolver(fetchImpl, logger, userAgent),
     verifyInboxSignature: config.verifyInboxSignature,
     fetch: fetchImpl,
     now: config.now ?? (() => Date.now()),
-    logger: config.logger ?? noopLogger,
+    logger,
     metrics: config.metrics ?? noopMetrics,
   };
 }

@@ -162,7 +162,11 @@ export function createActivitypubMcpTools(
         const body: Record<string, unknown> = { ...args };
         const audience = body.audience;
         if (typeof audience === "string" && isHandleShaped(audience)) {
-          const resolved = await resolveHandleGuarded(audience, config.fetch);
+          const resolved = await resolveHandleGuarded(
+            audience,
+            config.fetch,
+            config.userAgent,
+          );
           if (!resolved) {
             return toolError(
               `audience handle could not be resolved: ${audience}`,
@@ -227,12 +231,16 @@ export function createActivitypubMcpTools(
           return toolError("`handle` must be a non-empty string.");
         }
         const iri = isHandleShaped(handle)
-          ? await resolveHandleGuarded(handle, config.fetch)
+          ? await resolveHandleGuarded(handle, config.fetch, config.userAgent)
           : handle;
         if (!iri) {
           return toolError(`handle could not be resolved: ${handle}`);
         }
-        const actorDoc = await fetchActorGuarded(iri, config.fetch);
+        const actorDoc = await fetchActorGuarded(
+          iri,
+          config.fetch,
+          config.userAgent,
+        );
         if (!actorDoc) {
           return toolError(`actor document could not be fetched: ${iri}`);
         }

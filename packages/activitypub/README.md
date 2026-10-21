@@ -109,8 +109,9 @@ draft-cavage; [#59](https://github.com/davidwkeith/workers/issues/59)) can be
 swapped in unchanged once it lands.
 
 Every outbound request (key resolution, delivery, discovery) sends a
-descriptive `User-Agent` identifying this package, since some peers — and the
-anti-scraper challenge layers (e.g.
+descriptive `User-Agent` (`userAgent` in `ActivityPubConfig`, defaulting to
+`DEFAULT_USER_AGENT`; override it to identify a specific deployment), since
+some peers — and the anti-scraper challenge layers (e.g.
 [Anubis](https://github.com/TecharoHQ/anubis/issues/31)) a growing number of
 hosts run in front of federated software — treat an unidentified client as a
 bot. If signature verification against a specific peer consistently fails

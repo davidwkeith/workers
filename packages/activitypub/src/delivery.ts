@@ -14,7 +14,6 @@
 
 import { assertPublicUrl, safeFetch, SsrfError } from "@dwk/safe-fetch";
 
-import { DEFAULT_USER_AGENT } from "./http.js";
 import { signRequest, type SignerKey } from "./signature.js";
 
 /** Machine-readable cause of a blocked delivery target. */
@@ -80,6 +79,7 @@ export async function deliverActivity(
   activityJson: string,
   signer: SignerKey,
   fetchImpl: typeof fetch,
+  userAgent: string,
   now: () => number = () => Date.now(),
   timeoutMs = 10_000,
 ): Promise<DeliveryResult> {
@@ -104,7 +104,7 @@ export async function deliverActivity(
         // `User-Agent` is layered on top of (not part of) the signed header
         // set `signRequest` returns — it isn't covered by the signature, so
         // adding it here doesn't touch signing at all.
-        headers: { ...signed.headers, "User-Agent": DEFAULT_USER_AGENT },
+        headers: { ...signed.headers, "User-Agent": userAgent },
         body: signed.body as BufferSource,
       },
       { allowedSchemes: ["https:"], timeoutMs },

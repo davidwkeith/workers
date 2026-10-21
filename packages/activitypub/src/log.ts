@@ -51,7 +51,12 @@ export const ActivityPubLogEvent = {
    * doesn't say whether it was a network error, an HTTP status, a malformed
    * document, or an origin mismatch (e.g. a redirect loop from an anti-scraper
    * challenge the remote host runs in front of its actor documents). Fields:
-   * `reason`, `host`, and `status` when an HTTP response was received.
+   * `reason`; `host`, when derivable from the `keyId` (absent only for
+   * `bad_key_id`, where it never parsed); and `status`, when an HTTP response
+   * was received. `bad_key_id`, `bad_shape`, and `no_public_key` log at
+   * `debug` rather than `warn` — the `keyId` and the fetched document are
+   * both fully attacker-controlled, so spamming malformed ones costs an
+   * attacker nothing and shouldn't generate operator-facing noise.
    */
   KeyResolutionFailed: "activitypub.key_resolution.failed",
   /**

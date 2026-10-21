@@ -104,6 +104,7 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     reportRetentionMs: config.reportRetentionMs,
     keyId: config.iris.keyId,
     sharedInbox: config.sharedInbox,
+    userAgent: config.userAgent,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),
   };
 }
@@ -548,7 +549,11 @@ async function resolveAudienceHandle(
   if (typeof audience !== "string" || !isHandleShaped(audience)) {
     return {};
   }
-  const actor = await resolveHandleGuarded(audience, config.fetch);
+  const actor = await resolveHandleGuarded(
+    audience,
+    config.fetch,
+    config.userAgent,
+  );
   if (!actor) {
     return { error: `audience handle could not be resolved: ${audience}` };
   }

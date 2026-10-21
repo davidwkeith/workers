@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Logger } from "@dwk/log";
+import { SsrfError } from "@dwk/safe-fetch";
 
 import {
   DEFAULT_USER_AGENT,
@@ -348,7 +349,7 @@ describe("default key resolver", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("sends a descriptive User-Agent", async () => {
+  it("sends the resolved User-Agent, defaulting to DEFAULT_USER_AGENT", async () => {
     // Some peers' anti-scraper challenge layers (e.g. Anubis) treat an
     // unidentified client as a bot; an identifiable UA is standard ActivityPub
     // interop practice and lets such hosts allowlist federation traffic.
@@ -367,28 +368,50 @@ describe("default key resolver", () => {
     );
   });
 
+  it("sends a configured User-Agent override instead of the default", async () => {
+    // Composition-contract requirement: a deployment must be able to
+    // identify itself specifically (e.g. with an operator contact URL), the
+    // usual courtesy for peers that allowlist federation traffic by UA.
+    const fetchImpl = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(null, { status: 302, headers: { location: "x" } }),
+    );
+    const resolve = resolveConfig({
+      ...VALID,
+      fetch: fetchImpl as unknown as typeof fetch,
+      userAgent: "my-instance/1.0 (+https://my-instance.example/)",
+    }).keyResolver;
+    await resolve(KEY_ID);
+    const init = fetchImpl.mock.calls[0]?.[1];
+    expect(new Headers(init?.headers).get("user-agent")).toBe(
+      "my-instance/1.0 (+https://my-instance.example/)",
+    );
+  });
+
   describe("failure diagnostics", () => {
     function resolverWithLogger(fetchImpl: typeof fetch, logger: Logger) {
       return resolveConfig({ ...VALID, fetch: fetchImpl, logger }).keyResolver;
     }
 
     function fakeLogger() {
-      const warn =
-        vi.fn<(event: string, fields?: Record<string, unknown>) => void>();
-      const logger: Logger = {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn,
-        error: vi.fn(),
-      };
-      return { logger, warn };
+      type Call = (event: string, fields?: Record<string, unknown>) => void;
+      const debug = vi.fn<Call>();
+      const warn = vi.fn<Call>();
+      const logger: Logger = { debug, info: vi.fn(), warn, error: vi.fn() };
+      return { logger, debug, warn };
     }
 
-    it("logs the network error when the fetch throws", async () => {
+    it("logs the network error at warn, without the raw error message", async () => {
+      // The error `message` for a redirect-loop or SsrfError embeds the full
+      // requested URL(s) — per `@dwk/log`'s redaction policy (see
+      // `hostFromUrl`), only sanitized hosts and machine-readable codes
+      // belong in a log line, so only `error.name` is recorded here.
       const { logger, warn } = fakeLogger();
       const resolve = resolverWithLogger(
         vi.fn(async () => {
-          throw new Error("too many redirects");
+          throw new TypeError(
+            `Too many redirects.${"https://remote.example/users/bob,".repeat(20)}`,
+          );
         }) as unknown as typeof fetch,
         logger,
       );
@@ -398,9 +421,39 @@ describe("default key resolver", () => {
         expect.objectContaining({
           reason: "fetch_error",
           host: "remote.example",
-          message: "too many redirects",
+          errorName: "TypeError",
         }),
       );
+      for (const call of warn.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain("Too many redirects");
+      }
+    });
+
+    it("logs an SsrfError's reason and host, never its message", async () => {
+      const { logger, warn } = fakeLogger();
+      const resolve = resolverWithLogger(
+        vi.fn(async () => {
+          throw new SsrfError(
+            "blocked host https://169.254.169.254/latest/meta-data?secret=1",
+            "blocked_host",
+            "169.254.169.254",
+          );
+        }) as unknown as typeof fetch,
+        logger,
+      );
+      await resolve(KEY_ID);
+      expect(warn).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({
+          reason: "fetch_error",
+          errorName: "SsrfError",
+          ssrfReason: "blocked_host",
+          ssrfHost: "169.254.169.254",
+        }),
+      );
+      for (const call of warn.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain("secret=1");
+      }
     });
 
     it("logs the HTTP status on a non-ok response", async () => {
@@ -422,8 +475,60 @@ describe("default key resolver", () => {
       );
     });
 
-    it("never logs key material or document bodies", async () => {
+    it("logs attacker-trivial-to-trigger failures at debug, not warn", async () => {
+      // A malformed `keyId` and a malformed/missing-key document are both
+      // fully attacker-controlled (the `keyId` comes off an unauthenticated
+      // `Signature` header; the document comes from wherever that `keyId`
+      // points), so spamming them costs an attacker nothing — `debug` keeps
+      // them out of operator-facing `warn` noise.
+      const { logger, debug, warn } = fakeLogger();
+      const resolve = resolverWithLogger(vi.fn(), logger);
+      expect(await resolve("not a url")).toBeNull();
+      expect(debug).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({ reason: "bad_key_id" }),
+      );
+
+      const noKeyResolve = resolverWithLogger(
+        vi.fn(async () =>
+          jsonResponse({ id: "https://remote.example/users/bob" }),
+        ) as unknown as typeof fetch,
+        logger,
+      );
+      expect(await noKeyResolve(KEY_ID)).toBeNull();
+      expect(debug).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({ reason: "no_public_key" }),
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("logs an impersonation attempt (owner/origin mismatch) at warn", async () => {
+      // Unlike the attacker-trivial cases above, a cross-origin `owner`
+      // claim is a genuine impersonation attempt (or peer misconfiguration)
+      // worth an operator's attention.
       const { logger, warn } = fakeLogger();
+      const resolve = resolverWithLogger(
+        vi.fn(async () =>
+          jsonResponse({
+            id: "https://evil.example/key",
+            publicKey: {
+              owner: "https://victim.example/users/alice",
+              publicKeyPem: "ATTACKER-PEM",
+            },
+          }),
+        ) as unknown as typeof fetch,
+        logger,
+      );
+      expect(await resolve("https://evil.example/key")).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({ reason: "owner_origin_mismatch" }),
+      );
+    });
+
+    it("never logs key material or document bodies", async () => {
+      const { logger, debug, warn } = fakeLogger();
       const resolve = resolverWithLogger(
         vi.fn(async () =>
           jsonResponse({
@@ -434,9 +539,15 @@ describe("default key resolver", () => {
         logger,
       );
       await resolve(KEY_ID);
-      for (const call of warn.mock.calls) {
+      // This failure (owner "x" doesn't parse as a URL) logs at `debug`, but
+      // check both levels — the point is that neither one ever carries the
+      // PEM, not which level this particular branch happens to use.
+      for (const call of [...debug.mock.calls, ...warn.mock.calls]) {
         expect(JSON.stringify(call)).not.toContain("SECRET-PEM-MATERIAL");
       }
+      expect(debug.mock.calls.length + warn.mock.calls.length).toBeGreaterThan(
+        0,
+      );
     });
   });
 });

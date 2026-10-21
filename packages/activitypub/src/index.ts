@@ -55,6 +55,7 @@ export {
 export {
   resolveConfig,
   deriveIris,
+  DEFAULT_USER_AGENT,
   type ActivityPubConfig,
   type ActivityPubEnv,
   type ResolvedConfig,

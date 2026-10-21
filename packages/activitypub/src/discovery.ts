@@ -13,7 +13,6 @@ import { createTimeoutSignal } from "@dwk/safe-fetch";
 import { resolveHandle } from "@dwk/webfinger";
 
 import { assertPublicHttpsTarget } from "./delivery.js";
-import { DEFAULT_USER_AGENT } from "./http.js";
 
 /** Whether a string looks like a handle rather than an IRI. */
 export function isHandleShaped(value: string): boolean {
@@ -23,11 +22,14 @@ export function isHandleShaped(value: string): boolean {
 /**
  * Wrap a fetch so every request target passes the outbound SSRF guard and
  * carries a descriptive `User-Agent` (a caller-set one, if any, wins — see
- * {@link DEFAULT_USER_AGENT}). Covers both the WebFinger lookup in
+ * {@link ActivityPubConfig.userAgent}). Covers both the WebFinger lookup in
  * {@link resolveHandleGuarded} (which otherwise has no header-customization
  * seam of its own) and the actor fetch in {@link fetchActorGuarded}.
  */
-export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
+export function guardedFetch(
+  fetchImpl: typeof fetch,
+  userAgent: string,
+): typeof fetch {
   return (input, init) => {
     const url =
       typeof input === "string"
@@ -37,8 +39,7 @@ export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
           : input.url;
     assertPublicHttpsTarget(url);
     const headers = new Headers(init?.headers);
-    if (!headers.has("user-agent"))
-      headers.set("user-agent", DEFAULT_USER_AGENT);
+    if (!headers.has("user-agent")) headers.set("user-agent", userAgent);
     return fetchImpl(input, { ...init, headers });
   };
 }
@@ -51,10 +52,13 @@ export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
 export async function resolveHandleGuarded(
   handle: string,
   fetchImpl: typeof fetch,
+  userAgent: string,
 ): Promise<string | null> {
   let actor: string | null;
   try {
-    actor = await resolveHandle(handle, { fetch: guardedFetch(fetchImpl) });
+    actor = await resolveHandle(handle, {
+      fetch: guardedFetch(fetchImpl, userAgent),
+    });
   } catch {
     return null;
   }
@@ -120,11 +124,12 @@ export async function readJsonCapped(
 export async function fetchActorGuarded(
   iri: string,
   fetchImpl: typeof fetch,
+  userAgent: string,
 ): Promise<ResolvedActor | null> {
   let response: Response;
   const timeout = createTimeoutSignal(undefined, 10_000);
   try {
-    response = await guardedFetch(fetchImpl)(iri, {
+    response = await guardedFetch(fetchImpl, userAgent)(iri, {
       headers: { accept: "application/activity+json" },
       signal: timeout.signal,
     });

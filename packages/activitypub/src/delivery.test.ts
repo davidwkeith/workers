@@ -6,7 +6,8 @@ import {
   DeliveryBlockedError,
   type DeliveryResult,
 } from "./delivery.js";
-import { DEFAULT_USER_AGENT } from "./http.js";
+
+const TEST_UA = "test-ua/1.0 (+https://example.com/)";
 
 // A throwaway RSA key is unnecessary for the SSRF/result-classification tests;
 // only deliverActivity's success/failure path signs, so we generate one there.
@@ -95,6 +96,7 @@ describe("deliverActivity", () => {
       JSON.stringify({ type: "Accept" }),
       { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
       fetchImpl,
+      TEST_UA,
     );
 
     expect(result).toEqual<DeliveryResult>({ ok: true, status: 202 });
@@ -107,11 +109,11 @@ describe("deliverActivity", () => {
     expect(headers.Date).toBeTruthy();
   });
 
-  it("sends a descriptive User-Agent alongside the signed headers", async () => {
+  it("sends the given User-Agent alongside the signed headers", async () => {
     // Layered on top of `signRequest`'s output rather than part of the signed
     // header set — it isn't covered by the signature, so this shouldn't touch
     // signing at all (some peers' anti-scraper challenge layers key allow/deny
-    // rules off an unidentified UA; see `DEFAULT_USER_AGENT`).
+    // rules off an unidentified UA; see `ActivityPubConfig.userAgent`).
     const pem = await privateKeyPem();
     const fetchImpl = vi.fn(
       async () => new Response(null, { status: 202 }),
@@ -122,12 +124,13 @@ describe("deliverActivity", () => {
       JSON.stringify({ type: "Accept" }),
       { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
       fetchImpl,
+      TEST_UA,
     );
 
     const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
       .calls[0]![1] as RequestInit;
     const headers = init.headers as Record<string, string>;
-    expect(headers["User-Agent"]).toBe(DEFAULT_USER_AGENT);
+    expect(headers["User-Agent"]).toBe(TEST_UA);
     expect(headers.Signature).toContain('keyId="');
   });
 
@@ -146,6 +149,7 @@ describe("deliverActivity", () => {
         JSON.stringify({ type: "Accept" }),
         { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
         fetchImpl,
+        TEST_UA,
         undefined,
         10,
       );
@@ -166,6 +170,7 @@ describe("deliverActivity", () => {
       "{}",
       { keyId: "k", privateKeyPem: pem },
       fetchImpl,
+      TEST_UA,
     );
     expect(result).toEqual({ ok: false, status: 400, retryable: false });
   });
@@ -183,6 +188,7 @@ describe("deliverActivity", () => {
           privateKeyPem: pem,
         },
         five,
+        TEST_UA,
       ),
     ).toEqual({ ok: false, status: 503, retryable: true });
 
@@ -198,6 +204,7 @@ describe("deliverActivity", () => {
           privateKeyPem: pem,
         },
         boom,
+        TEST_UA,
       ),
     ).toEqual({ ok: false, status: 0, retryable: true });
   });
@@ -214,6 +221,7 @@ describe("deliverActivity", () => {
           privateKeyPem: pem,
         },
         fetchImpl,
+        TEST_UA,
       ),
     ).rejects.toBeInstanceOf(DeliveryBlockedError);
     expect(fetchImpl).not.toHaveBeenCalled();
