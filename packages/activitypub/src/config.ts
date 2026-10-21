@@ -418,15 +418,8 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   // verbatim by every peer resolving the migration, so a malformed one fails
   // loudly here rather than shipping a broken alias to the fediverse.
   for (const alias of config.actor.alsoKnownAs ?? []) {
-    let parsed: URL;
-    try {
-      parsed = new URL(alias);
-    } catch {
-      throw new Error(
-        "@dwk/activitypub: `actor.alsoKnownAs` entries must be absolute http(s) URLs",
-      );
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    const protocol = URL.canParse(alias) ? new URL(alias).protocol : undefined;
+    if (protocol !== "http:" && protocol !== "https:") {
       throw new Error(
         "@dwk/activitypub: `actor.alsoKnownAs` entries must be absolute http(s) URLs",
       );
