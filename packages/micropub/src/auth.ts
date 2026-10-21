@@ -3,14 +3,15 @@
  * proof-of-possession binding, honour revocation, and gate the action on the
  * token's scope.
  *
- * The token is an HS256 JWT minted by `@dwk/indieauth`; verification reuses that
- * package's `verifyAccessToken` (signature + `iss` + time window). The token is
- * **DPoP-bound** (RFC 9449): the request MUST carry a `DPoP` proof whose key
- * thumbprint matches the token's `cnf.jkt` and whose `ath` matches the token, so
- * a stolen bearer token alone is useless. The one exception is opt-in
- * (`acceptBearerTokens`): an unbound token from `@dwk/indieauth`'s
- * `bearerTokens` policy, accepted as a plain RFC 6750 Bearer token. Revocation is checked against the
- * strongly-consistent issued-token store — never a cache.
+ * The token is an HS256 JWT minted by `@dwk/indieauth`; verification reuses
+ * that package's `verifyAccessToken` (signature + `iss` + time window). The
+ * token is **DPoP-bound** (RFC 9449): the request MUST carry a `DPoP` proof
+ * whose key thumbprint matches the token's `cnf.jkt` and whose `ath` matches
+ * the token, so a stolen bearer token alone is useless. The one exception is
+ * opt-in (`acceptBearerTokens`): an unbound token from `@dwk/indieauth`'s
+ * `bearerTokens` policy, accepted as a plain RFC 6750 Bearer token. Revocation
+ * is checked against the strongly-consistent issued-token store — never a
+ * cache.
  */
 
 import { DEFAULT_MAX_AGE_SECONDS, verifyDpopProof } from "@dwk/dpop";
@@ -83,6 +84,9 @@ export function hasScope(
  * `@dwk/indieauth`'s opt-in `bearerTokens` policy. Accept it only when this
  * server opted in too, and never under the `DPoP` scheme (RFC 9449 §7.1: that
  * scheme names a DPoP-bound token). Returns the failure, or `null` to accept.
+ *
+ * Kept identical to its twin in `@dwk/microsub`'s `auth.ts` (the packages don't
+ * share code); change both together.
  */
 function checkUnboundToken(
   request: Request,
@@ -141,10 +145,11 @@ export async function authorize(
   const claims = verified.claims;
 
   // The token's subject (`sub`) is the canonical `me` it was minted for. A
-  // Micropub endpoint serves a single site, so reject any token whose subject is
-  // not this site's owner — otherwise any token from the same issuer (for any
-  // `me`) carrying the right scope could publish here. `config.me` and `sub` are
-  // both canonicalized (at resolve and at mint), so this is an exact compare.
+  // Micropub endpoint serves a single site, so reject any token whose subject
+  // is not this site's owner — otherwise any token from the same issuer (for
+  // any `me`) carrying the right scope could publish here. `config.me` and
+  // `sub` are both canonicalized (at resolve and at mint), so this is an exact
+  // compare.
   if (claims.sub !== config.me) {
     return failure(
       "invalid_token",
@@ -160,8 +165,8 @@ export async function authorize(
     // Complete the DPoP proof-of-possession binding for this request. A bound
     // token always needs its matching proof: the "DPoP everywhere" posture (see
     // spec/packages/micropub.md "Auth / security" and
-    // spec/non-functional-requirements.md) admits only the opt-in unbound Bearer
-    // token above, never a bound token presented without its proof.
+    // spec/non-functional-requirements.md) admits only the opt-in unbound
+    // Bearer token above, never a bound token presented without its proof.
     const proof = request.headers.get("DPoP");
     if (!proof) {
       return failure(
@@ -186,11 +191,12 @@ export async function authorize(
     }
 
     // Replay: `@dwk/dpop` proves a single proof is fresh but, per RFC 9449,
-    // delegates replay detection to the caller. Record the accepted `jti` in the
-    // strongly-consistent store and reject a duplicate, so a captured proof can't
-    // be replayed within its acceptance window to repeat this request. The TTL
-    // spans `2 × DEFAULT_MAX_AGE_SECONDS` because a proof's `iat` may sit anywhere
-    // in `±DEFAULT_MAX_AGE_SECONDS`, so it stays acceptable across that full span.
+    // delegates replay detection to the caller. Record the accepted `jti` in
+    // the strongly-consistent store and reject a duplicate, so a captured proof
+    // can't be replayed within its acceptance window to repeat this request.
+    // The TTL spans `2 × DEFAULT_MAX_AGE_SECONDS` because a proof's `iat` may
+    // sit anywhere in `±DEFAULT_MAX_AGE_SECONDS`, so it stays acceptable across
+    // that full span.
     if (config.checkDpopReplay && dpop.jti) {
       const now = Math.floor(Date.now() / 1000);
       const fresh = await createDpopReplayStore(env).recordProof(
@@ -208,8 +214,8 @@ export async function authorize(
     }
   }
 
-  // Revocation: staleness here is a security bug, so hit the strongly-consistent
-  // issued-token store rather than any cache.
+  // Revocation: staleness here is a security bug, so hit the
+  // strongly-consistent issued-token store rather than any cache.
   if (config.checkRevocation) {
     const store = createIndieAuthStore(env);
     const now = Math.floor(Date.now() / 1000);

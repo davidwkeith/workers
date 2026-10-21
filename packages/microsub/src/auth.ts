@@ -3,15 +3,16 @@
  * proof-of-possession binding, honour revocation, and gate the action on the
  * token's scope.
  *
- * Mirrors `@dwk/micropub`'s authorization exactly — Microsub is the read side of
- * the same identity layer, so it accepts the same DPoP-bound HS256 access tokens
- * `@dwk/indieauth` mints and applies the same single-owner subject check: a
- * token minted by this issuer for a *different* `me` cannot read here. The DPoP
- * proof binds the token to this exact request (RFC 9449), so a stolen bearer
- * token alone is useless (unless the deployer opted in to unbound Bearer tokens
- * with `acceptBearerTokens`); revocation is checked against the strongly-consistent
- * issued-token store, never a cache. Replay detection (for state-changing
- * `POST`s) is the caller's, recorded in the strongly-consistent `MICROSUB_DB`.
+ * Mirrors `@dwk/micropub`'s authorization exactly — Microsub is the read side
+ * of the same identity layer, so it accepts the same DPoP-bound HS256 access
+ * tokens `@dwk/indieauth` mints and applies the same single-owner subject
+ * check: a token minted by this issuer for a *different* `me` cannot read here.
+ * The DPoP proof binds the token to this exact request (RFC 9449), so a stolen
+ * bearer token alone is useless (unless the deployer opted in to unbound Bearer
+ * tokens with `acceptBearerTokens`); revocation is checked against the
+ * strongly-consistent issued-token store, never a cache. Replay detection (for
+ * state-changing `POST`s) is the caller's, recorded in the strongly-consistent
+ * `MICROSUB_DB`.
  *
  * @packageDocumentation
  */
@@ -84,6 +85,9 @@ export function hasScope(
  * `@dwk/indieauth`'s opt-in `bearerTokens` policy. Accept it only when this
  * server opted in too, and never under the `DPoP` scheme (RFC 9449 §7.1: that
  * scheme names a DPoP-bound token). Returns the failure, or `null` to accept.
+ *
+ * Kept identical to its twin in `@dwk/micropub`'s `auth.ts` (the packages don't
+ * share code); change both together.
  */
 function checkUnboundToken(
   request: Request,
@@ -108,8 +112,8 @@ function checkUnboundToken(
 
 /**
  * Authorize a request. Verifies the access token, completes the DPoP binding
- * against this request (`htm`/`htu`/`ath`/`cnf.jkt`), checks revocation, records
- * the proof for replay detection (when `recordReplay`), and — when
+ * against this request (`htm`/`htu`/`ath`/`cnf.jkt`), checks revocation,
+ * records the proof for replay detection (when `recordReplay`), and — when
  * `requiredScopes` is non-empty — enforces scope.
  *
  * `expectedHtu` is the configured, public endpoint URL the DPoP proof's `htu`
@@ -142,8 +146,8 @@ export async function authorize(
   const claims = verified.claims;
 
   // The token's subject (`sub`) is the canonical `me` it was minted for. A
-  // Microsub endpoint serves a single user, so reject any token whose subject is
-  // not this user — otherwise any token from the same issuer (for any `me`)
+  // Microsub endpoint serves a single user, so reject any token whose subject
+  // is not this user — otherwise any token from the same issuer (for any `me`)
   // could read this timeline. Both sides are canonicalized, so this is exact.
   if (claims.sub !== config.me) {
     return failure(
@@ -181,8 +185,9 @@ export async function authorize(
       );
     }
 
-    // Replay: only for state-changing requests. A captured GET proof is far less
-    // valuable, and recording every read's proof would write on the read path.
+    // Replay: only for state-changing requests. A captured GET proof is far
+    // less valuable, and recording every read's proof would write on the read
+    // path.
     if (recordReplay && config.checkDpopReplay && dpop.jti) {
       const now = Math.floor(Date.now() / 1000);
       const fresh = await createDpopReplayStore(env).recordProof(
@@ -200,8 +205,8 @@ export async function authorize(
     }
   }
 
-  // Revocation: staleness here is a security bug, so hit the strongly-consistent
-  // issued-token store rather than any cache.
+  // Revocation: staleness here is a security bug, so hit the
+  // strongly-consistent issued-token store rather than any cache.
   if (config.checkRevocation) {
     const store = createIndieAuthStore(env);
     const now = Math.floor(Date.now() / 1000);

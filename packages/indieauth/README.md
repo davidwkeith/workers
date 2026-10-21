@@ -126,6 +126,11 @@ createIndieAuth({
 });
 ```
 
+This is a policy, not a negotiation: with `bearerTokens` set, **any** token
+request without a `DPoP` header gets a Bearer token, including one from a
+DPoP-capable client that simply left the header off. Enable it only if you
+accept that every client may end up holding a replayable token.
+
 The token has no `cnf` claim and `token_type: "Bearer"`, carries only the
 granted scopes the policy allows (none left is `invalid_scope`), and is recorded
 so it can be revoked. A request that does send a proof is always held to it.

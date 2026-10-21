@@ -470,7 +470,14 @@ async function handleToken(
   // unless the deployer opted in to Bearer tokens and the client sent none.
   const proof = request.headers.get("DPoP");
   if (!proof && config.bearerTokens) {
-    return issueBearerToken(redeemed, audience, config, store, signingKey);
+    return issueBearerToken(
+      config.bearerTokens,
+      redeemed,
+      audience,
+      config,
+      store,
+      signingKey,
+    );
   }
   if (!proof) {
     emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
@@ -545,13 +552,13 @@ async function handleToken(
  * an empty `jkt`, so revocation applies as for any token.
  */
 async function issueBearerToken(
+  policy: NonNullable<ResolvedConfig["bearerTokens"]>,
   redeemed: Exclude<Awaited<ReturnType<typeof redeemCode>>, Response>,
   audience: readonly string[],
   config: ResolvedConfig,
   store: ReturnType<typeof createIndieAuthStore>,
   signingKey: string,
 ): Promise<Response> {
-  const policy = config.bearerTokens!;
   const allowed = new Set(policy.scopes);
   const scope = redeemed.scope
     .split(/\s+/)
@@ -562,9 +569,11 @@ async function issueBearerToken(
       reason: "bearer_scope",
       clientHost: hostFromUrl(redeemed.clientId),
     });
+    // The code is already redeemed (its record holds the scope), so the client
+    // must start over; say so rather than invite a retry with this code.
     return oauthError(
       "invalid_scope",
-      "none of the granted scopes may be issued as a Bearer token; send a DPoP proof",
+      "none of the granted scopes may be issued as a Bearer token, and the authorization code is now spent: start a new authorization, with a DPoP proof at the token request or a Bearer-eligible scope",
     );
   }
   const now = Math.floor(Date.now() / 1000);
