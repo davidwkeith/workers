@@ -105,6 +105,33 @@ describe("resolveConfig defaults and derivation", () => {
     ).toThrow(/actor\.url/);
   });
 
+  it("accepts valid alsoKnownAs IRIs and rejects non-http(s) or malformed ones (#534)", () => {
+    expect(
+      resolveConfig({
+        ...VALID,
+        actor: {
+          ...VALID.actor,
+          alsoKnownAs: ["https://xn--4t8h.dwk.io/users/dwk"],
+        },
+      }).actor.alsoKnownAs,
+    ).toEqual(["https://xn--4t8h.dwk.io/users/dwk"]);
+    expect(() =>
+      resolveConfig({
+        ...VALID,
+        actor: { ...VALID.actor, alsoKnownAs: ["not a url"] },
+      }),
+    ).toThrow(/actor\.alsoKnownAs/);
+    expect(() =>
+      resolveConfig({
+        ...VALID,
+        actor: {
+          ...VALID.actor,
+          alsoKnownAs: ["mailto:dwk@example.com"],
+        },
+      }),
+    ).toThrow(/actor\.alsoKnownAs/);
+  });
+
   it("honors explicit overrides", () => {
     const resolved = resolveConfig({
       ...VALID,

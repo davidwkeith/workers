@@ -25,8 +25,9 @@ export const PUBLIC_AUDIENCE = "https://www.w3.org/ns/activitystreams#Public";
  * The `@context` an actor document advertises: the AS2 base plus the security
  * vocabulary (so `publicKey` resolves) and the handful of property aliases the
  * fediverse expects — `manuallyApprovesFollowers`, `discoverable`, the FEP-2c59
- * `webfinger` back-link, and the Mastodon 4.6 profile-preference flags
- * (`showFeatured`, `showMedia`, `showRepliesInMedia`).
+ * `webfinger` back-link, the Mastodon 4.6 profile-preference flags
+ * (`showFeatured`, `showMedia`, `showRepliesInMedia`), and `alsoKnownAs` for
+ * account-migration aliases.
  */
 export const ACTOR_CONTEXT: readonly unknown[] = [
   AS2_NS,
@@ -43,6 +44,9 @@ export const ACTOR_CONTEXT: readonly unknown[] = [
     showFeatured: "toot:showFeatured",
     showMedia: "toot:showMedia",
     showRepliesInMedia: "toot:showRepliesInMedia",
+    // Account-migration aliases (Mastodon `Move` target validation): the IRIs
+    // of other actors this one is also known as.
+    alsoKnownAs: { "@id": "as:alsoKnownAs", "@type": "@id" },
   },
 ];
 
@@ -169,6 +173,17 @@ export interface ActorProfile {
   readonly showMedia?: boolean;
   /** Whether replies appear in the "media" tab (`toot:showRepliesInMedia`). Emitted only when set. */
   readonly showRepliesInMedia?: boolean;
+  /**
+   * Account-migration aliases: absolute actor IRIs this actor is also known
+   * as, e.g. an origin Mastodon account moving its followers to this actor.
+   * Mastodon's *Move* flow resolves the target via WebFinger and requires
+   * `alsoKnownAs` to contain the origin actor's IRI before it allows the move,
+   * and followers' servers repeat the same check when they process the
+   * `Move` activity. Validated as absolute `http(s)` IRIs in `resolveConfig`,
+   * like {@link url}. Emitted only when set and non-empty, so an actor that
+   * declares no aliases stays byte-for-byte unchanged.
+   */
+  readonly alsoKnownAs?: readonly string[];
 }
 
 /** Optional extras woven into the actor document. */
@@ -235,6 +250,9 @@ export function buildActorDocument(
   if (profile.showMedia !== undefined) doc.showMedia = profile.showMedia;
   if (profile.showRepliesInMedia !== undefined) {
     doc.showRepliesInMedia = profile.showRepliesInMedia;
+  }
+  if (profile.alsoKnownAs !== undefined && profile.alsoKnownAs.length > 0) {
+    doc.alsoKnownAs = profile.alsoKnownAs as JsonValue;
   }
   // FEP-2c59 back-link to the actor's WebFinger handle.
   if (options.webfinger !== undefined) doc.webfinger = options.webfinger;

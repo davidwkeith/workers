@@ -414,6 +414,17 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   if (!URL.canParse(url)) {
     throw new Error("@dwk/activitypub: `actor.url` must be an absolute URL");
   }
+  // alsoKnownAs (#534): a Mastodon Move target's aliases are followed
+  // verbatim by every peer resolving the migration, so a malformed one fails
+  // loudly here rather than shipping a broken alias to the fediverse.
+  for (const alias of config.actor.alsoKnownAs ?? []) {
+    const protocol = URL.canParse(alias) ? new URL(alias).protocol : undefined;
+    if (protocol !== "http:" && protocol !== "https:") {
+      throw new Error(
+        "@dwk/activitypub: `actor.alsoKnownAs` entries must be absolute http(s) URLs",
+      );
+    }
+  }
 
   return {
     baseUrl,

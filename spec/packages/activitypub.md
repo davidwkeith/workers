@@ -54,6 +54,16 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   `${baseUrl}/inbox` (§4.1 / §7.1.3) via `endpoints.sharedInbox`, so large peers
   can batch-deliver. Enabled by default; the single actor is the only recipient,
   so a batched delivery is processed for it.
+- When the owner sets `actor.alsoKnownAs`, the actor document federates
+  **account-migration aliases** — absolute actor IRIs this actor is also known
+  as (#534). This lets the actor be the *target* of a Mastodon **Move**: the
+  origin server's move flow (and every follower's server, re-checking as it
+  processes the `Move`) resolves the target via WebFinger and requires
+  `alsoKnownAs` to contain the origin actor's IRI. Entries are validated as
+  absolute `http(s)` IRIs in config resolution, like `actor.url`; omitted
+  entirely when unset. The reverse direction — moving *off* this actor
+  (`movedTo` plus an owner-published `Move` fanned out to followers) — is out
+  of scope.
 
 ### Server-to-server (federation)
 
