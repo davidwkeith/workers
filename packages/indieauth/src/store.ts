@@ -45,6 +45,7 @@ export interface IssuedTokenRecord {
   readonly clientId: string;
   readonly me: string;
   readonly scope: string;
+  /** The bound DPoP key's thumbprint; `""` for an opt-in Bearer token. */
   readonly jkt: string;
   readonly issuedAt: number;
   readonly expiresAt: number;

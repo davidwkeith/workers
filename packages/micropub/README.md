@@ -108,7 +108,9 @@ See the [package specification](../../spec/packages/micropub.md#locationvenue-qg
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession
 binding completed via [`@dwk/dpop`](../dpop) and revocation checked against the
-strongly-consistent token store.
+strongly-consistent token store. To let clients that predate DPoP post, set
+`acceptBearerTokens: true` here and `bearerTokens` on `@dwk/indieauth` (both
+off by default; see the [spec](../../spec/packages/micropub.md#auth--security)).
 
 ## License
 

@@ -130,6 +130,34 @@ async function mintToken(scope: string, me: string = ME): Promise<MintedToken> {
   return { token: minted.token, key };
 }
 
+/**
+ * Mint an unbound Bearer token (no `cnf`, as `@dwk/indieauth` issues under its
+ * opt-in `bearerTokens` policy) and record it in the issued-token store.
+ */
+async function mintBearerToken(
+  scope: string,
+): Promise<{ token: string; jti: string }> {
+  const now = Math.floor(Date.now() / 1000);
+  const minted = await signAccessToken(harness.TOKEN_SIGNING_KEY, {
+    issuer: BASE,
+    me: ME,
+    clientId: CLIENT_ID,
+    scope,
+    lifetimeSeconds: 3600,
+    now,
+  });
+  await createIndieAuthStore(harness).recordToken({
+    jti: minted.claims.jti,
+    clientId: CLIENT_ID,
+    me: ME,
+    scope,
+    jkt: "",
+    issuedAt: minted.claims.iat,
+    expiresAt: minted.claims.exp,
+  });
+  return { token: minted.token, jti: minted.claims.jti };
+}
+
 /** Build the `Authorization` + `DPoP` headers for a token-bound request. */
 async function authHeaders(
   minted: MintedToken,
@@ -2903,5 +2931,72 @@ describe("@dwk/micropub fediverse syndication", () => {
 
     resolveSyndication();
     await waited[0];
+  });
+});
+
+describe("@dwk/micropub opt-in Bearer tokens", () => {
+  const bearerHandler = createMicropub({
+    baseUrl: BASE,
+    me: ME,
+    acceptBearerTokens: true,
+  });
+  const create = (authorization: string, extra: Record<string, string> = {}) =>
+    new Request(MICROPUB, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: authorization,
+        ...extra,
+      },
+      body: JSON.stringify({
+        type: ["h-entry"],
+        properties: { content: ["hi"] },
+      }),
+    });
+
+  it("rejects an unbound token by default", async () => {
+    const { token } = await mintBearerToken("create");
+    const res = await handler(create(`Bearer ${token}`), harness, ctx);
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_token",
+    );
+  });
+
+  it("accepts one under the Bearer scheme once opted in", async () => {
+    const { token } = await mintBearerToken("create");
+    const res = await bearerHandler(create(`Bearer ${token}`), harness, ctx);
+    expect(res.status).toBe(201);
+    expect(res.headers.get("location")).toBeTruthy();
+  });
+
+  it("refuses one under the DPoP scheme", async () => {
+    const { token } = await mintBearerToken("create");
+    const res = await bearerHandler(create(`DPoP ${token}`), harness, ctx);
+    expect(res.status).toBe(401);
+  });
+
+  it("still requires the proof for a DPoP-bound token", async () => {
+    const bound = await mintToken("create");
+    const res = await bearerHandler(
+      create(`Bearer ${bound.token}`),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("honours revocation and scope for a Bearer token", async () => {
+    const readOnly = await mintBearerToken("media");
+    expect(
+      (await bearerHandler(create(`Bearer ${readOnly.token}`), harness, ctx))
+        .status,
+    ).toBe(403);
+    const revoked = await mintBearerToken("create");
+    await createIndieAuthStore(harness).revokeToken(revoked.jti);
+    expect(
+      (await bearerHandler(create(`Bearer ${revoked.token}`), harness, ctx))
+        .status,
+    ).toBe(401);
   });
 });

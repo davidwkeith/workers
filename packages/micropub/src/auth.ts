@@ -7,7 +7,9 @@
  * package's `verifyAccessToken` (signature + `iss` + time window). The token is
  * **DPoP-bound** (RFC 9449): the request MUST carry a `DPoP` proof whose key
  * thumbprint matches the token's `cnf.jkt` and whose `ath` matches the token, so
- * a stolen bearer token alone is useless. Revocation is checked against the
+ * a stolen bearer token alone is useless. The one exception is opt-in
+ * (`acceptBearerTokens`): an unbound token from `@dwk/indieauth`'s
+ * `bearerTokens` policy, accepted as a plain RFC 6750 Bearer token. Revocation is checked against the
  * strongly-consistent issued-token store — never a cache.
  */
 
@@ -77,6 +79,33 @@ export function hasScope(
 }
 
 /**
+ * An unbound token (no `cnf`) is an RFC 6750 Bearer token, issued only under
+ * `@dwk/indieauth`'s opt-in `bearerTokens` policy. Accept it only when this
+ * server opted in too, and never under the `DPoP` scheme (RFC 9449 §7.1: that
+ * scheme names a DPoP-bound token). Returns the failure, or `null` to accept.
+ */
+function checkUnboundToken(
+  request: Request,
+  config: ResolvedConfig,
+): AuthFailure | null {
+  if (!config.acceptBearerTokens) {
+    return failure(
+      "invalid_token",
+      "access token is not DPoP-bound, and this server requires DPoP",
+      401,
+    );
+  }
+  if (/^DPoP\s/i.test(request.headers.get("Authorization") ?? "")) {
+    return failure(
+      "invalid_token",
+      "an unbound access token must use the Bearer scheme, not DPoP",
+      401,
+    );
+  }
+  return null;
+}
+
+/**
  * Authorize a request. Verifies the access token, completes the DPoP binding
  * against this request (`htm`/`htu`/`ath`/`cnf.jkt`), checks revocation, and —
  * when `requiredScopes` is non-empty — enforces scope.
@@ -124,54 +153,58 @@ export async function authorize(
     );
   }
 
-  // Complete the DPoP proof-of-possession binding for this request. DPoP is
-  // mandatory here even though Micropub §5.2 would allow a plain Bearer token:
-  // this is the deliberate "DPoP everywhere" posture (see
-  // spec/packages/micropub.md "Auth / security" and
-  // spec/non-functional-requirements.md), so a token with no matching proof is
-  // always rejected.
-  const proof = request.headers.get("DPoP");
-  if (!proof) {
-    return failure(
-      "invalid_request",
-      "a DPoP proof is required for token-bound requests",
-      401,
-    );
-  }
-  const dpop = await verifyDpopProof({
-    proof,
-    htm: request.method,
-    htu: expectedHtu,
-    accessToken: token,
-    expectedJkt: claims.cnf.jkt,
-  });
-  if (!dpop.valid) {
-    return failure(
-      "invalid_token",
-      `DPoP proof verification failed: ${dpop.reason}`,
-      401,
-    );
-  }
-
-  // Replay: `@dwk/dpop` proves a single proof is fresh but, per RFC 9449,
-  // delegates replay detection to the caller. Record the accepted `jti` in the
-  // strongly-consistent store and reject a duplicate, so a captured proof can't
-  // be replayed within its acceptance window to repeat this request. The TTL
-  // spans `2 × DEFAULT_MAX_AGE_SECONDS` because a proof's `iat` may sit anywhere
-  // in `±DEFAULT_MAX_AGE_SECONDS`, so it stays acceptable across that full span.
-  if (config.checkDpopReplay && dpop.jti) {
-    const now = Math.floor(Date.now() / 1000);
-    const fresh = await createDpopReplayStore(env).recordProof(
-      dpop.jti,
-      now + 2 * DEFAULT_MAX_AGE_SECONDS,
-      now,
-    );
-    if (!fresh) {
+  if (claims.cnf === undefined) {
+    const refused = checkUnboundToken(request, config);
+    if (refused) return refused;
+  } else {
+    // Complete the DPoP proof-of-possession binding for this request. A bound
+    // token always needs its matching proof: the "DPoP everywhere" posture (see
+    // spec/packages/micropub.md "Auth / security" and
+    // spec/non-functional-requirements.md) admits only the opt-in unbound Bearer
+    // token above, never a bound token presented without its proof.
+    const proof = request.headers.get("DPoP");
+    if (!proof) {
       return failure(
-        "invalid_token",
-        "DPoP proof has already been used (replay detected)",
+        "invalid_request",
+        "a DPoP proof is required for token-bound requests",
         401,
       );
+    }
+    const dpop = await verifyDpopProof({
+      proof,
+      htm: request.method,
+      htu: expectedHtu,
+      accessToken: token,
+      expectedJkt: claims.cnf.jkt,
+    });
+    if (!dpop.valid) {
+      return failure(
+        "invalid_token",
+        `DPoP proof verification failed: ${dpop.reason}`,
+        401,
+      );
+    }
+
+    // Replay: `@dwk/dpop` proves a single proof is fresh but, per RFC 9449,
+    // delegates replay detection to the caller. Record the accepted `jti` in the
+    // strongly-consistent store and reject a duplicate, so a captured proof can't
+    // be replayed within its acceptance window to repeat this request. The TTL
+    // spans `2 × DEFAULT_MAX_AGE_SECONDS` because a proof's `iat` may sit anywhere
+    // in `±DEFAULT_MAX_AGE_SECONDS`, so it stays acceptable across that full span.
+    if (config.checkDpopReplay && dpop.jti) {
+      const now = Math.floor(Date.now() / 1000);
+      const fresh = await createDpopReplayStore(env).recordProof(
+        dpop.jti,
+        now + 2 * DEFAULT_MAX_AGE_SECONDS,
+        now,
+      );
+      if (!fresh) {
+        return failure(
+          "invalid_token",
+          "DPoP proof has already been used (replay detected)",
+          401,
+        );
+      }
     }
   }
 

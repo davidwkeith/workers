@@ -97,7 +97,9 @@ const result = await verifyAccessToken(token, env.TOKEN_SIGNING_KEY, {
   // resource server's identifier, else it fails with `audience_mismatch`.
   audience: "https://media.example.com/",
 });
-if (result.valid) {
+// A token without `cnf` is an opt-in Bearer token (see Bearer tokens below);
+// reject it unless this resource server accepts those.
+if (result.valid && result.claims.cnf) {
   const dpop = await verifyDpopProof({
     proof: request.headers.get("DPoP")!,
     htm: request.method,
@@ -107,6 +109,31 @@ if (result.valid) {
   });
 }
 ```
+
+### Bearer tokens (opt-in)
+
+Every token is DPoP-bound by default. For IndieWeb clients that predate DPoP,
+a deployment can opt in to issuing an unbound [RFC 6750][rfc6750] Bearer token
+to a token request that carries no `DPoP` header:
+
+```ts
+createIndieAuth({
+  // ...
+  bearerTokens: {
+    lifetimeSeconds: 3600, // default and maximum: accessTokenLifetimeSeconds
+    scopes: ["create", "update", "media"], // default: scopesSupported
+  },
+});
+```
+
+The token has no `cnf` claim and `token_type: "Bearer"`, carries only the
+granted scopes the policy allows (none left is `invalid_scope`), and is recorded
+so it can be revoked. A request that does send a proof is always held to it.
+Resource servers opt in separately (`acceptBearerTokens` in
+[`@dwk/micropub`](../micropub) and [`@dwk/microsub`](../microsub)). See the
+[spec](../../spec/packages/indieauth.md#auth--security).
+
+[rfc6750]: https://www.rfc-editor.org/rfc/rfc6750
 
 ## License
 

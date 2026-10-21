@@ -12,6 +12,7 @@ import {
   BASE,
   ME,
   MICROSUB,
+  mintBearerToken,
   mintToken,
   type MintedToken,
 } from "./test-harness.js";
@@ -682,3 +683,63 @@ async function channelUnread(
   };
   return channels.channels.find((c) => c.uid === uid)?.unread ?? -1;
 }
+
+describe("opt-in Bearer tokens", () => {
+  const channels = (headers: Record<string, string>) =>
+    new Request(`${MICROSUB}?action=channels`, { headers });
+
+  it("rejects an unbound token by default", async () => {
+    const { env: testEnv } = makeEnv();
+    const { token } = await mintBearerToken(testEnv, "read");
+    const res = await makeHandler()(
+      channels({ Authorization: `Bearer ${token}` }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("accepts one under the Bearer scheme once opted in, never under DPoP", async () => {
+    const { env: testEnv } = makeEnv();
+    const handler = createMicrosub({
+      baseUrl: BASE,
+      me: ME,
+      acceptBearerTokens: true,
+    });
+    const { token } = await mintBearerToken(testEnv, "read");
+    expect(
+      (
+        await handler(
+          channels({ Authorization: `Bearer ${token}` }),
+          testEnv,
+          ctx,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await handler(
+          channels({ Authorization: `DPoP ${token}` }),
+          testEnv,
+          ctx,
+        )
+      ).status,
+    ).toBe(401);
+  });
+
+  it("still requires the proof for a DPoP-bound token once opted in", async () => {
+    const { env: testEnv } = makeEnv();
+    const handler = createMicrosub({
+      baseUrl: BASE,
+      me: ME,
+      acceptBearerTokens: true,
+    });
+    const bound = await mintToken(testEnv, "read");
+    const res = await handler(
+      channels({ Authorization: `Bearer ${bound.token}` }),
+      testEnv,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+  });
+});

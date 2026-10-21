@@ -134,6 +134,11 @@ export interface IndieAuthConfig {
   /** Authentication + consent hook (see {@link ApproveAuthorization}). */
   readonly approveAuthorization: ApproveAuthorization;
   /**
+   * Opt in to unbound Bearer tokens for clients that send no DPoP proof (see
+   * {@link BearerTokenPolicy}). Omit to require DPoP on every token request.
+   */
+  readonly bearerTokens?: BearerTokenPolicy;
+  /**
    * Logger for authorization/token/revocation events; defaults to a no-op. Wire
    * a real logger (see `@dwk/log`) to surface authorization rejections, token
    * rejections, and revocations instead of swallowing them.
@@ -164,8 +169,40 @@ export interface ResolvedConfig {
   readonly redirectUriPolicy: RedirectUriPolicy;
   readonly resourceIndicatorPolicy: ResourceIndicatorPolicy;
   readonly approveAuthorization: ApproveAuthorization;
+  /** The resolved Bearer-token policy; absent when Bearer tokens are off. */
+  readonly bearerTokens?: {
+    readonly lifetimeSeconds: number;
+    readonly scopes: readonly string[];
+  };
   readonly logger: Logger;
   readonly metrics: Metrics;
+}
+
+/**
+ * Opt-in policy for issuing **unbound Bearer** access tokens (RFC 6750) to a
+ * token request that carries no `DPoP` proof — for Micropub/Microsub clients
+ * that predate DPoP. Absent (the default), every token request MUST carry a
+ * valid proof and every token is DPoP-bound ("DPoP everywhere",
+ * `spec/non-functional-requirements.md`). A request that does send a proof is
+ * always held to it: an invalid proof is rejected, never downgraded.
+ *
+ * A Bearer token has no `cnf` claim, so it is useless at a Resource Server that
+ * hasn't opted in too (`acceptBearerTokens` in `@dwk/micropub` and
+ * `@dwk/microsub`; `@dwk/mcp` never accepts one). It is recorded in the
+ * issued-token store like any other, so revocation applies.
+ */
+export interface BearerTokenPolicy {
+  /**
+   * Bearer-token lifetime in seconds; a stolen one is replayable until then.
+   * Defaults to (and may not exceed) `accessTokenLifetimeSeconds`.
+   */
+  readonly lifetimeSeconds?: number;
+  /**
+   * The only scopes a Bearer token may carry: the granted scope is narrowed to
+   * these, and a grant with none of them gets no Bearer token
+   * (`invalid_scope`). Defaults to `scopesSupported`.
+   */
+  readonly scopes?: readonly string[];
 }
 
 /** Default policy: the redirect URI must share an origin with the client id. */
@@ -219,6 +256,15 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
     config.metadataEndpoint ??
     `${origin}/.well-known/oauth-authorization-server`;
 
+  const scopesSupported = config.scopesSupported ?? [];
+  const accessTokenLifetimeSeconds =
+    config.accessTokenLifetimeSeconds ?? DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS;
+  const bearerTokens = resolveBearerTokens(
+    config.bearerTokens,
+    accessTokenLifetimeSeconds,
+    scopesSupported,
+  );
+
   return {
     issuer,
     authorizationEndpoint,
@@ -229,10 +275,8 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
     tokenPath: pathOf(tokenEndpoint, "tokenEndpoint"),
     revocationPath: pathOf(revocationEndpoint, "revocationEndpoint"),
     metadataPath: pathOf(metadataEndpoint, "metadataEndpoint"),
-    scopesSupported: config.scopesSupported ?? [],
-    accessTokenLifetimeSeconds:
-      config.accessTokenLifetimeSeconds ??
-      DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS,
+    scopesSupported,
+    accessTokenLifetimeSeconds,
     authorizationCodeLifetimeSeconds:
       config.authorizationCodeLifetimeSeconds ??
       DEFAULT_AUTHORIZATION_CODE_LIFETIME_SECONDS,
@@ -240,7 +284,27 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
     resourceIndicatorPolicy:
       config.resourceIndicatorPolicy ?? acceptAnyResource,
     approveAuthorization: config.approveAuthorization,
+    ...(bearerTokens ? { bearerTokens } : {}),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,
   };
+}
+
+function resolveBearerTokens(
+  policy: BearerTokenPolicy | undefined,
+  accessTokenLifetimeSeconds: number,
+  scopesSupported: readonly string[],
+): ResolvedConfig["bearerTokens"] {
+  if (policy === undefined) return undefined;
+  const lifetimeSeconds = policy.lifetimeSeconds ?? accessTokenLifetimeSeconds;
+  if (
+    !Number.isInteger(lifetimeSeconds) ||
+    lifetimeSeconds <= 0 ||
+    lifetimeSeconds > accessTokenLifetimeSeconds
+  ) {
+    throw new Error(
+      "@dwk/indieauth: `bearerTokens.lifetimeSeconds` must be a positive integer no greater than `accessTokenLifetimeSeconds`",
+    );
+  }
+  return { lifetimeSeconds, scopes: policy.scopes ?? scopesSupported };
 }

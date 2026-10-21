@@ -191,6 +191,14 @@ export interface MicropubConfig {
    * resource server).
    */
   readonly checkDpopReplay?: boolean;
+  /**
+   * Accept an unbound RFC 6750 Bearer token — one `@dwk/indieauth` issued under
+   * its opt-in `bearerTokens` policy, carrying no `cnf` — for clients that
+   * predate DPoP. Defaults to `false` ("DPoP everywhere"). A DPoP-bound token
+   * still needs its matching proof either way, and an unbound one is refused
+   * under the `DPoP` scheme.
+   */
+  readonly acceptBearerTokens?: boolean;
   /** Post-URL policy (see {@link GeneratePostUrl}). */
   readonly generatePostUrl?: GeneratePostUrl;
   /**
@@ -235,6 +243,7 @@ export interface ResolvedConfig {
   readonly mediaTrashRetentionDays: number;
   readonly checkRevocation: boolean;
   readonly checkDpopReplay: boolean;
+  readonly acceptBearerTokens: boolean;
   readonly generatePostUrl: GeneratePostUrl;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -372,6 +381,7 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
       config.mediaTrashRetentionDays ?? DEFAULT_MEDIA_TRASH_RETENTION_DAYS,
     checkRevocation: config.checkRevocation ?? true,
     checkDpopReplay: config.checkDpopReplay ?? true,
+    acceptBearerTokens: config.acceptBearerTokens ?? false,
     generatePostUrl:
       config.generatePostUrl ?? defaultGeneratePostUrl(config.baseUrl),
     logger: config.logger ?? noopLogger,

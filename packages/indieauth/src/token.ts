@@ -5,7 +5,11 @@
  * (HS256) using the deployer's secret key material. They are **DPoP-bound**: the
  * RFC 9449 confirmation claim `cnf.jkt` carries the thumbprint of the client's
  * proof-of-possession key, and a Resource Server completes the binding by
- * verifying a DPoP proof against that thumbprint (via `@dwk/dpop`).
+ * verifying a DPoP proof against that thumbprint (via `@dwk/dpop`). The one
+ * exception is a deployer's opt-in `bearerTokens` policy (see `config.ts`): a
+ * token issued under it carries no `cnf`, and a Resource Server MUST treat such a
+ * token as a plain RFC 6750 Bearer token that it accepts only when it, too, has
+ * opted in.
  *
  * Verification here covers the signature, the standard time claims, and the
  * issuer — it is shared by Micropub and other resource servers that accept
@@ -45,8 +49,12 @@ export interface AccessTokenClaims {
   readonly client_id: string;
   /** Space-separated granted scopes. */
   readonly scope: string;
-  /** DPoP confirmation (`cnf.jkt`). */
-  readonly cnf: Confirmation;
+  /**
+   * DPoP confirmation (`cnf.jkt`). Absent only on a Bearer token issued under
+   * the opt-in `bearerTokens` policy; a Resource Server that has not opted in
+   * to Bearer tokens MUST reject a token without it.
+   */
+  readonly cnf?: Confirmation;
   /**
    * Audience restriction (RFC 8707 resource indicators / RFC 9700 §2.3): the
    * resource server identifier(s) the token may be presented to. Present only
@@ -69,7 +77,11 @@ export interface MintAccessTokenInput {
   readonly me: string;
   readonly clientId: string;
   readonly scope: string;
-  readonly jkt: string;
+  /**
+   * Thumbprint of the client's DPoP key, bound as `cnf.jkt`. Omit only to mint
+   * an unbound Bearer token under the opt-in `bearerTokens` policy.
+   */
+  readonly jkt?: string;
   /**
    * Resource indicators (RFC 8707) to audience-restrict the token to. When
    * non-empty the minted token carries an `aud` claim, so a token leaked to one
@@ -145,7 +157,8 @@ function normalizeAudience(
 }
 
 /**
- * Mint a DPoP-bound access token. The returned `token` is a compact HS256 JWT;
+ * Mint an access token: DPoP-bound when `input.jkt` is given, otherwise an
+ * unbound Bearer token (no `cnf`). The returned `token` is a compact HS256 JWT;
  * `claims` is the decoded payload (so the caller can record `jti`/`exp` in the
  * token store without re-parsing).
  */
@@ -160,7 +173,7 @@ export async function signAccessToken(
     sub: input.me,
     client_id: input.clientId,
     scope: input.scope,
-    cnf: { jkt: input.jkt },
+    ...(input.jkt !== undefined ? { cnf: { jkt: input.jkt } } : {}),
     // Only emit `aud` when the grant was audience-restricted, so unrestricted
     // tokens stay byte-for-byte as before.
     ...(aud ? { aud } : {}),
@@ -206,7 +219,8 @@ export interface VerifyAccessTokenOptions {
  *
  * This does **not** check the DPoP binding or revocation: the caller passes the
  * returned `cnf.jkt` to `@dwk/dpop` and, if it tracks revocation, looks up the
- * `jti` in the token store.
+ * `jti` in the token store. A token with no `cnf` (an opt-in Bearer token)
+ * verifies here; deciding whether to accept one is the caller's policy.
  */
 export async function verifyAccessToken(
   token: string,
@@ -253,8 +267,7 @@ export async function verifyAccessToken(
     typeof iat !== "number" ||
     typeof exp !== "number" ||
     typeof jti !== "string" ||
-    !isObject(cnf) ||
-    typeof cnf.jkt !== "string"
+    (cnf !== undefined && (!isObject(cnf) || typeof cnf.jkt !== "string"))
   ) {
     return fail("payload_invalid");
   }
@@ -283,7 +296,7 @@ export async function verifyAccessToken(
       sub,
       client_id,
       scope,
-      cnf: { jkt: cnf.jkt },
+      ...(isObject(cnf) ? { cnf: { jkt: cnf.jkt as string } } : {}),
       ...(audience ? { aud: audience } : {}),
       iat,
       exp,

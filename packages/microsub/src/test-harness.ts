@@ -127,6 +127,35 @@ export async function mintToken(
   return { token: minted.token, key };
 }
 
+/**
+ * Mint an unbound Bearer token (no `cnf`, as `@dwk/indieauth` issues under its
+ * opt-in `bearerTokens` policy) and record it in the issued-token store.
+ */
+export async function mintBearerToken(
+  env: AuthEnv,
+  scope: string,
+): Promise<{ token: string; jti: string }> {
+  const now = Math.floor(Date.now() / 1000);
+  const minted = await signAccessToken(env.TOKEN_SIGNING_KEY, {
+    issuer: BASE,
+    me: ME,
+    clientId: CLIENT_ID,
+    scope,
+    lifetimeSeconds: 3600,
+    now,
+  });
+  await createIndieAuthStore(env as IndieAuthStoreEnv).recordToken({
+    jti: minted.claims.jti,
+    clientId: CLIENT_ID,
+    me: ME,
+    scope,
+    jkt: "",
+    issuedAt: minted.claims.iat,
+    expiresAt: minted.claims.exp,
+  });
+  return { token: minted.token, jti: minted.claims.jti };
+}
+
 /** Build the `Authorization` + `DPoP` headers for a token-bound request. */
 export async function authHeaders(
   minted: MintedToken,

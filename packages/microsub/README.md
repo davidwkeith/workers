@@ -84,7 +84,8 @@ The single endpoint dispatches on the `action` (and `method`) parameter:
 Every request is authorized by a DPoP-bound IndieAuth access token whose subject
 must match the configured `me`, with the proof-of-possession binding completed
 via [`@dwk/dpop`](../dpop) and revocation checked against the strongly-consistent
-token store. Polling runs off the read path on a Cron-triggered queue; the read
+token store. `acceptBearerTokens: true` (off by default) also accepts the
+unbound Bearer tokens `@dwk/indieauth` issues under its `bearerTokens` policy. Polling runs off the read path on a Cron-triggered queue; the read
 path serves stored entries only. Every outbound fetch is SSRF-guarded.
 
 ## License

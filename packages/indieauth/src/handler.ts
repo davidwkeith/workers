@@ -430,7 +430,9 @@ async function redeemCode(
 
 /**
  * Handle `POST` to the token endpoint: redeem the code, verify the DPoP proof,
- * and issue a DPoP-bound access token.
+ * and issue a DPoP-bound access token — or, when the deployer opted in to
+ * `bearerTokens` and the request carries no proof at all, an unbound Bearer
+ * token narrowed to the policy's scopes and lifetime.
  */
 async function handleToken(
   request: Request,
@@ -464,8 +466,12 @@ async function handleToken(
     audience = requestedResources;
   }
 
-  // Tokens issued here are DPoP-bound: require a valid proof for this request.
+  // Tokens issued here are DPoP-bound: require a valid proof for this request,
+  // unless the deployer opted in to Bearer tokens and the client sent none.
   const proof = request.headers.get("DPoP");
+  if (!proof && config.bearerTokens) {
+    return issueBearerToken(redeemed, audience, config, store, signingKey);
+  }
   if (!proof) {
     emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
       reason: "dpop_missing",
@@ -519,6 +525,7 @@ async function handleToken(
   emit(config, "info", IndieAuthLogEvent.TokenIssued, {
     clientHost: hostFromUrl(redeemed.clientId),
     scope: redeemed.scope,
+    tokenType: "DPoP",
   });
   const profile = parseProfile(redeemed.profile);
   return json({
@@ -527,6 +534,70 @@ async function handleToken(
     scope: redeemed.scope,
     me: redeemed.me,
     expires_in: config.accessTokenLifetimeSeconds,
+    ...(profile ? { profile } : {}),
+  });
+}
+
+/**
+ * Issue an unbound RFC 6750 Bearer token under the opt-in `bearerTokens`
+ * policy: no `cnf` claim, the granted scope narrowed to the policy's scopes, and
+ * the policy's (no longer than usual) lifetime. Recorded in the token store with
+ * an empty `jkt`, so revocation applies as for any token.
+ */
+async function issueBearerToken(
+  redeemed: Exclude<Awaited<ReturnType<typeof redeemCode>>, Response>,
+  audience: readonly string[],
+  config: ResolvedConfig,
+  store: ReturnType<typeof createIndieAuthStore>,
+  signingKey: string,
+): Promise<Response> {
+  const policy = config.bearerTokens!;
+  const allowed = new Set(policy.scopes);
+  const scope = redeemed.scope
+    .split(/\s+/)
+    .filter((s) => s !== "" && allowed.has(s))
+    .join(" ");
+  if (scope === "") {
+    emit(config, "warn", IndieAuthLogEvent.TokenRejected, {
+      reason: "bearer_scope",
+      clientHost: hostFromUrl(redeemed.clientId),
+    });
+    return oauthError(
+      "invalid_scope",
+      "none of the granted scopes may be issued as a Bearer token; send a DPoP proof",
+    );
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const minted = await signAccessToken(signingKey, {
+    issuer: config.issuer,
+    me: redeemed.me,
+    clientId: redeemed.clientId,
+    scope,
+    audience,
+    lifetimeSeconds: policy.lifetimeSeconds,
+    now,
+  });
+  await store.recordToken({
+    jti: minted.claims.jti,
+    clientId: redeemed.clientId,
+    me: redeemed.me,
+    scope,
+    jkt: "",
+    issuedAt: minted.claims.iat,
+    expiresAt: minted.claims.exp,
+  });
+  emit(config, "info", IndieAuthLogEvent.TokenIssued, {
+    clientHost: hostFromUrl(redeemed.clientId),
+    scope,
+    tokenType: "Bearer",
+  });
+  const profile = parseProfile(redeemed.profile);
+  return json({
+    access_token: minted.token,
+    token_type: "Bearer",
+    scope,
+    me: redeemed.me,
+    expires_in: policy.lifetimeSeconds,
     ...(profile ? { profile } : {}),
   });
 }

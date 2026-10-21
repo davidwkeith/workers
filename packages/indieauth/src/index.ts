@@ -27,6 +27,7 @@ export type {
   ApproveAuthorization,
   RedirectUriPolicy,
   ResourceIndicatorPolicy,
+  BearerTokenPolicy,
   ProfileInfo,
 } from "./config.js";
 

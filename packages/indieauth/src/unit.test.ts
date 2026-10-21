@@ -125,7 +125,7 @@ describe("access token sign/verify", () => {
     });
     expect(result.valid).toBe(true);
     if (!result.valid) return;
-    expect(result.claims.cnf.jkt).toBe("thumbprint-123");
+    expect(result.claims.cnf?.jkt).toBe("thumbprint-123");
     expect(result.claims.jti).toBe(claims.jti);
     expect(result.claims.scope).toBe("create");
   });
