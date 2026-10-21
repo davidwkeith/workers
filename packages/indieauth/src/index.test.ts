@@ -1434,3 +1434,142 @@ describe("@dwk/indieauth opt-in Bearer tokens", () => {
     );
   });
 });
+
+describe("@dwk/indieauth token introspection (RFC 7662, IndieAuth §6.1)", () => {
+  const SECRET = "rs-secret";
+  const introspecting = (bearerTokens?: IndieAuthConfig["bearerTokens"]) =>
+    createIndieAuth({
+      ...baseConfig(() => ({ me: ME })),
+      ...(bearerTokens ? { bearerTokens } : {}),
+      authorizeIntrospection: (req) =>
+        req.headers.get("authorization") === `Bearer ${SECRET}`,
+    });
+
+  async function issue(
+    handler: ReturnType<typeof createIndieAuth>,
+    dpop: boolean,
+  ): Promise<string> {
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    const headers: Record<string, string> = dpop
+      ? { DPoP: await makeProof(await makeDpopKey(), "POST", `${BASE}/token`) }
+      : {};
+    const res = await handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+    return ((await res.json()) as { access_token: string }).access_token;
+  }
+
+  const introspect = (
+    handler: ReturnType<typeof createIndieAuth>,
+    token: string,
+    secret = SECRET,
+  ) =>
+    handler(
+      new Request(`${BASE}/introspect`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${secret}` },
+        body: new URLSearchParams({ token }),
+      }),
+      harness,
+      ctx,
+    );
+
+  const metadata = async (handler: ReturnType<typeof createIndieAuth>) =>
+    (await (
+      await handler(
+        new Request(`${BASE}/.well-known/oauth-authorization-server`),
+        harness,
+        ctx,
+      )
+    ).json()) as Record<string, unknown>;
+
+  it("is advertised and served only when configured", async () => {
+    const plain = autoApproveHandler();
+    expect((await metadata(plain)).introspection_endpoint).toBeUndefined();
+    expect((await introspect(plain, "x")).status).toBe(404);
+    expect((await metadata(introspecting())).introspection_endpoint).toBe(
+      `${BASE}/introspect`,
+    );
+  });
+
+  it("always advertises the iss authorization-response parameter", async () => {
+    expect(
+      (await metadata(autoApproveHandler()))
+        .authorization_response_iss_parameter_supported,
+    ).toBe(true);
+  });
+
+  it("requires the deployer's authorization", async () => {
+    const res = await introspect(introspecting(), "anything", "wrong");
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toMatch(/^Bearer/);
+  });
+
+  it("describes an active DPoP-bound token, cnf included", async () => {
+    const handler = introspecting();
+    const token = await issue(handler, true);
+    const body = (await (await introspect(handler, token)).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({
+      active: true,
+      me: ME,
+      client_id: CLIENT_ID,
+      scope: "create update",
+      token_type: "DPoP",
+    });
+    expect((body.cnf as { jkt: string }).jkt).toBeTruthy();
+    expect(typeof body.exp).toBe("number");
+    expect(typeof body.iat).toBe("number");
+  });
+
+  it("describes an opt-in Bearer token without cnf", async () => {
+    const handler = introspecting({});
+    const body = (await (
+      await introspect(handler, await issue(handler, false))
+    ).json()) as Record<string, unknown>;
+    expect(body.active).toBe(true);
+    expect(body.token_type).toBe("Bearer");
+    expect(body.cnf).toBeUndefined();
+  });
+
+  it("reports a revoked, forged, or missing token as inactive, with no reason", async () => {
+    const handler = introspecting();
+    const token = await issue(handler, true);
+    await handler(
+      new Request(`${BASE}/revocation`, {
+        method: "POST",
+        body: new URLSearchParams({ token }),
+      }),
+      harness,
+      ctx,
+    );
+    for (const t of [token, `${token}x`, ""]) {
+      expect(await (await introspect(handler, t)).json()).toEqual({
+        active: false,
+      });
+    }
+  });
+});

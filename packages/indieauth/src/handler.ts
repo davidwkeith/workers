@@ -1,6 +1,6 @@
 /**
- * The IndieAuth fetch handler: authorization, token, revocation, and metadata
- * endpoints wired to the D1 store and `@dwk/dpop`. Routing matches the request
+ * The IndieAuth fetch handler: authorization, token, revocation, (opt-in)
+ * introspection, and metadata endpoints wired to the D1 store and `@dwk/dpop`. Routing matches the request
  * pathname against each configured endpoint's path, so the handler is mountable
  * under any prefix simply by configuring absolute endpoint URLs.
  */
@@ -652,6 +652,59 @@ async function handleRevocation(
   return new Response(null, { status: 200 });
 }
 
+/**
+ * Handle `POST` to the introspection endpoint (RFC 7662; IndieAuth §6.1). The
+ * deployer's `authorizeIntrospection` hook gates every request (401 otherwise).
+ * An active token — valid signature, issuer and time window, and still live in
+ * the issued-token store — is described with its IndieAuth fields, its
+ * `token_type`, and, when DPoP-bound, its `cnf.jkt` (RFC 9449 §6.2) so the
+ * resource server still completes the binding. Anything else is
+ * `{"active": false}`, never a reason.
+ */
+async function handleIntrospection(
+  request: Request,
+  store: ReturnType<typeof createIndieAuthStore>,
+  config: ResolvedConfig,
+  signingKey: string,
+): Promise<Response> {
+  if (!(await config.introspection!.authorize(request))) {
+    return new Response(
+      JSON.stringify({
+        error: "invalid_client",
+        error_description: "introspection requires authorization",
+      }),
+      {
+        status: 401,
+        headers: {
+          ...JSON_HEADERS,
+          "www-authenticate": 'Bearer realm="introspection"',
+        },
+      },
+    );
+  }
+  const form = await readForm(request);
+  const token = form.get("token") ?? "";
+  const result = token
+    ? await verifyAccessToken(token, signingKey, { issuer: config.issuer })
+    : undefined;
+  const now = Math.floor(Date.now() / 1000);
+  if (!result?.valid || !(await store.isTokenActive(result.claims.jti, now))) {
+    return json({ active: false });
+  }
+  const { claims } = result;
+  return json({
+    active: true,
+    me: claims.sub,
+    client_id: claims.client_id,
+    scope: claims.scope,
+    exp: claims.exp,
+    iat: claims.iat,
+    token_type: claims.cnf ? "DPoP" : "Bearer",
+    ...(claims.cnf ? { cnf: { jkt: claims.cnf.jkt } } : {}),
+    ...(claims.aud ? { aud: claims.aud } : {}),
+  });
+}
+
 /** Read an `application/x-www-form-urlencoded` body into `URLSearchParams`. */
 async function readForm(request: Request): Promise<URLSearchParams> {
   const params = new URLSearchParams();
@@ -782,6 +835,11 @@ export function createIndieAuth(config: IndieAuthConfig): IndieAuthHandler {
       if (pathname === resolved.revocationPath) {
         if (method !== "POST") return methodNotAllowed("POST");
         return await handleRevocation(request, store, resolved, signingKey);
+      }
+
+      if (resolved.introspection && pathname === resolved.introspection.path) {
+        if (method !== "POST") return methodNotAllowed("POST");
+        return await handleIntrospection(request, store, resolved, signingKey);
       }
 
       return new Response("Not Found", { status: 404 });

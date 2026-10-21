@@ -26,6 +26,7 @@ Solid-OIDC tokens (`webid` claim, issuer JWKS) instead, issued by the separate
 | Authorization (`POST`) | `/authorize`                               | Profile-URL exchange (identity only, no token).      |
 | Token (`POST`)         | `/token`                                   | Redeem code → DPoP-bound access token.               |
 | Revocation (`POST`)    | `/revocation`                              | Revoke an issued token (RFC 7009).                   |
+| Introspection (`POST`) | `/introspect`                              | Verify a token for a resource server (RFC 7662). Only with `authorizeIntrospection`. |
 
 Every endpoint path is derived from `baseUrl` but can be overridden with an
 absolute URL, and routing matches on pathname — so the handler is mountable

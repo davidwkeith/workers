@@ -73,6 +73,18 @@ redirect to an external IdP, …).
   downgrade. `verifyAccessToken` accepts a token without `cnf`; each resource
   server decides whether to (`acceptBearerTokens` in micropub/microsub, never
   in `@dwk/mcp`).
+- **Token introspection** (RFC 7662; [IndieAuth §6.1](https://indieauth.spec.indieweb.org/#access-token-verification)),
+  opt-in via `authorizeIntrospection(request)`: IndieAuth requires the endpoint
+  to demand authorization, so it is served (default `/introspect`) and
+  advertised as `introspection_endpoint` only when the deployer supplies that
+  hook. A request the hook refuses is `401`. An active token — valid
+  signature, issuer, and time window, and live in the token store — returns
+  `active: true` with `me`, `client_id`, `scope`, `exp`, `iat`, `token_type`
+  (`DPoP` or `Bearer`), `aud` when restricted, and `cnf.jkt` when DPoP-bound
+  (RFC 9449 §6.2), so the resource server still completes the binding.
+  Anything else is `{"active": false}` with no reason.
+- The metadata always sets `authorization_response_iss_parameter_supported:
+  true`: the authorization response carries `iss` (RFC 9207).
 - Support **audience-restricted** access tokens (RFC 8707 resource indicators /
   RFC 9700 §2.3): when a client supplies `resource` parameter(s), the issued
   token carries an `aud` claim, and resource servers verify it against their own

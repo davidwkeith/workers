@@ -28,6 +28,7 @@ export type {
   RedirectUriPolicy,
   ResourceIndicatorPolicy,
   BearerTokenPolicy,
+  AuthorizeIntrospection,
   ProfileInfo,
 } from "./config.js";
 

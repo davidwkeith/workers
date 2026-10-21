@@ -20,6 +20,9 @@ export interface ServerMetadata {
   readonly token_endpoint: string;
   readonly revocation_endpoint: string;
   readonly revocation_endpoint_auth_methods_supported: readonly string[];
+  readonly introspection_endpoint?: string;
+  /** The authorization response always carries `iss` (RFC 9207). */
+  readonly authorization_response_iss_parameter_supported: true;
   readonly grant_types_supported: readonly string[];
   readonly response_types_supported: readonly string[];
   readonly code_challenge_methods_supported: readonly string[];
@@ -36,6 +39,10 @@ export function buildServerMetadata(config: ResolvedConfig): ServerMetadata {
     token_endpoint: config.tokenEndpoint,
     revocation_endpoint: config.revocationEndpoint,
     revocation_endpoint_auth_methods_supported: ["none"],
+    ...(config.introspection
+      ? { introspection_endpoint: config.introspection.endpoint }
+      : {}),
+    authorization_response_iss_parameter_supported: true,
     grant_types_supported: ["authorization_code"],
     response_types_supported: ["code"],
     code_challenge_methods_supported: SUPPORTED_CODE_CHALLENGE_METHODS,

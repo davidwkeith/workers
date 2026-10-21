@@ -109,6 +109,20 @@ export interface IndieAuthConfig {
   /** Absolute revocation endpoint URL. Defaults to `${baseUrl}/revocation`. */
   readonly revocationEndpoint?: string;
   /**
+   * Absolute token introspection endpoint URL (RFC 7662; IndieAuth §6.1).
+   * Defaults to `${baseUrl}/introspect`. Served and advertised only when
+   * {@link authorizeIntrospection} is set.
+   */
+  readonly introspectionEndpoint?: string;
+  /**
+   * Decide whether a request may introspect tokens — IndieAuth §6.1 requires
+   * the endpoint to demand some authorization, e.g. a resource server's own
+   * bearer secret. Set it to serve the introspection endpoint and advertise
+   * `introspection_endpoint` in the metadata (which IndieAuth lists for
+   * resource servers on other hosts to verify tokens); omit it and neither is.
+   */
+  readonly authorizeIntrospection?: AuthorizeIntrospection;
+  /**
    * Absolute metadata endpoint URL. Defaults to
    * `${baseUrl}/.well-known/oauth-authorization-server`.
    */
@@ -162,6 +176,12 @@ export interface ResolvedConfig {
   readonly authorizationPath: string;
   readonly tokenPath: string;
   readonly revocationPath: string;
+  /** Present only when introspection is configured. */
+  readonly introspection?: {
+    readonly endpoint: string;
+    readonly path: string;
+    readonly authorize: AuthorizeIntrospection;
+  };
   readonly metadataPath: string;
   readonly scopesSupported: readonly string[];
   readonly accessTokenLifetimeSeconds: number;
@@ -204,6 +224,11 @@ export interface BearerTokenPolicy {
    */
   readonly scopes?: readonly string[];
 }
+
+/** See {@link IndieAuthConfig.authorizeIntrospection}. */
+export type AuthorizeIntrospection = (
+  request: Request,
+) => boolean | Promise<boolean>;
 
 /** Default policy: the redirect URI must share an origin with the client id. */
 function sameOriginRedirect(clientId: string, redirectUri: string): boolean {
@@ -265,6 +290,16 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
     scopesSupported,
   );
 
+  const introspectionEndpoint =
+    config.introspectionEndpoint ?? `${origin}/introspect`;
+  const introspection = config.authorizeIntrospection
+    ? {
+        endpoint: introspectionEndpoint,
+        path: pathOf(introspectionEndpoint, "introspectionEndpoint"),
+        authorize: config.authorizeIntrospection,
+      }
+    : undefined;
+
   return {
     issuer,
     authorizationEndpoint,
@@ -274,6 +309,7 @@ export function resolveConfig(config: IndieAuthConfig): ResolvedConfig {
     authorizationPath: pathOf(authorizationEndpoint, "authorizationEndpoint"),
     tokenPath: pathOf(tokenEndpoint, "tokenEndpoint"),
     revocationPath: pathOf(revocationEndpoint, "revocationEndpoint"),
+    ...(introspection ? { introspection } : {}),
     metadataPath: pathOf(metadataEndpoint, "metadataEndpoint"),
     scopesSupported,
     accessTokenLifetimeSeconds,
