@@ -49,9 +49,11 @@ toggled by maturity group via the `extensions` config
 
 ## Key constraints
 
-- **DPoP mandatory on every request.** Bearer-token-only clients (e.g.,
-  micropub.rocks default mode) cannot authenticate. Every authenticated request
-  must present a valid DPoP proof bound to the access token.
+- **DPoP mandatory on every request** by default. Bearer-token-only clients
+  (e.g., micropub.rocks default mode) cannot authenticate unless the deployer
+  opts in with `acceptBearerTokens` (and `@dwk/indieauth`'s `bearerTokens`):
+  then an unbound token is accepted under the `Bearer` scheme. A DPoP-bound
+  token always needs its matching proof.
 - **Subject (`me`) binding.** The access token's `me` claim must match the
   configured profile URL. Tokens issued for a different identity are rejected.
 - **JTI dedup in D1.** DPoP proof `jti` values are stored in D1 (`AUTH_DB`) and

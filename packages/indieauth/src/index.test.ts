@@ -225,7 +225,7 @@ describe("@dwk/indieauth authorization-code + PKCE + DPoP flow", () => {
     expect(verified.valid).toBe(true);
     if (!verified.valid) return;
     expect(verified.claims.sub).toBe(ME);
-    const jkt = verified.claims.cnf.jkt;
+    const jkt = verified.claims.cnf?.jkt;
 
     // 4. A Resource Server completes the binding: a DPoP proof for a protected
     //    request, carrying the access-token hash, verifies against cnf.jkt.
@@ -292,7 +292,7 @@ describe("@dwk/indieauth authorization-code + PKCE + DPoP flow", () => {
       htm: "GET",
       htu: `${BASE}/micropub`,
       accessToken: access_token,
-      expectedJkt: verified.claims.cnf.jkt,
+      expectedJkt: verified.claims.cnf?.jkt,
     });
     expect(rsResult.valid).toBe(false);
     expect(rsResult.reason).toBe("jkt_mismatch");
@@ -1308,5 +1308,129 @@ describe("@dwk/indieauth unhandled dispatch errors", () => {
     };
     expect(body.error).toBe("server_error");
     expect(body.error_description).not.toContain("simulated D1 outage");
+  });
+});
+
+describe("@dwk/indieauth opt-in Bearer tokens", () => {
+  function bearerHandler(policy: IndieAuthConfig["bearerTokens"] = {}) {
+    return createIndieAuth({
+      ...baseConfig(() => ({ me: ME, profile: { name: "Alice" } })),
+      bearerTokens: policy,
+    });
+  }
+
+  async function redeem(
+    handler: ReturnType<typeof createIndieAuth>,
+    headers: Record<string, string> = {},
+  ): Promise<Response> {
+    const authRes = await handler(
+      new Request(await authorizeUrl(await s256(CODE_VERIFIER)), {
+        redirect: "manual",
+      }),
+      harness,
+      ctx,
+    );
+    const code = new URL(authRes.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    return handler(
+      new Request(`${BASE}/token`, {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: CODE_VERIFIER,
+        }),
+      }),
+      harness,
+      ctx,
+    );
+  }
+
+  it("issues an unbound Bearer token, narrowed to the policy, to a request with no proof", async () => {
+    const res = await redeem(
+      bearerHandler({ lifetimeSeconds: 600, scopes: ["create", "media"] }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.token_type).toBe("Bearer");
+    expect(body.scope).toBe("create");
+    expect(body.expires_in).toBe(600);
+    expect(body.me).toBe(ME);
+
+    const verified = await verifyAccessToken(
+      body.access_token as string,
+      harness.TOKEN_SIGNING_KEY,
+      { issuer: BASE },
+    );
+    expect(verified.valid).toBe(true);
+    if (!verified.valid) return;
+    expect(verified.claims.cnf).toBeUndefined();
+    expect(verified.claims.scope).toBe("create");
+    expect(verified.claims.exp - verified.claims.iat).toBe(600);
+
+    // Recorded like any token, so it can be revoked.
+    const store = createIndieAuthStore(harness);
+    const now = Math.floor(Date.now() / 1000);
+    expect(await store.isTokenActive(verified.claims.jti, now)).toBe(true);
+    await bearerHandler()(
+      new Request(`${BASE}/revocation`, {
+        method: "POST",
+        body: new URLSearchParams({ token: body.access_token as string }),
+      }),
+      harness,
+      ctx,
+    );
+    expect(await store.isTokenActive(verified.claims.jti, now)).toBe(false);
+  });
+
+  it("defaults to the access-token lifetime and every supported scope", async () => {
+    const body = (await (await redeem(bearerHandler())).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body.token_type).toBe("Bearer");
+    expect(body.scope).toBe("create update");
+    expect(body.expires_in).toBe(3600);
+  });
+
+  it("still issues a DPoP-bound token to a request with a valid proof", async () => {
+    const key = await makeDpopKey();
+    const res = await redeem(bearerHandler(), {
+      DPoP: await makeProof(key, "POST", `${BASE}/token`),
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.token_type).toBe("DPoP");
+    const verified = await verifyAccessToken(
+      body.access_token as string,
+      harness.TOKEN_SIGNING_KEY,
+      { issuer: BASE },
+    );
+    expect(verified.valid && verified.claims.cnf?.jkt).toBeTruthy();
+  });
+
+  it("never downgrades a request whose proof is invalid", async () => {
+    const res = await redeem(bearerHandler(), { DPoP: "not.a.valid.proof" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_dpop_proof",
+    );
+  });
+
+  it("refuses a Bearer token when none of the granted scopes is allowed", async () => {
+    const res = await redeem(bearerHandler({ scopes: ["media"] }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_scope",
+    );
+  });
+
+  it("rejects a Bearer lifetime longer than the access-token lifetime", () => {
+    expect(() => bearerHandler({ lifetimeSeconds: 7200 })).toThrow(
+      /bearerTokens\.lifetimeSeconds/,
+    );
   });
 });

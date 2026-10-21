@@ -38,7 +38,11 @@ host cannot do:
 - **Auth:** every request is authenticated with an IndieAuth bearer token
   (reuse the validation path that [`@dwk/indieauth`](indieauth.md) issues and
   [`@dwk/micropub`](micropub.md) consumes); requests require an appropriate
-  scope and the token's `me` must match the server's identity.
+  scope and the token's `me` must match the server's identity. Tokens are
+  DPoP-bound and need a matching proof, unless the deployment opts in with
+  `acceptBearerTokens` to the unbound Bearer tokens `@dwk/indieauth` issues
+  under its `bearerTokens` policy (same rules as
+  [micropub.md](micropub.md) § Auth / security).
 - **Channels** (`action=channels`): list, create, update (rename), delete, and
   **reorder** channels. Reserve the built-in `notifications` channel.
 - **Following** (`action=follow` / `unfollow` / `action=follow` list): manage

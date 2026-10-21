@@ -28,7 +28,10 @@ export const IndieAuthLogEvent = {
   AuthorizeRejected: "indieauth.authorize.rejected",
   /** An authorization code was issued and the client redirected. Field: `clientHost`. */
   AuthorizeApproved: "indieauth.authorize.approved",
-  /** A DPoP-bound access token was minted. Fields: `clientHost`, `scope`. */
+  /**
+   * An access token was minted. Fields: `clientHost`, `scope`, `tokenType`
+   * (`DPoP`, or `Bearer` under the opt-in `bearerTokens` policy).
+   */
   TokenIssued: "indieauth.token.issued",
   /**
    * A token-endpoint (or profile-exchange) request was rejected. Field: `reason`

@@ -60,6 +60,19 @@ redirect to an external IdP, …).
   asymmetrically-signed Solid-OIDC tokens (issuer JWKS, `webid` claim) from the
   separate [`@dwk/solid-oidc`](solid-oidc.md) OP instead; see
   [open-questions.md §1](../open-questions.md#1-solid-oidc-op--resolved).
+- **Opt-in Bearer tokens** (`bearerTokens`, off by default; the designed
+  exception in [non-functional-requirements.md](../non-functional-requirements.md)
+  § Security). When set and a token request carries **no** `DPoP` header, the
+  token endpoint issues an unbound RFC 6750 token: no `cnf` claim,
+  `token_type: "Bearer"`, the granted scope narrowed to `bearerTokens.scopes`
+  (default `scopesSupported`; none left is `invalid_scope`), and a lifetime of
+  `bearerTokens.lifetimeSeconds` (default, and capped at,
+  `accessTokenLifetimeSeconds`). It is recorded in the token store with an
+  empty `jkt`, so revocation applies. A request that sends a proof is always
+  verified against it — an invalid proof is `invalid_dpop_proof`, never a
+  downgrade. `verifyAccessToken` accepts a token without `cnf`; each resource
+  server decides whether to (`acceptBearerTokens` in micropub/microsub, never
+  in `@dwk/mcp`).
 - Support **audience-restricted** access tokens (RFC 8707 resource indicators /
   RFC 9700 §2.3): when a client supplies `resource` parameter(s), the issued
   token carries an `aud` claim, and resource servers verify it against their own

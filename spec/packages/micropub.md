@@ -605,6 +605,13 @@ and the gated upload response body.
   bearer-only clients — including micropub.rocks' default (non-DPoP) token flow
   — cannot authenticate against this endpoint; conformance is asserted only for
   DPoP-capable clients. This is an intentional deviation, not a defect.
+- **Opt-in Bearer tokens** (`acceptBearerTokens`, default `false`). A
+  deployment that also sets `@dwk/indieauth`'s `bearerTokens` policy may accept
+  the unbound (no `cnf`) Bearer tokens it issues, so bearer-only clients can
+  post. Such a token is accepted only under the `Bearer` scheme or as the
+  `access_token` body parameter — never under the `DPoP` scheme — and goes
+  through the same subject, revocation, and scope checks. A DPoP-bound token
+  still requires its matching proof; the flag never weakens that.
 
 [mp-auth]: https://www.w3.org/TR/micropub/#authentication
 - **Least privilege.** The media endpoint requires the dedicated `media` scope;

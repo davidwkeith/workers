@@ -77,6 +77,14 @@ export interface MicrosubConfig {
    * `MICROSUB_DB`. Defaults to `true`.
    */
   readonly checkDpopReplay?: boolean;
+  /**
+   * Accept an unbound RFC 6750 Bearer token — one `@dwk/indieauth` issued under
+   * its opt-in `bearerTokens` policy, carrying no `cnf` — for clients that
+   * predate DPoP. Defaults to `false` ("DPoP everywhere"). A DPoP-bound token
+   * still needs its matching proof either way, and an unbound one is refused
+   * under the `DPoP` scheme.
+   */
+  readonly acceptBearerTokens?: boolean;
   /** `fetch` implementation for discovery/polling/preview; defaults to global `fetch`. */
   readonly fetch?: FetchLike;
   /** Logger; defaults to a no-op (see `@dwk/log`). */
@@ -102,6 +110,7 @@ export interface ResolvedConfig {
   readonly maxItemsPerChannel: number;
   readonly checkRevocation: boolean;
   readonly checkDpopReplay: boolean;
+  readonly acceptBearerTokens: boolean;
   readonly fetch: FetchLike;
   readonly logger: Logger;
   readonly metrics: Metrics;
@@ -157,6 +166,7 @@ export function resolveConfig(config: MicrosubConfig): ResolvedConfig {
     maxItemsPerChannel,
     checkRevocation: config.checkRevocation ?? true,
     checkDpopReplay: config.checkDpopReplay ?? true,
+    acceptBearerTokens: config.acceptBearerTokens ?? false,
     fetch: config.fetch ?? ((input, init) => fetch(input, init)),
     logger: config.logger ?? noopLogger,
     metrics: config.metrics ?? noopMetrics,

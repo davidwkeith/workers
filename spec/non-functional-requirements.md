@@ -50,6 +50,15 @@ Implications:
   `write`-scoped bearer; the other mitigations (opaque, hashed at rest,
   isolated audience, RFC 7009 revocable) are unchanged. See
   [packages/mastodon-api.md](packages/mastodon-api.md) § Write surface.
+  A second, **opt-in and off by default**: IndieWeb clients that predate DPoP.
+  A deployment MAY set `@dwk/indieauth`'s `bearerTokens` policy, which issues
+  an unbound RFC 6750 Bearer token (no `cnf`) to a token request that carries
+  no DPoP proof — narrowed to the policy's scopes, no longer-lived than a
+  DPoP-bound token, and recorded so it stays revocable — and set
+  `acceptBearerTokens` on `@dwk/micropub` / `@dwk/microsub` to accept one.
+  A request that sends a proof is always held to it, a DPoP-bound token is
+  never accepted without its proof, and `@dwk/mcp` never accepts an unbound
+  token. See [packages/indieauth.md](packages/indieauth.md) § Auth / security.
 - **No ACL / decision caching outside strongly-consistent layers.**
 - **Least-privilege bindings** — a package gets only the bindings it declares.
 - **Outbound SSRF posture is deny-by-default** — every fetch of an attacker-

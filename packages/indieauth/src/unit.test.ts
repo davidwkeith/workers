@@ -125,7 +125,7 @@ describe("access token sign/verify", () => {
     });
     expect(result.valid).toBe(true);
     if (!result.valid) return;
-    expect(result.claims.cnf.jkt).toBe("thumbprint-123");
+    expect(result.claims.cnf?.jkt).toBe("thumbprint-123");
     expect(result.claims.jti).toBe(claims.jti);
     expect(result.claims.scope).toBe("create");
   });
@@ -157,6 +157,63 @@ describe("access token sign/verify", () => {
     });
     expect(expired.valid).toBe(false);
     if (!expired.valid) expect(expired.reason).toBe("expired");
+  });
+});
+
+describe("access token cnf claim", () => {
+  /** Sign an arbitrary payload the way `signAccessToken` does. */
+  async function signPayload(payload: Record<string, unknown>) {
+    const b64 = (text: string) =>
+      btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const input = `${b64(JSON.stringify({ alg: "HS256", typ: "at+jwt" }))}.${b64(JSON.stringify(payload))}`;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(input)),
+    );
+    return `${input}.${b64(String.fromCharCode(...sig))}`;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    iss: "https://example.com",
+    sub: "https://alice.example.com/",
+    client_id: "https://app.example.org/",
+    scope: "create",
+    iat: now,
+    exp: now + 60,
+    jti: "j1",
+  };
+
+  it("verifies a token minted without a jkt, with no cnf claim", async () => {
+    const { token } = await signAccessToken(SECRET, {
+      issuer: claims.iss,
+      me: claims.sub,
+      clientId: claims.client_id,
+      scope: claims.scope,
+      lifetimeSeconds: 60,
+    });
+    const result = await verifyAccessToken(token, SECRET, {
+      issuer: claims.iss,
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.claims.cnf).toBeUndefined();
+  });
+
+  it("rejects a present but malformed cnf as payload_invalid", async () => {
+    for (const cnf of [null, "jkt", { jkt: 42 }, {}, ["x"]]) {
+      const result = await verifyAccessToken(
+        await signPayload({ ...claims, cnf }),
+        SECRET,
+        { issuer: claims.iss },
+      );
+      expect(result).toEqual({ valid: false, reason: "payload_invalid" });
+    }
   });
 });
 
