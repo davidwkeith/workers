@@ -91,11 +91,11 @@ jobs:
 
       - name: Install pnpm
         if: steps.provenance.outputs.proceed == 'true'
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node
         if: steps.provenance.outputs.proceed == 'true'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: pnpm
@@ -111,7 +111,7 @@ jobs:
 
       - name: Triage with Claude
         if: steps.provenance.outputs.proceed == 'true'
-        uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1.0.238
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         with:
           # Set exactly one of these two secrets. The action falls back from one to the other, so
           # an unset one is fine.
@@ -185,7 +185,7 @@ jobs:
 
       - name: Upload the agent's output
         if: always() && steps.provenance.outputs.proceed == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-out
           path: ${{ runner.temp }}/agent-out
@@ -207,7 +207,7 @@ jobs:
       # A clean checkout of `main`'s tree. No agent-written file is executed in this job.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: agent-out
           path: ${{ runner.temp }}/agent-out
