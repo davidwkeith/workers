@@ -70,12 +70,21 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 - Inbound `POST /inbox`: verify the HTTP signature, dedup by activity `id`, and
   handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `Announce` /
   `Delete`. A **temporary** signature-verification failure — the signer's key
-  could not be resolved (e.g. their server was briefly unreachable) — answers
-  **`503` + `Retry-After`** so the peer redelivers, rather than `401` which
-  permanently drops the activity (Mastodon 4.6). Cryptographic/format failures
-  stay `401`.
+  could not be resolved (e.g. their server was briefly unreachable, or an
+  anti-scraper challenge layer the signer's host runs blocks an unidentified
+  client — see `userAgent` below) — answers **`503` + `Retry-After`** so the
+  peer redelivers, rather than `401` which permanently drops the activity
+  (Mastodon 4.6). Cryptographic/format failures stay `401`. The default key
+  resolver logs *why* resolution failed
+  (`activitypub.key_resolution.failed`: `reason`, `host`, `status` when
+  available) rather than only the generic rejection reason, since
+  `key_unresolved` alone doesn't distinguish a network error from a
+  challenge/redirect loop.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
-  via **DO alarms** (and a Queue where composed), signing each request.
+  via **DO alarms** (and a Queue where composed), signing each request. Every
+  outbound fetch (key resolution, delivery, discovery) carries a configurable
+  `userAgent` (default: a string identifying this package), since some peers'
+  anti-scraper challenge layers treat an unidentified client as a bot.
 - Auto-`Accept`-on-`Follow`/`Join` inbox resolution is queued, not inline
   (#220): the DO is single-threaded, so resolving a remote actor's inbox
   (an outbound fetch, up to `OUTBOUND_TIMEOUT_MS`) while handling the inbound
@@ -306,6 +315,10 @@ design; summary:
   above.
 - `moderators` — actor IRIs authorized to moderate a `Group` actor via
   `Remove`. Defaults to empty; ignored for a `Person` actor.
+- `userAgent` — `User-Agent` sent on every outbound fediverse request.
+  Defaults to a string identifying this package; override to identify a
+  specific deployment, the usual courtesy for peers that allowlist federation
+  traffic by UA.
 
 ## Conformance
 

@@ -88,6 +88,7 @@ function cfgHeader(
     deliveryBaseDelayMs: 60_000,
     reportRetentionMs: 30 * 24 * 60 * 60 * 1000,
     keyId: iris.keyId,
+    userAgent: "test-ua/1.0",
     ...overrides,
   };
   return JSON.stringify(config);

@@ -79,6 +79,7 @@ export async function deliverActivity(
   activityJson: string,
   signer: SignerKey,
   fetchImpl: typeof fetch,
+  userAgent: string,
   now: () => number = () => Date.now(),
   timeoutMs = 10_000,
 ): Promise<DeliveryResult> {
@@ -100,7 +101,10 @@ export async function deliverActivity(
       inboxUrl,
       {
         method: "POST",
-        headers: signed.headers,
+        // `User-Agent` is layered on top of (not part of) the signed header
+        // set `signRequest` returns — it isn't covered by the signature, so
+        // adding it here doesn't touch signing at all.
+        headers: { ...signed.headers, "User-Agent": userAgent },
         body: signed.body as BufferSource,
       },
       { allowedSchemes: ["https:"], timeoutMs },

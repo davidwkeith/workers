@@ -107,6 +107,7 @@ describe("discovery helpers", () => {
     const overCap = await fetchActorGuarded(
       iri,
       async () => new Response(huge, { status: 200 }),
+      "test-ua",
     );
     expect(overCap).toBeNull();
 
@@ -116,6 +117,7 @@ describe("discovery helpers", () => {
         new Response(JSON.stringify({ id: iri, type: "Person" }), {
           status: 200,
         }),
+      "test-ua",
     );
     expect(fine).toEqual({ id: iri, type: "Person" });
   });

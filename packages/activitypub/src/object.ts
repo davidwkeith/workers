@@ -52,6 +52,7 @@ import {
   deliverActivity,
   DeliveryBlockedError,
 } from "./delivery.js";
+import { DEFAULT_USER_AGENT } from "./http.js";
 import type { ActivityPubEnv } from "./config.js";
 
 /** How long a seen activity `id` is remembered for dedup (7 days). */
@@ -3116,6 +3117,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    */
   async #processDeliveries(): Promise<number> {
     const signer = this.#deliverySigner();
+    const userAgent = this.#deliveryUserAgent();
     const now = Date.now();
     const due = this.#sql
       .exec<{
@@ -3144,6 +3146,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           row.json,
           signer,
           fetch,
+          userAgent,
           () => Date.now(),
         );
         if (result.ok) {
@@ -3798,11 +3801,26 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return null;
   }
 
+  /**
+   * The `User-Agent` for deliveries the alarm sends: live config first, then
+   * the persisted copy (an alarm can wake on a cold isolate where `#config`
+   * is null — same reasoning as `#verifyMode`). `DEFAULT_USER_AGENT` is only
+   * a last-resort fallback; `resolveConfig` always resolves one, so a
+   * forwarded request should always have persisted it by the time an alarm
+   * fires.
+   */
+  #deliveryUserAgent(): string {
+    return (
+      this.#config?.userAgent ?? this.#kvGet("userAgent") ?? DEFAULT_USER_AGENT
+    );
+  }
+
   #persistDeliveryConfig(config: ForwardedConfig): void {
     if (config.privateKeyPem) {
       this.#kvPut("privateKeyPem", config.privateKeyPem);
       this.#kvPut("keyId", config.keyId);
     }
+    this.#kvPut("userAgent", config.userAgent);
     // Persist the retry policy too: an alarm can wake on a cold isolate where
     // `#config` is null, and the backoff must still honor the configured policy
     // rather than silently fall back to defaults.

@@ -19,8 +19,17 @@ export function isHandleShaped(value: string): boolean {
   return !/^https?:\/\//i.test(value);
 }
 
-/** Wrap a fetch so every request target passes the outbound SSRF guard. */
-export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
+/**
+ * Wrap a fetch so every request target passes the outbound SSRF guard and
+ * carries a descriptive `User-Agent` (a caller-set one, if any, wins — see
+ * {@link ActivityPubConfig.userAgent}). Covers both the WebFinger lookup in
+ * {@link resolveHandleGuarded} (which otherwise has no header-customization
+ * seam of its own) and the actor fetch in {@link fetchActorGuarded}.
+ */
+export function guardedFetch(
+  fetchImpl: typeof fetch,
+  userAgent: string,
+): typeof fetch {
   return (input, init) => {
     const url =
       typeof input === "string"
@@ -29,7 +38,9 @@ export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
           ? input.href
           : input.url;
     assertPublicHttpsTarget(url);
-    return fetchImpl(input, init);
+    const headers = new Headers(init?.headers);
+    if (!headers.has("user-agent")) headers.set("user-agent", userAgent);
+    return fetchImpl(input, { ...init, headers });
   };
 }
 
@@ -41,10 +52,13 @@ export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
 export async function resolveHandleGuarded(
   handle: string,
   fetchImpl: typeof fetch,
+  userAgent: string,
 ): Promise<string | null> {
   let actor: string | null;
   try {
-    actor = await resolveHandle(handle, { fetch: guardedFetch(fetchImpl) });
+    actor = await resolveHandle(handle, {
+      fetch: guardedFetch(fetchImpl, userAgent),
+    });
   } catch {
     return null;
   }
@@ -110,11 +124,12 @@ export async function readJsonCapped(
 export async function fetchActorGuarded(
   iri: string,
   fetchImpl: typeof fetch,
+  userAgent: string,
 ): Promise<ResolvedActor | null> {
   let response: Response;
   const timeout = createTimeoutSignal(undefined, 10_000);
   try {
-    response = await guardedFetch(fetchImpl)(iri, {
+    response = await guardedFetch(fetchImpl, userAgent)(iri, {
       headers: { accept: "application/activity+json" },
       signal: timeout.signal,
     });

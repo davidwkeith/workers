@@ -1147,6 +1147,7 @@ function forwardedHeader(
     reportRetentionMs: 30 * 24 * 60 * 60 * 1000,
     keyId: iris.keyId,
     privateKeyPem,
+    userAgent: "test-ua/1.0",
   };
   return JSON.stringify(config);
 }
