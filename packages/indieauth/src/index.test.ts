@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createIndieAuth,
   createIndieAuthStore,
+  signAccessToken,
   verifyAccessToken,
   type AuthorizationApproval,
   type AuthorizationRequest,
@@ -1524,15 +1525,50 @@ describe("@dwk/indieauth token introspection (RFC 7662, IndieAuth §6.1)", () =>
     const res = await introspect(introspecting(), "anything", "wrong");
     expect(res.status).toBe(401);
     expect(res.headers.get("www-authenticate")).toMatch(/^Bearer/);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("accepts only POST", async () => {
+    const res = await introspecting()(
+      new Request(`${BASE}/introspect`),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+  });
+
+  it("reports an expired token as inactive, uncached", async () => {
+    const issuedAt = Math.floor(Date.now() / 1000) - 7200;
+    const { token, claims } = await signAccessToken(harness.TOKEN_SIGNING_KEY, {
+      issuer: BASE,
+      me: ME,
+      clientId: CLIENT_ID,
+      scope: "create",
+      jkt: "thumbprint",
+      lifetimeSeconds: 3600,
+      now: issuedAt,
+    });
+    await createIndieAuthStore(harness).recordToken({
+      jti: claims.jti,
+      clientId: CLIENT_ID,
+      me: ME,
+      scope: "create",
+      jkt: "thumbprint",
+      issuedAt: claims.iat,
+      expiresAt: claims.exp,
+    });
+    const res = await introspect(introspecting(), token);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ active: false });
   });
 
   it("describes an active DPoP-bound token, cnf included", async () => {
     const handler = introspecting();
     const token = await issue(handler, true);
-    const body = (await (await introspect(handler, token)).json()) as Record<
-      string,
-      unknown
-    >;
+    const res = await introspect(handler, token);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       active: true,
       me: ME,

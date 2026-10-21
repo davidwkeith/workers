@@ -1,6 +1,7 @@
 /**
  * The IndieAuth fetch handler: authorization, token, revocation, (opt-in)
- * introspection, and metadata endpoints wired to the D1 store and `@dwk/dpop`. Routing matches the request
+ * introspection, and metadata endpoints wired to the D1 store and
+ * `@dwk/dpop`. Routing matches the request
  * pathname against each configured endpoint's path, so the handler is mountable
  * under any prefix simply by configuring absolute endpoint URLs.
  */
@@ -665,21 +666,23 @@ async function handleIntrospection(
   request: Request,
   store: ReturnType<typeof createIndieAuthStore>,
   config: ResolvedConfig,
+  introspection: NonNullable<ResolvedConfig["introspection"]>,
   signingKey: string,
 ): Promise<Response> {
-  if (!(await config.introspection!.authorize(request))) {
-    return new Response(
-      JSON.stringify({
+  // Never cached: a cached "active" would outlive a revocation.
+  const answer = (body: unknown, status = 200, extra: HeadersInit = {}) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...JSON_HEADERS, "cache-control": "no-store", ...extra },
+    });
+  if (!(await introspection.authorize(request))) {
+    return answer(
+      {
         error: "invalid_client",
         error_description: "introspection requires authorization",
-      }),
-      {
-        status: 401,
-        headers: {
-          ...JSON_HEADERS,
-          "www-authenticate": 'Bearer realm="introspection"',
-        },
       },
+      401,
+      { "www-authenticate": 'Bearer realm="introspection"' },
     );
   }
   const form = await readForm(request);
@@ -689,10 +692,10 @@ async function handleIntrospection(
     : undefined;
   const now = Math.floor(Date.now() / 1000);
   if (!result?.valid || !(await store.isTokenActive(result.claims.jti, now))) {
-    return json({ active: false });
+    return answer({ active: false });
   }
   const { claims } = result;
-  return json({
+  return answer({
     active: true,
     me: claims.sub,
     client_id: claims.client_id,
@@ -837,9 +840,16 @@ export function createIndieAuth(config: IndieAuthConfig): IndieAuthHandler {
         return await handleRevocation(request, store, resolved, signingKey);
       }
 
-      if (resolved.introspection && pathname === resolved.introspection.path) {
+      const { introspection } = resolved;
+      if (introspection && pathname === introspection.path) {
         if (method !== "POST") return methodNotAllowed("POST");
-        return await handleIntrospection(request, store, resolved, signingKey);
+        return await handleIntrospection(
+          request,
+          store,
+          resolved,
+          introspection,
+          signingKey,
+        );
       }
 
       return new Response("Not Found", { status: 404 });
