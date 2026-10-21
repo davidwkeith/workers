@@ -46,6 +46,15 @@ export const ActivityPubLogEvent = {
   /** A delivery target was refused on SSRF grounds. Field: `reason`. */
   DeliveryBlocked: "activitypub.delivery.blocked",
   /**
+   * The default key resolver could not resolve an inbound signer's key —
+   * surfaces *why*, since `SignatureRejected`'s `key_unresolved` reason alone
+   * doesn't say whether it was a network error, an HTTP status, a malformed
+   * document, or an origin mismatch (e.g. a redirect loop from an anti-scraper
+   * challenge the remote host runs in front of its actor documents). Fields:
+   * `reason`, `host`, and `status` when an HTTP response was received.
+   */
+  KeyResolutionFailed: "activitypub.key_resolution.failed",
+  /**
    * An owner-authorized request was refused (bad/absent token): a publish, or
    * the owner blocklist read that shares the same token gate.
    */

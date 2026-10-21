@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { deriveIris, resolveConfig, type ActivityPubConfig } from "./config.js";
+import type { Logger } from "@dwk/log";
+
+import {
+  DEFAULT_USER_AGENT,
+  deriveIris,
+  resolveConfig,
+  type ActivityPubConfig,
+} from "./config.js";
+import { ActivityPubLogEvent } from "./log.js";
 
 /**
  * Tests for config resolution and the default key resolver. The resolver is the
@@ -338,5 +346,97 @@ describe("default key resolver", () => {
     // Both hops were fetched (both public), so it's the origin binding — not the
     // SSRF guard — that rejects it.
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a descriptive User-Agent", async () => {
+    // Some peers' anti-scraper challenge layers (e.g. Anubis) treat an
+    // unidentified client as a bot; an identifiable UA is standard ActivityPub
+    // interop practice and lets such hosts allowlist federation traffic.
+    const fetchImpl = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://169.254.169.254/x" },
+        }),
+    );
+    const resolve = resolverWith(fetchImpl as unknown as typeof fetch);
+    await resolve(KEY_ID);
+    const init = fetchImpl.mock.calls[0]?.[1];
+    expect(new Headers(init?.headers).get("user-agent")).toBe(
+      DEFAULT_USER_AGENT,
+    );
+  });
+
+  describe("failure diagnostics", () => {
+    function resolverWithLogger(fetchImpl: typeof fetch, logger: Logger) {
+      return resolveConfig({ ...VALID, fetch: fetchImpl, logger }).keyResolver;
+    }
+
+    function fakeLogger() {
+      const warn =
+        vi.fn<(event: string, fields?: Record<string, unknown>) => void>();
+      const logger: Logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn,
+        error: vi.fn(),
+      };
+      return { logger, warn };
+    }
+
+    it("logs the network error when the fetch throws", async () => {
+      const { logger, warn } = fakeLogger();
+      const resolve = resolverWithLogger(
+        vi.fn(async () => {
+          throw new Error("too many redirects");
+        }) as unknown as typeof fetch,
+        logger,
+      );
+      await resolve(KEY_ID);
+      expect(warn).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({
+          reason: "fetch_error",
+          host: "remote.example",
+          message: "too many redirects",
+        }),
+      );
+    });
+
+    it("logs the HTTP status on a non-ok response", async () => {
+      const { logger, warn } = fakeLogger();
+      const resolve = resolverWithLogger(
+        vi.fn(
+          async () => new Response(null, { status: 301 }),
+        ) as unknown as typeof fetch,
+        logger,
+      );
+      await resolve(KEY_ID);
+      expect(warn).toHaveBeenCalledWith(
+        ActivityPubLogEvent.KeyResolutionFailed,
+        expect.objectContaining({
+          reason: "http_status",
+          host: "remote.example",
+          status: 301,
+        }),
+      );
+    });
+
+    it("never logs key material or document bodies", async () => {
+      const { logger, warn } = fakeLogger();
+      const resolve = resolverWithLogger(
+        vi.fn(async () =>
+          jsonResponse({
+            id: "https://remote.example/users/bob",
+            publicKey: { owner: "x", publicKeyPem: "SECRET-PEM-MATERIAL" },
+          }),
+        ) as unknown as typeof fetch,
+        logger,
+      );
+      await resolve(KEY_ID);
+      for (const call of warn.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain("SECRET-PEM-MATERIAL");
+      }
+    });
   });
 });

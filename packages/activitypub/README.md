@@ -108,6 +108,20 @@ forthcoming cross-standard `@dwk/http-signatures` package (RFC 9421 +
 draft-cavage; [#59](https://github.com/davidwkeith/workers/issues/59)) can be
 swapped in unchanged once it lands.
 
+Every outbound request (key resolution, delivery, discovery) sends a
+descriptive `User-Agent` identifying this package, since some peers — and the
+anti-scraper challenge layers (e.g.
+[Anubis](https://github.com/TecharoHQ/anubis/issues/31)) a growing number of
+hosts run in front of federated software — treat an unidentified client as a
+bot. If signature verification against a specific peer consistently fails
+with `key_unresolved` despite the target being reachable from elsewhere (e.g.
+`curl`), suspect exactly this: a challenge page served to the actor-document
+fetch, typically visible as a redirect back to the same URL. The default key
+resolver logs the actual failure (`activitypub.key_resolution.failed`:
+`reason`, `host`, and `status` when available) rather than only the generic
+`key_unresolved` signature-rejection reason, so `wrangler tail` should show
+which of the two it is.
+
 ## Delivery safety
 
 Outbound deliveries target attacker-influenced URLs (a follower's advertised

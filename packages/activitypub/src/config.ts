@@ -9,12 +9,20 @@
  * Durable Object namespace, and a missing binding fails loudly at startup.
  */
 
-import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
+import {
+  hostFromUrl,
+  noopLogger,
+  noopMetrics,
+  type Logger,
+  type Metrics,
+} from "@dwk/log";
 
 import { safeFetch } from "@dwk/safe-fetch";
 
 import type { ActorIris, ActorProfile } from "./as2.js";
 import { readJsonCapped } from "./discovery.js";
+import { DEFAULT_USER_AGENT } from "./http.js";
+import { ActivityPubLogEvent } from "./log.js";
 import type {
   KeyResolver,
   ResolvedKey,
@@ -23,6 +31,8 @@ import type {
 } from "./signature.js";
 import type { SoftwareInfo } from "./nodeinfo.js";
 import type { ActivityPubObject } from "./object.js";
+
+export { DEFAULT_USER_AGENT } from "./http.js";
 
 /** Cloudflare bindings required by the ActivityPub handler and Durable Object. */
 export interface ActivityPubEnv {
@@ -326,7 +336,10 @@ const MAX_KEY_DOC_BYTES = 1024 * 1024;
  * key, and have the verifier attribute it to the victim (actor impersonation),
  * since the signature is checked against *this* document's key.
  */
-function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
+function defaultKeyResolver(
+  fetchImpl: typeof fetch,
+  logger: Logger,
+): KeyResolver {
   return async (keyId: string): Promise<ResolvedKey | null> => {
     // The key IRI is the actor (or key) document URL with its fragment
     // stripped. Parse it as a URL so the fragment is removed per the URL spec
@@ -337,8 +350,12 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       keyUrl = new URL(keyId);
       keyUrl.hash = "";
     } catch {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "bad_key_id",
+      });
       return null;
     }
+    const host = hostFromUrl(keyUrl.href);
     let response: Response;
     // The URL the document was actually served from, after any redirects — the
     // binding below uses THIS, not the requested `keyId`, so an open redirect on
@@ -349,26 +366,66 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       // `safeFetch` enforces `https:`-only + a public host on the initial URL
       // and on every redirect hop (throwing `SsrfError` on any violation); a
       // rejection resolves to `null`. `timeoutMs` bounds the whole chain so a
-      // slow remote cannot stall inbox verification.
+      // slow remote cannot stall inbox verification. A descriptive `User-Agent`
+      // is sent because some hosts' anti-scraper challenge layers treat an
+      // unidentified client as a bot (see {@link DEFAULT_USER_AGENT}).
       ({ response, url: servedUrl } = await safeFetch(
         fetchImpl,
         keyUrl.href,
-        { headers: { accept: "application/activity+json" } },
+        {
+          headers: {
+            accept: "application/activity+json",
+            "user-agent": DEFAULT_USER_AGENT,
+          },
+        },
         { allowedSchemes: ["https:"], timeoutMs: 10_000 },
       ));
-    } catch {
+    } catch (error) {
+      // Covers both a network/timeout failure and `safeFetch` giving up after
+      // too many redirect hops — the latter is the shape a challenge/bot-wall
+      // that redirects a cookieless client back to itself produces.
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "fetch_error",
+        host,
+        message: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
-    if (!response.ok) return null;
+    if (!response.ok) {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "http_status",
+        host,
+        status: response.status,
+      });
+      return null;
+    }
     const doc = await readJsonCapped(response, MAX_KEY_DOC_BYTES);
-    if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "bad_shape",
+        host,
+      });
+      return null;
+    }
     const publicKey = (doc as Record<string, unknown>).publicKey;
-    if (!publicKey || typeof publicKey !== "object") return null;
+    if (!publicKey || typeof publicKey !== "object") {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "no_public_key",
+        host,
+      });
+      return null;
+    }
     const pem = (publicKey as Record<string, unknown>).publicKeyPem;
     const owner =
       (publicKey as Record<string, unknown>).owner ??
       (doc as Record<string, unknown>).id;
-    if (typeof pem !== "string" || typeof owner !== "string") return null;
+    if (typeof pem !== "string" || typeof owner !== "string") {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "bad_shape",
+        host,
+      });
+      return null;
+    }
     // Bind the key to the origin that actually served it (post-redirect): reject
     // a document that claims ownership by an actor on a different origin (the
     // impersonation vector).
@@ -378,9 +435,19 @@ function defaultKeyResolver(fetchImpl: typeof fetch): KeyResolver {
       ownerUrl = new URL(owner);
       servedOrigin = new URL(servedUrl).origin;
     } catch {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "bad_owner_url",
+        host,
+      });
       return null;
     }
-    if (ownerUrl.origin !== servedOrigin) return null;
+    if (ownerUrl.origin !== servedOrigin) {
+      logger.warn(ActivityPubLogEvent.KeyResolutionFailed, {
+        reason: "owner_origin_mismatch",
+        host,
+      });
+      return null;
+    }
     return { owner, publicKeyPem: pem };
   };
 }
@@ -450,7 +517,9 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
       1000,
     clockSkewSeconds: config.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS,
     software: config.software ?? DEFAULT_SOFTWARE,
-    keyResolver: config.keyResolver ?? defaultKeyResolver(fetchImpl),
+    keyResolver:
+      config.keyResolver ??
+      defaultKeyResolver(fetchImpl, config.logger ?? noopLogger),
     verifyInboxSignature: config.verifyInboxSignature,
     fetch: fetchImpl,
     now: config.now ?? (() => Date.now()),

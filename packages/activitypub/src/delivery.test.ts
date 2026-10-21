@@ -6,6 +6,7 @@ import {
   DeliveryBlockedError,
   type DeliveryResult,
 } from "./delivery.js";
+import { DEFAULT_USER_AGENT } from "./http.js";
 
 // A throwaway RSA key is unnecessary for the SSRF/result-classification tests;
 // only deliverActivity's success/failure path signs, so we generate one there.
@@ -104,6 +105,30 @@ describe("deliverActivity", () => {
     expect(headers.Signature).toContain('keyId="');
     expect(headers.Digest).toMatch(/^SHA-256=/);
     expect(headers.Date).toBeTruthy();
+  });
+
+  it("sends a descriptive User-Agent alongside the signed headers", async () => {
+    // Layered on top of `signRequest`'s output rather than part of the signed
+    // header set — it isn't covered by the signature, so this shouldn't touch
+    // signing at all (some peers' anti-scraper challenge layers key allow/deny
+    // rules off an unidentified UA; see `DEFAULT_USER_AGENT`).
+    const pem = await privateKeyPem();
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 202 }),
+    ) as unknown as typeof fetch;
+
+    await deliverActivity(
+      "https://remote.example/inbox",
+      JSON.stringify({ type: "Accept" }),
+      { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
+      fetchImpl,
+    );
+
+    const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["User-Agent"]).toBe(DEFAULT_USER_AGENT);
+    expect(headers.Signature).toContain('keyId="');
   });
 
   it("releases its timeout after a successful delivery", async () => {

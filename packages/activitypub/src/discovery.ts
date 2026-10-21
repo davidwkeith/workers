@@ -13,13 +13,20 @@ import { createTimeoutSignal } from "@dwk/safe-fetch";
 import { resolveHandle } from "@dwk/webfinger";
 
 import { assertPublicHttpsTarget } from "./delivery.js";
+import { DEFAULT_USER_AGENT } from "./http.js";
 
 /** Whether a string looks like a handle rather than an IRI. */
 export function isHandleShaped(value: string): boolean {
   return !/^https?:\/\//i.test(value);
 }
 
-/** Wrap a fetch so every request target passes the outbound SSRF guard. */
+/**
+ * Wrap a fetch so every request target passes the outbound SSRF guard and
+ * carries a descriptive `User-Agent` (a caller-set one, if any, wins — see
+ * {@link DEFAULT_USER_AGENT}). Covers both the WebFinger lookup in
+ * {@link resolveHandleGuarded} (which otherwise has no header-customization
+ * seam of its own) and the actor fetch in {@link fetchActorGuarded}.
+ */
 export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
   return (input, init) => {
     const url =
@@ -29,7 +36,10 @@ export function guardedFetch(fetchImpl: typeof fetch): typeof fetch {
           ? input.href
           : input.url;
     assertPublicHttpsTarget(url);
-    return fetchImpl(input, init);
+    const headers = new Headers(init?.headers);
+    if (!headers.has("user-agent"))
+      headers.set("user-agent", DEFAULT_USER_AGENT);
+    return fetchImpl(input, { ...init, headers });
   };
 }
 
