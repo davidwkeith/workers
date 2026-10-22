@@ -1,5 +1,12 @@
 # @dwk/webfinger
 
+## 1.0.0-beta.3
+
+### Patch Changes
+
+- Updated dependencies [e4f8432]
+  - @dwk/safe-fetch@1.0.0-beta.2
+
 ## 1.0.0-beta.2
 
 ### Patch Changes

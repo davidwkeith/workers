@@ -1,5 +1,14 @@
 # @dwk/activitypub
 
+## 1.0.0-beta.9
+
+### Patch Changes
+
+- e4f8432: Sign outbound `GET`s (key resolution, inbox resolution, actor-profile refresh, relayed-object verification, and the `activitypub_resolve` MCP tool's actor fetch) as the actor with draft-cavage `(request-target) host date` when `privateKeyPem` is configured. Peers in Mastodon's authorized-fetch mode, such as mastodon.social, answer unsigned actor fetches with `401`, so their Follows (and every other activity) failed verification with `key_unresolved` and Accepts to them could not resolve an inbox.
+- Updated dependencies [e4f8432]
+  - @dwk/safe-fetch@1.0.0-beta.2
+  - @dwk/webfinger@1.0.0-beta.3
+
 ## 1.0.0-beta.8
 
 ### Patch Changes

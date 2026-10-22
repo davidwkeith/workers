@@ -1,5 +1,12 @@
 # @dwk/microsub
 
+## 1.0.0-beta.6
+
+### Patch Changes
+
+- Updated dependencies [e4f8432]
+  - @dwk/safe-fetch@1.0.0-beta.2
+
 ## 1.0.0-beta.5
 
 ### Patch Changes
