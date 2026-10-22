@@ -137,7 +137,7 @@ const now = (): number => Math.floor(Date.now() / 1000);
 /**
  * Authorize a request, emitting an `AuthRejected` event on failure. The token is
  * taken from the `Authorization` header, falling back to an `access_token`
- * parameter (which Microsub clients may use), but never both.
+ * parameter (which Microsub clients may use); both may carry the same token.
  */
 async function requireAuth(
   request: Request,
@@ -149,12 +149,18 @@ async function requireAuth(
 ): Promise<AuthResult> {
   const headerToken = tokenFromHeader(request);
   const paramToken = params.get("access_token");
-  if (headerToken !== null && paramToken !== null) {
+  // The same token in both places (as Quill-family clients send it) is
+  // harmless; two different ones are ambiguous.
+  if (
+    headerToken !== null &&
+    paramToken !== null &&
+    paramToken !== headerToken
+  ) {
     return {
       ok: false,
       error: "invalid_request",
       description:
-        "the access token must be supplied via exactly one method, not both the `Authorization` header and a parameter",
+        "the `Authorization` header and the `access_token` parameter carry different access tokens",
       status: 400,
     };
   }

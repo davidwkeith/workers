@@ -605,6 +605,12 @@ and the gated upload response body.
   bearer-only clients — including micropub.rocks' default (non-DPoP) token flow
   — cannot authenticate against this endpoint; conformance is asserted only for
   DPoP-capable clients. This is an intentional deviation, not a defect.
+- **One token, at most two places.** A client may send the same token in both
+  the `Authorization` header and the `access_token` body parameter (Quill
+  does); the request is authorized as if it carried one. Two *different*
+  tokens are ambiguous and rejected `400 invalid_request` before authorization
+  ([RFC 6750 §2](https://www.rfc-editor.org/rfc/rfc6750#section-2) forbids
+  clients from using both; Micropub does not require servers to refuse it).
 - **Opt-in Bearer tokens** (`acceptBearerTokens`, default `false`). A
   deployment that also sets `@dwk/indieauth`'s `bearerTokens` policy may accept
   the unbound (no `cnf`) Bearer tokens it issues, so bearer-only clients can

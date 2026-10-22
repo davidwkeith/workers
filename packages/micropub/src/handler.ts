@@ -335,7 +335,13 @@ async function parseMultipartFields(
       `upload exceeds the ${config.maxMediaBytes}-byte limit`,
     );
   }
-  const form = await request.formData();
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    // A missing or wrong boundary, or a truncated body.
+    throw new Mf2ParseError("request body is not valid multipart/form-data");
+  }
   const textEntries: [string, string][] = [];
   const files: [string, File][] = [];
   for (const [key, value] of form) {
@@ -1270,16 +1276,17 @@ async function handleAction(
     new URL(request.url).searchParams.get("q") === "contact";
 
   // RFC 6750 §2: a client MUST NOT use more than one method to transmit the
-  // token. Reject — before authorizing — when the token is present in BOTH the
-  // `Authorization` header and the request body.
+  // token. Quill sends the same token in both the `Authorization` header and
+  // the body, which is harmless, so only two *different* tokens are rejected
+  // (before authorizing): which one the client meant is ambiguous.
   const headerToken = tokenFromHeader(request);
-  if (headerToken !== null && parsed.token) {
+  if (headerToken !== null && parsed.token && parsed.token !== headerToken) {
     emit(config, "warn", MicropubLogEvent.RequestRejected, {
       reason: "multiple_token_methods",
     });
     return error(
       "invalid_request",
-      "the access token must be supplied via exactly one method, not both the `Authorization` header and the request body",
+      "the `Authorization` header and the request body carry different access tokens",
       400,
     );
   }
