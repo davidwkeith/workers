@@ -1,5 +1,12 @@
 # @dwk/microsub
 
+## 1.0.0-beta.4
+
+### Patch Changes
+
+- Updated dependencies [c8c487b]
+  - @dwk/indieauth@1.0.0-beta.4
+
 ## 1.0.0-beta.3
 
 ### Minor Changes
