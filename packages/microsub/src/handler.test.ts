@@ -727,6 +727,23 @@ describe("opt-in Bearer tokens", () => {
     ).toBe(401);
   });
 
+  it("accepts the same token in the header and the parameter, never two different ones", async () => {
+    const { env: testEnv } = makeEnv();
+    const handler = createMicrosub({
+      baseUrl: BASE,
+      me: ME,
+      acceptBearerTokens: true,
+    });
+    const { token } = await mintBearerToken(testEnv, "read");
+    const { token: other } = await mintBearerToken(testEnv, "read");
+    const withParam = (param: string) =>
+      new Request(`${MICROSUB}?action=channels&access_token=${param}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    expect((await handler(withParam(token), testEnv, ctx)).status).toBe(200);
+    expect((await handler(withParam(other), testEnv, ctx)).status).toBe(400);
+  });
+
   it("still requires the proof for a DPoP-bound token once opted in", async () => {
     const { env: testEnv } = makeEnv();
     const handler = createMicrosub({

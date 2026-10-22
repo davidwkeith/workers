@@ -419,23 +419,56 @@ describe("@dwk/micropub create", () => {
 });
 
 describe("@dwk/micropub token transmission method", () => {
-  it("rejects a token sent in both the header and the body (RFC 6750 §2)", async () => {
+  it("accepts the same token in both the header and the body, as Quill sends it", async () => {
     const minted = await mintToken("create");
-    const proof = await makeProof(minted.key, "POST", MICROPUB, {
-      ath: await sha256Base64url(minted.token),
-    });
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "same token twice"],
+          ["access_token", minted.token],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects different tokens in the header and the body (RFC 6750 §2)", async () => {
+    const minted = await mintToken("create");
+    const other = await mintToken("create");
+    const res = await handler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: await authHeaders(minted, "POST", MICROPUB),
+        body: new URLSearchParams([
+          ["h", "entry"],
+          ["content", "two tokens"],
+          ["access_token", other.token],
+        ]),
+      }),
+      harness,
+      ctx,
+    );
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("answers a malformed multipart body 400, not 500", async () => {
+    const minted = await mintToken("create");
     const res = await handler(
       new Request(MICROPUB, {
         method: "POST",
         headers: {
-          Authorization: `DPoP ${minted.token}`,
-          DPoP: proof,
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+          "content-type": "multipart/form-data; boundary=x",
         },
-        body: new URLSearchParams([
-          ["h", "entry"],
-          ["content", "dup token"],
-          ["access_token", minted.token],
-        ]),
+        body: "h=entry&content=no+boundary",
       }),
       harness,
       ctx,
