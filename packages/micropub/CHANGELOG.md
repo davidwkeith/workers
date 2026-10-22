@@ -1,5 +1,12 @@
 # @dwk/micropub
 
+## 1.0.0-beta.5
+
+### Patch Changes
+
+- Updated dependencies [c8c487b]
+  - @dwk/indieauth@1.0.0-beta.4
+
 ## 1.0.0-beta.4
 
 ### Minor Changes
