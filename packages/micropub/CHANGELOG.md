@@ -1,5 +1,11 @@
 # @dwk/micropub
 
+## 1.0.0-beta.6
+
+### Patch Changes
+
+- 5c4d721: Accept the same access token sent in both the `Authorization` header and the `access_token` parameter, as Quill sends every post; only two different tokens are still rejected 400. A malformed `multipart/form-data` body to the Micropub endpoint now gets `400 invalid_request` instead of a 500.
+
 ## 1.0.0-beta.5
 
 ### Patch Changes
