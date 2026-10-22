@@ -66,6 +66,18 @@ export interface MicropubStore {
     properties: Record<string, unknown[]>,
     now: number,
   ): Promise<boolean>;
+  /**
+   * Append values to one of a live post's properties, skipping any it already
+   * has, in a single atomic write (no read-modify-write, so a concurrent edit
+   * is never overwritten). Leaves `updated_at` alone: recording where the
+   * post was syndicated is not an edit of it. Returns `false` if the post is
+   * unknown or deleted.
+   */
+  addPropertyValues(
+    url: string,
+    property: string,
+    values: readonly string[],
+  ): Promise<boolean>;
   /** Set a post's soft-delete flag. Returns `false` if the URL is unknown. */
   setDeleted(url: string, deleted: boolean, now: number): Promise<boolean>;
   /**
@@ -197,6 +209,31 @@ export function createMicropubStore(env: MicropubStoreEnv): MicropubStore {
         .bind(JSON.stringify(properties), now, url)
         .run();
       return result.meta.changes > 0;
+    },
+
+    async addPropertyValues(url, property, values) {
+      await ensureSchema();
+      const isLive = async () =>
+        (await db
+          .prepare(`SELECT 1 FROM posts WHERE url = ? AND deleted = 0`)
+          .bind(url)
+          .first()) !== null;
+      if (values.length === 0) return isLive();
+      const path = `$.${JSON.stringify(property)}`;
+      const results = await db.batch(
+        values.map((value) =>
+          db
+            .prepare(
+              `UPDATE posts SET properties = json_set(properties, ?1,
+                   json_insert(COALESCE(json_extract(properties, ?1), '[]'), '$[#]', ?2))
+                 WHERE url = ?3 AND deleted = 0
+                   AND NOT EXISTS (
+                     SELECT 1 FROM json_each(posts.properties, ?1) WHERE value = ?2)`,
+            )
+            .bind(path, value, url),
+        ),
+      );
+      return results.some((r) => r.meta.changes > 0) || isLive();
     },
 
     async setDeleted(url, deleted, now) {

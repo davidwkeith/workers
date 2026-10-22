@@ -6,6 +6,7 @@ import {
   createMicropub,
   createMicropubContactStore,
   createMicropubMediaStore,
+  createMicropubStore,
   createMicropubVenueStore,
 } from "./index.js";
 import type { MicropubEnv } from "./index.js";
@@ -2964,6 +2965,65 @@ describe("@dwk/micropub fediverse syndication", () => {
 
     resolveSyndication();
     await waited[0];
+  });
+
+  it("links the copy back to the post and records it as the post's syndication", async () => {
+    const OBJECT = "https://social.example/users/alice/outbox/1/object";
+    const sent: { url?: string }[] = [];
+    const waited: Promise<unknown>[] = [];
+    const waitCtx = {
+      waitUntil: (p: Promise<unknown>) => {
+        waited.push(p);
+      },
+    } as unknown as ExecutionContext;
+    const fediverseHandler = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      fediverse: {
+        publishUrl: "https://social.example/users/alice/publish",
+        publishToken: "s3cret",
+        fetch: async (_input, init) => {
+          sent.push(JSON.parse(String(init?.body)) as { url?: string });
+          return Response.json(
+            {
+              id: "https://social.example/users/alice/outbox/1",
+              object: { id: OBJECT },
+            },
+            { status: 201 },
+          );
+        },
+      },
+    });
+
+    const minted = await mintToken("create");
+    const res = await fediverseHandler(
+      new Request(MICROPUB, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(await authHeaders(minted, "POST", MICROPUB)),
+        },
+        body: JSON.stringify({
+          type: ["h-entry"],
+          properties: {
+            content: ["Hello fediverse"],
+            syndication: ["https://bsky.example/post/1"],
+            "mp-syndicate-to": [FEDIVERSE_TARGET_UID],
+          },
+        }),
+      }),
+      harness,
+      waitCtx,
+    );
+    expect(res.status).toBe(201);
+    await Promise.all(waited);
+    const location = res.headers.get("location")!;
+    expect(sent).toEqual([expect.objectContaining({ url: location })]);
+    const post = await createMicropubStore(harness).getPost(location);
+    expect(post?.properties.syndication).toEqual([
+      "https://bsky.example/post/1",
+      OBJECT,
+    ]);
   });
 });
 

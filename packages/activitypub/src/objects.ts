@@ -75,6 +75,11 @@ export interface PostInput {
   /** IRI of the object this post replies to. */
   readonly inReplyTo?: string;
   /**
+   * The post's original, human-facing URL (AS2 `url`) — e.g. the permalink of
+   * the page it was syndicated from (POSSE), which fediverse clients link to.
+   */
+  readonly url?: string;
+  /**
    * A `Group` actor IRI (community target, FEP-1b12). Emitted as `audience`
    * and added to `to`; delivery to the group's own inbox lands with phase 2
    * (#275) — until then the post still reaches followers and the public.
@@ -244,6 +249,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     sensitive?: boolean;
     attachments?: PostAttachment[];
     inReplyTo?: string;
+    url?: string;
     audience?: string;
     tags?: string[];
     to?: string[];
@@ -284,7 +290,7 @@ export function parsePostInput(value: unknown): ParsedPostInput {
     input.published = published;
   }
 
-  for (const key of ["inReplyTo", "audience"] as const) {
+  for (const key of ["inReplyTo", "url", "audience"] as const) {
     const value = record[key];
     if (value === undefined) continue;
     if (typeof value !== "string" || !isHttpUrl(value)) {
@@ -419,6 +425,7 @@ export function buildPostObject(
   if (input.summary !== undefined) object.summary = input.summary;
   if (input.sensitive !== undefined) object.sensitive = input.sensitive;
   if (input.inReplyTo !== undefined) object.inReplyTo = input.inReplyTo;
+  if (input.url !== undefined) object.url = input.url;
   if (input.audience !== undefined) object.audience = input.audience;
   if (input.bto !== undefined) object.bto = input.bto as JsonValue;
   if (input.attachments !== undefined) {

@@ -67,7 +67,7 @@ import {
   parseMediaSourceParams,
   type MediaRecord,
 } from "./media.js";
-import { syndicateEntry } from "./fediverse.js";
+import { syndicateEntry, type SyndicationResult } from "./fediverse.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
 export interface MicropubEnv extends MicropubStoreEnv, AuthEnv {
@@ -1455,6 +1455,8 @@ export async function publishPost(
       // `create` action) so a slow/unreachable fediverse peer never delays
       // the client's response; when omitted (the MCP publish tool, which has
       // no `ExecutionContext`) fall back to awaiting it inline as before.
+      // Each copy links back to the post (`url`), and the post records each
+      // copy's object IRI as a `syndication` URL once it is published.
       if (config.fediverse && commands.syndicateTo.length > 0) {
         const syndication = syndicateEntry(
           config.fediverse,
@@ -1462,7 +1464,11 @@ export async function publishPost(
           commands.syndicateTo,
           await config.syndicateTo(),
           config.logger,
-        );
+          url,
+        ).then(async (results) => {
+          await recordSyndication(store, url, results, config);
+          return results;
+        });
         if (waitUntil) {
           waitUntil(syndication);
         } else {
@@ -1482,6 +1488,27 @@ export async function publishPost(
     description: "could not allocate a unique URL for the post",
     status: 409,
   };
+}
+
+/**
+ * Add the fediverse copies' object IRIs to a post's `syndication` property
+ * (POSSE). Non-fatal like the syndication itself: a failure is logged.
+ */
+async function recordSyndication(
+  store: MicropubStore,
+  url: string,
+  results: readonly SyndicationResult[],
+  config: ResolvedConfig,
+): Promise<void> {
+  const copies = results.flatMap((r) => (r.ok && r.object ? [r.object] : []));
+  if (copies.length === 0) return;
+  try {
+    await store.addPropertyValues(url, "syndication", copies);
+  } catch (err) {
+    config.logger.warn("micropub.syndicate.record_failed", {
+      reason: String(err),
+    });
+  }
 }
 
 /** Create a post via {@link publishPost}, return `201` + `Location`. */
