@@ -182,7 +182,9 @@ follows the peer's `Group`, receives the `Accept`, then accepts the group's
 `Announce(Create(Page))`) are likewise `skipped` without the owner publish
 channel — `--publish-url` (the target's `POST <actor>/outbox`) and
 `--publish-token` (or `FEDIFY_PUBLISH_TOKEN`; the workflow derives the URL
-from `target_url` and reads the token from the `FEDIFY_PUBLISH_TOKEN` repo
+from `target_url` — which for this suite is the actor URL, defaulting to
+`https://conformance.dwk.io/users/conformance` on the weekly schedule and a
+bare dispatch — and reads the token from the `FEDIFY_PUBLISH_TOKEN` repo
 secret, which mirrors the target's `ACTIVITYPUB_PUBLISH_TOKEN` deploy
 secret). Record `activitypub-federation` -> `targets` -> `fedify` as
 `passing` once every non-skipped case passes.

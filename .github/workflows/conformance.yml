@@ -161,12 +161,12 @@ jobs:
       # Cloudflare is already this project's deploy target) forwarding to the
       # peer's port on this runner. Failure to come up is non-fatal: the
       # callback cases then report `skipped` loudly, and `webfinger` still
-      # runs.
+      # runs. Not gated on target_url: the schedule and a bare dispatch fall
+      # back to the deployed actor, and still need the callback cases.
       - name: Provision Quick Tunnel (ActivityPub)
         id: tunnel
         if: >-
           matrix.standard == 'activitypub' &&
-          inputs.target_url != '' &&
           inputs.peer_url == ''
         timeout-minutes: 3
         run: |
@@ -196,12 +196,14 @@ jobs:
       # nonsense URL that then surfaced in the job log. Resolve it here
       # instead: scoped to the one suite that reads it, with trailing slashes
       # stripped. An unset token still yields an empty value, so the publish
-      # cases report `skipped` exactly as before.
+      # cases report `skipped` exactly as before. The ActivityPub target is the
+      # actor document, not the Worker origin (the owner publish channel is
+      # `POST <actor>/outbox`), so the default is the deployed actor URL.
       - name: Resolve ActivityPub publish URL
         id: publish
         if: matrix.standard == 'activitypub'
         env:
-          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io' }}
+          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io/users/conformance' }}
           PUBLISH_TOKEN: ${{ secrets.FEDIFY_PUBLISH_TOKEN }}
         run: |
           if [ -z "$PUBLISH_TOKEN" ]; then
@@ -220,8 +222,10 @@ jobs:
           # badge, zero suites actually run). deploy-target above just
           # (re)deployed exactly this URL, on both the schedule and dispatch
           # paths, so it's the correct default whenever an operator doesn't
-          # override it.
-          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io' }}
+          # override it. ActivityPub targets the actor URL rather than the
+          # origin: Fedify's `webfinger` case resolves the target to the actor
+          # (acct:conformance@conformance.dwk.io), which the origin is not.
+          TARGET_URL: ${{ inputs.target_url || (matrix.standard == 'activitypub' && 'https://conformance.dwk.io/users/conformance' || 'https://conformance.dwk.io') }}
           # Basic credentials for the WebDAV mount (an app password minted via
           # the owner-gated endpoint); unset for the other suites.
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
