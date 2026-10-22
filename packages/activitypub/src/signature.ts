@@ -506,8 +506,13 @@ export async function signRequest(
  * draft-cavage profile, covering `(request-target) host date`. Servers running
  * Mastodon's authorized-fetch ("secure") mode answer an unsigned `GET` for an
  * actor document with `401`, so without this the inbox cannot resolve their
- * signing keys and every activity they send fails verification. Returns the
- * `Host`, `Date`, and `Signature` headers to merge into the request.
+ * signing keys and every activity they send fails verification.
+ *
+ * Returns the `date` and `signature` headers to merge into the request. `host`
+ * is signed as `url`'s host (with any non-default port, as `URL.host` keeps
+ * it) but not returned: `fetch` derives the `Host` header from the URL, so the
+ * two always agree. The signature is bound to this URL; `safeFetch` strips it
+ * on a cross-origin redirect.
  */
 export async function signGetRequest(
   url: string,
@@ -536,7 +541,7 @@ export async function signGetRequest(
     `keyId="${signer.keyId}",algorithm="${ALGORITHM}",` +
     `headers="${covered.join(" ")}",signature="${bytesToBase64(new Uint8Array(raw))}"`;
 
-  return { Host: target.host, Date: date, Signature: signatureHeader };
+  return { date, signature: signatureHeader };
 }
 
 /** Compare two `Digest` header values for the `SHA-256` algorithm. */

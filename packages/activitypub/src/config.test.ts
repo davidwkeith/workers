@@ -201,13 +201,34 @@ describe("default key resolver", () => {
     expect(seen[0]?.get("signature")).toContain(
       'headers="(request-target) host date"',
     );
-    expect(seen[0]?.get("host")).toBe("remote.example");
     expect(seen[0]?.get("accept")).toBe("application/activity+json");
 
     // Without a private key the fetch goes out unsigned, as before.
     seen.length = 0;
     await resolveConfig({ ...VALID, fetch: fetchImpl }).keyResolver(KEY_ID);
     expect(seen[0]?.has("signature")).toBe(false);
+
+    // A cross-origin redirect drops the signature: it is bound to the
+    // original target, and the new host could replay it.
+    seen.length = 0;
+    const redirecting = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers));
+        return String(input).startsWith("https://remote.example/")
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "https://other.example/users/bob" },
+            })
+          : new Response("{}");
+      },
+    ) as unknown as typeof fetch;
+    await resolveConfig({
+      ...VALID,
+      privateKeyPem,
+      fetch: redirecting,
+    }).keyResolver(KEY_ID);
+    expect(seen[0]?.has("signature")).toBe(true);
+    expect(seen[1]?.has("signature")).toBe(false);
   });
 
   function resolverWith(fetchImpl: typeof fetch) {

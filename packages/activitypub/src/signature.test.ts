@@ -336,10 +336,10 @@ describe("signGetRequest", () => {
       { keyId: "https://example.com/users/bob#main-key", privateKeyPem },
       { now: () => now },
     );
-    expect(headers.Host).toBe("remote.example");
-    expect(headers.Date).toBe(new Date(now).toUTCString());
+    expect(Object.keys(headers).sort()).toEqual(["date", "signature"]);
+    expect(headers.date).toBe(new Date(now).toUTCString());
 
-    const fields = parseSignatureHeader(headers.Signature!);
+    const fields = parseSignatureHeader(headers.signature!);
     expect(fields.keyId).toBe("https://example.com/users/bob#main-key");
     expect(fields.algorithm).toBe("rsa-sha256");
     expect(fields.headers).toBe("(request-target) host date");
@@ -349,11 +349,11 @@ describe("signGetRequest", () => {
       {
         method: "get",
         path: "/users/alice?page=1",
-        headers: new Headers({ host: headers.Host!, date: headers.Date! }),
+        headers: new Headers({ host: "remote.example", date: headers.date! }),
       },
     );
     expect(signingString).toBe(
-      `(request-target): get /users/alice?page=1\nhost: remote.example\ndate: ${headers.Date}`,
+      `(request-target): get /users/alice?page=1\nhost: remote.example\ndate: ${headers.date}`,
     );
     const publicKey = await crypto.subtle.importKey(
       "spki",

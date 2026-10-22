@@ -425,7 +425,7 @@ export interface SafeFetchOptions extends AssertPublicUrlOptions {
   /**
    * Extra header names to strip on a cross-origin redirect hop, beyond the
    * base credential set (`authorization`, `cookie`, `cookie2`,
-   * `proxy-authorization`, `set-cookie`).
+   * `proxy-authorization`, `set-cookie`, `signature`, `signature-input`).
    */
   readonly stripHeadersCrossOrigin?: readonly string[];
 }
@@ -444,6 +444,11 @@ const BASE_STRIP_HEADERS = [
   "cookie2",
   "proxy-authorization",
   "set-cookie",
+  // HTTP signatures (draft-cavage `Signature`, RFC 9421 `Signature` +
+  // `Signature-Input`) authenticate the sender, and are bound to the original
+  // target: forwarding one would let the redirect target replay it.
+  "signature",
+  "signature-input",
 ];
 
 /**
