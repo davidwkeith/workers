@@ -501,6 +501,44 @@ export async function signRequest(
   };
 }
 
+/**
+ * Sign an outbound `GET` (fetching a remote actor, key, or object) with the
+ * draft-cavage profile, covering `(request-target) host date`. Servers running
+ * Mastodon's authorized-fetch ("secure") mode answer an unsigned `GET` for an
+ * actor document with `401`, so without this the inbox cannot resolve their
+ * signing keys and every activity they send fails verification. Returns the
+ * `Host`, `Date`, and `Signature` headers to merge into the request.
+ */
+export async function signGetRequest(
+  url: string,
+  signer: SignerKey,
+  options: { readonly now?: () => number } = {},
+): Promise<Record<string, string>> {
+  const now = options.now ?? (() => Date.now());
+  const target = new URL(url);
+  const path = `${target.pathname}${target.search}`;
+  const date = new Date(now()).toUTCString();
+
+  const headers = new Headers({ host: target.host, date });
+  const covered = ["(request-target)", "host", "date"];
+  const signingString = buildSigningString(covered, {
+    method: "get",
+    path,
+    headers,
+  });
+  const key = await importPrivateKey(signer.privateKeyPem);
+  const raw = await crypto.subtle.sign(
+    RSA_PARAMS.name,
+    key,
+    new TextEncoder().encode(signingString as string) as BufferSource,
+  );
+  const signatureHeader =
+    `keyId="${signer.keyId}",algorithm="${ALGORITHM}",` +
+    `headers="${covered.join(" ")}",signature="${bytesToBase64(new Uint8Array(raw))}"`;
+
+  return { Host: target.host, Date: date, Signature: signatureHeader };
+}
+
 /** Compare two `Digest` header values for the `SHA-256` algorithm. */
 function digestsEqual(presented: string, expected: string): boolean {
   // A peer may send multiple algorithms; match the SHA-256 component only.

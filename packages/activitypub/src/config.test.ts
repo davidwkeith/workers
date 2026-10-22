@@ -159,6 +159,57 @@ describe("resolveConfig defaults and derivation", () => {
 describe("default key resolver", () => {
   const KEY_ID = "https://remote.example/users/bob#main-key";
 
+  it("signs the key fetch as the actor when a private key is configured", async () => {
+    const pair = (await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const der = new Uint8Array(
+      (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer,
+    );
+    let binary = "";
+    for (const b of der) binary += String.fromCharCode(b);
+    const privateKeyPem = `-----BEGIN PRIVATE KEY-----\n${btoa(binary)}\n-----END PRIVATE KEY-----`;
+
+    const seen: Headers[] = [];
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers));
+        return new Response(
+          JSON.stringify({
+            id: "https://remote.example/users/bob",
+            publicKey: { publicKeyPem: "REMOTE-PEM" },
+          }),
+        );
+      },
+    ) as unknown as typeof fetch;
+
+    await resolveConfig({
+      ...VALID,
+      privateKeyPem,
+      fetch: fetchImpl,
+    }).keyResolver(KEY_ID);
+    expect(seen[0]?.get("signature")).toContain(
+      'keyId="https://example.com/users/alice#main-key"',
+    );
+    expect(seen[0]?.get("signature")).toContain(
+      'headers="(request-target) host date"',
+    );
+    expect(seen[0]?.get("host")).toBe("remote.example");
+    expect(seen[0]?.get("accept")).toBe("application/activity+json");
+
+    // Without a private key the fetch goes out unsigned, as before.
+    seen.length = 0;
+    await resolveConfig({ ...VALID, fetch: fetchImpl }).keyResolver(KEY_ID);
+    expect(seen[0]?.has("signature")).toBe(false);
+  });
+
   function resolverWith(fetchImpl: typeof fetch) {
     return resolveConfig({ ...VALID, fetch: fetchImpl }).keyResolver;
   }

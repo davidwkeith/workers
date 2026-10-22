@@ -6,6 +6,7 @@ import {
   buildSigningString,
   digestHeader,
   parseSignatureHeader,
+  signGetRequest,
   signRequest,
   verifyInboxSignature,
   type InboxRequest,
@@ -323,5 +324,57 @@ describe("digestHeader", () => {
     expect(await digestHeader(new Uint8Array(0))).toBe(
       "SHA-256=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
     );
+  });
+});
+
+describe("signGetRequest", () => {
+  it("signs (request-target) host date so authorized-fetch peers accept it", async () => {
+    const url = "https://remote.example/users/alice?page=1";
+    const now = Date.UTC(2026, 9, 22, 3, 0, 0);
+    const headers = await signGetRequest(
+      url,
+      { keyId: "https://example.com/users/bob#main-key", privateKeyPem },
+      { now: () => now },
+    );
+    expect(headers.Host).toBe("remote.example");
+    expect(headers.Date).toBe(new Date(now).toUTCString());
+
+    const fields = parseSignatureHeader(headers.Signature!);
+    expect(fields.keyId).toBe("https://example.com/users/bob#main-key");
+    expect(fields.algorithm).toBe("rsa-sha256");
+    expect(fields.headers).toBe("(request-target) host date");
+
+    const signingString = buildSigningString(
+      ["(request-target)", "host", "date"],
+      {
+        method: "get",
+        path: "/users/alice?page=1",
+        headers: new Headers({ host: headers.Host!, date: headers.Date! }),
+      },
+    );
+    expect(signingString).toBe(
+      `(request-target): get /users/alice?page=1\nhost: remote.example\ndate: ${headers.Date}`,
+    );
+    const publicKey = await crypto.subtle.importKey(
+      "spki",
+      Uint8Array.from(
+        atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")),
+        (c) => c.charCodeAt(0),
+      ),
+      RSA,
+      false,
+      ["verify"],
+    );
+    const signature = Uint8Array.from(atob(fields.signature!), (c) =>
+      c.charCodeAt(0),
+    );
+    expect(
+      await crypto.subtle.verify(
+        RSA.name,
+        publicKey,
+        signature,
+        new TextEncoder().encode(signingString as string),
+      ),
+    ).toBe(true);
   });
 });

@@ -53,6 +53,7 @@ import {
   DeliveryBlockedError,
 } from "./delivery.js";
 import { DEFAULT_USER_AGENT } from "./http.js";
+import { signGetRequest } from "./signature.js";
 import type { ActivityPubEnv } from "./config.js";
 
 /** How long a seen activity `id` is remembered for dedup (7 days). */
@@ -3255,7 +3256,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         ({ response } = await safeFetch(
           fetch,
           row.target,
-          { headers: { accept: "application/activity+json" } },
+          { headers: await this.#signedGetHeaders(row.target) },
           { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
         ));
       } catch {
@@ -3360,7 +3361,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         ({ response } = await safeFetch(
           fetch,
           row.actor,
-          { headers: { accept: "application/activity+json" } },
+          { headers: await this.#signedGetHeaders(row.actor) },
           { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
         ));
       } catch {
@@ -3763,7 +3764,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       ({ response } = await safeFetch(
         fetch,
         actor,
-        { headers: { accept: "application/activity+json" } },
+        { headers: await this.#signedGetHeaders(actor) },
         { allowedSchemes: ["https:"], timeoutMs: OUTBOUND_TIMEOUT_MS },
       ));
     } catch {
@@ -3792,6 +3793,19 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     return inbox === null
       ? null
       : { inbox, sharedInbox, personalInbox: personal, actorType };
+  }
+
+  /**
+   * Headers for an outbound AS2 `GET` (actor, inbox, or relayed-object
+   * fetch), signed as this actor when it has a key: peers in Mastodon's
+   * authorized-fetch mode answer an unsigned `GET` with `401`.
+   */
+  async #signedGetHeaders(url: string): Promise<Record<string, string>> {
+    const signer = this.#deliverySigner();
+    return {
+      ...(signer ? await signGetRequest(url, signer) : {}),
+      accept: "application/activity+json",
+    };
   }
 
   #deliverySigner(): { keyId: string; privateKeyPem: string } | null {
