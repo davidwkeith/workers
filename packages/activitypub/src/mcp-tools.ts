@@ -240,6 +240,9 @@ export function createActivitypubMcpTools(
           iri,
           config.fetch,
           config.userAgent,
+          config.privateKeyPem
+            ? { keyId: config.iris.keyId, privateKeyPem: config.privateKeyPem }
+            : null,
         );
         if (!actorDoc) {
           return toolError(`actor document could not be fetched: ${iri}`);

@@ -329,6 +329,26 @@ describe("safeFetch", () => {
     expect(seen[2]?.get("accept")).toBe("text/html");
   });
 
+  it("strips HTTP signature headers on a cross-origin redirect", async () => {
+    const seen: Headers[] = [];
+    const doFetch: FetchLike = vi.fn(async (url, init) => {
+      seen.push(new Headers(init?.headers as HeadersInit));
+      return url === "https://a.example/"
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "https://b.example/cross" },
+          })
+        : new Response("ok");
+    });
+    await safeFetch(doFetch, "https://a.example/", {
+      method: "GET",
+      headers: { signature: 'keyId="k"', "signature-input": "sig1=()" },
+    });
+    expect(seen[0]?.get("signature")).toBe('keyId="k"');
+    expect(seen[1]?.get("signature")).toBeNull();
+    expect(seen[1]?.get("signature-input")).toBeNull();
+  });
+
   it("strips extra stripHeadersCrossOrigin headers on a cross-origin redirect", async () => {
     const seen: Headers[] = [];
     const doFetch: FetchLike = vi.fn(async (url, init) => {

@@ -86,6 +86,13 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   outbound fetch (key resolution, delivery, discovery) carries a configurable
   `userAgent` (default: a string identifying this package), since some peers'
   anti-scraper challenge layers treat an unidentified client as a bot.
+- Outbound `GET`s (key resolution, inbox resolution, actor-profile refresh,
+  relayed-object verification, the `activitypub_resolve` actor fetch) are
+  HTTP-signed as the actor (draft-cavage, `(request-target) host date`)
+  whenever a private key is configured: peers in Mastodon's authorized-fetch
+  mode answer an unsigned actor fetch with `401`, which would leave every
+  activity they send `key_unresolved`. `@dwk/safe-fetch` drops the signature
+  on a cross-origin redirect, since it is bound to the original target.
 - Auto-`Accept`-on-`Follow`/`Join` inbox resolution is queued, not inline
   (#220): the DO is single-threaded, so resolving a remote actor's inbox
   (an outbound fetch, up to `OUTBOUND_TIMEOUT_MS`) while handling the inbound

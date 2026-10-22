@@ -23,11 +23,13 @@ import type { ActorIris, ActorProfile } from "./as2.js";
 import { readJsonCapped } from "./discovery.js";
 import { DEFAULT_USER_AGENT } from "./http.js";
 import { ActivityPubLogEvent } from "./log.js";
-import type {
-  KeyResolver,
-  ResolvedKey,
-  VerifyResult,
-  InboxRequest,
+import {
+  signGetRequest,
+  type KeyResolver,
+  type ResolvedKey,
+  type SignerKey,
+  type VerifyResult,
+  type InboxRequest,
 } from "./signature.js";
 import type { SoftwareInfo } from "./nodeinfo.js";
 import type { ActivityPubObject } from "./object.js";
@@ -355,6 +357,7 @@ function defaultKeyResolver(
   fetchImpl: typeof fetch,
   logger: Logger,
   userAgent: string,
+  signer: SignerKey | null,
 ): KeyResolver {
   return async (keyId: string): Promise<ResolvedKey | null> => {
     // The key IRI is the actor (or key) document URL with its fragment
@@ -394,11 +397,14 @@ function defaultKeyResolver(
       // `init` and so preserves a caller-set `User-Agent`), this request is
       // built entirely by this function — there is no caller header to
       // preserve, so it's set unconditionally.
+      // Signed as this actor when it has a private key: a peer in Mastodon's
+      // authorized-fetch mode answers an unsigned key fetch with `401`.
       ({ response, url: servedUrl } = await safeFetch(
         fetchImpl,
         keyUrl.href,
         {
           headers: {
+            ...(signer ? await signGetRequest(keyUrl.href, signer) : {}),
             accept: "application/activity+json",
             "user-agent": userAgent,
           },
@@ -533,11 +539,15 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
 
   const logger = config.logger ?? noopLogger;
   const userAgent = config.userAgent ?? DEFAULT_USER_AGENT;
+  const iris = deriveIris(baseUrl, config.actor.username);
+  const signer = config.privateKeyPem
+    ? { keyId: iris.keyId, privateKeyPem: config.privateKeyPem }
+    : null;
 
   return {
     baseUrl,
     actor: config.actor,
-    iris: deriveIris(baseUrl, config.actor.username),
+    iris,
     webfinger,
     url,
     sharedInbox,
@@ -560,7 +570,8 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     software: config.software ?? DEFAULT_SOFTWARE,
     userAgent,
     keyResolver:
-      config.keyResolver ?? defaultKeyResolver(fetchImpl, logger, userAgent),
+      config.keyResolver ??
+      defaultKeyResolver(fetchImpl, logger, userAgent, signer),
     verifyInboxSignature: config.verifyInboxSignature,
     fetch: fetchImpl,
     now: config.now ?? (() => Date.now()),

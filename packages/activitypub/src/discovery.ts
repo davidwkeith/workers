@@ -13,6 +13,7 @@ import { createTimeoutSignal } from "@dwk/safe-fetch";
 import { resolveHandle } from "@dwk/webfinger";
 
 import { assertPublicHttpsTarget } from "./delivery.js";
+import { signGetRequest, type SignerKey } from "./signature.js";
 
 /** Whether a string looks like a handle rather than an IRI. */
 export function isHandleShaped(value: string): boolean {
@@ -120,17 +121,25 @@ export async function readJsonCapped(
   }
 }
 
-/** Fetch an actor document (AS2, guarded, bounded) and read its identity facts. */
+/**
+ * Fetch an actor document (AS2, guarded, bounded) and read its identity facts.
+ * Signed as `signer` when given: peers in Mastodon's authorized-fetch mode
+ * answer an unsigned actor fetch with `401`.
+ */
 export async function fetchActorGuarded(
   iri: string,
   fetchImpl: typeof fetch,
   userAgent: string,
+  signer?: SignerKey | null,
 ): Promise<ResolvedActor | null> {
   let response: Response;
   const timeout = createTimeoutSignal(undefined, 10_000);
   try {
     response = await guardedFetch(fetchImpl, userAgent)(iri, {
-      headers: { accept: "application/activity+json" },
+      headers: {
+        ...(signer ? await signGetRequest(iri, signer) : {}),
+        accept: "application/activity+json",
+      },
       signal: timeout.signal,
     });
   } catch {

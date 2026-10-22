@@ -119,10 +119,13 @@ with `key_unresolved` despite the target being reachable from elsewhere (e.g.
 `curl`), the default key resolver's log line says why: it records the actual
 failure (`activitypub.key_resolution.failed`: `reason`, `host`, and `status`
 when available) rather than only the generic `key_unresolved`
-signature-rejection reason. Two causes seen in practice:
+signature-rejection reason. Causes seen in practice:
 
 - A challenge page served to the actor-document fetch by a bot-protection
   layer in front of the peer. The `User-Agent` is the fix.
+- A `401` from a peer in Mastodon's authorized-fetch ("secure") mode, which
+  refuses unsigned actor fetches. Outbound `GET`s are signed as the actor
+  (`(request-target) host date`) when `privateKeyPem` is configured, so set it.
 - On Cloudflare, a peer whose hostname is in the Worker's **own zone** (a
   Mastodon instance on a subdomain of the site, say). A same-zone subrequest
   goes through Cloudflare's proxy with the zone's SSL/TLS encryption mode, even

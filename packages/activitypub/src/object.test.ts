@@ -546,8 +546,10 @@ async function followWith(
   username: string,
   follower: string,
   fetchImpl: (url: string | URL, init?: RequestInit) => Promise<Response>,
+  keyed = true,
 ): Promise<{ status: number; deliveries: number }> {
   const iris = deriveIris(BASE, username);
+  const overrides = keyed ? { privateKeyPem } : {};
   return runInDurableObject(stub, async (instance, state) =>
     withFetch(fetchImpl, async () => {
       const res = await instance.fetch(
@@ -555,7 +557,7 @@ async function followWith(
           method: "POST",
           headers: {
             "content-type": "application/activity+json",
-            [INTERNAL_HEADERS.config]: cfgHeader(username, { privateKeyPem }),
+            [INTERNAL_HEADERS.config]: cfgHeader(username, overrides),
           },
           body: JSON.stringify({
             id: `https://remote.example/f/${crypto.randomUUID()}`,
@@ -570,7 +572,7 @@ async function followWith(
       await instance.fetch(
         new Request(`${iris.id}/__resolve`, {
           headers: {
-            [INTERNAL_HEADERS.config]: cfgHeader(username, { privateKeyPem }),
+            [INTERNAL_HEADERS.config]: cfgHeader(username, overrides),
           },
         }),
       );
@@ -849,6 +851,38 @@ describe("auto-accept resolveInbox", () => {
     });
     expect(out.status).toBe(202);
     expect(out.deliveries).toBe(1);
+  });
+
+  it("signs the actor lookup as this actor when keys are provisioned, and only then", async () => {
+    const actorDoc = () =>
+      new Response(JSON.stringify({ id: REMOTE, inbox: `${REMOTE}/inbox` }), {
+        status: 200,
+      });
+    for (const keyed of [true, false]) {
+      const { username, iris, stub } = freshUser();
+      const lookups: Headers[] = [];
+      await followWith(
+        stub,
+        username,
+        REMOTE,
+        async (url, init) => {
+          if (String(url) === REMOTE) lookups.push(new Headers(init?.headers));
+          return actorDoc();
+        },
+        keyed,
+      );
+      expect(lookups).toHaveLength(1);
+      if (keyed) {
+        expect(lookups[0]?.get("signature")).toContain(`keyId="${iris.keyId}"`);
+        expect(lookups[0]?.get("signature")).toContain(
+          'headers="(request-target) host date"',
+        );
+        expect(lookups[0]?.has("date")).toBe(true);
+      } else {
+        expect(lookups[0]?.has("signature")).toBe(false);
+      }
+      expect(lookups[0]?.get("accept")).toBe("application/activity+json");
+    }
   });
 });
 
