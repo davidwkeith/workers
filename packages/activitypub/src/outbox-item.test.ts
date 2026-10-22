@@ -118,16 +118,39 @@ describe("outbox items", () => {
     expect((await user.get(plain.object.id, "text/html")).status).toBe(200);
   });
 
-  it("serves the latest Update of an object, and a Tombstone once deleted", async () => {
+  it("merges the owner's Updates into the object, and serves a Tombstone once deleted", async () => {
     const user = freshUser();
-    const created = await user.publish({ kind: "note", content: "v1" });
+    const created = await user.publish({
+      kind: "note",
+      content: "v1",
+      url: "https://blog.example/posts/v",
+    });
+    // A partial Update (AP §6.3) keeps the fields it doesn't name.
     await user.outbox({
       type: "Update",
       object: { id: created.object.id, type: "Note", content: "v2" },
     });
-    expect(await (await user.get(created.object.id)).json()).toMatchObject({
-      content: "v2",
+    // A blind-only Update is a private edit: never applied to the public copy.
+    await user.outbox({
+      type: "Update",
+      bto: ["https://friend.example/users/bob"],
+      object: { id: created.object.id, type: "Note", content: "private" },
     });
+    for (const iri of [created.object.id, created.id]) {
+      const body = (await (await user.get(iri)).json()) as {
+        content?: string;
+        url?: string;
+        object?: { content: string; url: string };
+      };
+      expect(body.object ?? body).toMatchObject({
+        content: "v2",
+        url: "https://blog.example/posts/v",
+      });
+    }
+    const redirect = await user.get(created.object.id, "text/html");
+    expect(redirect.headers.get("location")).toBe(
+      "https://blog.example/posts/v",
+    );
 
     await user.outbox({ type: "Delete", object: created.object.id });
     for (const iri of [created.id, created.object.id]) {
@@ -135,7 +158,24 @@ describe("outbox items", () => {
       expect(gone.status).toBe(410);
       const body = (await gone.json()) as Record<string, unknown>;
       expect(body).toMatchObject({ id: iri, type: "Tombstone" });
-      expect(JSON.stringify(body)).not.toContain("v1");
+      expect(JSON.stringify(body)).not.toContain("v2");
+    }
+  });
+
+  it("varies every answer on Accept", async () => {
+    const user = freshUser();
+    const created = await user.publish({
+      kind: "note",
+      content: "x",
+      url: "https://blog.example/posts/x",
+    });
+    for (const [iri, accept] of [
+      [created.id, AS2],
+      [created.object.id, AS2],
+      [created.object.id, "text/html"],
+      [`${user.iris.outbox}/nope/object`, AS2],
+    ] as const) {
+      expect((await user.get(iri, accept)).headers.get("vary")).toBe("accept");
     }
   });
 

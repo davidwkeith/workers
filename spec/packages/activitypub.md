@@ -50,8 +50,10 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   their IRIs** (`<outbox>/<id>` and `<outbox>/<id>/object`, AP §3.1), served
   as AS2 without blind addressing. Restricted (blind-only) rows answer `404`;
   an object the owner has since `Delete`d answers `410` with a `Tombstone`
-  (for the activity too), and one they `Update`d serves its latest version. A
-  non-AS2 request (a browser) for an object with a `url` is redirected there.
+  (for the activity too), and the owner's public `Update`s to it are merged
+  in order (partial, AP §6.3; a restricted `Update` is never applied). A
+  non-AS2 request (a browser) for an object with a `url` is redirected there,
+  so every answer carries `Vary: Accept`.
 - A shaped `PostInput` may carry **`url`** (an http(s) IRI), the post's
   original human-facing page — e.g. the POSSE permalink a Micropub entry was
   syndicated from — emitted as the object's AS2 `url` so fediverse clients'

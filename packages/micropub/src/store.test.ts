@@ -190,3 +190,51 @@ describe("listPosts", () => {
     ]);
   });
 });
+
+describe("addPropertyValues", () => {
+  it("appends new values atomically, keeping concurrent edits and updated_at", async () => {
+    const store = createMicropubStore(harness);
+    await store.init();
+    const url = "https://example.com/add-values";
+    await store.insertPost({
+      url,
+      type: "h-entry",
+      properties: { content: ["v1"] },
+      now: 1,
+    });
+    // An edit lands between publishing and recording the syndication.
+    await store.updateProperties(url, { content: ["v2"] }, 2);
+    expect(
+      await store.addPropertyValues(url, "syndication", [
+        "https://a.example/1",
+      ]),
+    ).toBe(true);
+    expect(
+      await store.addPropertyValues(url, "syndication", [
+        "https://a.example/1",
+        "https://b.example/2",
+      ]),
+    ).toBe(true);
+    const post = await store.getPost(url);
+    expect(post?.properties).toEqual({
+      content: ["v2"],
+      syndication: ["https://a.example/1", "https://b.example/2"],
+    });
+    expect(post?.updatedAt).toBe(2);
+  });
+
+  it("reports unknown and deleted posts", async () => {
+    const store = createMicropubStore(harness);
+    await store.init();
+    expect(
+      await store.addPropertyValues("https://example.com/none", "x", ["y"]),
+    ).toBe(false);
+    const url = "https://example.com/add-values-deleted";
+    await store.insertPost({ url, type: "h-entry", properties: {}, now: 1 });
+    await store.setDeleted(url, true, 2);
+    expect(await store.addPropertyValues(url, "syndication", ["z"])).toBe(
+      false,
+    );
+    expect((await store.getPost(url))?.properties).toEqual({});
+  });
+});

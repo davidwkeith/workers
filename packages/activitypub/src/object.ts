@@ -383,6 +383,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // row out of the public outbox collection and the NodeInfo counts. NULL
     // (every pre-existing row) reads as public.
     this.#ensureColumn("outbox", "restricted", "INTEGER");
+    // Dereferencing an object by IRI (`#serveOutboxItem`) finds its `Create`,
+    // `Update`s and `Delete` by the embedded object's id.
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_outbox_object_id
+         ON outbox (json_extract(json, '$.object.id'))`,
+    );
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_outbox_delete_object
+         ON outbox (json_extract(json, '$.object'))
+         WHERE json_extract(json, '$.type') = 'Delete'`,
+    );
     // Owner-admin follow confirmation (#473): NULL means still awaiting the
     // owner's `Accept`; non-NULL (the timestamp) means confirmed — either
     // auto-accepted at insert time (#onFollow) or owner-triggered later
@@ -2027,29 +2038,39 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
   /**
    * Dereference an outbox activity, or the object a `Create` in it carried,
-   * by IRI. Restricted (blind-addressed) rows are never served, and served
-   * copies drop blind addressing. An object the owner has since `Delete`d
-   * answers `410` with a `Tombstone`; one they `Update`d serves its latest
-   * version (in the `Create` too). A browser asking for an object that has a
-   * human-facing `url` (POSSE: the original post) is redirected there.
+   * by IRI. Restricted (blind-addressed) rows are never served or applied,
+   * and served copies drop blind addressing. An object the owner has since
+   * `Delete`d answers `410` with a `Tombstone`; the owner's `Update`s to it
+   * are merged in order (AP §6.3: partial), in the `Create` too. A browser
+   * asking for an object that has a human-facing `url` (POSSE: the original
+   * post) is redirected there, so every answer varies on `Accept`.
    */
   #serveOutboxItem(iri: string, accept: string | null): Response {
-    const rowFor = (where: string, ...args: string[]) =>
+    const vary = { vary: "accept" };
+    const rows = (where: string, ...args: string[]) =>
       this.#sql
-        .exec<{ json: string; restricted: number | null }>(
-          `SELECT json, restricted FROM outbox WHERE ${where}
-             ORDER BY published_at DESC, seq DESC LIMIT 1`,
+        .exec<{ json: string }>(
+          `SELECT json FROM outbox WHERE ${where} AND COALESCE(restricted, 0) = 0
+             ORDER BY published_at ASC, seq ASC`,
           ...args,
         )
-        .toArray()[0];
-    const create =
-      rowFor(`id = ?`, iri) ??
-      rowFor(
-        `json_extract(json, '$.type') = 'Create' AND json_extract(json, '$.object.id') = ?`,
+        .toArray()
+        .map((row) => JSON.parse(row.json) as Record<string, JsonValue>);
+    // The lookups below are served by idx_outbox_object_id and, for a
+    // `Delete` naming its object by bare IRI, idx_outbox_delete_object.
+    const [activity] = [
+      ...rows(`id = ?`, iri),
+      ...rows(
+        `json_extract(json, '$.object.id') = ? AND json_extract(json, '$.type') = 'Create'`,
         iri,
-      );
-    if (!create || create.restricted) return text(404, "Not Found");
-    const activity = JSON.parse(create.json) as Record<string, JsonValue>;
+      ),
+    ];
+    if (!activity) {
+      return new Response("Not Found", {
+        status: 404,
+        headers: { "content-type": "text/plain; charset=utf-8", ...vary },
+      });
+    }
     const embedded = activity.object;
     const object =
       activity.type === "Create" &&
@@ -2063,47 +2084,67 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
 
     if (object) {
       const objectIri = object.id as string;
-      const deleted = rowFor(
-        `json_extract(json, '$.type') = 'Delete' AND (json_extract(json, '$.object') = ?1 OR json_extract(json, '$.object.id') = ?1)`,
-        objectIri,
-      );
+      const deleted = [
+        ...rows(
+          `json_extract(json, '$.object.id') = ? AND json_extract(json, '$.type') = 'Delete'`,
+          objectIri,
+        ),
+        ...rows(
+          `json_extract(json, '$.type') = 'Delete' AND json_extract(json, '$.object') = ?`,
+          objectIri,
+        ),
+      ][0];
       if (deleted) {
-        const at = (JSON.parse(deleted.json) as Record<string, JsonValue>)
-          .published;
-        return json(410, {
-          "@context": "https://www.w3.org/ns/activitystreams",
-          id: iri,
-          type: "Tombstone",
-          ...(wantsObject && typeof object.type === "string"
-            ? { formerType: object.type }
-            : {}),
-          ...(typeof at === "string" ? { deleted: at } : {}),
-        });
+        return json(
+          410,
+          {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            id: iri,
+            type: "Tombstone",
+            ...(wantsObject && typeof object.type === "string"
+              ? { formerType: object.type }
+              : {}),
+            ...(typeof deleted.published === "string"
+              ? { deleted: deleted.published }
+              : {}),
+          },
+          vary,
+        );
       }
-      const updated = rowFor(
-        `json_extract(json, '$.type') = 'Update' AND json_extract(json, '$.object.id') = ?`,
+      let current = object;
+      for (const update of rows(
+        `json_extract(json, '$.object.id') = ? AND json_extract(json, '$.type') = 'Update'`,
         objectIri,
-      );
-      if (updated) {
-        activity.object = (
-          JSON.parse(updated.json) as Record<string, JsonValue>
-        ).object as JsonValue;
+      )) {
+        const fields = update.object;
+        if (fields && typeof fields === "object" && !Array.isArray(fields)) {
+          current = {
+            ...current,
+            ...(fields as Record<string, JsonValue>),
+            id: objectIri,
+          };
+        }
       }
+      activity.object = current;
     }
     const served = withoutBlindAddressing(activity);
-    if (!wantsObject) return json(200, served);
+    if (!wantsObject) return json(200, served, vary);
     const current = served.object as Record<string, JsonValue>;
     if (!wantsActivityJson(accept) && typeof current.url === "string") {
       return new Response(null, {
         status: 302,
-        headers: { location: current.url },
+        headers: { location: current.url, ...vary },
       });
     }
-    return json(200, {
-      "@context":
-        activity["@context"] ?? "https://www.w3.org/ns/activitystreams",
-      ...current,
-    });
+    return json(
+      200,
+      {
+        "@context":
+          activity["@context"] ?? "https://www.w3.org/ns/activitystreams",
+        ...current,
+      },
+      vary,
+    );
   }
 
   #serveCollection(

@@ -1458,15 +1458,17 @@ export async function publishPost(
       // Each copy links back to the post (`url`), and the post records each
       // copy's object IRI as a `syndication` URL once it is published.
       if (config.fediverse && commands.syndicateTo.length > 0) {
-        const postUrl = url;
         const syndication = syndicateEntry(
           config.fediverse,
           mf2,
           commands.syndicateTo,
           await config.syndicateTo(),
           config.logger,
-          postUrl,
-        ).then((results) => recordSyndication(store, postUrl, results, config));
+          url,
+        ).then(async (results) => {
+          await recordSyndication(store, url, results, config);
+          return results;
+        });
         if (waitUntil) {
           waitUntil(syndication);
         } else {
@@ -1497,27 +1499,16 @@ async function recordSyndication(
   url: string,
   results: readonly SyndicationResult[],
   config: ResolvedConfig,
-): Promise<SyndicationResult[]> {
+): Promise<void> {
   const copies = results.flatMap((r) => (r.ok && r.object ? [r.object] : []));
-  if (copies.length === 0) return [...results];
+  if (copies.length === 0) return;
   try {
-    const post = await store.getPost(url);
-    if (!post || post.deleted) return [...results];
-    const existing = post.properties.syndication ?? [];
-    const added = copies.filter((copy) => !existing.includes(copy));
-    if (added.length > 0) {
-      await store.updateProperties(
-        url,
-        { ...post.properties, syndication: [...existing, ...added] },
-        Math.floor(Date.now() / 1000),
-      );
-    }
+    await store.addPropertyValues(url, "syndication", copies);
   } catch (err) {
     config.logger.warn("micropub.syndicate.record_failed", {
       reason: String(err),
     });
   }
-  return [...results];
 }
 
 /** Create a post via {@link publishPost}, return `201` + `Location`. */

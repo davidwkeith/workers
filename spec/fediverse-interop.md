@@ -257,7 +257,8 @@ the clients:
   the micropub → outbox seam both specs already reserve. The post carries its
   permalink as `url`, so each copy links back to the original, and once a copy
   is published the entry records its object IRI as a `syndication` URL
-  (POSSE's `u-syndication`).
+  (POSSE's `u-syndication`), appended atomically so a concurrent edit is
+  kept, and without touching the post's `updated` time.
 - **`@dwk/mcp`**: a v3 tool contribution `activitypub_publish` (write-scoped,
   distinct from the read-only `activitypub_list_inbox`) taking `PostInput`,
   plus `audience` listing folded into existing reads. Agent-operable posting
