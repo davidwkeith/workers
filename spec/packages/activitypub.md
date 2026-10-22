@@ -79,7 +79,8 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   (`activitypub.key_resolution.failed`: `reason`, `host`, `status` when
   available) rather than only the generic rejection reason, since
   `key_unresolved` alone doesn't distinguish a network error from a
-  challenge/redirect loop.
+  challenge/redirect loop (or, on Cloudflare, a same-zone key fetch looped by
+  the zone's Flexible SSL/TLS mode — see the package README).
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request. Every
   outbound fetch (key resolution, delivery, discovery) carries a configurable

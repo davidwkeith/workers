@@ -116,12 +116,20 @@ some peers — and the anti-scraper challenge layers (e.g.
 hosts run in front of federated software — treat an unidentified client as a
 bot. If signature verification against a specific peer consistently fails
 with `key_unresolved` despite the target being reachable from elsewhere (e.g.
-`curl`), suspect exactly this: a challenge page served to the actor-document
-fetch, typically visible as a redirect back to the same URL. The default key
-resolver logs the actual failure (`activitypub.key_resolution.failed`:
-`reason`, `host`, and `status` when available) rather than only the generic
-`key_unresolved` signature-rejection reason, so `wrangler tail` should show
-which of the two it is.
+`curl`), the default key resolver's log line says why: it records the actual
+failure (`activitypub.key_resolution.failed`: `reason`, `host`, and `status`
+when available) rather than only the generic `key_unresolved`
+signature-rejection reason. Two causes seen in practice:
+
+- A challenge page served to the actor-document fetch by a bot-protection
+  layer in front of the peer. The `User-Agent` is the fix.
+- On Cloudflare, a peer whose hostname is in the Worker's **own zone** (a
+  Mastodon instance on a subdomain of the site, say). A same-zone subrequest
+  goes through Cloudflare's proxy with the zone's SSL/TLS encryption mode, even
+  for a DNS-only record, so under **Flexible** the origin's HTTP→HTTPS redirect
+  loops back to the same URL (`too_many_redirects`). The fix is **Full
+  (strict)** on the zone; no `User-Agent` changes it
+  ([dwk.io#62](https://github.com/davidwkeith/dwk.io/pull/62)).
 
 ## Delivery safety
 
