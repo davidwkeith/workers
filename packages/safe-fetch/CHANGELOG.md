@@ -1,5 +1,11 @@
 # @dwk/safe-fetch
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- e4f8432: Strip HTTP signature headers (`Signature`, `Signature-Input`) on a cross-origin redirect, alongside the existing credential headers. A signature is bound to its original target, so forwarding it would let the redirect target replay it.
+
 ## 1.0.0-beta.1
 
 ### Major Changes
