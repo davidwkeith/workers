@@ -516,6 +516,14 @@ export function createActivityPub(
     ) {
       return forwardToDo(resolved, env, request.url, { method });
     }
+    // An outbox activity or its object, dereferenced by IRI.
+    if (path.startsWith(`${outboxPath}/`)) {
+      const accept = request.headers.get("accept");
+      return forwardToDo(resolved, env, request.url, {
+        method,
+        ...(accept ? { extra: { accept } } : {}),
+      });
+    }
     if (path === inboxPath || path === outboxPath) {
       // Non-GET/POST on a collection: let the DO answer 405.
       return forwardToDo(resolved, env, request.url, { method });

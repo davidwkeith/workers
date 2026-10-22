@@ -67,7 +67,7 @@ import {
   parseMediaSourceParams,
   type MediaRecord,
 } from "./media.js";
-import { syndicateEntry } from "./fediverse.js";
+import { syndicateEntry, type SyndicationResult } from "./fediverse.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
 export interface MicropubEnv extends MicropubStoreEnv, AuthEnv {
@@ -1455,14 +1455,18 @@ export async function publishPost(
       // `create` action) so a slow/unreachable fediverse peer never delays
       // the client's response; when omitted (the MCP publish tool, which has
       // no `ExecutionContext`) fall back to awaiting it inline as before.
+      // Each copy links back to the post (`url`), and the post records each
+      // copy's object IRI as a `syndication` URL once it is published.
       if (config.fediverse && commands.syndicateTo.length > 0) {
+        const postUrl = url;
         const syndication = syndicateEntry(
           config.fediverse,
           mf2,
           commands.syndicateTo,
           await config.syndicateTo(),
           config.logger,
-        );
+          postUrl,
+        ).then((results) => recordSyndication(store, postUrl, results, config));
         if (waitUntil) {
           waitUntil(syndication);
         } else {
@@ -1482,6 +1486,38 @@ export async function publishPost(
     description: "could not allocate a unique URL for the post",
     status: 409,
   };
+}
+
+/**
+ * Add the fediverse copies' object IRIs to a post's `syndication` property
+ * (POSSE). Non-fatal like the syndication itself: a failure is logged.
+ */
+async function recordSyndication(
+  store: MicropubStore,
+  url: string,
+  results: readonly SyndicationResult[],
+  config: ResolvedConfig,
+): Promise<SyndicationResult[]> {
+  const copies = results.flatMap((r) => (r.ok && r.object ? [r.object] : []));
+  if (copies.length === 0) return [...results];
+  try {
+    const post = await store.getPost(url);
+    if (!post || post.deleted) return [...results];
+    const existing = post.properties.syndication ?? [];
+    const added = copies.filter((copy) => !existing.includes(copy));
+    if (added.length > 0) {
+      await store.updateProperties(
+        url,
+        { ...post.properties, syndication: [...existing, ...added] },
+        Math.floor(Date.now() / 1000),
+      );
+    }
+  } catch (err) {
+    config.logger.warn("micropub.syndicate.record_failed", {
+      reason: String(err),
+    });
+  }
+  return [...results];
 }
 
 /** Create a post via {@link publishPost}, return `201` + `Location`. */

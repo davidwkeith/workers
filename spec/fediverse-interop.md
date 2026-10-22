@@ -254,7 +254,10 @@ the clients:
   `content` → `article`, and a **syndication target per followed community**
   (`q=syndicate-to` advertising `{uid: <group IRI>, name: "!birding@lemmy.ml"}`;
   `mp-syndicate-to` → a `page` post with that `audience`). This finally wires
-  the micropub → outbox seam both specs already reserve.
+  the micropub → outbox seam both specs already reserve. The post carries its
+  permalink as `url`, so each copy links back to the original, and once a copy
+  is published the entry records its object IRI as a `syndication` URL
+  (POSSE's `u-syndication`).
 - **`@dwk/mcp`**: a v3 tool contribution `activitypub_publish` (write-scoped,
   distinct from the read-only `activitypub_list_inbox`) taking `PostInput`,
   plus `audience` listing folded into existing reads. Agent-operable posting

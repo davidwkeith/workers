@@ -54,6 +54,8 @@ export interface FediversePost {
   }[];
   readonly audience?: string;
   readonly tags?: readonly string[];
+  /** The entry's permalink, which the fediverse copy links back to (AS2 `url`). */
+  readonly url?: string;
 }
 
 /** First value of an mf2 property, when it is a plain string. */
@@ -127,7 +129,7 @@ function attachmentsOf(
  */
 export function entryToFediversePost(
   mf2: Mf2Object,
-  options: { readonly audience?: string } = {},
+  options: { readonly audience?: string; readonly url?: string } = {},
 ): FediversePost | string {
   if (!mf2.type.includes("h-entry")) {
     return "only h-entry posts syndicate to the fediverse";
@@ -162,6 +164,7 @@ export function entryToFediversePost(
     ...(attachments !== undefined ? { attachments } : {}),
     ...(options.audience !== undefined ? { audience: options.audience } : {}),
     ...(tags.length > 0 ? { tags } : {}),
+    ...(options.url !== undefined ? { url: options.url } : {}),
   };
 }
 
@@ -171,7 +174,33 @@ export interface SyndicationResult {
   readonly ok: boolean;
   /** The created activity IRI (the publish endpoint's Location), on success. */
   readonly location?: string;
+  /**
+   * The created object's IRI (the response body's `object.id`), on success:
+   * the fediverse copy, recorded as the entry's `syndication`.
+   */
+  readonly object?: string;
   readonly error?: string;
+}
+
+/** The `object.id` of the `Create` a publish answered with, if it has one. */
+async function createdObjectId(
+  response: Response,
+): Promise<string | undefined> {
+  try {
+    const body = (await response.json()) as { object?: unknown };
+    const object = body.object;
+    const id =
+      typeof object === "string"
+        ? object
+        : object && typeof object === "object"
+          ? (object as { id?: unknown }).id
+          : undefined;
+    if (typeof id !== "string") return undefined;
+    const protocol = new URL(id).protocol;
+    return protocol === "https:" || protocol === "http:" ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Deliver one mapped post to the ActivityPub publish endpoint. */
@@ -207,12 +236,13 @@ export async function deliverFediversePost(
         error: `publish endpoint answered ${response.status}: ${reason}`,
       };
     }
+    const location = response.headers.get("location");
+    const object = await createdObjectId(response);
     return {
       target,
       ok: true,
-      ...(response.headers.get("location")
-        ? { location: response.headers.get("location") as string }
-        : {}),
+      ...(location ? { location } : {}),
+      ...(object ? { object } : {}),
     };
   } catch (err) {
     return { target, ok: false, error: String(err) };
@@ -226,6 +256,7 @@ export async function deliverFediversePost(
  * as a community (`Group` IRI) target. Unknown uids are ignored (they may
  * belong to a different syndication network). Failures are reported per
  * target and logged — a failed syndication never fails the post creation.
+ * `url`, the entry's permalink, becomes each copy's link back to it.
  */
 export async function syndicateEntry(
   config: FediverseSyndicationConfig,
@@ -233,6 +264,7 @@ export async function syndicateEntry(
   requested: readonly string[],
   advertised: readonly { readonly uid: string }[],
   logger?: Logger,
+  url?: string,
 ): Promise<SyndicationResult[]> {
   const advertisedUids = new Set(advertised.map((t) => t.uid));
   // Deliveries run in parallel (each is independently bounded and non-fatal)
@@ -245,6 +277,7 @@ export async function syndicateEntry(
       if (!isFollowersTarget && !advertisedUids.has(uid)) return null;
       const post = entryToFediversePost(mf2, {
         ...(isFollowersTarget ? {} : { audience: uid }),
+        ...(url !== undefined ? { url } : {}),
       });
       if (typeof post === "string") {
         logger?.warn("micropub.syndicate.rejected", {

@@ -46,6 +46,16 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   AS2 JSON at the actor `id`. Defaults to the `baseUrl` root (one actor per
   `baseUrl`, so the site's home page is the profile); overridable via
   `actor.url`.
+- Every outbox activity and the object its `Create` carries **dereference at
+  their IRIs** (`<outbox>/<id>` and `<outbox>/<id>/object`, AP §3.1), served
+  as AS2 without blind addressing. Restricted (blind-only) rows answer `404`;
+  an object the owner has since `Delete`d answers `410` with a `Tombstone`
+  (for the activity too), and one they `Update`d serves its latest version. A
+  non-AS2 request (a browser) for an object with a `url` is redirected there.
+- A shaped `PostInput` may carry **`url`** (an http(s) IRI), the post's
+  original human-facing page — e.g. the POSSE permalink a Micropub entry was
+  syndicated from — emitted as the object's AS2 `url` so fediverse clients'
+  "open original" links back to it.
 - When the owner sets them, the actor document federates the Mastodon 4.6
   **profile-preference flags** `showFeatured` / `showMedia` /
   `showRepliesInMedia` (toot namespace), advertising which profile tabs are

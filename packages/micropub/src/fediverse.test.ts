@@ -24,6 +24,14 @@ function post(mf2: Mf2Object, audience?: string) {
 }
 
 describe("entryToFediversePost", () => {
+  it("links back to the entry's permalink", () => {
+    const mapped = entryToFediversePost(entry({ content: ["hi"] }), {
+      url: "https://blog.example/p",
+    });
+    expect(mapped).toMatchObject({ url: "https://blog.example/p" });
+    expect(post(entry({ content: ["hi"] })).url).toBeUndefined();
+  });
+
   it("maps plain content to a note", () => {
     const mapped = post(entry({ content: ["hello"] }));
     expect(mapped.kind).toBe("note");
@@ -152,6 +160,29 @@ describe("deliverFediversePost", () => {
     );
     expect(result.ok).toBe(true);
     expect(auth).toBe("Bearer s3cret");
+  });
+
+  it("returns the created object's IRI from the response body", async () => {
+    const deliver = (body: string) =>
+      deliverFediversePost(
+        {
+          publishUrl: "https://social.example/users/alice/publish",
+          publishToken: "s3cret",
+          fetch: async () => new Response(body, { status: 201 }),
+        },
+        FEDIVERSE_TARGET_UID,
+        { kind: "note", content: "x", url: "https://blog.example/p" },
+      );
+    const ok = await deliver(
+      JSON.stringify({ object: { id: "https://social.example/o/1" } }),
+    );
+    expect(ok.object).toBe("https://social.example/o/1");
+    // A body without one (or not JSON, or not an http(s) IRI) is still a success.
+    for (const body of ["{}", "not json", '{"object":{"id":"javascript:x"}}']) {
+      const result = await deliver(body);
+      expect(result.ok).toBe(true);
+      expect(result.object).toBeUndefined();
+    }
   });
 
   it("stays non-fatal when reading a failure body itself fails", async () => {

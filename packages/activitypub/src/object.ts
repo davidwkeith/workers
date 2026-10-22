@@ -21,6 +21,7 @@ import {
   buildCollectionPage,
   objectId,
   objectType,
+  wantsActivityJson,
   type ActivityObject,
   type ActorIris,
   type JsonValue,
@@ -543,6 +544,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (path === pathOf(iris.outbox)) {
       if (method === "POST") return this.#publish(request);
       return this.#serveCollection(request, iris.outbox, "outbox");
+    }
+    // An outbox activity or its object, by IRI (AP §3.1: ids dereference).
+    if (path.startsWith(`${pathOf(iris.outbox)}/`)) {
+      if (method !== "GET") return text(405, "Method Not Allowed");
+      return this.#serveOutboxItem(
+        `${iris.outbox}${path.slice(pathOf(iris.outbox).length)}`,
+        request.headers.get("accept"),
+      );
     }
     // Owner shaped-post publish (`PostInput` → Create(Note|Article|Page)); the
     // outbox POST above stays purely AS2 (spec/fediverse-interop.md).
@@ -2015,6 +2024,87 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   // -- collections -----------------------------------------------------------
+
+  /**
+   * Dereference an outbox activity, or the object a `Create` in it carried,
+   * by IRI. Restricted (blind-addressed) rows are never served, and served
+   * copies drop blind addressing. An object the owner has since `Delete`d
+   * answers `410` with a `Tombstone`; one they `Update`d serves its latest
+   * version (in the `Create` too). A browser asking for an object that has a
+   * human-facing `url` (POSSE: the original post) is redirected there.
+   */
+  #serveOutboxItem(iri: string, accept: string | null): Response {
+    const rowFor = (where: string, ...args: string[]) =>
+      this.#sql
+        .exec<{ json: string; restricted: number | null }>(
+          `SELECT json, restricted FROM outbox WHERE ${where}
+             ORDER BY published_at DESC, seq DESC LIMIT 1`,
+          ...args,
+        )
+        .toArray()[0];
+    const create =
+      rowFor(`id = ?`, iri) ??
+      rowFor(
+        `json_extract(json, '$.type') = 'Create' AND json_extract(json, '$.object.id') = ?`,
+        iri,
+      );
+    if (!create || create.restricted) return text(404, "Not Found");
+    const activity = JSON.parse(create.json) as Record<string, JsonValue>;
+    const embedded = activity.object;
+    const object =
+      activity.type === "Create" &&
+      embedded &&
+      typeof embedded === "object" &&
+      !Array.isArray(embedded) &&
+      typeof (embedded as Record<string, JsonValue>).id === "string"
+        ? (embedded as Record<string, JsonValue>)
+        : undefined;
+    const wantsObject = activity.id !== iri;
+
+    if (object) {
+      const objectIri = object.id as string;
+      const deleted = rowFor(
+        `json_extract(json, '$.type') = 'Delete' AND (json_extract(json, '$.object') = ?1 OR json_extract(json, '$.object.id') = ?1)`,
+        objectIri,
+      );
+      if (deleted) {
+        const at = (JSON.parse(deleted.json) as Record<string, JsonValue>)
+          .published;
+        return json(410, {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: iri,
+          type: "Tombstone",
+          ...(wantsObject && typeof object.type === "string"
+            ? { formerType: object.type }
+            : {}),
+          ...(typeof at === "string" ? { deleted: at } : {}),
+        });
+      }
+      const updated = rowFor(
+        `json_extract(json, '$.type') = 'Update' AND json_extract(json, '$.object.id') = ?`,
+        objectIri,
+      );
+      if (updated) {
+        activity.object = (
+          JSON.parse(updated.json) as Record<string, JsonValue>
+        ).object as JsonValue;
+      }
+    }
+    const served = withoutBlindAddressing(activity);
+    if (!wantsObject) return json(200, served);
+    const current = served.object as Record<string, JsonValue>;
+    if (!wantsActivityJson(accept) && typeof current.url === "string") {
+      return new Response(null, {
+        status: 302,
+        headers: { location: current.url },
+      });
+    }
+    return json(200, {
+      "@context":
+        activity["@context"] ?? "https://www.w3.org/ns/activitystreams",
+      ...current,
+    });
+  }
 
   #serveCollection(
     request: Request,
