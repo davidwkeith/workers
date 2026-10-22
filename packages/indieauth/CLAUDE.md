@@ -24,6 +24,9 @@ tokens, and audience restriction via RFC 8707 resource indicators.
   exception is the opt-in `bearerTokens` policy (off by default): a token
   request with no `DPoP` header gets an unbound Bearer token (no `cnf`),
   narrowed in scope and lifetime; an invalid proof is never downgraded.
+- **Introspection is opt-in.** The RFC 7662 endpoint (IndieAuth §6.1) is served
+  and advertised only when `authorizeIntrospection` is configured, because the
+  spec requires it to demand authorization.
 - **D1 for auth state.** Authorization codes and issued tokens live in D1
   (`AUTH_DB`). Codes are single-use with short TTL.
 - **Token signing key.** `TOKEN_SIGNING_KEY` secret binding is required. Fail
