@@ -1,5 +1,11 @@
 # @dwk/activitypub
 
+## 1.0.0-beta.12
+
+### Minor Changes
+
+- 3d9232f: `actor.fields` federates profile metadata (Mastodon's profile "fields") as `PropertyValue` attachments on the actor document. URL values render as `rel="me"` links, so a peer can show them verified.
+
 ## 1.0.0-beta.11
 
 ### Patch Changes
