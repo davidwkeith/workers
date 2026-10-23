@@ -1,5 +1,11 @@
 # @dwk/micropub
 
+## 1.0.0-beta.8
+
+### Minor Changes
+
+- 46202e8: Deleting a post retracts its fediverse copies: an AS2 `Delete` goes to the actor's outbox for each `syndication` URL that is one of the actor's own outbox objects (`fediverse.outboxUrl`, defaulting to the one beside `publishUrl`). `retractFediverseCopies` is exported.
+
 ## 1.0.0-beta.7
 
 ### Minor Changes
