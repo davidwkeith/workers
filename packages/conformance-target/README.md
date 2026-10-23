@@ -44,7 +44,7 @@ Solid-OIDC in the Solid harness phase.
 
 Prereqs: the `dwk.io` zone on the Cloudflare account; `wrangler` authenticated
 (`wrangler login` locally, or `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
-in CI). All commands run from `packages/conformance-target/`.
+in CI; template: `.env.example`). All commands run from `packages/conformance-target/`.
 
 1. Create the R2 buckets and D1 databases:
 
