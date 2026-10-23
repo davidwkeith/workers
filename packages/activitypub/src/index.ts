@@ -74,6 +74,7 @@ export {
   wantsActivityJson,
   as2ContentType,
   type ActorProfile,
+  type ProfileField,
   type ActorIris,
   type ActorDocumentOptions,
   type ActivityObject,

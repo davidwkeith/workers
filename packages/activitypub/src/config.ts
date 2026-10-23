@@ -537,6 +537,34 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     }
   }
 
+  // Profile fields are published verbatim in the public actor document, so a
+  // malformed entry, or a URL carrying credentials, fails loudly here.
+  const fields = config.actor.fields;
+  if (fields !== undefined && !Array.isArray(fields)) {
+    throw new Error("@dwk/activitypub: `actor.fields` must be an array");
+  }
+  for (const field of fields ?? []) {
+    if (
+      typeof field?.name !== "string" ||
+      field.name.trim() === "" ||
+      typeof field.value !== "string" ||
+      field.value.trim() === ""
+    ) {
+      throw new Error(
+        "@dwk/activitypub: `actor.fields` entries need a non-empty `name` and `value`",
+      );
+    }
+    const value = field.value.trim();
+    if (URL.canParse(value)) {
+      const url = new URL(value);
+      if (url.username !== "" || url.password !== "") {
+        throw new Error(
+          "@dwk/activitypub: `actor.fields` URLs must not carry credentials",
+        );
+      }
+    }
+  }
+
   const logger = config.logger ?? noopLogger;
   const userAgent = config.userAgent ?? DEFAULT_USER_AGENT;
   const iris = deriveIris(baseUrl, config.actor.username);
