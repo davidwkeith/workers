@@ -63,6 +63,13 @@ CI (`.github/workflows/ci.yml`) runs, in order: **lint → format:check →
 typecheck → build → test**. All five must pass; match them locally before
 pushing.
 
+Test secrets are fixed throwaway values in each `workerd` package's
+`vitest.config.ts` (`miniflare.bindings`, e.g. `TOKEN_SIGNING_KEY` and the
+ActivityPub PEMs in `packages/conformance-target/vitest.config.ts`). No config
+points at a `wrangler.jsonc`, so no `.dev.vars` is read: tests need no secret
+file locally or in CI. Add a new package's secrets there, never to a
+`.dev.vars`.
+
 ## Architecture
 
 **Mental model:** stateless Worker front door (routing + edge token validation)
