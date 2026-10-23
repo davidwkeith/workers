@@ -604,6 +604,55 @@ describe("inbox", () => {
   });
 });
 
+describe("outbox items through the front door", () => {
+  it("hands a browser the object's redirect instead of following it", async () => {
+    const config = makeConfig({ publishToken: "s3cret" });
+    const handler = createActivityPub(config);
+    const created = (await (
+      await handler(
+        new Request(`${actorUrl(config)}/publish`, {
+          method: "POST",
+          headers: {
+            authorization: "Bearer s3cret",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            kind: "note",
+            content: "hi",
+            url: "https://blog.example/posts/hi",
+          }),
+        }),
+        testEnv,
+        ctx,
+      )
+    ).json()) as { object: { id: string } };
+
+    for (const accept of ["text/html", undefined]) {
+      const res = await handler(
+        new Request(created.object.id, {
+          ...(accept ? { headers: { accept } } : {}),
+          redirect: "manual",
+        }),
+        testEnv,
+        ctx,
+      );
+      expect(res.status, accept).toBe(302);
+      expect(res.headers.get("location")).toBe("https://blog.example/posts/hi");
+    }
+    const as2 = await handler(
+      new Request(created.object.id, {
+        headers: { accept: "application/activity+json" },
+      }),
+      testEnv,
+      ctx,
+    );
+    expect(await as2.json()).toMatchObject({
+      id: created.object.id,
+      url: "https://blog.example/posts/hi",
+    });
+  });
+});
+
 describe("publish endpoint", () => {
   it("is 404 when no publish token is configured", async () => {
     const config = makeConfig();
