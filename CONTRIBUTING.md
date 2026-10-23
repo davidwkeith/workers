@@ -150,6 +150,8 @@ right when adding or moving tests:
   `@dwk/activitypub`, `@dwk/atproto-pds`). These keep their Miniflare setup in
   a `test-harness.ts` that is excluded from the build and the published
   `files`.
+  Their test secrets are throwaway values in `miniflare.bindings` in
+  `vitest.config.ts`; no secret file (`.dev.vars`) is needed locally or in CI.
 
 ## Code conventions
 
