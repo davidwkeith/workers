@@ -1,0 +1,33 @@
+# Local secrets for `wrangler dev` (packages/conformance-target). Copy to `.dev.vars`
+# (gitignored) and fill in. Production uses `wrangler secret put` instead; see
+# README.md step 3. Deploy-time variables (wrangler auth) are in `.env.example`.
+#
+# Generate random values with `openssl rand -base64 32`. Multi-line values (the
+# PEMs) go in double quotes with real line breaks.
+
+# Overrides the production var in wrangler.jsonc so URLs point at the dev server.
+BASE_URL=http://localhost:8787
+
+TOKEN_SIGNING_KEY=
+# IndieAuth consent form password.
+CONFORMANCE_PASSWORD=
+# Owner bearer: `Authorization: Bearer …` on /admin/init, /webmention/send, pod writes.
+CONFORMANCE_ADMIN_TOKEN=
+
+# ActivityPub actor keypair:
+#   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out ap.pem
+#   openssl pkey -in ap.pem -pubout -out ap.pub.pem
+ACTIVITYPUB_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
+...
+-----END PUBLIC KEY-----"
+ACTIVITYPUB_PRIVATE_KEY_PEM="-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----"
+# Optional: enables owner publishing (POST <actor>/outbox, /publish).
+ACTIVITYPUB_PUBLISH_TOKEN=
+
+ATPROTO_PASSWORD=
+ATPROTO_JWT_SECRET=
+
+# P-256 private JWK, one line, single-quoted (README.md step 3 has the node one-liner).
+VC_SIGNING_KEY='{"kty":"EC","crv":"P-256","x":"…","y":"…","d":"…"}'

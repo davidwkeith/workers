@@ -35,7 +35,8 @@ npm run dev
    Webmention, an edge Solid Pod, ActivityPub — following the
    [composition model](../../README.md#composition-model). Each package's
    [spec](../../spec/packages/) lists the bindings its `Env` fragment declares;
-   add their union to `wrangler.jsonc`.
+   add their union to `wrangler.jsonc`. Secrets go in [`.env.example`](.env.example), which
+   the Deploy button turns into prompts.
 
 ## Note on isolation
 
