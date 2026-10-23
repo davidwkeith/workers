@@ -153,6 +153,9 @@ async function forwardToDo(
   const request = new Request(url, {
     method: init.method,
     headers,
+    // A stub `fetch` follows redirects like a global `fetch`; the DO's own
+    // (an outbox object's browser redirect to its `url`) are the caller's.
+    redirect: "manual",
     ...(init.body !== undefined ? { body: init.body } : {}),
   });
   const response = await actorStub(config, env).fetch(request);
