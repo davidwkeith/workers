@@ -9,7 +9,10 @@
 import { canonicalizeProfileUrl } from "@dwk/indieauth";
 import { noopLogger, noopMetrics, type Logger, type Metrics } from "@dwk/log";
 
-import type { FediverseSyndicationConfig } from "./fediverse.js";
+import {
+  fediverseActorUrls,
+  type FediverseSyndicationConfig,
+} from "./fediverse.js";
 import type {
   MicropubContactStore,
   MicropubContactStoreEnv,
@@ -351,6 +354,8 @@ export function resolveConfig(config: MicropubConfig): ResolvedConfig {
     audienceIds.add(audience.uid);
   }
 
+  // Fail at startup, not on the first delete, if the actor can't be named.
+  if (config.fediverse) fediverseActorUrls(config.fediverse);
   return {
     me,
     micropubEndpoint,

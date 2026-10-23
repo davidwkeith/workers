@@ -33,6 +33,17 @@ export interface FediverseSyndicationConfig {
   readonly publishUrl: string;
   /** The `@dwk/activitypub` `publishToken` authorizing owner publishes. */
   readonly publishToken: string;
+  /**
+   * The actor IRI, whose `/followers` a retraction `Delete` is addressed to.
+   * Defaults to {@link publishUrl} without its trailing `/publish`; required
+   * when `publishUrl` doesn't end in `/publish`.
+   */
+  readonly actorUrl?: string;
+  /**
+   * The actor's raw AS2 outbox, where a deleted entry's copies are retracted
+   * with a `Delete`. Defaults to `<actorUrl>/outbox`.
+   */
+  readonly outboxUrl?: string;
   /** Transport override (tests); defaults to global `fetch`. */
   readonly fetch?: typeof fetch;
 }
@@ -297,4 +308,88 @@ export async function syndicateEntry(
     }),
   );
   return outcomes.filter((r): r is SyndicationResult => r !== null);
+}
+
+/**
+ * The actor and outbox a retraction goes to. Throws when neither is
+ * configured and `publishUrl` doesn't name them (`<actor>/publish`), so a
+ * misconfiguration fails at startup rather than addressing the wrong actor.
+ */
+export function fediverseActorUrls(config: FediverseSyndicationConfig): {
+  readonly actor: string;
+  readonly outbox: string;
+} {
+  const actor =
+    config.actorUrl ??
+    (config.publishUrl.endsWith("/publish")
+      ? config.publishUrl.slice(0, -"/publish".length)
+      : undefined);
+  if (actor === undefined) {
+    throw new Error(
+      "@dwk/micropub: `fediverse.actorUrl` is required when `fediverse.publishUrl` doesn't end in `/publish`",
+    );
+  }
+  return { actor, outbox: config.outboxUrl ?? `${actor}/outbox` };
+}
+
+/** One retraction attempt's outcome, for logging. */
+export interface RetractionResult {
+  readonly object: string;
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
+/**
+ * Retract a deleted entry's fediverse copies: POST an AS2 `Delete` to the
+ * actor's outbox for each `syndication` URL that is one of the actor's own
+ * outbox objects (other sites' copies are left to them). Addressed like the
+ * copies (the public and the followers), so followers' servers drop them.
+ * Non-fatal like syndication: failures are reported and logged.
+ */
+export async function retractFediverseCopies(
+  config: FediverseSyndicationConfig,
+  syndication: readonly unknown[],
+  logger?: Logger,
+): Promise<RetractionResult[]> {
+  const { actor, outbox } = fediverseActorUrls(config);
+  const copies = syndication.filter(
+    (s): s is string => typeof s === "string" && s.startsWith(`${outbox}/`),
+  );
+  const fetchImpl = config.fetch ?? fetch;
+  return Promise.all(
+    copies.map(async (object): Promise<RetractionResult> => {
+      try {
+        const response = await fetchImpl(outbox, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${config.publishToken}`,
+            "content-type": "application/activity+json",
+          },
+          body: JSON.stringify({
+            "@context": "https://www.w3.org/ns/activitystreams",
+            type: "Delete",
+            object,
+            to: ["https://www.w3.org/ns/activitystreams#Public"],
+            cc: [`${actor}/followers`],
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (response.ok) return { object, ok: true };
+        const result = {
+          object,
+          ok: false,
+          error: `outbox answered ${response.status}`,
+        };
+        logger?.warn("micropub.syndicate.retract_failed", {
+          reason: result.error,
+        });
+        return result;
+      } catch (err) {
+        logger?.warn("micropub.syndicate.retract_failed", {
+          reason: String(err),
+        });
+        return { object, ok: false, error: String(err) };
+      }
+    }),
+  );
 }

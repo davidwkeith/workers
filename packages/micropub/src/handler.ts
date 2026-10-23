@@ -67,7 +67,11 @@ import {
   parseMediaSourceParams,
   type MediaRecord,
 } from "./media.js";
-import { syndicateEntry, type SyndicationResult } from "./fediverse.js";
+import {
+  retractFediverseCopies,
+  syndicateEntry,
+  type SyndicationResult,
+} from "./fediverse.js";
 
 /** Cloudflare bindings required by the Micropub handler. */
 export interface MicropubEnv extends MicropubStoreEnv, AuthEnv {
@@ -1342,7 +1346,7 @@ async function handleAction(
     case "update":
       return doUpdate(parsed.url, rawJson, isJson, config, store);
     case "delete":
-      return doDelete(parsed.url, config, store);
+      return doDelete(parsed.url, config, store, waitUntil);
     case "undelete":
       return doUndelete(parsed.url, config, store);
     default:
@@ -1611,11 +1615,18 @@ async function doUpdate(
   return noContent();
 }
 
-/** Soft-delete a post. */
+/**
+ * Soft-delete a post, and retract its fediverse copies (its `syndication`
+ * URLs that are the actor's outbox objects) with a `Delete`, in the
+ * background when `waitUntil` is available. Undelete does not republish them,
+ * and a delete racing a create's still-running syndication finds no copy
+ * recorded yet, so that copy stays.
+ */
 async function doDelete(
   url: string | undefined,
   config: ResolvedConfig,
   store: MicropubStore,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Response> {
   if (!url) {
     emit(config, "warn", MicropubLogEvent.RequestRejected, {
@@ -1623,9 +1634,23 @@ async function doDelete(
     });
     return error("invalid_request", "`url` is required for `delete`", 400);
   }
+  // Read the copies before deleting: once deleted, the post is still
+  // readable, but `post.deleted` below tells a fresh delete from a repeat.
+  const post = config.fediverse ? await store.getPost(url) : null;
   const ok = await store.setDeleted(url, true, Math.floor(Date.now() / 1000));
   if (!ok) return error("invalid_request", "no post exists at that URL", 404);
   emit(config, "info", MicropubLogEvent.ActionCompleted, { action: "delete" });
+  const syndication =
+    post && !post.deleted ? post.properties.syndication : undefined;
+  if (config.fediverse && syndication && syndication.length > 0) {
+    const retraction = retractFediverseCopies(
+      config.fediverse,
+      syndication,
+      config.logger,
+    );
+    if (waitUntil) waitUntil(retraction);
+    else await retraction;
+  }
   return noContent();
 }
 

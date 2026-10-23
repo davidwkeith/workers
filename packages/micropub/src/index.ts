@@ -46,9 +46,12 @@ export {
   entryToFediversePost,
   deliverFediversePost,
   syndicateEntry,
+  retractFediverseCopies,
+  fediverseActorUrls,
   type FediverseSyndicationConfig,
   type FediversePost,
   type SyndicationResult,
+  type RetractionResult,
 } from "./fediverse.js";
 
 export {

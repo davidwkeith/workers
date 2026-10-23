@@ -3025,6 +3025,79 @@ describe("@dwk/micropub fediverse syndication", () => {
       OBJECT,
     ]);
   });
+
+  it("retracts the fediverse copy when the post is deleted", async () => {
+    const OBJECT = "https://social.example/users/alice/outbox/2/object";
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const waited: Promise<unknown>[] = [];
+    const waitCtx = {
+      waitUntil: (p: Promise<unknown>) => {
+        waited.push(p);
+      },
+    } as unknown as ExecutionContext;
+    const fediverseHandler = createMicropub({
+      baseUrl: BASE,
+      me: ME,
+      fediverse: {
+        publishUrl: "https://social.example/users/alice/publish",
+        publishToken: "s3cret",
+        fetch: async (input, init) => {
+          calls.push({
+            url: String(input),
+            body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+          });
+          return Response.json({ object: { id: OBJECT } }, { status: 201 });
+        },
+      },
+    });
+    const post = (
+      token: Awaited<ReturnType<typeof mintToken>>,
+      body: unknown,
+    ) =>
+      authHeaders(token, "POST", MICROPUB).then((auth) =>
+        fediverseHandler(
+          new Request(MICROPUB, {
+            method: "POST",
+            headers: { "content-type": "application/json", ...auth },
+            body: JSON.stringify(body),
+          }),
+          harness,
+          waitCtx,
+        ),
+      );
+
+    const created = await post(await mintToken("create"), {
+      type: ["h-entry"],
+      properties: {
+        content: ["Soon gone"],
+        syndication: ["https://bsky.example/post/2"],
+        "mp-syndicate-to": [FEDIVERSE_TARGET_UID],
+      },
+    });
+    await Promise.all(waited);
+    const location = created.headers.get("location")!;
+    calls.length = 0;
+
+    const deleted = await post(await mintToken("delete"), {
+      action: "delete",
+      url: location,
+    });
+    expect(deleted.status).toBe(204);
+    await Promise.all(waited);
+    // Only the actor's own copy is retracted, through its outbox.
+    expect(calls).toEqual([
+      {
+        url: "https://social.example/users/alice/outbox",
+        body: {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          type: "Delete",
+          object: OBJECT,
+          to: ["https://www.w3.org/ns/activitystreams#Public"],
+          cc: ["https://social.example/users/alice/followers"],
+        },
+      },
+    ]);
+  });
 });
 
 describe("@dwk/micropub opt-in Bearer tokens", () => {
