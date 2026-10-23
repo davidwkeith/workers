@@ -1,0 +1,14 @@
+# Local Worker secrets for `npm run dev` (`wrangler dev`). This starter has none:
+# @dwk/webfinger and @dwk/host-meta are stateless and configured in src/index.ts.
+#
+# Every line below is deliberately commented out. The Deploy to Cloudflare button
+# reads this file (as it does `.env.example`) and prompts for each uncommented
+# KEY= as a Worker secret. Copy to `.dev.vars` (gitignored) and uncomment there.
+#
+# Having a `.dev.vars` also stops `wrangler dev` from loading `.env` into the
+# Worker's `env`, so CLOUDFLARE_API_TOKEN in `.env` stays out of it.
+#
+# --- Composing more @dwk packages in ---
+# List the secrets their Env fragments declare (spec/packages/<name>.md) here,
+# uncommented, so the Deploy button asks for them; put local values in `.dev.vars`:
+# TOKEN_SIGNING_KEY=           # e.g. @dwk/indieauth; `openssl rand -base64 32`
