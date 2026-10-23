@@ -165,7 +165,9 @@ results checklist, and troubleshooting).
 **ActivityPub/Fedify is executable too.** The Fedify peer needs a public URL to
 receive callbacks for every case but the read-only `webfinger` one. The
 `hosted-suite` workflow **auto-provisions a Cloudflare Quick Tunnel on the
-runner** (override by passing `peer_url` at dispatch); for a local run start
+runner** (override by passing `peer_url` at dispatch) and, with no
+`target_url`, targets the conformance actor
+`https://conformance.dwk.io/users/conformance`; for a local run start
 one yourself (`cloudflared tunnel --url http://localhost:8765`):
 
 ```bash

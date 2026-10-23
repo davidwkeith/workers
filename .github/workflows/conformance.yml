@@ -166,7 +166,6 @@ jobs:
         id: tunnel
         if: >-
           matrix.standard == 'activitypub' &&
-          inputs.target_url != '' &&
           inputs.peer_url == ''
         timeout-minutes: 3
         run: |
@@ -201,7 +200,7 @@ jobs:
         id: publish
         if: matrix.standard == 'activitypub'
         env:
-          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io' }}
+          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io/users/conformance' }}
           PUBLISH_TOKEN: ${{ secrets.FEDIFY_PUBLISH_TOKEN }}
         run: |
           if [ -z "$PUBLISH_TOKEN" ]; then
@@ -220,8 +219,10 @@ jobs:
           # badge, zero suites actually run). deploy-target above just
           # (re)deployed exactly this URL, on both the schedule and dispatch
           # paths, so it's the correct default whenever an operator doesn't
-          # override it.
-          TARGET_URL: ${{ inputs.target_url || 'https://conformance.dwk.io' }}
+          # override it. ActivityPub's target is the actor, not the site root:
+          # the Fedify peer resolves `--target` with lookupObject, and the root
+          # serves HTML, so the bare host fails `webfinger`.
+          TARGET_URL: ${{ inputs.target_url || (matrix.standard == 'activitypub' && 'https://conformance.dwk.io/users/conformance' || 'https://conformance.dwk.io') }}
           # Basic credentials for the WebDAV mount (an app password minted via
           # the owner-gated endpoint); unset for the other suites.
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
