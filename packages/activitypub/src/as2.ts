@@ -49,6 +49,7 @@ export const ACTOR_CONTEXT: readonly unknown[] = [
     alsoKnownAs: { "@id": "as:alsoKnownAs", "@type": "@id" },
     // Profile metadata (Mastodon's "fields"): `attachment` entries typed
     // `schema:PropertyValue`, each a label and an HTML value.
+    // `http:` and the trailing `#` are deliberate: the IRI Mastodon uses.
     schema: "http://schema.org#",
     PropertyValue: "schema:PropertyValue",
     value: "schema:value",
@@ -195,7 +196,8 @@ export interface ActorProfile {
    * an absolute http(s) URL is rendered as a `rel="me"` link, so a peer that
    * finds a `rel="me"` link back to this actor's {@link url} on that page
    * marks it verified; any other value is escaped text. Emitted only when
-   * set and non-empty. Mastodon shows the first four.
+   * set and non-empty. Names and values are trimmed. Every entry is
+   * federated; Mastodon shows the first four by default.
    */
   readonly fields?: readonly ProfileField[];
 }
@@ -215,7 +217,9 @@ function escapeHtml(value: string): string {
 }
 
 /** A field value as the HTML Mastodon expects: a `rel="me"` link for a URL, else text. */
-function fieldValueHtml(value: string): string {
+function fieldValueHtml(raw: string): string {
+  const value = raw.trim();
+  // The label is host and path; the href keeps any query and fragment.
   const url = URL.canParse(value) ? new URL(value) : undefined;
   if (url && (url.protocol === "https:" || url.protocol === "http:")) {
     const label = `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
@@ -295,7 +299,7 @@ export function buildActorDocument(
   if (profile.fields !== undefined && profile.fields.length > 0) {
     doc.attachment = profile.fields.map((field) => ({
       type: "PropertyValue",
-      name: field.name,
+      name: field.name.trim(),
       value: fieldValueHtml(field.value),
     }));
   }

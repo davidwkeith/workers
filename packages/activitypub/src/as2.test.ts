@@ -159,6 +159,35 @@ describe("buildActorDocument", () => {
       },
       { type: "PropertyValue", name: "Pronouns", value: "he/&lt;him&gt;" },
     ]);
+    // Names and values are trimmed; a URL's query and fragment stay in the
+    // href but not the label; http: links too; any other scheme is text.
+    expect(
+      buildActorDocument(
+        IRIS,
+        {
+          username: "bob",
+          fields: [
+            { name: " Site ", value: " http://example.com/a?b=1#c " },
+            { name: "Mail", value: "mailto:bob@example.com" },
+            { name: "X", value: 'javascript:alert("1")' },
+          ],
+        },
+        "PEM",
+      ).attachment,
+    ).toEqual([
+      {
+        type: "PropertyValue",
+        name: "Site",
+        value:
+          '<a href="http://example.com/a?b=1#c" rel="me nofollow noopener" target="_blank">example.com/a</a>',
+      },
+      { type: "PropertyValue", name: "Mail", value: "mailto:bob@example.com" },
+      {
+        type: "PropertyValue",
+        name: "X",
+        value: "javascript:alert(&quot;1&quot;)",
+      },
+    ]);
     const terms = ACTOR_CONTEXT[2] as Record<string, unknown>;
     expect(terms.PropertyValue).toBe("schema:PropertyValue");
     expect(terms.value).toBe("schema:value");

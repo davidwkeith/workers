@@ -67,8 +67,11 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   entries of type `schema:PropertyValue`. A value that is an absolute
   http(s) URL is rendered as a `rel="me"` link, so a peer that finds a
   `rel="me"` link back to the actor's `url` on that page shows it verified;
-  any other value is escaped text. Entries need a non-empty `name` and
-  `value` (checked in config resolution); omitted entirely when unset.
+  any other value is escaped text. `actor.fields` must be an array of
+  entries with a non-empty `name` and `value` (trimmed on emit), and a URL
+  value must not carry credentials; config resolution checks all three.
+  Every entry is federated, though Mastodon shows only the first four by
+  default. Omitted entirely when unset.
 - Optionally serve and advertise an instance-level **shared inbox** at
   `${baseUrl}/inbox` (§4.1 / §7.1.3) via `endpoints.sharedInbox`, so large peers
   can batch-deliver. Enabled by default; the single actor is the only recipient,

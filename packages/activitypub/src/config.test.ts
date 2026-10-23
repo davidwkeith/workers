@@ -141,15 +141,25 @@ describe("resolveConfig defaults and derivation", () => {
     ).toThrow(/actor\.alsoKnownAs/);
   });
 
-  it("rejects profile fields without a name or value", () => {
+  it("rejects profile fields that aren't a list of named values, or leak credentials", () => {
     for (const field of [
       { name: "", value: "x" },
       { name: "Website", value: " " },
+      { name: "Website", value: "https://user:pass@example.com/" },
     ]) {
       expect(() =>
         resolveConfig({ ...VALID, actor: { ...VALID.actor, fields: [field] } }),
       ).toThrow(/actor\.fields/);
     }
+    expect(() =>
+      resolveConfig({
+        ...VALID,
+        actor: {
+          ...VALID.actor,
+          fields: { name: "Website", value: "x" } as never,
+        },
+      }),
+    ).toThrow(/actor\.fields/);
   });
 
   it("honors explicit overrides", () => {
