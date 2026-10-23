@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -150,6 +150,17 @@ describe("dwk-serve CLI", () => {
   });
 
   describe("main", () => {
+    // main() calls loadDwkEnv() against process.cwd(); run every case from an
+    // empty temp dir so a developer's local .env never reaches these tests.
+    let prevCwd: string;
+    beforeEach(() => {
+      prevCwd = process.cwd();
+      process.chdir(workdir());
+    });
+    afterEach(() => {
+      process.chdir(prevCwd);
+    });
+
     it("parses args, loads the config path, and starts listening", async () => {
       const path = configFile(pingConfig());
       const cap = capture();

@@ -108,6 +108,6 @@ for Cloudflare bindings.
   bindings (`secrets: { TOKEN_SIGNING_KEY, … }` in the `phase*` integration
   tests), and `env.test.ts` drives `loadDwkEnv({ cwd })` against temp dirs, so
   no secret file is needed locally or in CI. Add a new test's secrets inline
-  the same way. One leak: `cli.test.ts` calls `main()`, whose `loadDwkEnv()`
-  reads `.env`/`<domain>.env` from the working directory, so a local `.env`
-  there lands in `process.env` during that file.
+  the same way. `main()` calls `loadDwkEnv()` against `process.cwd()`, so
+  `cli.test.ts` runs every `main` case from an empty temp dir; keep new `main`
+  tests inside that `describe`.
