@@ -131,6 +131,47 @@ describe("buildActorDocument", () => {
     });
   });
 
+  it("federates profile fields as PropertyValue attachments, URLs as rel=me links", () => {
+    const doc = buildActorDocument(
+      IRIS,
+      {
+        username: "bob",
+        fields: [
+          { name: "Website", value: "https://dwk.io" },
+          { name: "Blog", value: "https://pulletsforever.com/archive" },
+          { name: "Pronouns", value: "he/<him>" },
+        ],
+      },
+      "PEM",
+    );
+    expect(doc.attachment).toEqual([
+      {
+        type: "PropertyValue",
+        name: "Website",
+        value:
+          '<a href="https://dwk.io/" rel="me nofollow noopener" target="_blank">dwk.io</a>',
+      },
+      {
+        type: "PropertyValue",
+        name: "Blog",
+        value:
+          '<a href="https://pulletsforever.com/archive" rel="me nofollow noopener" target="_blank">pulletsforever.com/archive</a>',
+      },
+      { type: "PropertyValue", name: "Pronouns", value: "he/&lt;him&gt;" },
+    ]);
+    const terms = ACTOR_CONTEXT[2] as Record<string, unknown>;
+    expect(terms.PropertyValue).toBe("schema:PropertyValue");
+    expect(terms.value).toBe("schema:value");
+    // Omitted when unset or empty.
+    expect(
+      buildActorDocument(IRIS, { username: "bob" }, "PEM").attachment,
+    ).toBeUndefined();
+    expect(
+      buildActorDocument(IRIS, { username: "bob", fields: [] }, "PEM")
+        .attachment,
+    ).toBeUndefined();
+  });
+
   it("emits type Group when the profile declares it (#376)", () => {
     const doc = buildActorDocument(
       IRIS,

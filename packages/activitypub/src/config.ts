@@ -537,6 +537,19 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     }
   }
 
+  for (const field of config.actor.fields ?? []) {
+    if (
+      typeof field?.name !== "string" ||
+      field.name.trim() === "" ||
+      typeof field.value !== "string" ||
+      field.value.trim() === ""
+    ) {
+      throw new Error(
+        "@dwk/activitypub: `actor.fields` entries need a non-empty `name` and `value`",
+      );
+    }
+  }
+
   const logger = config.logger ?? noopLogger;
   const userAgent = config.userAgent ?? DEFAULT_USER_AGENT;
   const iris = deriveIris(baseUrl, config.actor.username);

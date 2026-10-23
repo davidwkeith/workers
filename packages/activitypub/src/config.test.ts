@@ -141,6 +141,17 @@ describe("resolveConfig defaults and derivation", () => {
     ).toThrow(/actor\.alsoKnownAs/);
   });
 
+  it("rejects profile fields without a name or value", () => {
+    for (const field of [
+      { name: "", value: "x" },
+      { name: "Website", value: " " },
+    ]) {
+      expect(() =>
+        resolveConfig({ ...VALID, actor: { ...VALID.actor, fields: [field] } }),
+      ).toThrow(/actor\.fields/);
+    }
+  });
+
   it("honors explicit overrides", () => {
     const resolved = resolveConfig({
       ...VALID,

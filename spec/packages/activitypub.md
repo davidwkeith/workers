@@ -62,6 +62,13 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   **profile-preference flags** `showFeatured` / `showMedia` /
   `showRepliesInMedia` (toot namespace), advertising which profile tabs are
   exposed. Unset flags are omitted.
+- When the owner sets `actor.fields`, the actor document federates
+  **profile metadata** (Mastodon's profile "fields") as `attachment`
+  entries of type `schema:PropertyValue`. A value that is an absolute
+  http(s) URL is rendered as a `rel="me"` link, so a peer that finds a
+  `rel="me"` link back to the actor's `url` on that page shows it verified;
+  any other value is escaped text. Entries need a non-empty `name` and
+  `value` (checked in config resolution); omitted entirely when unset.
 - Optionally serve and advertise an instance-level **shared inbox** at
   `${baseUrl}/inbox` (§4.1 / §7.1.3) via `endpoints.sharedInbox`, so large peers
   can batch-deliver. Enabled by default; the single actor is the only recipient,
