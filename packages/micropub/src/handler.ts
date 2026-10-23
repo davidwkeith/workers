@@ -1618,7 +1618,9 @@ async function doUpdate(
 /**
  * Soft-delete a post, and retract its fediverse copies (its `syndication`
  * URLs that are the actor's outbox objects) with a `Delete`, in the
- * background when `waitUntil` is available. Undelete does not republish them.
+ * background when `waitUntil` is available. Undelete does not republish them,
+ * and a delete racing a create's still-running syndication finds no copy
+ * recorded yet, so that copy stays.
  */
 async function doDelete(
   url: string | undefined,
@@ -1632,6 +1634,8 @@ async function doDelete(
     });
     return error("invalid_request", "`url` is required for `delete`", 400);
   }
+  // Read the copies before deleting: once deleted, the post is still
+  // readable, but `post.deleted` below tells a fresh delete from a repeat.
   const post = config.fediverse ? await store.getPost(url) : null;
   const ok = await store.setDeleted(url, true, Math.floor(Date.now() / 1000));
   if (!ok) return error("invalid_request", "no post exists at that URL", 404);

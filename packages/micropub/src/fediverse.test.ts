@@ -4,6 +4,7 @@ import {
   FEDIVERSE_TARGET_UID,
   deliverFediversePost,
   entryToFediversePost,
+  fediverseActorUrls,
   retractFediverseCopies,
   syndicateEntry,
 } from "./fediverse.js";
@@ -274,5 +275,39 @@ describe("retractFediverseCopies", () => {
       [`${OUTBOX}/1/object`],
     );
     expect(offline[0]?.ok).toBe(false);
+  });
+});
+
+describe("fediverseActorUrls", () => {
+  it("derives the actor and outbox from publishUrl, or takes them as given", () => {
+    expect(
+      fediverseActorUrls({
+        publishUrl: "https://s.example/users/a/publish",
+        publishToken: "t",
+      }),
+    ).toEqual({
+      actor: "https://s.example/users/a",
+      outbox: "https://s.example/users/a/outbox",
+    });
+    expect(
+      fediverseActorUrls({
+        publishUrl: "https://s.example/post",
+        publishToken: "t",
+        actorUrl: "https://s.example/@a",
+        outboxUrl: "https://s.example/@a/box",
+      }),
+    ).toEqual({
+      actor: "https://s.example/@a",
+      outbox: "https://s.example/@a/box",
+    });
+  });
+
+  it("refuses a publishUrl that names no actor", () => {
+    expect(() =>
+      fediverseActorUrls({
+        publishUrl: "https://s.example/post",
+        publishToken: "t",
+      }),
+    ).toThrow(/fediverse\.actorUrl/);
   });
 });

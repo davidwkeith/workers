@@ -41,3 +41,23 @@ describe("Micropub audience configuration", () => {
     expect(resolved.audienceIds).toEqual(new Set(["family"]));
   });
 });
+
+describe("Micropub fediverse configuration", () => {
+  it("fails at startup when the fediverse actor can't be named", () => {
+    expect(() =>
+      resolveConfig({
+        ...config,
+        fediverse: { publishUrl: "https://s.example/post", publishToken: "t" },
+      }),
+    ).toThrow(/fediverse\.actorUrl/);
+    expect(
+      resolveConfig({
+        ...config,
+        fediverse: {
+          publishUrl: "https://s.example/users/a/publish",
+          publishToken: "t",
+        },
+      }).fediverse?.publishUrl,
+    ).toBe("https://s.example/users/a/publish");
+  });
+});

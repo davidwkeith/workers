@@ -105,6 +105,29 @@ const micropub = createMicropub({
 
 See the [package specification](../../spec/packages/micropub.md#locationvenue-qgeo-extension).
 
+### Fediverse syndication
+
+With `fediverse` set, `mp-syndicate-to` publishes the entry through
+[`@dwk/activitypub`](../activitypub)'s owner `POST <actor>/publish`. The copy
+links back to the entry (`url`), the entry records the copy as a `syndication`
+URL, and deleting the entry retracts it with a `Delete` to the actor's outbox.
+
+```ts
+createMicropub({
+  baseUrl: "https://example.com",
+  me: "https://example.com/",
+  fediverse: {
+    publishUrl: "https://example.com/users/alice/publish",
+    publishToken: env.ACTIVITYPUB_PUBLISH_TOKEN,
+    // Optional: derived from publishUrl when it ends in `/publish`.
+    // actorUrl: "https://example.com/users/alice",
+    // outboxUrl: "https://example.com/users/alice/outbox",
+  },
+});
+```
+
+See [`spec/fediverse-interop.md`](../../spec/fediverse-interop.md) (Capability 3).
+
 Every request is authorized by an IndieAuth access token whose scope gates the
 action (`create`, `update`, `delete`, `media`), with the DPoP proof-of-possession
 binding completed via [`@dwk/dpop`](../dpop) and revocation checked against the

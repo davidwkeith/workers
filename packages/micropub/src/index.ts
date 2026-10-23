@@ -47,6 +47,7 @@ export {
   deliverFediversePost,
   syndicateEntry,
   retractFediverseCopies,
+  fediverseActorUrls,
   type FediverseSyndicationConfig,
   type FediversePost,
   type SyndicationResult,

@@ -262,7 +262,11 @@ the clients:
   retracts those copies: Micropub POSTs an AS2 `Delete` (addressed to the
   public and the actor's followers) to the actor's outbox (`outboxUrl`,
   default beside `publishUrl`) for each `syndication` URL that is one of the
-  actor's own outbox objects. Undelete does not republish them.
+  actor's own outbox objects (the actor and outbox default from
+  `publishUrl` = `<actor>/publish`; `actorUrl`/`outboxUrl` override them,
+  and configuration fails when neither names the actor). Undelete does not
+  republish them, and a delete that races a create's background syndication
+  finds no copy recorded yet, so that copy is not retracted.
 - **`@dwk/mcp`**: a v3 tool contribution `activitypub_publish` (write-scoped,
   distinct from the read-only `activitypub_list_inbox`) taking `PostInput`,
   plus `audience` listing folded into existing reads. Agent-operable posting

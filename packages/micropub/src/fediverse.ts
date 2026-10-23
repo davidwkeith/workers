@@ -34,9 +34,14 @@ export interface FediverseSyndicationConfig {
   /** The `@dwk/activitypub` `publishToken` authorizing owner publishes. */
   readonly publishToken: string;
   /**
-   * The actor's raw AS2 outbox (`<actor>/outbox`), where a deleted entry's
-   * copies are retracted with a `Delete`. Defaults to {@link publishUrl}
-   * with its trailing `/publish` replaced by `/outbox`.
+   * The actor IRI, whose `/followers` a retraction `Delete` is addressed to.
+   * Defaults to {@link publishUrl} without its trailing `/publish`; required
+   * when `publishUrl` doesn't end in `/publish`.
+   */
+  readonly actorUrl?: string;
+  /**
+   * The actor's raw AS2 outbox, where a deleted entry's copies are retracted
+   * with a `Delete`. Defaults to `<actorUrl>/outbox`.
    */
   readonly outboxUrl?: string;
   /** Transport override (tests); defaults to global `fetch`. */
@@ -305,9 +310,26 @@ export async function syndicateEntry(
   return outcomes.filter((r): r is SyndicationResult => r !== null);
 }
 
-/** The actor's outbox: the configured one, or the one beside `/publish`. */
-function outboxUrlOf(config: FediverseSyndicationConfig): string {
-  return config.outboxUrl ?? config.publishUrl.replace(/\/publish$/, "/outbox");
+/**
+ * The actor and outbox a retraction goes to. Throws when neither is
+ * configured and `publishUrl` doesn't name them (`<actor>/publish`), so a
+ * misconfiguration fails at startup rather than addressing the wrong actor.
+ */
+export function fediverseActorUrls(config: FediverseSyndicationConfig): {
+  readonly actor: string;
+  readonly outbox: string;
+} {
+  const actor =
+    config.actorUrl ??
+    (config.publishUrl.endsWith("/publish")
+      ? config.publishUrl.slice(0, -"/publish".length)
+      : undefined);
+  if (actor === undefined) {
+    throw new Error(
+      "@dwk/micropub: `fediverse.actorUrl` is required when `fediverse.publishUrl` doesn't end in `/publish`",
+    );
+  }
+  return { actor, outbox: config.outboxUrl ?? `${actor}/outbox` };
 }
 
 /** One retraction attempt's outcome, for logging. */
@@ -329,8 +351,7 @@ export async function retractFediverseCopies(
   syndication: readonly unknown[],
   logger?: Logger,
 ): Promise<RetractionResult[]> {
-  const outbox = outboxUrlOf(config);
-  const actor = outbox.replace(/\/outbox$/, "");
+  const { actor, outbox } = fediverseActorUrls(config);
   const copies = syndication.filter(
     (s): s is string => typeof s === "string" && s.startsWith(`${outbox}/`),
   );
