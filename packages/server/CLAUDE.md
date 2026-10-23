@@ -104,3 +104,10 @@ for Cloudflare bindings.
   release the (always-null in central mode) writer-lock reference.
 - **All @dwk packages as devDeps.** The server imports all endpoint packages
   for composition but they're devDependencies since this is never published.
+- **Test secrets are inline.** Tests pass throwaway values straight into the
+  bindings (`secrets: { TOKEN_SIGNING_KEY, … }` in the `phase*` integration
+  tests), and `env.test.ts` drives `loadDwkEnv({ cwd })` against temp dirs, so
+  no secret file is needed locally or in CI. Add a new test's secrets inline
+  the same way. One leak: `cli.test.ts` calls `main()`, whose `loadDwkEnv()`
+  reads `.env`/`<domain>.env` from the working directory, so a local `.env`
+  there lands in `process.env` during that file.
