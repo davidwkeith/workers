@@ -258,7 +258,11 @@ the clients:
   permalink as `url`, so each copy links back to the original, and once a copy
   is published the entry records its object IRI as a `syndication` URL
   (POSSE's `u-syndication`), appended atomically so a concurrent edit is
-  kept, and without touching the post's `updated` time.
+  kept, and without touching the post's `updated` time. Deleting the entry
+  retracts those copies: Micropub POSTs an AS2 `Delete` (addressed to the
+  public and the actor's followers) to the actor's outbox (`outboxUrl`,
+  default beside `publishUrl`) for each `syndication` URL that is one of the
+  actor's own outbox objects. Undelete does not republish them.
 - **`@dwk/mcp`**: a v3 tool contribution `activitypub_publish` (write-scoped,
   distinct from the read-only `activitypub_list_inbox`) taking `PostInput`,
   plus `audience` listing folded into existing reads. Agent-operable posting

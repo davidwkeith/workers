@@ -4,6 +4,7 @@ import {
   FEDIVERSE_TARGET_UID,
   deliverFediversePost,
   entryToFediversePost,
+  retractFediverseCopies,
   syndicateEntry,
 } from "./fediverse.js";
 import type { Mf2Object } from "./mf2.js";
@@ -222,5 +223,56 @@ describe("deliverFediversePost", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/offline/);
+  });
+});
+
+describe("retractFediverseCopies", () => {
+  const OUTBOX = "https://social.example/users/alice/outbox";
+
+  it("deletes only the actor's own copies, through a configured outbox too", async () => {
+    const seen: string[] = [];
+    const results = await retractFediverseCopies(
+      {
+        publishUrl: "https://social.example/users/alice/publish",
+        publishToken: "s3cret",
+        outboxUrl: OUTBOX,
+        fetch: async (input, init) => {
+          seen.push(
+            `${String(input)} ${new Headers(init?.headers).get("authorization")}`,
+          );
+          return new Response(null, { status: 201 });
+        },
+      },
+      [
+        `${OUTBOX}/1/object`,
+        "https://bsky.example/post/1",
+        42,
+        `${OUTBOX}-evil/x`,
+      ],
+    );
+    expect(results).toEqual([{ object: `${OUTBOX}/1/object`, ok: true }]);
+    expect(seen).toEqual([`${OUTBOX} Bearer s3cret`]);
+  });
+
+  it("reports failures without throwing", async () => {
+    const config = (impl: typeof fetch) => ({
+      publishUrl: "https://social.example/users/alice/publish",
+      publishToken: "s3cret",
+      fetch: impl,
+    });
+    const refused = await retractFediverseCopies(
+      config(async () => new Response("no", { status: 403 })),
+      [`${OUTBOX}/1/object`],
+    );
+    expect(refused).toEqual([
+      { object: `${OUTBOX}/1/object`, ok: false, error: "outbox answered 403" },
+    ]);
+    const offline = await retractFediverseCopies(
+      config(async () => {
+        throw new Error("down");
+      }),
+      [`${OUTBOX}/1/object`],
+    );
+    expect(offline[0]?.ok).toBe(false);
   });
 });
