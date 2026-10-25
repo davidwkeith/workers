@@ -221,8 +221,8 @@
             },
             "fedify": {
               "status": "passing",
-              "report": "https://github.com/davidwkeith/workers/actions/runs/39870793175",
-              "lastRun": "2026-10-22T23:18:59Z"
+              "report": "https://github.com/davidwkeith/workers/actions/runs/40211566353",
+              "lastRun": "2026-10-25T16:26:41Z"
             },
             "pixelfed": {
               "status": "passing",
