@@ -102,7 +102,9 @@ Run workflow) with:
 | `target_url` | `https://conformance.dwk.io/dav/` |
 | `target_id`  | `cloudflare` (default)            |
 
-`target_url` must include the `/dav/` mount path, not just the domain —
+With `target_url` left empty (and on the weekly schedule) the workflow
+defaults to this mount. An explicit `target_url` must include the `/dav/`
+mount path, not just the domain —
 `run-suite.mjs` passes it straight to `litmus` with no per-standard suffix
 logic (unlike the ActivityPub path, which appends `/outbox` itself), so a
 bare domain 404s on litmus's very first `MKCOL` and the run aborts before
