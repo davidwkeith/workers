@@ -83,4 +83,14 @@ export class HostExecutionContext implements ExecutionContext {
   get exports(): Cloudflare.Exports {
     throw new Error("exports is not supported on the @dwk/server Node host");
   }
+
+  /**
+   * Cloudflare's invocation-abort API (added to `ExecutionContext` in
+   * `@cloudflare/workers-types` 5.20261021). The Node host has no per-request
+   * isolate to tear down, so, like `tracing` and `exports`, calling it throws
+   * rather than silently doing nothing.
+   */
+  abort(_reason?: unknown): void {
+    throw new Error("abort is not supported on the @dwk/server Node host");
+  }
 }
