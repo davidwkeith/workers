@@ -1407,6 +1407,34 @@ describe("Accept-on-Follow delivery", () => {
         expect(inboxCalls).toHaveLength(1);
         expect(inboxCalls[0]!["Signature-Input"]).toBeUndefined();
         expect(inboxCalls[0]!.Signature).toContain(`keyId="${iris.keyId}"`);
+
+        // Once the row is older than the 7-day TTL it is ignored (the peer is
+        // double-knocked again) and pruned on that delivery pass.
+        inboxCalls.length = 0;
+        state.storage.sql.exec(
+          "UPDATE sig_pref SET at = ?",
+          Date.now() - 7 * 24 * 60 * 60 * 1000 - 1,
+        );
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          `${REMOTE}/inbox`,
+          JSON.stringify({ type: "Update" }),
+        );
+        globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+          const headers = init?.headers as Record<string, string>;
+          inboxCalls.push(headers);
+          // The peer now accepts RFC 9421, so the first knock lands.
+          return new Response(null, { status: 202 });
+        }) as unknown as typeof fetch;
+        await deliver();
+
+        expect(inboxCalls).toHaveLength(1);
+        expect(inboxCalls[0]!["Signature-Input"]).toContain(
+          `keyid="${iris.keyId}"`,
+        );
+        expect(
+          state.storage.sql.exec("SELECT host FROM sig_pref").toArray(),
+        ).toEqual([]);
       } finally {
         globalThis.fetch = original;
       }

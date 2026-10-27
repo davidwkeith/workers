@@ -26,9 +26,9 @@ import {
   type ActorIris,
   type JsonValue,
 } from "./as2.js";
-import type { SignatureProfile } from "@dwk/http-signatures";
 import { hostFromUrl } from "@dwk/log";
 import { readBodyCapped, safeFetch } from "@dwk/safe-fetch";
+import type { SignatureProfile } from "@dwk/http-signatures";
 
 import {
   ApOutcome,
@@ -3317,9 +3317,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           signer,
           fetch,
           userAgent,
-          () => Date.now(),
-          OUTBOUND_TIMEOUT_MS,
-          preference,
+          { timeoutMs: OUTBOUND_TIMEOUT_MS, preference },
         );
         if (result.ok) {
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);

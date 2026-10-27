@@ -131,6 +131,7 @@ export {
   deliverActivity,
   assertPublicHttpsTarget,
   DeliveryBlockedError,
+  type DeliveryOptions,
   type DeliveryResult,
 } from "./delivery.js";
 

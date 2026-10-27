@@ -34,6 +34,12 @@ import {
  * second knock with draft-cavage. Mastodon answers `401`; others use `400` or
  * `403`. A `404`/`410`/`422`/`5xx` is not about the signature, so it never
  * triggers the fallback.
+ *
+ * `403` is also what a peer that blocks our domain or actor answers, so each
+ * delivery to such a peer is sent twice (both knocks fail, and the row is
+ * dropped as permanent). That doubled traffic is accepted — the same trade-off
+ * Fedify makes — rather than dropping `403`, which would leave peers that use
+ * it for signature failures unreachable.
  */
 const KNOCK_AGAIN_STATUSES: ReadonlySet<number> = new Set([400, 401, 403]);
 
@@ -95,14 +101,27 @@ export type DeliveryResult =
       readonly retryable: boolean;
     };
 
+/** Optional knobs for {@link deliverActivity}. */
+export interface DeliveryOptions {
+  /** Clock, epoch milliseconds (deterministic tests). Defaults to `Date.now`. */
+  readonly now?: () => number;
+  /** Timeout for each `POST`, in milliseconds. Defaults to 10 s. */
+  readonly timeoutMs?: number;
+  /**
+   * The signature profile the peer is known to want: `"cavage"` skips the
+   * RFC 9421 knock; anything else (including unknown) double-knocks — RFC 9421
+   * first, then draft-cavage if the first answer is in
+   * {@link KNOCK_AGAIN_STATUSES}.
+   */
+  readonly preference?: SignatureProfile;
+}
+
 /**
  * Sign and `POST` one activity to a remote inbox. A `2xx` is success; `4xx`
  * (except `408`/`429`) is a permanent failure (drop) since the peer rejected the
  * request; `5xx`, `408`, `429`, and network errors are retryable.
  *
- * `preference` is the profile the peer is known to want: `"cavage"` skips the
- * RFC 9421 knock; anything else (including unknown) double-knocks — RFC 9421
- * first, then draft-cavage if the first answer is in {@link KNOCK_AGAIN_STATUSES}.
+ * {@link DeliveryOptions.preference} selects the signing strategy — see there.
  */
 export async function deliverActivity(
   inboxUrl: string,
@@ -110,10 +129,11 @@ export async function deliverActivity(
   signer: SignerKey,
   fetchImpl: typeof fetch,
   userAgent: string,
-  now: () => number = () => Date.now(),
-  timeoutMs = 10_000,
-  preference?: SignatureProfile,
+  options: DeliveryOptions = {},
 ): Promise<DeliveryResult> {
+  const now = options.now ?? (() => Date.now());
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const { preference } = options;
   // Throws DeliveryBlockedError for an unsafe target — the caller drops the row.
   assertPublicHttpsTarget(inboxUrl);
 

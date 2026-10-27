@@ -157,8 +157,7 @@ describe("deliverActivity", () => {
         { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
         fetchImpl,
         TEST_UA,
-        undefined,
-        10,
+        { timeoutMs: 10 },
       );
       await vi.advanceTimersByTimeAsync(10);
 
@@ -213,9 +212,7 @@ describe("deliverActivity", () => {
       { keyId: "k", privateKeyPem: pem },
       fetchImpl,
       TEST_UA,
-      undefined,
-      undefined,
-      "cavage",
+      { preference: "cavage" },
     );
 
     expect(result).toEqual({ ok: true, status: 202, profile: "cavage" });
