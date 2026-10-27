@@ -108,6 +108,15 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   outbound fetch (key resolution, delivery, discovery) carries a configurable
   `userAgent` (default: a string identifying this package), since some peers'
   anti-scraper challenge layers treat an unidentified client as a bot.
+- Outbound delivery signatures **double-knock**: sign with RFC 9421
+  (`@method @target-uri content-digest content-type`, `created`,
+  `rsa-v1_5-sha256`) first; if the peer answers `400`/`401`/`403`, re-sign the
+  same body with draft-cavage (`(request-target) host date digest
+  content-type`) and send once more. No other status triggers a second knock.
+  A host that rejected RFC 9421 but accepted draft-cavage is recorded in the
+  actor DO's SQLite (`sig_pref`) for 7 days; deliveries to it skip the RFC 9421
+  knock until the row expires, so a peer that later adds RFC 9421 support is
+  rediscovered. Hosts are not recorded for any other outcome.
 - Outbound `GET`s (key resolution, inbox resolution, actor-profile refresh,
   relayed-object verification, the `activitypub_resolve` actor fetch) are
   HTTP-signed as the actor (draft-cavage, `(request-target) host date`)

@@ -219,7 +219,9 @@ describe("Phase 5 — activitypub on the emulated Durable Object", () => {
       const delivery = seen.find((s) => s.url === `${REMOTE}/inbox`);
       expect(delivery?.init?.method).toBe("POST");
       const headers = delivery?.init?.headers as Record<string, string>;
-      expect(headers.Signature).toContain(`keyId="${actor.actorUrl}#main-key"`);
+      expect(headers["Signature-Input"]).toContain(
+        `keyid="${actor.actorUrl}#main-key"`,
+      );
       const raw = delivery?.init?.body as ArrayBufferView;
       const body = JSON.parse(new TextDecoder().decode(raw)) as {
         type: string;

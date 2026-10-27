@@ -99,13 +99,20 @@ describe("deliverActivity", () => {
       TEST_UA,
     );
 
-    expect(result).toEqual<DeliveryResult>({ ok: true, status: 202 });
+    expect(result).toEqual<DeliveryResult>({
+      ok: true,
+      status: 202,
+      profile: "rfc9421",
+    });
     expect(fetchImpl).toHaveBeenCalledOnce();
     const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
       .calls[0]![1] as RequestInit;
     const headers = init.headers as Record<string, string>;
-    expect(headers.Signature).toContain('keyId="');
-    expect(headers.Digest).toMatch(/^SHA-256=/);
+    expect(headers["Signature-Input"]).toContain(
+      'keyid="https://example.com/users/bob#main-key"',
+    );
+    expect(headers.Signature).toMatch(/^sig1=:/);
+    expect(headers["Content-Digest"]).toMatch(/^sha-256=:/);
     expect(headers.Date).toBeTruthy();
   });
 
@@ -131,7 +138,7 @@ describe("deliverActivity", () => {
       .calls[0]![1] as RequestInit;
     const headers = init.headers as Record<string, string>;
     expect(headers["User-Agent"]).toBe(TEST_UA);
-    expect(headers.Signature).toContain('keyId="');
+    expect(headers["Signature-Input"]).toContain('keyid="');
   });
 
   it("releases its timeout after a successful delivery", async () => {
@@ -161,8 +168,86 @@ describe("deliverActivity", () => {
     }
   });
 
+  it("double-knocks with draft-cavage when RFC 9421 is rejected", async () => {
+    const pem = await privateKeyPem();
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string>;
+      return new Response(null, {
+        status: headers["Signature-Input"] ? 401 : 202,
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await deliverActivity(
+      "https://remote.example/inbox",
+      JSON.stringify({ type: "Accept" }),
+      { keyId: "https://example.com/users/bob#main-key", privateKeyPem: pem },
+      fetchImpl,
+      TEST_UA,
+    );
+
+    expect(result).toEqual<DeliveryResult>({
+      ok: true,
+      status: 202,
+      profile: "cavage",
+    });
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls as [string, RequestInit][];
+    expect(calls).toHaveLength(2);
+    const second = calls[1]![1].headers as Record<string, string>;
+    expect(second["Signature-Input"]).toBeUndefined();
+    expect(second.Signature).toContain(
+      'keyId="https://example.com/users/bob#main-key"',
+    );
+    expect(second.Digest).toMatch(/^SHA-256=/);
+  });
+
+  it("skips the RFC 9421 knock for a known draft-cavage peer", async () => {
+    const pem = await privateKeyPem();
+    const fetchImpl = vi.fn(
+      async () => new Response(null, { status: 202 }),
+    ) as unknown as typeof fetch;
+
+    const result = await deliverActivity(
+      "https://remote.example/inbox",
+      "{}",
+      { keyId: "k", privateKeyPem: pem },
+      fetchImpl,
+      TEST_UA,
+      undefined,
+      undefined,
+      "cavage",
+    );
+
+    expect(result).toEqual({ ok: true, status: 202, profile: "cavage" });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Signature-Input"]).toBeUndefined();
+    expect(headers.Signature).toContain('keyId="k"');
+  });
+
+  it.each([404, 410, 422, 500])(
+    "does not knock again on a non-signature %i",
+    async (status) => {
+      const pem = await privateKeyPem();
+      const fetchImpl = vi.fn(
+        async () => new Response(null, { status }),
+      ) as unknown as typeof fetch;
+      await deliverActivity(
+        "https://remote.example/inbox",
+        "{}",
+        { keyId: "k", privateKeyPem: pem },
+        fetchImpl,
+        TEST_UA,
+      );
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    },
+  );
+
   it("classifies a 4xx as a permanent (non-retryable) failure", async () => {
     const pem = await privateKeyPem();
+    // Both knocks rejected: the draft-cavage answer is the one reported.
     const fetchImpl = (async () =>
       new Response("bad", { status: 400 })) as unknown as typeof fetch;
     const result = await deliverActivity(

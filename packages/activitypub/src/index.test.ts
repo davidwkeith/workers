@@ -1263,8 +1263,9 @@ describe("Accept-on-Follow delivery", () => {
         expect(delivery).toBeDefined();
         expect(delivery?.init?.method).toBe("POST");
         const headers = delivery?.init?.headers as Record<string, string>;
-        expect(headers.Signature).toContain(`keyId="${iris.keyId}"`);
-        expect(headers.Digest).toMatch(/^SHA-256=/);
+        // First knock is RFC 9421 (see delivery.ts's double-knock).
+        expect(headers["Signature-Input"]).toContain(`keyid="${iris.keyId}"`);
+        expect(headers["Content-Digest"]).toMatch(/^sha-256=:/);
         const raw = delivery?.init?.body as ArrayBufferView;
         const body = JSON.parse(new TextDecoder().decode(raw));
         expect(body.type).toBe("Accept");
@@ -1325,6 +1326,87 @@ describe("Accept-on-Follow delivery", () => {
           .exec<{ attempts: number }>("SELECT attempts FROM delivery LIMIT 1")
           .toArray()[0];
         expect(row?.attempts).toBe(1);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("remembers a draft-cavage peer after a double-knock and skips RFC 9421 next time", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const inboxCalls: Record<string, string>[] = [];
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (href === REMOTE) {
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: { publicKeyPem, owner: REMOTE },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        const headers = init?.headers as Record<string, string>;
+        inboxCalls.push(headers);
+        // A draft-cavage-only peer: rejects RFC 9421 the way Mastodon does.
+        return new Response(null, {
+          status: headers["Signature-Input"] ? 401 : 202,
+        });
+      }) as unknown as typeof fetch;
+
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
+
+      try {
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify({
+              id: "https://remote.example/activities/77",
+              type: "Follow",
+              actor: REMOTE,
+              object: iris.id,
+            }),
+          }),
+        );
+        await deliver();
+
+        expect(inboxCalls.map((h) => Boolean(h["Signature-Input"]))).toEqual([
+          true,
+          false,
+        ]);
+        const pref = state.storage.sql
+          .exec<{ host: string; profile: string }>(
+            "SELECT host, profile FROM sig_pref",
+          )
+          .toArray();
+        expect(pref).toEqual([{ host: "remote.example", profile: "cavage" }]);
+
+        inboxCalls.length = 0;
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          `${REMOTE}/inbox`,
+          JSON.stringify({ type: "Update" }),
+        );
+        await deliver();
+
+        expect(inboxCalls).toHaveLength(1);
+        expect(inboxCalls[0]!["Signature-Input"]).toBeUndefined();
+        expect(inboxCalls[0]!.Signature).toContain(`keyId="${iris.keyId}"`);
       } finally {
         globalThis.fetch = original;
       }

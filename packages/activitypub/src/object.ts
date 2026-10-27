@@ -26,6 +26,7 @@ import {
   type ActorIris,
   type JsonValue,
 } from "./as2.js";
+import type { SignatureProfile } from "@dwk/http-signatures";
 import { hostFromUrl } from "@dwk/log";
 import { readBodyCapped, safeFetch } from "@dwk/safe-fetch";
 
@@ -59,6 +60,12 @@ import type { ActivityPubEnv } from "./config.js";
 
 /** How long a seen activity `id` is remembered for dedup (7 days). */
 const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How long a peer's draft-cavage signature preference (learned when it rejected
+ * an RFC 9421 delivery) is remembered before double-knocking it again (7 days),
+ * so a peer that later adds RFC 9421 support is eventually rediscovered.
+ */
+const SIG_PREF_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Max delivery rows processed per alarm wake. */
 const DELIVERY_BATCH = 20;
 /** Timeout (ms) bounding any single outbound fetch (actor lookup / delivery). */
@@ -330,6 +337,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       `CREATE TABLE IF NOT EXISTS pending_metrics (
          event TEXT NOT NULL, fields TEXT NOT NULL, n INTEGER NOT NULL,
          PRIMARY KEY (event, fields))`,
+    );
+    // Delivery hosts that rejected an RFC 9421 signature but accepted
+    // draft-cavage (see `deliverActivity`'s double-knock), so later deliveries
+    // skip the doomed first knock. Rows older than SIG_PREF_TTL_MS are ignored
+    // and pruned on the next delivery pass.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS sig_pref (
+         host TEXT PRIMARY KEY, profile TEXT NOT NULL, at INTEGER NOT NULL)`,
     );
     // Additive-column migrations for objects created before fediverse interop
     // phases 1–2 (#274/#275); fresh objects already get these from the CREATE
@@ -3242,6 +3257,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
+   * The signature profile `host` is known to want for deliveries, or
+   * `undefined` to double-knock (RFC 9421 first). Only draft-cavage peers are
+   * recorded; an expired row reads as unknown.
+   */
+  #signaturePreference(host: string): SignatureProfile | undefined {
+    const row = this.#sql
+      .exec<{ profile: string }>(
+        `SELECT profile FROM sig_pref WHERE host = ? AND at > ?`,
+        host,
+        Date.now() - SIG_PREF_TTL_MS,
+      )
+      .toArray()[0];
+    return row?.profile === "cavage" ? "cavage" : undefined;
+  }
+
+  /**
    * Process every due delivery row once: sign and `POST` it, deleting on
    * success or permanent failure and rescheduling with exponential backoff on a
    * retryable one. Returns how many rows it attempted. Re-arms the alarm for the
@@ -3264,6 +3295,12 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         DELIVERY_BATCH,
       )
       .toArray();
+    if (due.length > 0) {
+      this.#sql.exec(
+        `DELETE FROM sig_pref WHERE at <= ?`,
+        now - SIG_PREF_TTL_MS,
+      );
+    }
 
     for (const row of due) {
       if (!signer) {
@@ -3272,6 +3309,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         continue;
       }
       const targetHost = hostFromUrl(row.inbox) ?? "unknown";
+      const preference = this.#signaturePreference(targetHost);
       try {
         const result = await deliverActivity(
           row.inbox,
@@ -3280,9 +3318,19 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           fetch,
           userAgent,
           () => Date.now(),
+          OUTBOUND_TIMEOUT_MS,
+          preference,
         );
         if (result.ok) {
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
+          if (result.profile === "cavage" && preference !== "cavage") {
+            this.#sql.exec(
+              `INSERT INTO sig_pref (host, profile, at) VALUES (?, 'cavage', ?)
+                 ON CONFLICT (host) DO UPDATE SET profile = excluded.profile, at = excluded.at`,
+              targetHost,
+              Date.now(),
+            );
+          }
           this.#logDelivery(ActivityPubLogEvent.DeliverySucceeded, {
             targetHost,
             status: result.status,

@@ -96,17 +96,21 @@ follower lists, dedup, and the delivery queue all live in the DO's SQLite.
 
 ## HTTP signatures
 
-Inbound `POST /inbox` deliveries are authenticated, and outbound deliveries are
-signed, with the de-facto fediverse `draft-cavage-http-signatures` profile
-(RSA-SHA256 over a covered header set, body integrity via `Digest`). The
+Inbound `POST /inbox` deliveries are verified against either the de-facto
+fediverse `draft-cavage-http-signatures` profile (RSA-SHA256 over a covered
+header set, body integrity via `Digest`) or
+[RFC 9421](https://www.rfc-editor.org/rfc/rfc9421) HTTP Message Signatures
+(via [`@dwk/http-signatures`](../http-signatures/README.md)). The
 implementation is RSA-only with an explicit algorithm allow-list (no `none`, no
 symmetric algorithms), mirroring the [`@dwk/dpop`](../dpop/README.md) hardening
 posture.
 
-Signing/verification sit behind the `verifyInboxSignature` config seam, so the
-forthcoming cross-standard `@dwk/http-signatures` package (RFC 9421 +
-draft-cavage; [#59](https://github.com/davidwkeith/workers/issues/59)) can be
-swapped in unchanged once it lands.
+Outbound deliveries **double-knock**: each is signed with RFC 9421 first, and
+if the peer answers `400`/`401`/`403` the same body is re-signed with
+draft-cavage and sent once more. A host that only accepts draft-cavage is
+remembered in the actor's Durable Object for 7 days, so later deliveries skip
+the first knock (the same strategy [Fedify](https://fedify.dev/manual/send#double-knocking-http-signatures)
+uses). Outbound `GET`s (authorized-fetch key resolution) stay draft-cavage.
 
 Every outbound request (key resolution, delivery, discovery) sends a
 descriptive `User-Agent` (`userAgent` in `ActivityPubConfig`, defaulting to

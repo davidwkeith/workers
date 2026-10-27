@@ -114,6 +114,7 @@ export {
 
 export {
   signRequest,
+  signRequestRfc9421,
   verifyInboxSignature,
   digestHeader,
   importPublicKey,

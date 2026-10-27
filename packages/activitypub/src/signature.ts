@@ -12,15 +12,19 @@
  * cross-standard `@dwk/http-signatures` package (issue #59) rather than
  * reimplemented here — see {@link verifyInboxSignature}.
  *
- * Outbound signing stays on the draft-cavage profile: every fediverse peer
- * this package interoperates with today accepts it, so there is no correctness
- * reason to change it, and it keeps `signRequest` self-contained.
+ * Outbound `POST` deliveries can be signed with either profile —
+ * {@link signRequest} (draft-cavage) or {@link signRequestRfc9421} — and
+ * `delivery.ts` "double-knocks": RFC 9421 first, falling back to draft-cavage
+ * when a peer rejects it. Outbound `GET`s ({@link signGetRequest}) stay on
+ * draft-cavage, which every authorized-fetch peer accepts.
  *
  * Inputs are plain data — method, URL, headers, body bytes, and a resolved key —
  * so the crypto unit-tests without any ActivityPub assumptions.
  */
 
 import {
+  createContentDigest,
+  signMessage,
   verifyMessage,
   type HttpMessage,
   type KeyResolver as HttpSigKeyResolver,
@@ -499,6 +503,45 @@ export async function signRequest(
     },
     body,
   };
+}
+
+/**
+ * Sign an outbound `POST` (a delivery to a remote inbox) with the RFC 9421
+ * profile via `@dwk/http-signatures`. Covers `@method`, `@target-uri`,
+ * `content-digest`, and `content-type` with a `created` parameter — a superset
+ * of what {@link verifyInboxSignature} requires of an RFC 9421 peer — and
+ * returns `Date`, `Content-Digest`, `Content-Type`, `Signature-Input`, and
+ * `Signature` to send. `Date` is not covered (`created` is the timestamp
+ * anchor) but is sent for peers that log or sanity-check it.
+ */
+export async function signRequestRfc9421(
+  url: string,
+  body: Uint8Array,
+  signer: SignerKey,
+  options: { readonly now?: () => number; readonly contentType?: string } = {},
+): Promise<SignedRequest> {
+  const now = options.now ?? (() => Date.now());
+  const contentType = options.contentType ?? "application/activity+json";
+  const nowMs = now();
+  const contentDigest = await createContentDigest(body);
+  const headers: Record<string, string> = {
+    Date: new Date(nowMs).toUTCString(),
+    "Content-Digest": contentDigest,
+    "Content-Type": contentType,
+  };
+  const key = await importPrivateKey(signer.privateKeyPem);
+  const signature = await signMessage(
+    { method: "POST", url, headers },
+    {
+      profile: "rfc9421",
+      key,
+      keyId: signer.keyId,
+      alg: "rsa-v1_5-sha256",
+      components: ["@method", "@target-uri", "content-digest", "content-type"],
+      created: Math.floor(nowMs / 1000),
+    },
+  );
+  return { headers: { ...headers, ...signature }, body };
 }
 
 /**
