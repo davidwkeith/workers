@@ -4,7 +4,8 @@ Thanks for your interest in `@dwk/workers` — a pnpm-workspace monorepo of
 composable npm packages that each implement an open web standard and run as
 [Cloudflare Workers](https://developers.cloudflare.com/workers/) on an end
 user's **own** account. Start with the [README](./README.md) for what the
-project is; this document covers how to work on it.
+project is; this document covers how to work on it. If you operate a deployed
+site rather than develop the packages, see the [IT guide](./docs/it-guide.md).
 
 ## Ground rules
 
@@ -222,7 +223,9 @@ cannot publish a stable version until its suites in
 ## Reporting bugs & security issues
 
 - Open a [GitHub issue](https://github.com/davidwkeith/workers/issues) with
-  reproduction steps and the package + version affected.
+  reproduction steps and the package + version affected. For a deployed site,
+  the [IT guide](./docs/it-guide.md#4-getting-help) lists the redacted log
+  details worth including.
 - Production errors reported automatically by Anglesite sites arrive as
   `source:anglesite-issues` issues and are triaged by an agent. See
   [docs/anglesite-issue-triage.md](./docs/anglesite-issue-triage.md).
