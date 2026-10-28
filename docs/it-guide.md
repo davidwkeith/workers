@@ -190,7 +190,9 @@ Durable Objects need a one-time
 [migration](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/)
 entry declaring the class as SQLite-backed (`new_sqlite_classes`). The class
 names are `SolidPodObject`, `ActivityPubObject`, `RemoteStorageObject`,
-`WebAuthnObject`, `AtprotoRepoObject` — see the
+`WebAuthnObject`, `AtprotoRepoObject` (`webdav` reuses `SolidPodObject` and
+`mastodon-api` reuses `ActivityPubObject`; they add no classes of their own) —
+see the
 [reference config](../packages/conformance-target/wrangler.jsonc). Never
 delete or rename a class in a migration once it has data: Cloudflare deletes
 that object's storage.
@@ -206,8 +208,11 @@ cannot solve a CAPTCHA or JavaScript challenge. Common culprits on the zone:
 - [WAF custom rules](https://developers.cloudflare.com/waf/custom-rules/) or
   managed challenges — add a
   [skip rule](https://developers.cloudflare.com/waf/custom-rules/skip/) for the
-  worker's paths (`/.well-known/*`, `/micropub`, `/webmention`, `/websub`,
-  `/inbox`, `/users/`, `/nodeinfo/`, `/xrpc/`, `/storage/`, `/pod`, `/dav`).
+  worker's paths. The defaults are listed per package under `routes` in
+  [`catalog.json`](../catalog.json) (e.g. `/.well-known/*`, `/authorize`,
+  `/token`, `/oidc/*`, `/micropub`, `/media/`, `/microsub`, `/webmention`,
+  `/websub`, `/inbox`, `/users/`, `/xrpc/`, `/storage/`, `/pod`, `/dav`), but
+  a site may mount packages elsewhere — confirm against its Worker entry.
 - [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
   in front of the whole domain — public protocol endpoints must stay public.
   Restrict admin pages only.
