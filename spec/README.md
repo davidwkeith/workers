@@ -6,6 +6,10 @@ into focused technical specifications. The issue is the source of truth for
 **scope**; these documents are the source of truth for **how** each piece is
 built and what "done" means.
 
+Operating a deployed site rather than building the packages? The
+[IT guide](../docs/it-guide.md) covers the same architecture from an operator's
+side and how to debug it against your own Cloudflare configuration.
+
 ## Reading order
 
 | # | Document | Covers |
