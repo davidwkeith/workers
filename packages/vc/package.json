@@ -30,6 +30,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./data-integrity": {
+      "types": "./dist/data-integrity.d.ts",
+      "import": "./dist/data-integrity.js"
     }
   },
   "files": [

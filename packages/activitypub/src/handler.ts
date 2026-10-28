@@ -17,6 +17,7 @@ import { isHandleShaped, resolveHandleGuarded } from "./discovery.js";
 
 import { as2ContentType, buildActorDocument, type JsonValue } from "./as2.js";
 import { readRequestBodyCapped } from "./body.js";
+import { buildAssertionMethod } from "./integrity.js";
 import {
   buildNodeInfo20,
   buildNodeInfo21,
@@ -106,6 +107,7 @@ export function forwardedConfig(config: ResolvedConfig): ForwardedConfig {
     sharedInbox: config.sharedInbox,
     userAgent: config.userAgent,
     ...(config.privateKeyPem ? { privateKeyPem: config.privateKeyPem } : {}),
+    ...(config.integrityKey ? { integrityKey: config.integrityKey } : {}),
   };
 }
 
@@ -297,6 +299,14 @@ export function createActivityPub(
           sharedInbox: resolved.sharedInbox,
           webfinger: resolved.webfinger,
           url: resolved.url,
+          ...(resolved.integrityKey
+            ? {
+                assertionMethod: buildAssertionMethod(
+                  iris.id,
+                  resolved.integrityKey,
+                ),
+              }
+            : {}),
         }),
       );
       return new Response(method === "HEAD" ? null : body, {

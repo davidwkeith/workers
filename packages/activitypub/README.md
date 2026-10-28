@@ -53,6 +53,7 @@ const activitypub = createActivityPub({
   actor: { username: "alice", name: "Alice", summary: "Hello, fediverse." },
   publicKeyPem: env.AP_PUBLIC_KEY, // published in the actor document
   privateKeyPem: env.AP_PRIVATE_KEY, // signs outbound deliveries (secret binding)
+  integrityKey: JSON.parse(env.AP_INTEGRITY_KEY), // optional: Ed25519 JWK for FEP-8b32 proofs
   publishToken: env.AP_PUBLISH_TOKEN, // optional: enables POST <actor>/outbox
   software: { name: "anglesite", version: "1.2.3" }, // NodeInfo
 });
@@ -93,6 +94,25 @@ under a path prefix by including it in `baseUrl` (e.g.
 No KV is used for any authoritative state, per
 [`spec/non-functional-requirements.md`](../../spec/non-functional-requirements.md):
 follower lists, dedup, and the delivery queue all live in the DO's SQLite.
+
+## Object integrity proofs (FEP-8b32)
+
+Set `integrityKey` to an Ed25519 private JWK (for example the output of
+`crypto.subtle.exportKey("jwk", privateKey)` for a
+`{ name: "Ed25519" }` key pair, stored as a secret) and the actor:
+
+- publishes the public half as a [FEP-521a](https://codeberg.org/fediverse/fep/src/branch/main/fep/521a/fep-521a.md)
+  `assertionMethod` `Multikey` at `<actor>#ed25519-key`, and
+- delivers every activity it authors with a top-level
+  [FEP-8b32](https://codeberg.org/fediverse/fep/src/branch/main/fep/8b32/fep-8b32.md)
+  `DataIntegrityProof` (`eddsa-jcs-2022`), so peers can authenticate it
+  without relying on the HTTP signature, for example after it has been
+  forwarded.
+
+Activities this actor forwards on someone else's behalf are never signed. The
+proof pipeline is [`@dwk/vc/data-integrity`](../vc/README.md)'s. Verifying
+proofs on inbound activities is not implemented yet; inbound authentication is
+still the HTTP signature.
 
 ## Unreachable peers
 

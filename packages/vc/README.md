@@ -33,6 +33,13 @@ runtime. Signing/verification mirror `@dwk/dpop` and `@dwk/http-signatures`:
 asymmetric only, an explicit cryptosuite allow-list, and keys validated against
 the claimed suite.
 
+The proof pipeline is also published on its own as the
+**`@dwk/vc/data-integrity`** subpath (`importSigner`, `addProof`,
+`verifyProof`, plus the `encodeEd25519Multikey`/`decodeMultikey` helpers), so a
+consumer that only signs or verifies proofs, such as `@dwk/activitypub`'s
+FEP-8b32 object integrity proofs, imports it without the credential, `did:web`
+and status-list endpoint code.
+
 ## Usage
 
 ```ts

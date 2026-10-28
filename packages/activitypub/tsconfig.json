@@ -15,6 +15,7 @@
       "@dwk/calendar": ["../calendar/src/index.ts"],
       "@dwk/safe-fetch": ["../safe-fetch/src/index.ts"],
       "@dwk/http-signatures": ["../http-signatures/src/index.ts"],
+      "@dwk/vc/data-integrity": ["../vc/src/data-integrity.ts"],
       "@dwk/mcp": ["../mcp/src/index.ts"],
       // `@dwk/mcp`'s own source (path-mapped above) imports `@dwk/dpop` for its
       // auth bridge, and that import resolves under THIS program's paths too.

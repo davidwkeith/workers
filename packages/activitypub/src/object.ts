@@ -56,6 +56,11 @@ import {
 } from "./delivery.js";
 import { DEFAULT_USER_AGENT } from "./http.js";
 import { signGetRequest } from "./signature.js";
+import {
+  importIntegritySigner,
+  signOwnActivity,
+  type IntegritySigner,
+} from "./integrity.js";
 import type { ActivityPubEnv } from "./config.js";
 
 /** How long a seen activity `id` is remembered for dedup (7 days). */
@@ -209,6 +214,8 @@ function isSafeTarget(actor: string): boolean {
 export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   readonly #sql: SqlStorage;
   #config: ForwardedConfig | null = null;
+  /** The imported FEP-8b32 signer, keyed by the persisted actor + JWK it came from. */
+  #integrityCache: { key: string; signer: IntegritySigner } | null = null;
 
   constructor(state: DurableObjectState, env: ActivityPubEnv) {
     super(state, env);
@@ -3386,6 +3393,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
    */
   async #processDeliveries(): Promise<number> {
     const signer = this.#deliverySigner();
+    const integrity = await this.#integritySigner();
     const userAgent = this.#deliveryUserAgent();
     const now = Date.now();
     const due = this.#sql
@@ -3441,9 +3449,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       const preference = this.#signaturePreference(targetHost);
       try {
+        // FEP-8b32: this actor's own activities carry an integrity proof; a
+        // forwarded/relayed one is left as-is (see `signOwnActivity`).
+        const body = integrity
+          ? await signOwnActivity(row.json, integrity)
+          : row.json;
         const result = await deliverActivity(
           row.inbox,
-          row.json,
+          body,
           signer,
           fetch,
           userAgent,
@@ -4119,6 +4132,28 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     };
   }
 
+  /**
+   * The FEP-8b32 integrity signer for this actor's deliveries, or `null` when
+   * no integrity key is configured. Read from the persisted copy (the alarm
+   * can wake on a cold isolate) and imported once per distinct key.
+   */
+  async #integritySigner(): Promise<IntegritySigner | null> {
+    const raw = this.#kvGet("integrityKey");
+    const actorId = this.#kvGet("integrityActor");
+    if (!raw || !actorId) return null;
+    const cacheKey = `${actorId}\n${raw}`;
+    if (this.#integrityCache?.key !== cacheKey) {
+      this.#integrityCache = {
+        key: cacheKey,
+        signer: await importIntegritySigner(
+          actorId,
+          JSON.parse(raw) as JsonWebKey,
+        ),
+      };
+    }
+    return this.#integrityCache.signer;
+  }
+
   #deliverySigner(): { keyId: string; privateKeyPem: string } | null {
     const keyId = this.#kvGet("keyId");
     const privateKeyPem = this.#kvGet("privateKeyPem");
@@ -4146,6 +4181,17 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       this.#kvPut("keyId", config.keyId);
     }
     this.#kvPut("userAgent", config.userAgent);
+    // The FEP-8b32 integrity key signs from the alarm too. Cleared when the
+    // config drops it, so a retired key stops signing (its public half is no
+    // longer published, so its proofs could no longer verify anyway).
+    if (config.integrityKey) {
+      this.#kvPut("integrityKey", JSON.stringify(config.integrityKey));
+      this.#kvPut("integrityActor", config.iris.id);
+    } else {
+      this.#sql.exec(
+        `DELETE FROM kv WHERE k IN ('integrityKey', 'integrityActor')`,
+      );
+    }
     // Persist the retry policy too: an alarm can wake on a cold isolate where
     // `#config` is null, and the backoff must still honor the configured policy
     // rather than silently fall back to defaults.

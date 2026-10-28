@@ -14,6 +14,11 @@
 
 /** The ActivityStreams 2.0 namespace IRI. */
 export const AS2_NS = "https://www.w3.org/ns/activitystreams";
+/** JSON-LD context defining `proof` / `DataIntegrityProof` terms (FEP-8b32). */
+export const DATA_INTEGRITY_CONTEXT =
+  "https://w3id.org/security/data-integrity/v2";
+/** JSON-LD context defining `Multikey` / `assertionMethod` terms (FEP-521a). */
+export const MULTIKEY_CONTEXT = "https://w3id.org/security/multikey/v1";
 
 /** The W3C security vocabulary namespace (carries `publicKey`). */
 export const SECURITY_NS = "https://w3id.org/security/v1";
@@ -250,6 +255,12 @@ export interface ActorDocumentOptions {
    * Omitted when not supplied.
    */
   readonly url?: string;
+  /**
+   * A FEP-521a `Multikey` verification method for FEP-8b32 integrity proofs,
+   * published under `assertionMethod` (with the Multikey and Data Integrity
+   * contexts). Omitted when the actor has no integrity key.
+   */
+  readonly assertionMethod?: Record<string, JsonValue>;
 }
 
 /**
@@ -309,6 +320,14 @@ export function buildActorDocument(
   if (options.url !== undefined) doc.url = options.url;
   if (options.sharedInbox !== undefined) {
     doc.endpoints = { sharedInbox: options.sharedInbox };
+  }
+  if (options.assertionMethod !== undefined) {
+    doc["@context"] = [
+      ...ACTOR_CONTEXT,
+      MULTIKEY_CONTEXT,
+      DATA_INTEGRITY_CONTEXT,
+    ] as JsonValue;
+    doc.assertionMethod = [options.assertionMethod];
   }
   return doc;
 }
