@@ -21,6 +21,7 @@ import { safeFetch, SsrfError } from "@dwk/safe-fetch";
 
 import type { ActorIris, ActorProfile } from "./as2.js";
 import { readJsonCapped } from "./discovery.js";
+import { assertIntegrityKey } from "./integrity.js";
 import { DEFAULT_USER_AGENT } from "./http.js";
 import { ActivityPubLogEvent } from "./log.js";
 import {
@@ -89,6 +90,17 @@ export interface ActivityPubConfig {
    * omit it for a read-only actor that never delivers.
    */
   readonly privateKeyPem?: string;
+
+  /**
+   * Ed25519 **private** JWK (`kty: "OKP"`, `crv: "Ed25519"`, with `x` and `d`;
+   * a secret binding's value, parsed) for FEP-8b32 object integrity proofs.
+   * When set, the actor document publishes the public half as a FEP-521a
+   * `assertionMethod` `Multikey` (`<actor>#ed25519-key`), and every activity
+   * this actor authors is delivered with an `eddsa-jcs-2022`
+   * `DataIntegrityProof`. Optional: omit it and deliveries carry only the HTTP
+   * signature. A malformed key fails at startup.
+   */
+  readonly integrityKey?: JsonWebKey;
 
   /**
    * Bearer token authorizing the owner-only publish endpoint
@@ -223,6 +235,7 @@ export interface ResolvedConfig {
   readonly moderators: readonly string[];
   readonly publicKeyPem: string;
   readonly privateKeyPem?: string;
+  readonly integrityKey?: JsonWebKey;
   readonly publishToken?: string;
   readonly pageSize: number;
   readonly deliveryMaxAttempts: number;
@@ -296,6 +309,8 @@ export interface ForwardedConfig {
   readonly keyId: string;
   /** Private key (PKCS#8 PEM) so the DO can sign deliveries from its alarm. */
   readonly privateKeyPem?: string;
+  /** Ed25519 JWK so the DO can add FEP-8b32 proofs to deliveries from its alarm. */
+  readonly integrityKey?: JsonWebKey;
   /** `User-Agent` the DO sends on outbound deliveries from its alarm. */
   readonly userAgent: string;
 }
@@ -507,6 +522,8 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
   if (!config.publicKeyPem) {
     throw new Error("@dwk/activitypub: `publicKeyPem` is required");
   }
+  if (config.integrityKey !== undefined)
+    assertIntegrityKey(config.integrityKey);
   const baseUrl = normalizeBaseUrl(config.baseUrl);
   const fetchImpl = config.fetch ?? fetch;
   const sharedInbox =
@@ -584,6 +601,7 @@ export function resolveConfig(config: ActivityPubConfig): ResolvedConfig {
     moderators: config.moderators ?? [],
     publicKeyPem: config.publicKeyPem,
     privateKeyPem: config.privateKeyPem,
+    ...(config.integrityKey ? { integrityKey: config.integrityKey } : {}),
     publishToken: config.publishToken,
     pageSize: config.pageSize ?? DEFAULT_PAGE_SIZE,
     deliveryMaxAttempts: config.deliveryMaxAttempts ?? DEFAULT_MAX_ATTEMPTS,

@@ -59,6 +59,12 @@ export const ActivityPubLogEvent = {
   /** A host whose circuit had opened is reachable again. Field: `targetHost`. */
   CircuitClosed: "activitypub.delivery.circuit_closed",
   /**
+   * The configured FEP-8b32 `integrityKey` could not be imported, so this
+   * actor's deliveries go out without an integrity proof (they still carry the
+   * HTTP signature). Logged once per distinct key. Field: `errorName`.
+   */
+  IntegrityKeyInvalid: "activitypub.integrity.key_invalid",
+  /**
    * The default key resolver could not resolve an inbound signer's key —
    * surfaces *why*, since `SignatureRejected`'s `key_unresolved` reason alone
    * doesn't say whether it was a network error, an HTTP status, a malformed

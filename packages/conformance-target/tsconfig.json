@@ -15,6 +15,7 @@
       "@dwk/remotestorage": ["../remotestorage/src/index.ts"],
       "@dwk/solid-pod": ["../solid-pod/src/index.ts"],
       "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/vc/data-integrity": ["../vc/src/data-integrity.ts"],
       "@dwk/webauthn": ["../webauthn/src/index.ts"],
       "@dwk/webfinger": ["../webfinger/src/index.ts"],
       "@dwk/webmention": ["../webmention/src/index.ts"],

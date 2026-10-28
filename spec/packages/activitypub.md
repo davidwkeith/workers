@@ -117,6 +117,22 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   actor DO's SQLite (`sig_pref`) for 7 days; deliveries to it skip the RFC 9421
   knock until the row expires, so a peer that later adds RFC 9421 support is
   rediscovered. Hosts are not recorded for any other outcome.
+- **FEP-8b32 object integrity proofs** (outbound). With an `integrityKey`
+  (Ed25519 private JWK) configured, the actor document adds the Multikey and
+  Data Integrity contexts and a FEP-521a `assertionMethod`
+  (`<actor>#ed25519-key`, `type: "Multikey"`, `publicKeyMultibase`). The DO
+  adds a top-level `eddsa-jcs-2022` `DataIntegrityProof`
+  (`proofPurpose: "assertionMethod"`) to a delivery only when the activity's
+  `actor` is this actor, it has no `proof` yet, and its `id` is not a fragment
+  IRI (FEP-8b32: such objects SHOULD NOT carry proofs). The Data Integrity
+  context is appended to the activity's `@context` before signing. Forwarded
+  and relayed activities are delivered unchanged. The proof is applied at send
+  time and never stored, so each attempt (including every retry) is signed
+  afresh with its own `created`. Removing `integrityKey` from config stops
+  signing at the next forwarded request. A key that passes the startup shape
+  check but fails to import in the DO is logged once
+  (`activitypub.integrity.key_invalid`), and deliveries go out without a proof
+  instead of stalling. Inbound proof verification is not yet implemented.
 - Outbound delivery has a per-host **circuit breaker** (actor DO SQLite,
   `peer_circuit`). Five consecutive retryable failures to one host (network
   error, `5xx`, `408`, `429`), counted across all of its delivery rows, open

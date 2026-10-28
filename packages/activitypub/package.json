@@ -54,6 +54,7 @@
     "@dwk/mastodon-api": "workspace:*",
     "@dwk/mcp": "workspace:*",
     "@dwk/safe-fetch": "workspace:*",
+    "@dwk/vc": "workspace:*",
     "@dwk/webfinger": "workspace:*"
   }
 }

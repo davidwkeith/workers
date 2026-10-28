@@ -36,6 +36,7 @@
       "@dwk/solid-pod": ["../solid-pod/src/index.ts"],
       "@dwk/store": ["../store/src/index.ts"],
       "@dwk/vc": ["../vc/src/index.ts"],
+      "@dwk/vc/data-integrity": ["../vc/src/data-integrity.ts"],
       "@dwk/wac": ["../wac/src/index.ts"],
       "@dwk/webauthn": ["../webauthn/src/index.ts"],
       "@dwk/webdav": ["../webdav/src/index.ts"],

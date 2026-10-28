@@ -1197,6 +1197,7 @@ function forwardedHeader(
     keyId: iris.keyId,
     privateKeyPem,
     userAgent: "test-ua/1.0",
+    ...(overrides.integrityKey ? { integrityKey: overrides.integrityKey } : {}),
   };
   return JSON.stringify(config);
 }
@@ -1915,5 +1916,227 @@ describe("delivery circuit breaker", () => {
         expect(circuit(sql)).toEqual([]);
       },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FEP-8b32 object integrity proofs: the actor publishes an assertionMethod
+// Multikey, and its own deliveries carry a DataIntegrityProof.
+// ---------------------------------------------------------------------------
+
+describe("FEP-8b32 integrity proofs", () => {
+  let integrityKey: JsonWebKey;
+
+  beforeAll(async () => {
+    const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
+    integrityKey = (await crypto.subtle.exportKey(
+      "jwk",
+      pair.privateKey,
+    )) as JsonWebKey;
+  });
+
+  it("publishes the key as an assertionMethod Multikey on the actor", async () => {
+    const config = makeConfig({ integrityKey });
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+
+    expect(doc["@context"]).toEqual(
+      expect.arrayContaining([
+        "https://w3id.org/security/multikey/v1",
+        "https://w3id.org/security/data-integrity/v2",
+      ]),
+    );
+    expect(doc.assertionMethod).toEqual([
+      {
+        id: `${actorUrl(config)}#ed25519-key`,
+        type: "Multikey",
+        controller: actorUrl(config),
+        publicKeyMultibase: expect.stringMatching(/^z6Mk/),
+      },
+    ]);
+  });
+
+  it("omits assertionMethod when no integrity key is configured", async () => {
+    const config = makeConfig();
+    const handler = createActivityPub(config);
+    const res = await handler(new Request(actorUrl(config)), testEnv, ctx);
+    const doc = (await res.json()) as Record<string, unknown>;
+    expect(doc.assertionMethod).toBeUndefined();
+  });
+
+  it("fails at startup on a malformed integrity key", () => {
+    expect(() =>
+      createActivityPub(
+        makeConfig({ integrityKey: { kty: "OKP", crv: "Ed25519" } }),
+      ),
+    ).toThrow(/integrityKey/);
+  });
+
+  it("proofs this actor's own deliveries but not activities it forwards", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+        bodies.push(
+          JSON.parse(
+            new TextDecoder().decode(init?.body as ArrayBufferView),
+          ) as Record<string, unknown>,
+        );
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: {
+              [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+                integrityKey,
+              }),
+            },
+          }),
+        );
+
+      try {
+        await deliver();
+        const own = {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: `${iris.id}/activities/1`,
+          type: "Create",
+          actor: iris.id,
+          object: { id: `${iris.id}/notes/1`, type: "Note", content: "hi" },
+        };
+        const forwarded = {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: "https://remote.example/activities/9",
+          type: "Create",
+          actor: REMOTE,
+          object: { id: "https://remote.example/notes/9", type: "Note" },
+        };
+        for (const activity of [own, forwarded]) {
+          state.storage.sql.exec(
+            "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+            "https://peer.example/inbox",
+            JSON.stringify(activity),
+          );
+        }
+        await deliver();
+
+        expect(bodies).toHaveLength(2);
+        const [ownSent, forwardedSent] = bodies;
+        expect(ownSent!.proof).toMatchObject({
+          type: "DataIntegrityProof",
+          cryptosuite: "eddsa-jcs-2022",
+          verificationMethod: `${iris.id}#ed25519-key`,
+          proofPurpose: "assertionMethod",
+        });
+        expect(forwardedSent).toEqual(forwarded);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("delivers unsigned rather than stalling when the stored key will not import", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+    // Shape-plausible enough to reach the DO (the forwarded header bypasses
+    // `resolveConfig`), but Web Crypto refuses it.
+    const broken: JsonWebKey = {
+      kty: "OKP",
+      crv: "Ed25519",
+      x: "AAAA",
+      d: "AA",
+    };
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+        bodies.push(
+          JSON.parse(
+            new TextDecoder().decode(init?.body as ArrayBufferView),
+          ) as Record<string, unknown>,
+        );
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: {
+              [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+                integrityKey: broken,
+              }),
+            },
+          }),
+        );
+
+      try {
+        await deliver();
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          "https://peer.example/inbox",
+          JSON.stringify({ type: "Update", actor: iris.id }),
+        );
+        const res = await deliver();
+
+        expect(res.status).toBeLessThan(500);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]!.proof).toBeUndefined();
+        expect(
+          state.storage.sql.exec("SELECT seq FROM delivery").toArray(),
+        ).toEqual([]);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("stops signing once the key is removed from config", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+        bodies.push(
+          JSON.parse(
+            new TextDecoder().decode(init?.body as ArrayBufferView),
+          ) as Record<string, unknown>,
+        );
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+      const deliverWith = (header: string) =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: header },
+          }),
+        );
+
+      try {
+        await deliverWith(forwardedHeader(username, { integrityKey }));
+        await deliverWith(forwardedHeader(username));
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          "https://peer.example/inbox",
+          JSON.stringify({ type: "Update", actor: iris.id }),
+        );
+        await deliverWith(forwardedHeader(username));
+
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]!.proof).toBeUndefined();
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
   });
 });

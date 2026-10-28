@@ -17,6 +17,9 @@
  * validated against the claimed cryptosuite.
  *
  * Pure aside from Web Crypto: plain-data in, plain-data out, no runtime bindings.
+ * Also published as the `@dwk/vc/data-integrity` subpath, so a consumer that
+ * only needs the proof pipeline (e.g. `@dwk/activitypub`'s FEP-8b32 object
+ * integrity proofs) imports it without the credential/`did:web` endpoint code.
  *
  * @see https://www.w3.org/TR/vc-di-eddsa/
  * @see https://www.w3.org/TR/vc-di-ecdsa/
@@ -30,6 +33,10 @@ import {
   encodeMultibaseBase58btc,
   MULTIBASE_BASE58BTC,
 } from "./multibase.js";
+
+// The Multikey helpers a proof publisher needs to advertise its key, re-exported
+// so `@dwk/vc/data-integrity` is self-contained.
+export { decodeMultikey, encodeEd25519Multikey } from "./multibase.js";
 
 /** A JSON object with string keys — a credential, proof, or proof config. */
 export type JsonObject = { [key: string]: JcsValue | undefined };

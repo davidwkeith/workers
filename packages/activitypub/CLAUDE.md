@@ -26,6 +26,14 @@ Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
   method, target URI, host, date, and content digest.
 - **Activity deduplication.** Inbound activities are deduped by their `id` in
   the DO's SQLite store to prevent replay.
+- **FEP-8b32 integrity proofs (outbound).** An optional `integrityKey`
+  (Ed25519 private JWK) publishes a FEP-521a `assertionMethod` Multikey on the
+  actor and makes `#processDeliveries` add an `eddsa-jcs-2022` proof via
+  `integrity.ts` `signOwnActivity`, only to activities whose `actor` is this
+  actor. Never sign a forwarded or relayed activity: a proof asserts
+  authorship. A key that fails to import must degrade to unsigned delivery,
+  never stall the queue. The proof pipeline is `@dwk/vc/data-integrity`'s; don't
+  reimplement JCS or Multikey here.
 - **Delivery retries.** Outbound delivery failures trigger DO alarm-based retries
   with exponential backoff. Failed deliveries are not silently dropped.
 - **Inbox resolution off the critical path.** Auto-`Accept`-on-`Follow`/`Join`
