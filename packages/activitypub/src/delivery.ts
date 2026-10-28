@@ -8,13 +8,40 @@
  * malicious actor cannot point a delivery at the Worker's own network. (DNS
  * rebinding is out of scope: the Workers runtime does not expose name
  * resolution to user code; see `@dwk/webmention`'s safe-fetch for the same
- * limitation.) The forthcoming `@dwk/http-signatures` package owns the signing
- * primitive; this module wires it to the network.
+ * limitation.) `signature.ts` owns the signing primitives; this module wires
+ * them to the network.
+ *
+ * Signing "double-knocks": a peer with no known preference is sent an RFC 9421
+ * signature first, and if it rejects that with a signature-shaped status
+ * (`400`/`401`/`403`) the same body is re-signed with draft-cavage and sent
+ * once more. The result reports which profile the peer accepted so the caller
+ * can remember draft-cavage peers and skip the first knock next time.
  */
 
 import { assertPublicUrl, safeFetch, SsrfError } from "@dwk/safe-fetch";
 
-import { signRequest, type SignerKey } from "./signature.js";
+import type { SignatureProfile } from "@dwk/http-signatures";
+
+import {
+  signRequest,
+  signRequestRfc9421,
+  type SignedRequest,
+  type SignerKey,
+} from "./signature.js";
+
+/**
+ * Statuses that may mean "I could not verify that signature", and so warrant a
+ * second knock with draft-cavage. Mastodon answers `401`; others use `400` or
+ * `403`. A `404`/`410`/`422`/`5xx` is not about the signature, so it never
+ * triggers the fallback.
+ *
+ * `403` is also what a peer that blocks our domain or actor answers, so each
+ * delivery to such a peer is sent twice (both knocks fail, and the row is
+ * dropped as permanent). That doubled traffic is accepted — the same trade-off
+ * Fedify makes — rather than dropping `403`, which would leave peers that use
+ * it for signature failures unreachable.
+ */
+const KNOCK_AGAIN_STATUSES: ReadonlySet<number> = new Set([400, 401, 403]);
 
 /** Machine-readable cause of a blocked delivery target. */
 export type BlockedReason =
@@ -62,17 +89,39 @@ function reasonFor(error: SsrfError): BlockedReason {
 
 /** The outcome of a single delivery attempt. */
 export type DeliveryResult =
-  | { readonly ok: true; readonly status: number }
+  | {
+      readonly ok: true;
+      readonly status: number;
+      /** The signature profile the peer accepted. */
+      readonly profile: SignatureProfile;
+    }
   | {
       readonly ok: false;
       readonly status: number;
       readonly retryable: boolean;
     };
 
+/** Optional knobs for {@link deliverActivity}. */
+export interface DeliveryOptions {
+  /** Clock, epoch milliseconds (deterministic tests). Defaults to `Date.now`. */
+  readonly now?: () => number;
+  /** Timeout for each `POST`, in milliseconds. Defaults to 10 s. */
+  readonly timeoutMs?: number;
+  /**
+   * The signature profile the peer is known to want: `"cavage"` skips the
+   * RFC 9421 knock; anything else (including unknown) double-knocks — RFC 9421
+   * first, then draft-cavage if the first answer is in
+   * {@link KNOCK_AGAIN_STATUSES}.
+   */
+  readonly preference?: SignatureProfile;
+}
+
 /**
  * Sign and `POST` one activity to a remote inbox. A `2xx` is success; `4xx`
  * (except `408`/`429`) is a permanent failure (drop) since the peer rejected the
  * request; `5xx`, `408`, `429`, and network errors are retryable.
+ *
+ * {@link DeliveryOptions.preference} selects the signing strategy — see there.
  */
 export async function deliverActivity(
   inboxUrl: string,
@@ -80,16 +129,59 @@ export async function deliverActivity(
   signer: SignerKey,
   fetchImpl: typeof fetch,
   userAgent: string,
-  now: () => number = () => Date.now(),
-  timeoutMs = 10_000,
+  options: DeliveryOptions = {},
 ): Promise<DeliveryResult> {
+  const now = options.now ?? (() => Date.now());
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const { preference } = options;
   // Throws DeliveryBlockedError for an unsafe target — the caller drops the row.
   assertPublicHttpsTarget(inboxUrl);
 
   const body = new TextEncoder().encode(activityJson);
-  const signed = await signRequest(inboxUrl, body, signer, { now });
+  const post = (signed: SignedRequest): Promise<Response | null> =>
+    postSigned(fetchImpl, inboxUrl, signed, userAgent, timeoutMs);
 
-  let response: Response;
+  let profile: SignatureProfile =
+    preference === "cavage" ? "cavage" : "rfc9421";
+  let response =
+    profile === "cavage"
+      ? await post(await signRequest(inboxUrl, body, signer, { now }))
+      : await post(await signRequestRfc9421(inboxUrl, body, signer, { now }));
+  if (
+    profile === "rfc9421" &&
+    response !== null &&
+    KNOCK_AGAIN_STATUSES.has(response.status)
+  ) {
+    // The first knock's body is never read; release it before knocking again.
+    await response.body?.cancel();
+    profile = "cavage";
+    response = await post(await signRequest(inboxUrl, body, signer, { now }));
+  }
+  // Network error or timeout: worth retrying.
+  if (response === null) return { ok: false, status: 0, retryable: true };
+
+  if (response.status >= 200 && response.status < 300) {
+    return { ok: true, status: response.status, profile };
+  }
+  const retryable =
+    response.status >= 500 ||
+    response.status === 408 ||
+    response.status === 429;
+  return { ok: false, status: response.status, retryable };
+}
+
+/**
+ * `POST` one signed delivery. Returns the response, or `null` on a network
+ * error or timeout; throws {@link DeliveryBlockedError} if a redirect hop lands
+ * on a blocked target.
+ */
+async function postSigned(
+  fetchImpl: typeof fetch,
+  inboxUrl: string,
+  signed: SignedRequest,
+  userAgent: string,
+  timeoutMs: number,
+): Promise<Response | null> {
   try {
     // Route the POST itself through the SSRF-safe wrapper too, not just the
     // pre-flight check on `inboxUrl`: a hostile inbox can 3xx-redirect a
@@ -102,30 +194,20 @@ export async function deliverActivity(
       {
         method: "POST",
         // `User-Agent` is layered on top of (not part of) the signed header
-        // set `signRequest` returns — it isn't covered by the signature, so
-        // adding it here doesn't touch signing at all.
+        // set — it isn't covered by the signature, so adding it here doesn't
+        // touch signing at all.
         headers: { ...signed.headers, "User-Agent": userAgent },
         body: signed.body as BufferSource,
       },
       { allowedSchemes: ["https:"], timeoutMs },
     );
-    response = result.response;
+    return result.response;
   } catch (error) {
     if (error instanceof SsrfError) {
       // A redirect hop landed on a blocked target — this inbox can never be
       // delivered to safely, same as failing the pre-flight check.
       throw new DeliveryBlockedError(reasonFor(error));
     }
-    // Network error or timeout: worth retrying.
-    return { ok: false, status: 0, retryable: true };
+    return null;
   }
-
-  if (response.status >= 200 && response.status < 300) {
-    return { ok: true, status: response.status };
-  }
-  const retryable =
-    response.status >= 500 ||
-    response.status === 408 ||
-    response.status === 429;
-  return { ok: false, status: response.status, retryable };
 }

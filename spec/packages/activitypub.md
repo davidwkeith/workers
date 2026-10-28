@@ -108,6 +108,29 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   outbound fetch (key resolution, delivery, discovery) carries a configurable
   `userAgent` (default: a string identifying this package), since some peers'
   anti-scraper challenge layers treat an unidentified client as a bot.
+- Outbound delivery signatures **double-knock**: sign with RFC 9421
+  (`@method @target-uri content-digest content-type`, `created`,
+  `rsa-v1_5-sha256`) first; if the peer answers `400`/`401`/`403`, re-sign the
+  same body with draft-cavage (`(request-target) host date digest
+  content-type`) and send once more. No other status triggers a second knock.
+  A host that rejected RFC 9421 but accepted draft-cavage is recorded in the
+  actor DO's SQLite (`sig_pref`) for 7 days; deliveries to it skip the RFC 9421
+  knock until the row expires, so a peer that later adds RFC 9421 support is
+  rediscovered. Hosts are not recorded for any other outcome.
+- Outbound delivery has a per-host **circuit breaker** (actor DO SQLite,
+  `peer_circuit`). Five consecutive retryable failures to one host (network
+  error, `5xx`, `408`, `429`), counted across all of its delivery rows, open
+  the circuit for 10 minutes. While open, that host's due rows are deferred to
+  the end of the cooldown without spending a retry attempt. When the cooldown
+  elapses, the next row is a half-open probe: a failure re-opens the circuit
+  with double the previous cooldown (capped at 24 h), and a success closes it.
+  Any non-retryable answer (`2xx`, or a `4xx` other than `408`/`429`) also
+  closes it, as does a validly-signed inbound activity from the host. Once a
+  host has been failing for 7 days, rows that reach it while its circuit is
+  open are dropped instead of deferred (one probe per cooldown still goes
+  out). Events: `activitypub.delivery.deferred`,
+  `activitypub.delivery.circuit_opened`, `activitypub.delivery.circuit_closed`,
+  and `activitypub.delivery.failed` with `reason: "circuit_open"` for a drop.
 - Outbound `GET`s (key resolution, inbox resolution, actor-profile refresh,
   relayed-object verification, the `activitypub_resolve` actor fetch) are
   HTTP-signed as the actor (draft-cavage, `(request-target) host date`)

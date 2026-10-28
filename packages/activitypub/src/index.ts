@@ -114,6 +114,7 @@ export {
 
 export {
   signRequest,
+  signRequestRfc9421,
   verifyInboxSignature,
   digestHeader,
   importPublicKey,
@@ -130,6 +131,7 @@ export {
   deliverActivity,
   assertPublicHttpsTarget,
   DeliveryBlockedError,
+  type DeliveryOptions,
   type DeliveryResult,
 } from "./delivery.js";
 

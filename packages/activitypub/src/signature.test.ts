@@ -8,6 +8,7 @@ import {
   parseSignatureHeader,
   signGetRequest,
   signRequest,
+  signRequestRfc9421,
   verifyInboxSignature,
   type InboxRequest,
   type KeyResolver,
@@ -316,6 +317,37 @@ describe("verifyInboxSignature (RFC 9421)", () => {
       { now: () => now },
     );
     expect(result).toEqual({ ok: false, reason: "bad_key" });
+  });
+});
+
+describe("signRequestRfc9421", () => {
+  const now = Date.UTC(2026, 5, 4, 12, 0, 0);
+  const url = "https://example.com/users/bob/inbox";
+  const body = JSON.stringify({ type: "Accept", id: "https://remote/2" });
+
+  it("produces a delivery our own RFC 9421 inbox verifier accepts", async () => {
+    const bytes = new TextEncoder().encode(body);
+    const signed = await signRequestRfc9421(
+      url,
+      bytes,
+      { keyId: KEY_ID, privateKeyPem },
+      { now: () => now },
+    );
+    expect(signed.headers["Signature-Input"]).toMatch(
+      /^sig1=\("@method" "@target-uri" "content-digest" "content-type"\);created=\d+;keyid="[^"]+";alg="rsa-v1_5-sha256"$/,
+    );
+    const result = await verifyInboxSignature(
+      {
+        method: "POST",
+        path: "/users/bob/inbox",
+        url,
+        headers: new Headers(signed.headers),
+        body: bytes,
+      },
+      resolver(publicKeyPem),
+      { now: () => now },
+    );
+    expect(result).toEqual({ ok: true, keyId: KEY_ID, actor: ACTOR });
   });
 });
 

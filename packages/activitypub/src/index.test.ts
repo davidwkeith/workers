@@ -1263,8 +1263,9 @@ describe("Accept-on-Follow delivery", () => {
         expect(delivery).toBeDefined();
         expect(delivery?.init?.method).toBe("POST");
         const headers = delivery?.init?.headers as Record<string, string>;
-        expect(headers.Signature).toContain(`keyId="${iris.keyId}"`);
-        expect(headers.Digest).toMatch(/^SHA-256=/);
+        // First knock is RFC 9421 (see delivery.ts's double-knock).
+        expect(headers["Signature-Input"]).toContain(`keyid="${iris.keyId}"`);
+        expect(headers["Content-Digest"]).toMatch(/^sha-256=:/);
         const raw = delivery?.init?.body as ArrayBufferView;
         const body = JSON.parse(new TextDecoder().decode(raw));
         expect(body.type).toBe("Accept");
@@ -1325,6 +1326,115 @@ describe("Accept-on-Follow delivery", () => {
           .exec<{ attempts: number }>("SELECT attempts FROM delivery LIMIT 1")
           .toArray()[0];
         expect(row?.attempts).toBe(1);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  it("remembers a draft-cavage peer after a double-knock and skips RFC 9421 next time", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const inboxCalls: Record<string, string>[] = [];
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (href === REMOTE) {
+          return new Response(
+            JSON.stringify({
+              id: REMOTE,
+              inbox: `${REMOTE}/inbox`,
+              publicKey: { publicKeyPem, owner: REMOTE },
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        const headers = init?.headers as Record<string, string>;
+        inboxCalls.push(headers);
+        // A draft-cavage-only peer: rejects RFC 9421 the way Mastodon does.
+        return new Response(null, {
+          status: headers["Signature-Input"] ? 401 : 202,
+        });
+      }) as unknown as typeof fetch;
+
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
+
+      try {
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+            },
+            body: JSON.stringify({
+              id: "https://remote.example/activities/77",
+              type: "Follow",
+              actor: REMOTE,
+              object: iris.id,
+            }),
+          }),
+        );
+        await deliver();
+
+        expect(inboxCalls.map((h) => Boolean(h["Signature-Input"]))).toEqual([
+          true,
+          false,
+        ]);
+        const pref = state.storage.sql
+          .exec<{ host: string; profile: string }>(
+            "SELECT host, profile FROM sig_pref",
+          )
+          .toArray();
+        expect(pref).toEqual([{ host: "remote.example", profile: "cavage" }]);
+
+        inboxCalls.length = 0;
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          `${REMOTE}/inbox`,
+          JSON.stringify({ type: "Update" }),
+        );
+        await deliver();
+
+        expect(inboxCalls).toHaveLength(1);
+        expect(inboxCalls[0]!["Signature-Input"]).toBeUndefined();
+        expect(inboxCalls[0]!.Signature).toContain(`keyId="${iris.keyId}"`);
+
+        // Once the row is older than the 7-day TTL it is ignored (the peer is
+        // double-knocked again) and pruned on that delivery pass.
+        inboxCalls.length = 0;
+        state.storage.sql.exec(
+          "UPDATE sig_pref SET at = ?",
+          Date.now() - 7 * 24 * 60 * 60 * 1000 - 1,
+        );
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          `${REMOTE}/inbox`,
+          JSON.stringify({ type: "Update" }),
+        );
+        globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+          const headers = init?.headers as Record<string, string>;
+          inboxCalls.push(headers);
+          // The peer now accepts RFC 9421, so the first knock lands.
+          return new Response(null, { status: 202 });
+        }) as unknown as typeof fetch;
+        await deliver();
+
+        expect(inboxCalls).toHaveLength(1);
+        expect(inboxCalls[0]!["Signature-Input"]).toContain(
+          `keyid="${iris.keyId}"`,
+        );
+        expect(
+          state.storage.sql.exec("SELECT host FROM sig_pref").toArray(),
+        ).toEqual([]);
       } finally {
         globalThis.fetch = original;
       }
@@ -1631,5 +1741,179 @@ describe("Event RSVP (Join/Leave)", () => {
         .one().n;
       expect(count).toBe(0);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delivery circuit breaker: a host that keeps failing stops being attempted,
+// is probed again after a cooldown, and closes on success or inbound traffic.
+// ---------------------------------------------------------------------------
+
+describe("delivery circuit breaker", () => {
+  const DEAD_INBOX = "https://dead.example/inbox";
+
+  /** A fresh actor DO with `rows` deliveries queued to {@link DEAD_INBOX}. */
+  function withQueuedDeliveries(
+    rows: number,
+    body: (ctx: {
+      instance: { fetch(request: Request): Promise<Response> };
+      sql: SqlStorage;
+      calls: string[];
+      respond: (status: number) => void;
+      deliver: () => Promise<Response>;
+      username: string;
+      iris: ReturnType<typeof deriveIris>;
+    }) => Promise<void>,
+  ): Promise<void> {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+    return runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const calls: string[] = [];
+      let status = 503;
+      globalThis.fetch = (async (url: string | URL) => {
+        calls.push(typeof url === "string" ? url : url.toString());
+        return new Response(null, { status });
+      }) as unknown as typeof fetch;
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: { [INTERNAL_HEADERS.config]: forwardedHeader(username) },
+          }),
+        );
+      try {
+        // A first request lets the DO pick up its forwarded config + schema.
+        await deliver();
+        for (let i = 0; i < rows; i++) {
+          state.storage.sql.exec(
+            "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+            DEAD_INBOX,
+            JSON.stringify({ type: "Note", n: i }),
+          );
+        }
+        await body({
+          instance,
+          sql: state.storage.sql,
+          calls,
+          respond: (s) => {
+            status = s;
+          },
+          deliver,
+          username,
+          iris,
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  }
+
+  const circuit = (sql: SqlStorage) =>
+    sql
+      .exec<{
+        failures: number;
+        open_until: number;
+        trips: number;
+      }>("SELECT failures, open_until, trips FROM peer_circuit")
+      .toArray();
+
+  it("opens after 5 consecutive failures and defers the rest without spending attempts", async () => {
+    await withQueuedDeliveries(7, async ({ sql, calls, deliver }) => {
+      const before = Date.now();
+      await deliver();
+
+      expect(calls).toHaveLength(5);
+      const [row] = circuit(sql);
+      expect(row?.failures).toBe(5);
+      expect(row?.trips).toBe(1);
+      expect(row!.open_until).toBeGreaterThanOrEqual(before + 10 * 60_000);
+
+      const deferred = sql
+        .exec<{ attempts: number; next_at: number }>(
+          "SELECT attempts, next_at FROM delivery WHERE attempts = 0",
+        )
+        .toArray();
+      expect(deferred).toHaveLength(2);
+      for (const d of deferred) expect(d.next_at).toBe(row!.open_until);
+    });
+  });
+
+  it("re-opens with a doubled cooldown when the half-open probe fails", async () => {
+    await withQueuedDeliveries(7, async ({ sql, calls, deliver }) => {
+      await deliver();
+      // Cooldown elapses; every row is due again.
+      sql.exec("UPDATE peer_circuit SET open_until = 0");
+      sql.exec("UPDATE delivery SET next_at = 0");
+      calls.length = 0;
+      const before = Date.now();
+      await deliver();
+
+      expect(calls).toHaveLength(1);
+      const [row] = circuit(sql);
+      expect(row?.trips).toBe(2);
+      expect(row!.open_until).toBeGreaterThanOrEqual(before + 20 * 60_000);
+    });
+  });
+
+  it("closes on a successful probe and delivers the backlog", async () => {
+    await withQueuedDeliveries(7, async ({ sql, calls, deliver, respond }) => {
+      await deliver();
+      sql.exec("UPDATE peer_circuit SET open_until = 0");
+      sql.exec("UPDATE delivery SET next_at = 0");
+      respond(202);
+      calls.length = 0;
+      await deliver();
+
+      expect(calls).toHaveLength(7);
+      expect(circuit(sql)).toEqual([]);
+      expect(sql.exec("SELECT seq FROM delivery").toArray()).toEqual([]);
+    });
+  });
+
+  it("drops rows to a host failing for over 7 days while its circuit is open", async () => {
+    await withQueuedDeliveries(7, async ({ sql, calls, deliver }) => {
+      await deliver();
+      sql.exec(
+        "UPDATE peer_circuit SET first_failed_at = ?",
+        Date.now() - 8 * 24 * 60 * 60 * 1000,
+      );
+      sql.exec("UPDATE delivery SET next_at = 0");
+      calls.length = 0;
+      await deliver();
+
+      expect(calls).toEqual([]);
+      expect(sql.exec("SELECT seq FROM delivery").toArray()).toEqual([]);
+    });
+  });
+
+  it("closes when the host sends us a signed activity", async () => {
+    await withQueuedDeliveries(
+      5,
+      async ({ instance, sql, deliver, username, iris }) => {
+        await deliver();
+        expect(circuit(sql)).toHaveLength(1);
+
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.config]: forwardedHeader(username),
+              [INTERNAL_HEADERS.signedActor]:
+                "https://dead.example/users/carol",
+            },
+            body: JSON.stringify({
+              id: "https://dead.example/activities/1",
+              type: "Like",
+              actor: "https://dead.example/users/carol",
+              object: `${iris.id}/notes/1`,
+            }),
+          }),
+        );
+
+        expect(circuit(sql)).toEqual([]);
+      },
+    );
   });
 });
