@@ -215,7 +215,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   readonly #sql: SqlStorage;
   #config: ForwardedConfig | null = null;
   /** The imported FEP-8b32 signer, keyed by the persisted actor + JWK it came from. */
-  #integrityCache: { key: string; signer: IntegritySigner } | null = null;
+  #integrityCache: { key: string; signer: IntegritySigner | null } | null =
+    null;
 
   constructor(state: DurableObjectState, env: ActivityPubEnv) {
     super(state, env);
@@ -4143,13 +4144,22 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (!raw || !actorId) return null;
     const cacheKey = `${actorId}\n${raw}`;
     if (this.#integrityCache?.key !== cacheKey) {
-      this.#integrityCache = {
-        key: cacheKey,
-        signer: await importIntegritySigner(
+      let signer: IntegritySigner | null = null;
+      try {
+        signer = await importIntegritySigner(
           actorId,
           JSON.parse(raw) as JsonWebKey,
-        ),
-      };
+        );
+      } catch (error) {
+        // `resolveConfig` checks the key's shape, but a key Web Crypto still
+        // refuses (or a corrupt stored copy) must not stall every delivery,
+        // forwarded ones included: deliver unsigned and say why, once per
+        // distinct key (the failure is cached below).
+        this.#logDelivery(ActivityPubLogEvent.IntegrityKeyInvalid, {
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      }
+      this.#integrityCache = { key: cacheKey, signer };
     }
     return this.#integrityCache.signer;
   }

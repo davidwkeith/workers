@@ -2043,6 +2043,62 @@ describe("FEP-8b32 integrity proofs", () => {
     });
   });
 
+  it("delivers unsigned rather than stalling when the stored key will not import", async () => {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+    // Shape-plausible enough to reach the DO (the forwarded header bypasses
+    // `resolveConfig`), but Web Crypto refuses it.
+    const broken: JsonWebKey = {
+      kty: "OKP",
+      crv: "Ed25519",
+      x: "AAAA",
+      d: "AA",
+    };
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+        bodies.push(
+          JSON.parse(
+            new TextDecoder().decode(init?.body as ArrayBufferView),
+          ) as Record<string, unknown>,
+        );
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch;
+      const deliver = () =>
+        instance.fetch(
+          new Request(`${iris.id}/__deliver`, {
+            headers: {
+              [INTERNAL_HEADERS.config]: forwardedHeader(username, {
+                integrityKey: broken,
+              }),
+            },
+          }),
+        );
+
+      try {
+        await deliver();
+        state.storage.sql.exec(
+          "INSERT INTO delivery (inbox, json, attempts, next_at) VALUES (?, ?, 0, 0)",
+          "https://peer.example/inbox",
+          JSON.stringify({ type: "Update", actor: iris.id }),
+        );
+        const res = await deliver();
+
+        expect(res.status).toBeLessThan(500);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]!.proof).toBeUndefined();
+        expect(
+          state.storage.sql.exec("SELECT seq FROM delivery").toArray(),
+        ).toEqual([]);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
   it("stops signing once the key is removed from config", async () => {
     const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
     const iris = deriveIris(BASE, username);

@@ -9,6 +9,7 @@ import {
 import { DATA_INTEGRITY_CONTEXT } from "./as2.js";
 import {
   assertIntegrityKey,
+  base64urlToBytes,
   buildAssertionMethod,
   importIntegritySigner,
   integrityKeyId,
@@ -60,6 +61,12 @@ describe("assertIntegrityKey", () => {
   ])("rejects %j", (bad, message) => {
     expect(() => assertIntegrityKey(bad as JsonWebKey)).toThrow(message);
   });
+
+  it("rejects a seed that is not 32 bytes", () => {
+    expect(() => assertIntegrityKey({ ...jwk, d: "AAAA" })).toThrow(
+      /32-byte base64url Ed25519 seed/,
+    );
+  });
 });
 
 describe("buildAssertionMethod", () => {
@@ -73,11 +80,7 @@ describe("buildAssertionMethod", () => {
     const { rawPublicKey } = decodeMultikey(
       method.publicKeyMultibase as string,
     );
-    const x = btoa(String.fromCharCode(...rawPublicKey))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-    expect(x).toBe(jwk.x);
+    expect(rawPublicKey).toEqual(base64urlToBytes(jwk.x!));
   });
 });
 

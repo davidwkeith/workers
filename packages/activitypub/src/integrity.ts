@@ -32,7 +32,7 @@ export function integrityKeyId(actorId: string): string {
 }
 
 /** Decode unpadded base64url (a JWK member) to bytes. */
-function base64urlToBytes(value: string): Uint8Array {
+export function base64urlToBytes(value: string): Uint8Array {
   const b64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
   const bytes = new Uint8Array(binary.length);
@@ -40,10 +40,22 @@ function base64urlToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+/** Byte length of a base64url JWK member, or -1 when absent or malformed. */
+function decodedLength(value: unknown): number {
+  if (typeof value !== "string") return -1;
+  try {
+    return base64urlToBytes(value).length;
+  } catch {
+    return -1;
+  }
+}
+
 /**
  * Validate a configured integrity key: an Ed25519 private JWK (`kty: "OKP"`,
- * `crv: "Ed25519"`, a 32-byte `x`, and `d`). Throws a descriptive error
- * otherwise, so a misconfigured key fails loudly at startup.
+ * `crv: "Ed25519"`, a 32-byte `x`, and a 32-byte `d`). Throws a descriptive
+ * error otherwise, so a misconfigured key fails loudly at startup. Whether `d`
+ * matches `x` is only knowable by importing the key, which is async; the DO
+ * handles a key that still fails to import by delivering without a proof.
  */
 export function assertIntegrityKey(jwk: JsonWebKey): void {
   if (jwk.kty !== "OKP" || jwk.crv !== "Ed25519") {
@@ -56,15 +68,14 @@ export function assertIntegrityKey(jwk: JsonWebKey): void {
       "@dwk/activitypub: `integrityKey` must be a private JWK (missing `d`)",
     );
   }
-  let x: Uint8Array;
-  try {
-    x = base64urlToBytes(typeof jwk.x === "string" ? jwk.x : "");
-  } catch {
-    x = new Uint8Array();
-  }
-  if (x.length !== 32) {
+  if (decodedLength(jwk.x) !== 32) {
     throw new Error(
       "@dwk/activitypub: `integrityKey.x` must be a 32-byte base64url Ed25519 public key",
+    );
+  }
+  if (decodedLength(jwk.d) !== 32) {
+    throw new Error(
+      "@dwk/activitypub: `integrityKey.d` must be a 32-byte base64url Ed25519 seed",
     );
   }
 }

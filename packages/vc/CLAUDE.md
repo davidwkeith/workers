@@ -29,3 +29,10 @@ multicodec encoding, and XSD datetime utilities.
   credential. Revocation flips a bit in the D1-backed status store.
 - **Authorization.** The `authorize` callback in config controls who can issue/
   verify/revoke. This is caller-provided, not hardcoded.
+- **`@dwk/vc/data-integrity` subpath.** `data-integrity.ts` (plus the
+  `encodeEd25519Multikey`/`decodeMultikey` re-exports) is also published as its
+  own entry point, so a consumer that only signs or verifies proofs
+  (`@dwk/activitypub`'s FEP-8b32 integrity proofs) skips the credential,
+  `did:web` and status-list endpoint code. Keep that module free of imports
+  beyond `datetime.ts`, `jcs.ts` and `multibase.ts`, like the
+  `@dwk/ldn/discovery` precedent.
