@@ -11,6 +11,11 @@ file hosting alongside the endpoints.
 > writes by hand — packaged and reusable. See
 > [`spec/self-hosting.md`](../../spec/self-hosting.md).
 
+Operating a deployment? The [IT guide](../../docs/it-guide.md) explains the
+architecture and how to debug it. It is written for Cloudflare, but its package
+model, log-event names, and DPoP / canonical-domain troubleshooting apply here
+unchanged; the dashboard, zone-setting, and `wrangler` steps do not.
+
 ## How it works
 
 The composition contract's handler shape —
