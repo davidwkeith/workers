@@ -262,6 +262,10 @@ stable (`>=1.0.0`) release; those hosted suites are still `pending`.
 
 ## Documentation
 
+Running a deployed site? The [IT guide](docs/it-guide.md) explains the
+architecture in operational terms and how to debug it against your own
+Cloudflare configuration.
+
 The [`spec/`](spec/) directory holds the technical requirements:
 
 - [Overview](spec/overview.md) — purpose, goals / non-goals, audience.
