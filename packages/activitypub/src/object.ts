@@ -66,6 +66,24 @@ const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * so a peer that later adds RFC 9421 support is eventually rediscovered.
  */
 const SIG_PREF_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Delivery circuit breaker. After this many consecutive retryable failures
+ * (network error, `5xx`, `408`, `429`) to one host — counted across all its
+ * delivery rows — the host's circuit opens and its rows are deferred, not
+ * attempted, so a dead peer stops tying up the alarm with timeouts.
+ */
+const CIRCUIT_FAILURE_THRESHOLD = 5;
+/** First open-circuit cooldown; doubles on each re-trip, capped below. */
+const CIRCUIT_BASE_COOLDOWN_MS = 10 * 60_000;
+/** Longest open-circuit cooldown — a dead host is still probed daily. */
+const CIRCUIT_MAX_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+/**
+ * A host failing continuously for this long is treated as gone (Mastodon's
+ * "unavailable domain" window): rows that reach it while its circuit is open
+ * are dropped instead of deferred. One probe per cooldown still goes out, and
+ * a success — or any signed activity from the host — closes the circuit.
+ */
+const CIRCUIT_DEAD_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 /** Max delivery rows processed per alarm wake. */
 const DELIVERY_BATCH = 20;
 /** Timeout (ms) bounding any single outbound fetch (actor lookup / delivery). */
@@ -345,6 +363,16 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE TABLE IF NOT EXISTS sig_pref (
          host TEXT PRIMARY KEY, profile TEXT NOT NULL, at INTEGER NOT NULL)`,
+    );
+    // Per-host delivery circuit breaker (see CIRCUIT_* above). A row exists
+    // only while the host is failing; any success deletes it. `trips` counts
+    // how many times the circuit has opened during this failure streak, so
+    // each re-open doubles the cooldown.
+    this.#sql.exec(
+      `CREATE TABLE IF NOT EXISTS peer_circuit (
+         host TEXT PRIMARY KEY, failures INTEGER NOT NULL,
+         first_failed_at INTEGER NOT NULL, open_until INTEGER NOT NULL DEFAULT 0,
+         trips INTEGER NOT NULL DEFAULT 0)`,
     );
     // Additive-column migrations for objects created before fediverse interop
     // phases 1–2 (#274/#275); fresh objects already get these from the CREATE
@@ -680,6 +708,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     if (author && this.#isBlocked(author)) {
       return text(403, "Actor is blocked");
     }
+    // A host that just sent us a validly-signed activity is up: close its
+    // delivery circuit so queued deliveries to it resume at once rather than
+    // waiting out the cooldown (Mastodon does the same for unavailable domains).
+    const signerHost = signer ? hostFromUrl(signer) : undefined;
+    if (signerHost) this.#closeCircuit(signerHost);
 
     const id = activity.id;
     if (typeof id === "string" && id.length > 0) {
@@ -3126,7 +3159,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     fields: Record<string, string | number | boolean>,
   ): void {
     const level: "info" | "warn" | "error" =
-      event === ActivityPubLogEvent.DeliverySucceeded
+      event === ActivityPubLogEvent.DeliverySucceeded ||
+      event === ActivityPubLogEvent.DeliveryDeferred ||
+      event === ActivityPubLogEvent.CircuitClosed
         ? "info"
         : fields.dropped === true
           ? "error"
@@ -3257,6 +3292,77 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
   }
 
   /**
+   * `host`'s open delivery circuit, or `null` when deliveries to it should be
+   * attempted (no failure streak, below the threshold, or the cooldown has
+   * elapsed — the half-open probe). `dead` marks a host failing for longer
+   * than {@link CIRCUIT_DEAD_AFTER_MS}.
+   */
+  #openCircuit(host: string): { until: number; dead: boolean } | null {
+    const now = Date.now();
+    const row = this.#sql
+      .exec<{ open_until: number; first_failed_at: number }>(
+        `SELECT open_until, first_failed_at FROM peer_circuit
+           WHERE host = ? AND open_until > ?`,
+        host,
+        now,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      until: row.open_until,
+      dead: now - row.first_failed_at >= CIRCUIT_DEAD_AFTER_MS,
+    };
+  }
+
+  /**
+   * Count one retryable delivery failure to `host`, opening its circuit once
+   * the streak reaches {@link CIRCUIT_FAILURE_THRESHOLD}. A failed half-open
+   * probe re-opens it at once with double the previous cooldown.
+   */
+  #recordCircuitFailure(host: string): void {
+    const now = Date.now();
+    const row = this.#sql
+      .exec<{ failures: number; trips: number }>(
+        `INSERT INTO peer_circuit (host, failures, first_failed_at) VALUES (?, 1, ?)
+           ON CONFLICT (host) DO UPDATE SET failures = failures + 1
+           RETURNING failures, trips`,
+        host,
+        now,
+      )
+      .toArray()[0]!;
+    if (row.failures < CIRCUIT_FAILURE_THRESHOLD) return;
+    const cooldownMs = Math.min(
+      CIRCUIT_BASE_COOLDOWN_MS * 2 ** row.trips,
+      CIRCUIT_MAX_COOLDOWN_MS,
+    );
+    this.#sql.exec(
+      `UPDATE peer_circuit SET open_until = ?, trips = trips + 1 WHERE host = ?`,
+      now + cooldownMs,
+      host,
+    );
+    this.#logDelivery(ActivityPubLogEvent.CircuitOpened, {
+      targetHost: host,
+      failures: row.failures,
+      cooldownMs,
+    });
+  }
+
+  /** Clear `host`'s failure streak; logs when a circuit that had opened closes. */
+  #closeCircuit(host: string): void {
+    const closed = this.#sql
+      .exec<{ trips: number }>(
+        `DELETE FROM peer_circuit WHERE host = ? RETURNING trips`,
+        host,
+      )
+      .toArray()[0];
+    if (closed && closed.trips > 0) {
+      this.#logDelivery(ActivityPubLogEvent.CircuitClosed, {
+        targetHost: host,
+      });
+    }
+  }
+
+  /**
    * The signature profile `host` is known to want for deliveries, or
    * `undefined` to double-knock (RFC 9421 first). Only draft-cavage peers are
    * recorded; an expired row reads as unknown.
@@ -3309,6 +3415,30 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         continue;
       }
       const targetHost = hostFromUrl(row.inbox) ?? "unknown";
+      const circuit = this.#openCircuit(targetHost);
+      if (circuit) {
+        if (circuit.dead) {
+          this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
+          this.#logDelivery(ActivityPubLogEvent.DeliveryFailed, {
+            targetHost,
+            status: 0,
+            attempts: row.attempts,
+            dropped: true,
+            reason: "circuit_open",
+          });
+        } else {
+          // Not attempted, so no retry attempt is spent.
+          this.#sql.exec(
+            `UPDATE delivery SET next_at = ? WHERE seq = ?`,
+            circuit.until,
+            row.seq,
+          );
+          this.#logDelivery(ActivityPubLogEvent.DeliveryDeferred, {
+            targetHost,
+          });
+        }
+        continue;
+      }
       const preference = this.#signaturePreference(targetHost);
       try {
         const result = await deliverActivity(
@@ -3319,6 +3449,10 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           userAgent,
           { timeoutMs: OUTBOUND_TIMEOUT_MS, preference },
         );
+        // Any answer but a retryable one proves the host is up; a retryable
+        // one (network error, 5xx, 408, 429) counts toward its circuit.
+        if (result.ok || !result.retryable) this.#closeCircuit(targetHost);
+        else this.#recordCircuitFailure(targetHost);
         if (result.ok) {
           this.#sql.exec(`DELETE FROM delivery WHERE seq = ?`, row.seq);
           if (result.profile === "cavage" && preference !== "cavage") {

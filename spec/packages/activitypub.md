@@ -117,6 +117,20 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   actor DO's SQLite (`sig_pref`) for 7 days; deliveries to it skip the RFC 9421
   knock until the row expires, so a peer that later adds RFC 9421 support is
   rediscovered. Hosts are not recorded for any other outcome.
+- Outbound delivery has a per-host **circuit breaker** (actor DO SQLite,
+  `peer_circuit`). Five consecutive retryable failures to one host (network
+  error, `5xx`, `408`, `429`), counted across all of its delivery rows, open
+  the circuit for 10 minutes. While open, that host's due rows are deferred to
+  the end of the cooldown without spending a retry attempt. When the cooldown
+  elapses, the next row is a half-open probe: a failure re-opens the circuit
+  with double the previous cooldown (capped at 24 h), and a success closes it.
+  Any non-retryable answer (`2xx`, or a `4xx` other than `408`/`429`) also
+  closes it, as does a validly-signed inbound activity from the host. Once a
+  host has been failing for 7 days, rows that reach it while its circuit is
+  open are dropped instead of deferred (one probe per cooldown still goes
+  out). Events: `activitypub.delivery.deferred`,
+  `activitypub.delivery.circuit_opened`, `activitypub.delivery.circuit_closed`,
+  and `activitypub.delivery.failed` with `reason: "circuit_open"` for a drop.
 - Outbound `GET`s (key resolution, inbox resolution, actor-profile refresh,
   relayed-object verification, the `activitypub_resolve` actor fetch) are
   HTTP-signed as the actor (draft-cavage, `(request-target) host date`)

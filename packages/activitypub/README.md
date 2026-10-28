@@ -94,6 +94,18 @@ No KV is used for any authoritative state, per
 [`spec/non-functional-requirements.md`](../../spec/non-functional-requirements.md):
 follower lists, dedup, and the delivery queue all live in the DO's SQLite.
 
+## Unreachable peers
+
+Each actor's Durable Object keeps a per-host delivery circuit breaker. After 5
+consecutive retryable failures to a host, its queued deliveries are deferred
+(not attempted, and not charged a retry) for a cooldown that starts at 10
+minutes and doubles on each failed probe, up to 24 hours. A successful
+delivery, or any signed activity received from that host, closes the circuit.
+A host that has been failing for 7 days has its deliveries dropped while the
+circuit is open, the same window Mastodon uses before it marks a domain
+unavailable. This keeps one dead peer from spending every alarm wake on
+10-second timeouts.
+
 ## HTTP signatures
 
 Inbound `POST /inbox` deliveries are verified against either the de-facto

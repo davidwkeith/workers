@@ -46,6 +46,19 @@ export const ActivityPubLogEvent = {
   /** A delivery target was refused on SSRF grounds. Field: `reason`. */
   DeliveryBlocked: "activitypub.delivery.blocked",
   /**
+   * A delivery was not attempted because its host's circuit is open (the host
+   * keeps failing); the row was pushed back to when the circuit half-opens,
+   * without spending a retry attempt. Field: `targetHost`.
+   */
+  DeliveryDeferred: "activitypub.delivery.deferred",
+  /**
+   * A host's delivery circuit opened after consecutive retryable failures.
+   * Fields: `targetHost`, `failures`, `cooldownMs`.
+   */
+  CircuitOpened: "activitypub.delivery.circuit_opened",
+  /** A host whose circuit had opened is reachable again. Field: `targetHost`. */
+  CircuitClosed: "activitypub.delivery.circuit_closed",
+  /**
    * The default key resolver could not resolve an inbound signer's key —
    * surfaces *why*, since `SignatureRejected`'s `key_unresolved` reason alone
    * doesn't say whether it was a network error, an HTTP status, a malformed
