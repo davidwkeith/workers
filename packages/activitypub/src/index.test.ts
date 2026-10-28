@@ -2140,3 +2140,137 @@ describe("FEP-8b32 integrity proofs", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Inbound Move (Mastodon account migration): follow the target, unfollow the
+// mover — only when the target lists the mover in alsoKnownAs.
+// ---------------------------------------------------------------------------
+
+describe("inbound Move", () => {
+  const NEW = "https://new.example/users/alice";
+
+  /** Drive one Move into a fresh actor that follows REMOTE (when `follows`). */
+  async function runMove(opts: {
+    follows?: boolean;
+    aliases?: string[];
+    move?: Record<string, unknown>;
+  }): Promise<{
+    following: { actor: string; state: string }[];
+    posts: { url: string; body: Record<string, unknown> }[];
+  }> {
+    const username = `bob-${crypto.randomUUID().slice(0, 8)}`;
+    const iris = deriveIris(BASE, username);
+    const stub = testEnv.ACTOR.get(testEnv.ACTOR.idFromName(iris.id));
+    let out!: Awaited<ReturnType<typeof runMove>>;
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const original = globalThis.fetch;
+      const posts: { url: string; body: Record<string, unknown> }[] = [];
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = typeof url === "string" ? url : url.toString();
+        if (init?.method === "POST") {
+          posts.push({
+            url: href,
+            body: JSON.parse(
+              new TextDecoder().decode(init.body as ArrayBufferView),
+            ) as Record<string, unknown>,
+          });
+          return new Response(null, { status: 202 });
+        }
+        if (href === NEW) {
+          return new Response(
+            JSON.stringify({
+              id: NEW,
+              type: "Person",
+              inbox: `${NEW}/inbox`,
+              alsoKnownAs: opts.aliases ?? [REMOTE],
+            }),
+            { headers: { "content-type": "application/activity+json" } },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }) as unknown as typeof fetch;
+      const headers = {
+        [INTERNAL_HEADERS.config]: forwardedHeader(username),
+      };
+
+      try {
+        // A first request lets the DO create its schema.
+        await instance.fetch(new Request(`${iris.id}/__deliver`, { headers }));
+        if (opts.follows ?? true) {
+          state.storage.sql.exec(
+            `INSERT INTO following (actor, state, added_at, inbox)
+               VALUES (?, 'accepted', 0, ?)`,
+            REMOTE,
+            `${REMOTE}/inbox`,
+          );
+        }
+        await instance.fetch(
+          new Request(iris.inbox, {
+            method: "POST",
+            headers: {
+              ...headers,
+              "content-type": "application/activity+json",
+              [INTERNAL_HEADERS.signedActor]: REMOTE,
+            },
+            body: JSON.stringify({
+              id: `${REMOTE}#moves/1`,
+              type: "Move",
+              actor: REMOTE,
+              object: REMOTE,
+              target: NEW,
+              ...opts.move,
+            }),
+          }),
+        );
+        await instance.fetch(new Request(`${iris.id}/__deliver`, { headers }));
+        out = {
+          following: state.storage.sql
+            .exec<{ actor: string; state: string }>(
+              "SELECT actor, state FROM following ORDER BY actor",
+            )
+            .toArray(),
+          posts,
+        };
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+    return out;
+  }
+
+  it("follows a verified target and unfollows the mover", async () => {
+    const { following, posts } = await runMove({});
+
+    expect(following).toEqual([{ actor: NEW, state: "pending" }]);
+    const follow = posts.find((p) => p.url === `${NEW}/inbox`);
+    expect(follow?.body).toMatchObject({ type: "Follow", object: NEW });
+    const undo = posts.find((p) => p.url === `${REMOTE}/inbox`);
+    expect(undo?.body).toMatchObject({
+      type: "Undo",
+      object: { type: "Follow", object: REMOTE },
+    });
+  });
+
+  it("ignores a target that does not list the mover in alsoKnownAs", async () => {
+    const { following, posts } = await runMove({
+      aliases: ["https://elsewhere.example/users/mallory"],
+    });
+    expect(following).toEqual([{ actor: REMOTE, state: "accepted" }]);
+    expect(posts).toEqual([]);
+  });
+
+  it("ignores a Move from an account this actor does not follow", async () => {
+    const { following, posts } = await runMove({ follows: false });
+    expect(following).toEqual([]);
+    expect(posts).toEqual([]);
+  });
+
+  it("ignores a Move whose object is not the moving actor", async () => {
+    const { following, posts } = await runMove({
+      move: { object: "https://remote.example/users/carol" },
+    });
+    expect(following).toEqual([{ actor: REMOTE, state: "accepted" }]);
+    expect(posts).toEqual([]);
+  });
+});

@@ -91,7 +91,7 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 
 - Inbound `POST /inbox`: verify the HTTP signature, dedup by activity `id`, and
   handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `Announce` /
-  `Delete`. A **temporary** signature-verification failure — the signer's key
+  `Delete` / `Move`. A **temporary** signature-verification failure — the signer's key
   could not be resolved (e.g. their server was briefly unreachable, or an
   anti-scraper challenge layer the signer's host runs blocks an unidentified
   client — see `userAgent` below) — answers **`503` + `Retry-After`** so the
@@ -103,6 +103,21 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   `key_unresolved` alone doesn't distinguish a network error from a
   challenge/redirect loop (or, on Cloudflare, a same-zone key fetch looped by
   the zone's Flexible SSL/TLS mode — see the package README).
+- Inbound **`Move`** (Mastodon account migration, the follower side). A
+  `Move` is acted on only when its `actor` (already bound to the HTTP signer)
+  equals its `object`, its `target` is a different, SSRF-safe IRI, and this
+  actor has a `following` row for the mover; otherwise it is accepted and
+  ignored. Acting on it queues a `pending_accept` row of kind `move` (target
+  in `actor`, mover in `event`, the prebuilt `Follow` and `Undo(Follow)` in
+  `json`), so the target fetch runs from the alarm, not on the inbound POST.
+  The alarm resolves the target's actor document and requires its
+  `alsoKnownAs` to contain the mover, as Mastodon does. If it does, this actor
+  follows the target (a `pending` `following` row plus a `Follow`, skipped if
+  it already follows the target), deletes the mover's `following` row, and
+  sends the mover an `Undo(Follow)`. If it doesn't, nothing changes
+  (`activitypub.move.rejected`). An owner unfollow of the mover before the
+  alarm runs cancels the queued move. At most one `move` row is queued per
+  mover. The `Move` itself is not stored in the inbox.
 - Outbound delivery: fan out activities to follower inboxes with retry/backoff
   via **DO alarms** (and a Queue where composed), signing each request. Every
   outbound fetch (key resolution, delivery, discovery) carries a configurable

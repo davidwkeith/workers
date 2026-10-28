@@ -65,6 +65,18 @@ export const ActivityPubLogEvent = {
    */
   IntegrityKeyInvalid: "activitypub.integrity.key_invalid",
   /**
+   * An account this actor followed moved (Mastodon `Move`) and the target
+   * proved the alias: this actor now follows the target and unfollowed the
+   * mover. Fields: `fromHost`, `toHost`, `alreadyFollowing`.
+   */
+  MoveFollowed: "activitypub.move.followed",
+  /**
+   * A `Move` from a followed account was not acted on because the target's
+   * `alsoKnownAs` does not list the mover. Fields: `fromHost`, `toHost`,
+   * `reason`.
+   */
+  MoveRejected: "activitypub.move.rejected",
+  /**
    * The default key resolver could not resolve an inbound signer's key —
    * surfaces *why*, since `SignatureRejected`'s `key_unresolved` reason alone
    * doesn't say whether it was a network error, an HTTP status, a malformed
