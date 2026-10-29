@@ -109,8 +109,11 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   `Like`). An `Undo` whose object is a `Like` or `EmojiReact` (embedded, or
   named by bare IRI) deletes that stored reaction, but only when the stored
   row's `actor` is the `Undo`'s actor, so one peer cannot retract another's
-  reaction. An unknown id is a no-op. A bare-IRI `Undo` never touches
-  followers.
+  reaction (the stored `actor` may be an IRI or an embedded `{ id }`). An
+  unknown id is a no-op. A bare-IRI `Undo` never touches followers. No
+  tombstone is kept: a redelivery of the same `Like` id within the 7-day
+  `seen` dedup window is dropped as a duplicate, but a reaction that arrives
+  after its own `Undo`, or is redelivered after that window, is stored again.
 - Inbound **`Move`** (Mastodon account migration, the follower side). A
   `Move` is acted on only when its `actor` (already bound to the HTTP signer)
   equals its `object`, its `target` is a different, SSRF-safe IRI, and this

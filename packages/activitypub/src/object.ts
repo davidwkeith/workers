@@ -944,6 +944,9 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // `Follow` would let an `Undo Like`/`Undo Announce` carrying a string id
     // silently drop a follower. Require the typed form.
     const undone = objectType(activity.object);
+    // A bare IRI (or an untyped object) may name a reaction: that path only
+    // ever deletes the undoer's own `Like`/`EmojiReact` rows, never a
+    // follower, so it is safe to try where the `Follow` path above is not.
     if (undone === undefined || REACTION_TYPES.includes(undone)) {
       this.#undoReaction(activity);
       return;
@@ -966,10 +969,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const undoer = actorIri(activity.actor);
     const undoneId = objectId(activity.object as JsonValue);
     if (!undoer || !undoneId) return;
+    // `type` is the column `#storeInbox` fills (rows predating it fall back
+    // to the JSON); `actor` may be stored as an IRI or an embedded `{ id }`
+    // object, so match either shape the way `actorIri` reads it.
     this.#sql.exec(
       `DELETE FROM inbox WHERE id = ?
-         AND json_extract(json, '$.type') IN (${REACTION_TYPES.map(() => "?").join(", ")})
-         AND json_extract(json, '$.actor') = ?`,
+         AND COALESCE(type, json_extract(json, '$.type'))
+           IN (${REACTION_TYPES.map(() => "?").join(", ")})
+         AND COALESCE(json_extract(json, '$.actor.id'), json_extract(json, '$.actor')) = ?`,
       undoneId,
       ...REACTION_TYPES,
       undoer,

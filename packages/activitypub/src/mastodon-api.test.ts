@@ -700,6 +700,28 @@ describe("buildMastodonBackend", () => {
       },
     );
 
+    it("removes a reaction stored with an embedded actor object", async () => {
+      const config = freshConfig();
+      const post = createNote(config);
+      const target = (post["object"] as { id: string }).id;
+      await seedActivity(config, post);
+      const react = reaction(target, "Like");
+      await seedActivity(config, {
+        ...react,
+        actor: { id: react.actor, type: "Person" },
+      });
+      expect(await favouritesOf(config, post)).toBe(1);
+
+      await seedActivity(config, {
+        id: `${react.id}/undo`,
+        type: "Undo",
+        actor: react.actor,
+        object: react.id,
+      });
+
+      expect(await favouritesOf(config, post)).toBe(0);
+    });
+
     it("ignores an Undo of someone else's reaction", async () => {
       const config = freshConfig();
       const post = createNote(config);
