@@ -8,7 +8,7 @@ Native ActivityPub actor rooted at the user's domain. Per-actor Durable Object
 manages inbox/outbox/followers/following collections with SQLite. Handles
 inbound `POST /inbox` with HTTP signature verification (RFC 9421 + draft-cavage),
 activity deduplication, and activity-type handlers (Follow, Undo, Create, Update,
-Like, Announce, Delete, Move). Outbound delivery retries via DO alarms with backoff.
+Like, EmojiReact, Announce, Delete, Move). Outbound delivery retries via DO alarms with backoff.
 Serves actor documents, collection pages, and NodeInfo for fediverse discovery.
 Also contributes a read-only `@dwk/mcp` tool (`createActivitypubMcpTools` →
 `activitypub_list_inbox`) over a new internal-only DO route — the public
