@@ -90,8 +90,8 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
 ### Server-to-server (federation)
 
 - Inbound `POST /inbox`: verify the HTTP signature, dedup by activity `id`, and
-  handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `Announce` /
-  `Delete` / `Move`. A **temporary** signature-verification failure — the signer's key
+  handle `Follow` / `Undo` / `Create` / `Update` / `Like` / `EmojiReact` /
+  `Announce` / `Delete` / `Move`. A **temporary** signature-verification failure — the signer's key
   could not be resolved (e.g. their server was briefly unreachable, or an
   anti-scraper challenge layer the signer's host runs blocks an unidentified
   client — see `userAgent` below) — answers **`503` + `Retry-After`** so the
@@ -103,6 +103,17 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   `key_unresolved` alone doesn't distinguish a network error from a
   challenge/redirect loop (or, on Cloudflare, a same-zone key fetch looped by
   the zone's Flexible SSL/TLS mode — see the package README).
+- Inbound **reactions**. A Pleroma/Akkoma `EmojiReact` is stored and
+  forwarded exactly like a `Like`, and counts toward `favourites_count` and
+  the `favourite` notification (Misskey already sends its reactions as
+  `Like`). An `Undo` whose object is a `Like` or `EmojiReact` (embedded, or
+  named by bare IRI) deletes that stored reaction, but only when the stored
+  row's `actor` is the `Undo`'s actor, so one peer cannot retract another's
+  reaction (the stored `actor` may be an IRI or an embedded `{ id }`). An
+  unknown id is a no-op. A bare-IRI `Undo` never touches followers. No
+  tombstone is kept: a redelivery of the same `Like` id within the 7-day
+  `seen` dedup window is dropped as a duplicate, but a reaction that arrives
+  after its own `Undo`, or is redelivered after that window, is stored again.
 - Inbound **`Move`** (Mastodon account migration, the follower side). A
   `Move` is acted on only when its `actor` (already bound to the HTTP signer)
   equals its `object`, its `target` is a different, SSRF-safe IRI, and this

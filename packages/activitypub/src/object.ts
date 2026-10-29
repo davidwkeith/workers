@@ -102,6 +102,11 @@ const RELAYED_ACTIVITY_TYPES = [
   "Like",
   "Dislike",
 ];
+/**
+ * Inbound activity types that count as a favourite and that an `Undo` from
+ * the same actor retracts: a `Like` and a Pleroma/Akkoma `EmojiReact`.
+ */
+const REACTION_TYPES: readonly string[] = ["Like", "EmojiReact"];
 /** How long relayed votes wait for their batched verification sweep (§2.2). */
 const VOTE_SWEEP_MS = 10 * 60_000;
 /** Small debounce before a newly seen actor document is hydrated. */
@@ -807,8 +812,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           await this.#maybeAnnounceMemberPost(activity, config);
         }
         break;
+      // Pleroma/Akkoma `EmojiReact` is stored like a `Like` (and surfaced to
+      // Mastodon clients as a favourite, which has no reaction type).
       case "Like":
       case "Dislike":
+      case "EmojiReact":
         await this.#storeInbox(activity);
         await this.#maybeForward(activity, firstSeen, config);
         break;
@@ -935,10 +943,44 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     // is an activity IRI this handler does not resolve, so treating it as a
     // `Follow` would let an `Undo Like`/`Undo Announce` carrying a string id
     // silently drop a follower. Require the typed form.
-    if (objectType(activity.object) !== "Follow") return;
+    const undone = objectType(activity.object);
+    // A bare IRI (or an untyped object) may name a reaction: that path only
+    // ever deletes the undoer's own `Like`/`EmojiReact` rows, never a
+    // follower, so it is safe to try where the `Follow` path above is not.
+    if (undone === undefined || REACTION_TYPES.includes(undone)) {
+      this.#undoReaction(activity);
+      return;
+    }
+    if (undone !== "Follow") return;
     const follower = actorIri(activity.actor);
     if (follower)
       this.#sql.exec(`DELETE FROM followers WHERE actor = ?`, follower);
+  }
+
+  /**
+   * Handle an `Undo` of a `Like` or `EmojiReact`: delete the stored reaction
+   * so it stops counting as a favourite. The undone activity is named by id
+   * (a bare IRI or an embedded object's `id`), and only a row of a reaction
+   * type whose `actor` is the `Undo`'s actor (already bound to the HTTP signer)
+   * is deleted, so nobody can retract someone else's reaction. An unknown id is
+   * a no-op.
+   */
+  #undoReaction(activity: ActivityObject): void {
+    const undoer = actorIri(activity.actor);
+    const undoneId = objectId(activity.object as JsonValue);
+    if (!undoer || !undoneId) return;
+    // `type` is the column `#storeInbox` fills (rows predating it fall back
+    // to the JSON); `actor` may be stored as an IRI or an embedded `{ id }`
+    // object, so match either shape the way `actorIri` reads it.
+    this.#sql.exec(
+      `DELETE FROM inbox WHERE id = ?
+         AND COALESCE(type, json_extract(json, '$.type'))
+           IN (${REACTION_TYPES.map(() => "?").join(", ")})
+         AND COALESCE(json_extract(json, '$.actor.id'), json_extract(json, '$.actor')) = ?`,
+      undoneId,
+      ...REACTION_TYPES,
+      undoer,
+    );
   }
 
   /**
@@ -2640,7 +2682,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       }
       return null;
     }
-    if (type === "Like") return "favourite";
+    if (type === "Like" || type === "EmojiReact") return "favourite";
     if (type === "Announce") return "reblog";
     if (type === "Follow" || type === "Join") return "follow";
     return null;
@@ -3109,7 +3151,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         `SELECT
            SUM(CASE WHEN json_extract(json, '$.type') IN ('Create', 'Update')
                          AND json_extract(json, '$.object.inReplyTo') IN (${placeholders}) THEN 1 ELSE 0 END) AS replies,
-           SUM(CASE WHEN json_extract(json, '$.type') = 'Like'
+           SUM(CASE WHEN json_extract(json, '$.type') IN ('Like', 'EmojiReact')
                          AND json_extract(json, '$.object') IN (${placeholders}) THEN 1 ELSE 0 END) AS favourites,
            SUM(CASE WHEN json_extract(json, '$.type') = 'Announce'
                          AND json_extract(json, '$.object') IN (${placeholders}) THEN 1 ELSE 0 END) AS reblogs

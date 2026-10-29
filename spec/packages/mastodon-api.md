@@ -245,7 +245,9 @@ for the full cursor contract (`max_received_at`/`since_received_at`/
   attributed to the relaying group's account), `account` (best-effort
   remote `Account`, see below), `media_attachments`, `mentions: []`,
   `tags: []`, `emojis: []`, `card: null`, `poll: null`.
-- **`Notification`**: `Like` → `favourite`, `Announce` → `reblog`, a
+- **`Notification`**: `Like` → `favourite` (as is a Pleroma/Akkoma
+  `EmojiReact`: Mastodon has no reaction notification type, so the emoji is
+  not shown), `Announce` → `reblog`, a
   `Create` whose `inReplyTo` targets this instance → `mention` (with the
   full mapped `Status` attached); `Follow` (or its FEP-1b12 `Group`
   membership synonym `Join`) → `follow` — `@dwk/activitypub`'s `#onFollow`

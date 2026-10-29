@@ -633,6 +633,114 @@ describe("buildMastodonBackend", () => {
     });
   });
 
+  describe("emoji reactions and undone reactions", () => {
+    const favouritesOf = async (
+      config: ResolvedConfig,
+      post: Record<string, unknown>,
+    ) => {
+      const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+      const entry = (await backend.timeline({ limit: 10 })).entries.find(
+        (candidate) => candidate.activity["id"] === post["id"],
+      );
+      return entry?.interactions?.favourites;
+    };
+    const reaction = (
+      target: string,
+      type: "Like" | "EmojiReact",
+      actor = "https://remote.example/users/erin",
+    ) => {
+      counter += 1;
+      return {
+        id: `https://remote.example/activities/react-${counter}`,
+        type,
+        actor,
+        object: target,
+        ...(type === "EmojiReact" ? { content: "🔥" } : {}),
+      };
+    };
+
+    it("counts an EmojiReact as a favourite and notifies it", async () => {
+      const config = freshConfig();
+      const post = createNote(config);
+      const target = (post["object"] as { id: string }).id;
+      await seedActivity(config, post);
+      const react = reaction(target, "EmojiReact");
+      await seedActivity(config, react);
+
+      expect(await favouritesOf(config, post)).toBe(1);
+      const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+      const page = await backend.notifications({ limit: 10 });
+      expect(page.entries.map((e) => e.activity["id"])).toEqual([react.id]);
+    });
+
+    it.each([
+      ["an embedded Like", "Like", true],
+      ["a Like by bare id", "Like", false],
+      ["an embedded EmojiReact", "EmojiReact", true],
+      ["an EmojiReact by bare id", "EmojiReact", false],
+    ] as const)(
+      "removes the reaction on Undo of %s",
+      async (_label, type, embedded) => {
+        const config = freshConfig();
+        const post = createNote(config);
+        const target = (post["object"] as { id: string }).id;
+        await seedActivity(config, post);
+        const react = reaction(target, type);
+        await seedActivity(config, react);
+        expect(await favouritesOf(config, post)).toBe(1);
+
+        await seedActivity(config, {
+          id: `${react.id}/undo`,
+          type: "Undo",
+          actor: react.actor,
+          object: embedded ? react : react.id,
+        });
+
+        expect(await favouritesOf(config, post)).toBe(0);
+      },
+    );
+
+    it("removes a reaction stored with an embedded actor object", async () => {
+      const config = freshConfig();
+      const post = createNote(config);
+      const target = (post["object"] as { id: string }).id;
+      await seedActivity(config, post);
+      const react = reaction(target, "Like");
+      await seedActivity(config, {
+        ...react,
+        actor: { id: react.actor, type: "Person" },
+      });
+      expect(await favouritesOf(config, post)).toBe(1);
+
+      await seedActivity(config, {
+        id: `${react.id}/undo`,
+        type: "Undo",
+        actor: react.actor,
+        object: react.id,
+      });
+
+      expect(await favouritesOf(config, post)).toBe(0);
+    });
+
+    it("ignores an Undo of someone else's reaction", async () => {
+      const config = freshConfig();
+      const post = createNote(config);
+      const target = (post["object"] as { id: string }).id;
+      await seedActivity(config, post);
+      const react = reaction(target, "Like");
+      await seedActivity(config, react);
+
+      await seedActivity(config, {
+        id: `${react.id}/forged-undo`,
+        type: "Undo",
+        actor: "https://remote.example/users/mallory",
+        object: react.id,
+      });
+
+      expect(await favouritesOf(config, post)).toBe(1);
+    });
+  });
+
   it("notifications() surfaces mentions and favourites, not plain timeline posts", async () => {
     const config = freshConfig();
     await seedActivity(config, createNote(config));
