@@ -4062,9 +4062,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // A profile resolution that is about to hit the attempts ceiling
         // marks the following row 'Unknown' so the backfill never re-queues
         // it (and it never qualifies as a Group).
+        // A `move` row's actor is the migration target, not a follow being
+        // typed: an unreachable target must not mark an existing follow of it.
         if (
-          row.attempts + 1 >=
-          this.#deliveryPolicy("deliveryMaxAttempts", 8)
+          row.kind !== "move" &&
+          row.attempts + 1 >= this.#deliveryPolicy("deliveryMaxAttempts", 8)
         ) {
           this.#sql.exec(
             `UPDATE following SET actor_type = 'Unknown'

@@ -73,7 +73,9 @@ export const ActivityPubLogEvent = {
   /**
    * A `Move` from a followed account was not acted on because the target's
    * `alsoKnownAs` does not list the mover. Fields: `fromHost`, `toHost`,
-   * `reason`.
+   * `reason` (currently always `alias_missing`; a target that cannot be
+   * fetched is retried and surfaces as `DeliveryFailed` with
+   * `stage: "resolve"` instead).
    */
   MoveRejected: "activitypub.move.rejected",
   /**
