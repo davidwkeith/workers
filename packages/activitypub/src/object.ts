@@ -15,6 +15,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import {
   AS2_CONTENT_TYPE,
+  AS2_NS,
   PUBLIC_AUDIENCE,
   actorIri,
   buildCollection,
@@ -818,6 +819,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // own Announce — unwrap and store the inner activity too (§2.2).
         await this.#maybeUnwrapAnnounce(activity, config);
         break;
+      case "Move":
+        // An account we follow migrated (Mastodon `Move`): follow the target
+        // once it proves the alias, from the alarm (see #onMove).
+        await this.#onMove(activity, config);
+        break;
       case "Flag":
         // A report (#489). Stored like Like/Dislike/Announce, but
         // deliberately WITHOUT #maybeForward — a report must never fan out
@@ -1592,6 +1598,133 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     await this.#armAlarm();
 
     return json(201, activity as JsonValue, { location: id });
+  }
+
+  /**
+   * Handle an inbound `Move` (Mastodon account migration): when the mover is
+   * an actor this actor follows, queue a `move` row whose alarm pass fetches
+   * the target and, only if the target lists the mover in `alsoKnownAs`,
+   * follows the target and unfollows the mover (#onMoveVerified). The fetch
+   * stays off the inbound POST's critical path, like `pending_accept`.
+   *
+   * The front door already bound the activity's `actor` to the HTTP signer,
+   * so requiring `object` to equal `actor` means only the account itself can
+   * announce its move. Anything else — a `Move` of some other object, one we
+   * don't follow, an unsafe or self target — is accepted and ignored.
+   */
+  async #onMove(
+    activity: ActivityObject,
+    config: ForwardedConfig,
+  ): Promise<void> {
+    const mover = actorIri(activity.actor);
+    const target = objectId(activity.target as JsonValue);
+    if (
+      !mover ||
+      objectId(activity.object as JsonValue) !== mover ||
+      !target ||
+      target === mover ||
+      !isSafeTarget(target)
+    ) {
+      return;
+    }
+    const followed =
+      this.#sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM following WHERE actor = ?`,
+          mover,
+        )
+        .one().n > 0;
+    const queued =
+      this.#sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM pending_accept WHERE kind = 'move' AND event = ?`,
+          mover,
+        )
+        .one().n > 0;
+    if (!followed || queued) return;
+    // Built now, while the forwarded config (our actor IRI) is in hand: the
+    // alarm that sends them can wake on a cold isolate without it.
+    const me = config.iris.id;
+    const follow = {
+      "@context": AS2_NS,
+      id: `${me}#follows/${crypto.randomUUID()}`,
+      type: "Follow",
+      actor: me,
+      object: target,
+    };
+    const undo = {
+      "@context": AS2_NS,
+      id: `${me}#undos/${crypto.randomUUID()}`,
+      type: "Undo",
+      actor: me,
+      object: { type: "Follow", actor: me, object: mover },
+    };
+    this.#sql.exec(
+      `INSERT INTO pending_accept (kind, actor, event, json, attempts, next_at)
+         VALUES ('move', ?, ?, ?, 0, ?)`,
+      target,
+      mover,
+      JSON.stringify({ follow, undo }),
+      Date.now(),
+    );
+    await this.#armAlarm();
+  }
+
+  /**
+   * Apply a verified `Move` from `mover` to `target`: follow `target` (unless
+   * already following it), drop the `mover` following row, and send `mover` an
+   * `Undo(Follow)`. Mastodon matches that `Undo` on actor + object, so the
+   * original `Follow` id is not needed.
+   */
+  #onMoveVerified(
+    mover: string,
+    target: string,
+    resolved: {
+      inbox: string;
+      sharedInbox: string | null;
+      actorType: string | null;
+    },
+    json: string,
+  ): void {
+    let bodies: { follow: unknown; undo: unknown };
+    try {
+      bodies = JSON.parse(json) as { follow: unknown; undo: unknown };
+    } catch {
+      return;
+    }
+    const alreadyFollowing =
+      this.#sql
+        .exec<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM following WHERE actor = ?`,
+          target,
+        )
+        .one().n > 0;
+    if (!alreadyFollowing) {
+      this.#sql.exec(
+        `INSERT INTO following (actor, state, added_at, actor_type, inbox, shared_inbox)
+           VALUES (?, 'pending', ?, ?, ?, ?)`,
+        target,
+        Date.now(),
+        resolved.actorType ?? "Unknown",
+        resolved.inbox,
+        resolved.sharedInbox,
+      );
+      this.#enqueueDelivery(resolved.inbox, JSON.stringify(bodies.follow));
+    }
+    const old = this.#sql
+      .exec<{ inbox: string | null }>(
+        `DELETE FROM following WHERE actor = ? RETURNING inbox`,
+        mover,
+      )
+      .toArray()[0];
+    const undo = JSON.stringify(bodies.undo);
+    if (old?.inbox) this.#enqueueDelivery(old.inbox, undo);
+    else this.#enqueuePendingDelivery(mover, undo);
+    this.#logDelivery(ActivityPubLogEvent.MoveFollowed, {
+      fromHost: hostFromUrl(mover) ?? "unknown",
+      toHost: hostFromUrl(target) ?? "unknown",
+      alreadyFollowing,
+    });
   }
 
   /**
@@ -3861,6 +3994,18 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           .one().n > 0
       );
     }
+    if (row.kind === "move") {
+      // Only while we still follow the mover (an owner unfollow in between
+      // cancels the migration).
+      return (
+        row.event !== null &&
+        this.#sql
+          .exec<{
+            n: number;
+          }>(`SELECT COUNT(*) AS n FROM following WHERE actor = ?`, row.event)
+          .one().n > 0
+      );
+    }
     if (!row.event) return false;
     return (
       this.#sql
@@ -3917,9 +4062,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         // A profile resolution that is about to hit the attempts ceiling
         // marks the following row 'Unknown' so the backfill never re-queues
         // it (and it never qualifies as a Group).
+        // A `move` row's actor is the migration target, not a follow being
+        // typed: an unreachable target must not mark an existing follow of it.
         if (
-          row.attempts + 1 >=
-          this.#deliveryPolicy("deliveryMaxAttempts", 8)
+          row.kind !== "move" &&
+          row.attempts + 1 >= this.#deliveryPolicy("deliveryMaxAttempts", 8)
         ) {
           this.#sql.exec(
             `UPDATE following SET actor_type = 'Unknown'
@@ -3939,6 +4086,21 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
           dropped,
           stage: "resolve",
         });
+        continue;
+      }
+      if (row.kind === "move") {
+        // Mastodon's own check: the target must list the mover as an alias,
+        // or anyone could "move" an account onto an arbitrary actor.
+        if (row.event && resolved.alsoKnownAs.includes(row.event)) {
+          this.#onMoveVerified(row.event, row.actor, resolved, row.json);
+        } else {
+          this.#logDelivery(ActivityPubLogEvent.MoveRejected, {
+            fromHost: hostFromUrl(row.event ?? "") ?? "unknown",
+            toHost: hostFromUrl(row.actor) ?? "unknown",
+            reason: "alias_missing",
+          });
+        }
+        this.#sql.exec(`DELETE FROM pending_accept WHERE seq = ?`, row.seq);
         continue;
       }
       if (row.kind === "follow") {
@@ -4074,6 +4236,8 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     /** The actor's own `inbox`, for blind deliveries that must not batch. */
     personalInbox: string | null;
     actorType: string | null;
+    /** The actor's `alsoKnownAs` IRIs (Move target validation). */
+    alsoKnownAs: readonly string[];
   } | null> {
     try {
       assertPublicHttpsTarget(actor);
@@ -4115,9 +4279,13 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     const personal = typeof record.inbox === "string" ? record.inbox : null;
     const inbox = sharedInbox ?? personal;
     const actorType = typeof record.type === "string" ? record.type : null;
+    const aliases = record.alsoKnownAs;
+    const alsoKnownAs = (Array.isArray(aliases) ? aliases : [aliases]).filter(
+      (alias): alias is string => typeof alias === "string",
+    );
     return inbox === null
       ? null
-      : { inbox, sharedInbox, personalInbox: personal, actorType };
+      : { inbox, sharedInbox, personalInbox: personal, actorType, alsoKnownAs };
   }
 
   /**
