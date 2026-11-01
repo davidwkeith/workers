@@ -24,7 +24,9 @@ This is the second `@dwk` package to ship a Durable Object.
   `OrderedCollection`s; `inbox` is write-only to peers.
 - **Server-to-server (inbound)** `POST /inbox`: HTTP-signature verification at
   the edge, dedup by activity `id`, and handling of `Follow` / `Undo` /
-  `Accept` / `Create` / `Update` / `Like` / `Announce` / `Delete` / `Move`.
+  `Accept` / `Create` / `Update` / `Like` / `EmojiReact` / `Announce` /
+  `Delete` / `Move`. An `EmojiReact` (Pleroma/Akkoma) counts as a favourite,
+  and an `Undo` of a `Like` or `EmojiReact` removes it again.
   A `Move` from an account this actor follows switches the follow to the
   new account once that account lists the old one in `alsoKnownAs`.
 - **Server-to-server (outbound)**: auto-`Accept` of follows and signed fan-out

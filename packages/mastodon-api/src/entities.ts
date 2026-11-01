@@ -547,7 +547,10 @@ export function notificationEntity(
     ? remoteAccountEntity(actorIri, entry.actorProfiles?.[actorIri])
     : remoteAccountEntity(opts.baseUrl);
 
-  if (type === "Like") {
+  // An `EmojiReact` (Pleroma/Akkoma) renders as a favourite: Mastodon's
+  // notification types have no reaction, and Misskey downgrades its own
+  // reactions to `Like` for Mastodon peers the same way.
+  if (type === "Like" || type === "EmojiReact") {
     return {
       id: entry.id,
       type: "favourite",

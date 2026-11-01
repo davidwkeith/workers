@@ -527,6 +527,24 @@ describe("notificationEntity", () => {
     expect((notification!.account as { acct: string }).acct).toContain("carol");
   });
 
+  it("maps an EmojiReact to a favourite notification", () => {
+    const entry: BackendEntry = {
+      id: encodeSnowflake(1_753_000_000_003, 1),
+      receivedAt: 1_753_000_000_003,
+      objectType: null,
+      relayedBy: null,
+      activity: {
+        id: "https://remote.example/activities/4",
+        type: "EmojiReact",
+        actor: "https://remote.example/users/carol",
+        object: `${baseUrl}/users/owner/outbox/1`,
+        content: "🔥",
+      },
+    };
+    const notification = notificationEntity(entry, { baseUrl });
+    expect(notification!.type).toBe("favourite");
+  });
+
   it("maps an Announce to a reblog notification", () => {
     const entry: BackendEntry = {
       id: encodeSnowflake(1_753_000_000_003, 1),
