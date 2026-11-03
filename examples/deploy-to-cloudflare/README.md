@@ -33,8 +33,8 @@ npm run dev
    there).
 3. Compose more `@dwk` packages into the same Worker — IndieAuth, Micropub,
    Webmention, an edge Solid Pod, ActivityPub — following the
-   [composition model](../../README.md#composition-model). Each package's
-   [spec](../../spec/packages/) lists the bindings its `Env` fragment declares;
+   [composition model](https://github.com/davidwkeith/workers/blob/main/README.md#composition-model). Each package's
+   [spec](https://github.com/davidwkeith/workers/tree/main/spec/packages) lists the bindings its `Env` fragment declares;
    add their union to `wrangler.jsonc`. Secrets go in [`.env.example`](.env.example), which
    the Deploy button turns into prompts.
 
