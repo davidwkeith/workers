@@ -38,6 +38,13 @@ npm run dev
    add their union to `wrangler.jsonc`. Secrets go in [`.env.example`](.env.example), which
    the Deploy button turns into prompts.
 
+## Operating it
+
+The [IT guide](https://github.com/davidwkeith/workers/blob/main/docs/it-guide.md)
+explains what runs where on your Cloudflare account and how to debug it: live
+logs, missing bindings, zone settings (WAF, Bot Fight Mode, caching) that block
+or rewrite protocol traffic, and the canonical-domain rules identity depends on.
+
 ## Note on isolation
 
 This directory is deliberately **not** part of the pnpm workspace: its `@dwk`
