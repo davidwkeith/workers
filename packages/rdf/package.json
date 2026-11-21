@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@types/n3": "1.26.1",
+    "@types/n3": "1.26.6",
     "n3": "2.13.12"
   }
 }
