@@ -109,7 +109,12 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   FEP-e232 `Link` tag with `rel`
   `https://misskey-hub.net/ns#_misskey_quote`; `http(s)` IRIs only) against
   locally-held posts via `#resolveLocalObject`, exactly like a bare-IRI
-  boost, and return it as `quote`. There is no network fetch and no
+  boost, and return it as `quote`. `#resolveLocalObject` (shared by reply,
+  boost and quote hydration) trusts only the owner's outbox or an inbox
+  `Create`/`Update` whose `actor` has the same origin as the object IRI,
+  newest row first. A `Like`/`Announce` embedding someone else's object, or a
+  `Create` from another origin claiming its id, is never rendered as that
+  post. Its inbox lookup is served by `idx_inbox_object_id`. There is no network fetch and no
   `QuoteRequest`/`quoteAuthorization` handling (FEP-044f consent) yet, and
   this actor does not publish quotes.
 - Inbound **reactions**. A Pleroma/Akkoma `EmojiReact` is stored and

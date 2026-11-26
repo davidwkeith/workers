@@ -361,9 +361,10 @@ function mediaAttachments(raw: unknown): Record<string, unknown>[] {
  * Whether rendering this entry may need the real owner account (id) rather
  * than a synthesized remote one. True when the entry *is* the owner's own
  * post (`source === 1`), *replies to* one (`inReplyTo.authorIsOwner`), or
- * *boosts* or *quotes* one (`boost`/`quote.authorIsOwner`) — those cases matter because
- * `in_reply_to_account_id` / `reblog.account.id` must resolve to the owner's
- * real id, not a fallback `r_...`. A caller passes `ownerAccount` into
+ * *boosts* or *quotes* one (`boost`/`quote.authorIsOwner`) — those cases
+ * matter because `in_reply_to_account_id`, `reblog.account.id` and a quoted
+ * status's `account.id` must resolve to the owner's real id, not a fallback
+ * `r_...`. A caller passes `ownerAccount` into
  * `statusEntity`/`notificationEntity` iff this is true for the entry (or any
  * entry on the page).
  */
@@ -506,6 +507,9 @@ export function statusEntity(
       content: "",
       spoiler_text: "",
       media_attachments: [],
+      // The quote belongs to the relayed post (`reblog`), not the group's
+      // content-less wrapper — Mastodon's reblog shell carries `quote: null`.
+      quote: null,
       account: remoteAccountEntity(
         entry.relayedBy,
         entry.actorProfiles?.[entry.relayedBy],
@@ -544,6 +548,7 @@ export function statusEntity(
       content: "",
       spoiler_text: "",
       media_attachments: [],
+      quote: null,
       reblog: boostedStatus,
     };
   }

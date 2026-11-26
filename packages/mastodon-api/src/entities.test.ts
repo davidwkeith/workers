@@ -562,6 +562,25 @@ describe("statusEntity quotes", () => {
     );
   });
 
+  it("keeps a group-relayed quote on the reblog, not the wrapper", () => {
+    const status = statusEntity(
+      {
+        ...base,
+        relayedBy: "https://group.example/groups/g",
+        quote: {
+          id: encodeSnowflake(1_753_000_000_007, 1),
+          authorIri: "https://remote.example/users/alice",
+          authorIsOwner: false,
+          object: { id: "https://remote.example/objects/o", type: "Note" },
+        },
+      },
+      { baseUrl },
+    );
+    expect(status.quote).toBeNull();
+    const reblog = status.reblog as { quote: { state: string } | null };
+    expect(reblog.quote?.state).toBe("accepted");
+  });
+
   it("uses the owner account for a quoted owner post", () => {
     const ownerAccount = { id: "owner-id", acct: "owner" };
     const status = statusEntity(
