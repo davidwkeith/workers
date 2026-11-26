@@ -71,6 +71,18 @@ export interface BackendEntry {
     readonly authorIsOwner: boolean;
     readonly object: Record<string, unknown>;
   };
+  /**
+   * The post this entry quotes (FEP-044f `quote`, or a Misskey/Pleroma
+   * quote), hydrated like {@link boost} from a locally-held copy. Absent when
+   * the entry quotes nothing or the quoted post is not held; the status then
+   * renders `quote: null`.
+   */
+  readonly quote?: {
+    readonly id: string;
+    readonly authorIri: string | null;
+    readonly authorIsOwner: boolean;
+    readonly object: Record<string, unknown>;
+  };
 }
 
 /** Safe, best-effort fields retained from a cached remote AS2 actor document. */

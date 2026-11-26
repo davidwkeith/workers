@@ -633,6 +633,62 @@ describe("buildMastodonBackend", () => {
     });
   });
 
+  describe("quote posts", () => {
+    const entryFor = async (
+      config: ResolvedConfig,
+      activity: Record<string, unknown>,
+    ) => {
+      const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+      return (await backend.timeline({ limit: 10 })).entries.find(
+        (candidate) => candidate.activity["id"] === activity["id"],
+      );
+    };
+    const quoting = (quoted: string, field = "quoteUrl") => {
+      counter += 1;
+      return {
+        id: `https://remote.example/activities/quote-${counter}`,
+        type: "Create",
+        actor: "https://remote.example/users/quoter",
+        object: {
+          id: `https://remote.example/objects/quote-${counter}`,
+          type: "Note",
+          content: `<p>look at this</p><p>RE: ${quoted}</p>`,
+          [field]: quoted,
+        },
+      };
+    };
+
+    it.each(["quote", "quoteUrl", "_misskey_quote"])(
+      "hydrates a held post quoted via %s",
+      async (field) => {
+        const config = freshConfig();
+        const original = createNote(config);
+        const quotedIri = (original["object"] as { id: string }).id;
+        await seedActivity(config, original);
+        const post = quoting(quotedIri, field);
+        await seedActivity(config, post);
+
+        const entry = await entryFor(config, post);
+        expect(entry?.quote?.object).toMatchObject({
+          id: quotedIri,
+          content: (original["object"] as { content: string }).content,
+        });
+        expect(entry?.quote?.authorIri).toBe(original["actor"]);
+        expect(entry?.quote?.authorIsOwner).toBe(false);
+      },
+    );
+
+    it("leaves a quote of an unheld post absent", async () => {
+      const config = freshConfig();
+      const post = quoting("https://elsewhere.example/notes/unheld");
+      await seedActivity(config, post);
+
+      const entry = await entryFor(config, post);
+      expect(entry).toBeDefined();
+      expect(entry?.quote).toBeUndefined();
+    });
+  });
+
   describe("emoji reactions and undone reactions", () => {
     const favouritesOf = async (
       config: ResolvedConfig,

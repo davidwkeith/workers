@@ -361,7 +361,7 @@ function mediaAttachments(raw: unknown): Record<string, unknown>[] {
  * Whether rendering this entry may need the real owner account (id) rather
  * than a synthesized remote one. True when the entry *is* the owner's own
  * post (`source === 1`), *replies to* one (`inReplyTo.authorIsOwner`), or
- * *boosts* one (`boost.authorIsOwner`) — the reply/boost cases matter because
+ * *boosts* or *quotes* one (`boost`/`quote.authorIsOwner`) — those cases matter because
  * `in_reply_to_account_id` / `reblog.account.id` must resolve to the owner's
  * real id, not a fallback `r_...`. A caller passes `ownerAccount` into
  * `statusEntity`/`notificationEntity` iff this is true for the entry (or any
@@ -371,8 +371,43 @@ export function entryNeedsOwnerAccount(entry: BackendEntry): boolean {
   return (
     entry.source === 1 ||
     entry.inReplyTo?.authorIsOwner === true ||
-    entry.boost?.authorIsOwner === true
+    entry.boost?.authorIsOwner === true ||
+    entry.quote?.authorIsOwner === true
   );
+}
+
+/**
+ * Mastodon 4.5's `Quote` for a post that quotes a locally-held one: the
+ * quoted post rendered as a full `Status` (from the hydrated copy, so the
+ * nested status carries no quote of its own). `state` is `"accepted"`: the
+ * quoted content is our own stored copy, but a FEP-044f `quoteAuthorization`
+ * stamp is not verified, so this reflects "shown", not "approved by the
+ * quoted author".
+ */
+function quoteEntity(
+  entry: BackendEntry,
+  quote: NonNullable<BackendEntry["quote"]>,
+  opts: Parameters<typeof statusEntity>[1],
+): Record<string, unknown> {
+  return {
+    state: "accepted",
+    quoted_status: statusEntity(
+      {
+        id: quote.id,
+        activity: {
+          type: "Create",
+          actor: quote.authorIri ?? "",
+          object: quote.object,
+        },
+        receivedAt: entry.receivedAt,
+        objectType: null,
+        relayedBy: null,
+        source: quote.authorIsOwner ? 1 : 0,
+        actorProfiles: entry.actorProfiles,
+      },
+      opts,
+    ),
+  };
 }
 
 /**
@@ -461,6 +496,7 @@ export function statusEntity(
     emojis: [],
     card: null,
     poll: null,
+    quote: entry.quote ? quoteEntity(entry, entry.quote, opts) : null,
   };
 
   if (entry.relayedBy) {

@@ -75,6 +75,14 @@ interface ClientEntryRow {
     readonly authorIri: string | null;
     readonly object: Record<string, unknown>;
   };
+  /** Quoted post hydrated from a local row by the DO, like `boost`. */
+  readonly quote?: {
+    readonly receivedAt: number;
+    readonly seq: number;
+    readonly source: 0 | 1;
+    readonly authorIri: string | null;
+    readonly object: Record<string, unknown>;
+  };
 }
 
 /**
@@ -120,6 +128,20 @@ function toBackendEntry(row: ClientEntryRow): BackendEntry {
             authorIri: row.boost.authorIri,
             authorIsOwner: row.boost.source === 1,
             object: row.boost.object,
+          },
+        }
+      : {}),
+    ...(row.quote
+      ? {
+          quote: {
+            id: encodeSnowflake(
+              row.quote.receivedAt,
+              row.quote.seq,
+              row.quote.source,
+            ),
+            authorIri: row.quote.authorIri,
+            authorIsOwner: row.quote.source === 1,
+            object: row.quote.object,
           },
         }
       : {}),

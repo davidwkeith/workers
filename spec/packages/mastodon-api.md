@@ -244,7 +244,19 @@ for the full cursor contract (`max_received_at`/`since_received_at`/
   `relayed_by` row — FEP-1b12 group-relay provenance, wrapped as a boost
   attributed to the relaying group's account), `account` (best-effort
   remote `Account`, see below), `media_attachments`, `mentions: []`,
-  `tags: []`, `emojis: []`, `card: null`, `poll: null`.
+  `tags: []`, `emojis: []`, `card: null`, `poll: null`, and `quote`
+  (Mastodon 4.5's `Quote`; see below).
+- **`quote`**: `null` unless the post quotes another post the backend holds
+  locally (`BackendEntry.quote`, hydrated like a bare-IRI boost). The quoted
+  post is recognized from FEP-044f `quote`, Pleroma/Akkoma `quoteUrl`,
+  Fedibird `quoteUri`, Misskey `_misskey_quote`, or a FEP-e232 object link
+  with the Misskey quote `rel`. A held quote renders as
+  `{ state: "accepted", quoted_status: <Status> }`, where the nested
+  `Status` carries `quote: null` (no nesting beyond one level). `state` is
+  always `"accepted"`: the quoted content is the backend's own stored copy,
+  but a FEP-044f `quoteAuthorization` is not verified, so it does not mean
+  the quoted author approved. An unheld quote stays `null`; the quoting
+  post's own fallback link (usually `RE: <url>` in `content`) still shows.
 - **`Notification`**: `Like` → `favourite` (as is a Pleroma/Akkoma
   `EmojiReact`: Mastodon has no reaction notification type, so the emoji is
   not shown), `Announce` → `reblog`, a
@@ -287,9 +299,10 @@ text is correct behavior, not a bug.
   (`in_reply_to_id`) and its author (`in_reply_to_account_id`); a bare-IRI
   boost of a locally-held post renders its reblog with the real content and
   author. A target the DO does **not** hold still degrades to `null`
-  (reply) or a content-less reblog (boost) — dereferencing and caching a
-  remote boosted/replied-to object is the remaining increment, the same
-  network-fetch shape as actor-profile hydration.
+  (reply), a content-less reblog (boost), or `quote: null` (quote) —
+  dereferencing and caching a remote boosted/replied-to/quoted object is the
+  remaining increment, the same network-fetch shape as actor-profile
+  hydration.
 
 ## Phase 3 (implemented; manual QA pending)
 

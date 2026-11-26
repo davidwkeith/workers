@@ -22,6 +22,7 @@ import {
   buildCollectionPage,
   objectId,
   objectType,
+  quotedObjectIri,
   wantsActivityJson,
   type ActivityObject,
   type ActorIris,
@@ -2979,7 +2980,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         actorProfiles: this.#clientActorProfiles(
           entry.activity,
           entry.relayedBy,
-          [resolved.boost?.authorIri, resolved.replyTo?.authorIri],
+          [
+            resolved.boost?.authorIri,
+            resolved.replyTo?.authorIri,
+            resolved.quote?.authorIri,
+          ],
         ),
         ...resolved,
       };
@@ -3013,6 +3018,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       authorIri: string | null;
       object: JsonValue;
     };
+    /** The quoted post (FEP-044f / Misskey quote), hydrated like a boost. */
+    quote?: {
+      receivedAt: number;
+      seq: number;
+      source: 0 | 1;
+      authorIri: string | null;
+      object: JsonValue;
+    };
   } {
     const record = activity as Record<string, JsonValue>;
     const type = record.type;
@@ -3022,20 +3035,49 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         object && typeof object === "object" && !Array.isArray(object)
           ? (object as Record<string, JsonValue>).inReplyTo
           : undefined;
+      const resolved: {
+        replyTo?: {
+          receivedAt: number;
+          seq: number;
+          source: 0 | 1;
+          authorIri: string | null;
+        };
+        quote?: {
+          receivedAt: number;
+          seq: number;
+          source: 0 | 1;
+          authorIri: string | null;
+          object: JsonValue;
+        };
+      } = {};
       if (typeof inReplyTo === "string") {
         const target = this.#resolveLocalObject(inReplyTo);
         if (target) {
-          return {
-            replyTo: {
-              receivedAt: target.receivedAt,
-              seq: target.seq,
-              source: target.source,
-              authorIri: target.authorIri,
-            },
+          resolved.replyTo = {
+            receivedAt: target.receivedAt,
+            seq: target.seq,
+            source: target.source,
+            authorIri: target.authorIri,
           };
         }
       }
-      return {};
+      // A quote renders only from a locally-held copy (no fetch in a client
+      // request, as for boosts); an unheld one leaves `quote` absent, and the
+      // post's own fallback link (`RE: <url>`) stays in its content.
+      const quoted = quotedObjectIri(object);
+      if (quoted) {
+        const target = this.#resolveLocalObject(quoted);
+        if (target && target.object !== null) {
+          resolved.quote = {
+            receivedAt: target.receivedAt,
+            seq: target.seq,
+            source: target.source,
+            authorIri: target.authorIri,
+            object: target.object,
+          };
+        }
+      }
+      return resolved;
     }
     if (type === "Announce") {
       // Only a bare-IRI boost needs hydration — an embedded object already
@@ -3279,6 +3321,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       actorProfiles: this.#clientActorProfiles(parsed, row.relayed_by, [
         resolved.boost?.authorIri,
         resolved.replyTo?.authorIri,
+        resolved.quote?.authorIri,
       ]),
       ...resolved,
     } as unknown as JsonValue);

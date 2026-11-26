@@ -391,6 +391,47 @@ export function objectId(value: JsonValue | undefined): string | undefined {
   return undefined;
 }
 
+/** The Misskey quote relation FEP-e232 object links use to mark a quote. */
+export const MISSKEY_QUOTE_REL = "https://misskey-hub.net/ns#_misskey_quote";
+
+/**
+ * The IRI of the post a `Note` quotes, or `undefined` when it quotes none.
+ * Reads, in order: Mastodon's FEP-044f `quote`, Pleroma/Akkoma `quoteUrl`,
+ * Fedibird `quoteUri`, Misskey `_misskey_quote`, then a FEP-e232 object link
+ * (`tag` of type `Link` whose `rel` includes {@link MISSKEY_QUOTE_REL}). Each
+ * may be a bare IRI; `quote`/`quoteUrl` may also be an embedded `{ id }`.
+ * Only `http(s)` IRIs are returned: the value is attacker-controlled.
+ */
+export function quotedObjectIri(
+  object: JsonValue | undefined,
+): string | undefined {
+  if (!object || typeof object !== "object" || Array.isArray(object)) {
+    return undefined;
+  }
+  const record = object as Record<string, JsonValue>;
+  const httpIri = (value: JsonValue | undefined): string | undefined => {
+    const iri = objectId(value);
+    if (!iri || !URL.canParse(iri)) return undefined;
+    const { protocol } = new URL(iri);
+    return protocol === "https:" || protocol === "http:" ? iri : undefined;
+  };
+  for (const key of ["quote", "quoteUrl", "quoteUri", "_misskey_quote"]) {
+    const iri = httpIri(record[key]);
+    if (iri) return iri;
+  }
+  const tags = Array.isArray(record.tag) ? record.tag : [record.tag];
+  for (const tag of tags) {
+    if (!tag || typeof tag !== "object" || Array.isArray(tag)) continue;
+    const link = tag as Record<string, JsonValue>;
+    if (link.type !== "Link") continue;
+    const rels = Array.isArray(link.rel) ? link.rel : [link.rel];
+    if (!rels.includes(MISSKEY_QUOTE_REL)) continue;
+    const iri = httpIri(link.href);
+    if (iri) return iri;
+  }
+  return undefined;
+}
+
 /** Read the `type` of an activity's `object` when it is a nested object. */
 export function objectType(value: JsonValue | undefined): string | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
