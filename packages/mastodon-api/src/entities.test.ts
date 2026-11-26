@@ -505,6 +505,101 @@ describe("remote account id round trip", () => {
   });
 });
 
+describe("statusEntity quotes", () => {
+  const baseUrl = "https://owner.example";
+  const base: BackendEntry = {
+    id: encodeSnowflake(1_753_000_000_010, 1),
+    receivedAt: 1_753_000_000_010,
+    objectType: "Note",
+    relayedBy: null,
+    activity: {
+      id: "https://remote.example/activities/q1",
+      type: "Create",
+      actor: "https://remote.example/users/quoter",
+      object: {
+        id: "https://remote.example/objects/q1",
+        type: "Note",
+        content: "<p>look</p>",
+      },
+    },
+  };
+
+  it("renders quote: null when the post quotes nothing held", () => {
+    expect(statusEntity(base, { baseUrl }).quote).toBeNull();
+  });
+
+  it("renders a hydrated quote as an accepted Quote with the quoted Status", () => {
+    const quotedId = encodeSnowflake(1_753_000_000_009, 1);
+    const status = statusEntity(
+      {
+        ...base,
+        quote: {
+          id: quotedId,
+          authorIri: "https://remote.example/users/alice",
+          authorIsOwner: false,
+          object: {
+            id: "https://remote.example/objects/original",
+            type: "Note",
+            content: "<p>the original</p>",
+          },
+        },
+      },
+      { baseUrl },
+    );
+    const quote = status.quote as {
+      state: string;
+      quoted_status: Record<string, unknown>;
+    };
+    expect(quote.state).toBe("accepted");
+    expect(quote.quoted_status.id).toBe(quotedId);
+    expect(quote.quoted_status.uri).toBe(
+      "https://remote.example/objects/original",
+    );
+    expect(quote.quoted_status.content).toBe("<p>the original</p>");
+    expect(quote.quoted_status.quote).toBeNull();
+    expect((quote.quoted_status.account as { acct: string }).acct).toContain(
+      "alice",
+    );
+  });
+
+  it("keeps a group-relayed quote on the reblog, not the wrapper", () => {
+    const status = statusEntity(
+      {
+        ...base,
+        relayedBy: "https://group.example/groups/g",
+        quote: {
+          id: encodeSnowflake(1_753_000_000_007, 1),
+          authorIri: "https://remote.example/users/alice",
+          authorIsOwner: false,
+          object: { id: "https://remote.example/objects/o", type: "Note" },
+        },
+      },
+      { baseUrl },
+    );
+    expect(status.quote).toBeNull();
+    const reblog = status.reblog as { quote: { state: string } | null };
+    expect(reblog.quote?.state).toBe("accepted");
+  });
+
+  it("uses the owner account for a quoted owner post", () => {
+    const ownerAccount = { id: "owner-id", acct: "owner" };
+    const status = statusEntity(
+      {
+        ...base,
+        quote: {
+          id: encodeSnowflake(1_753_000_000_008, 1, 1),
+          authorIri: `${baseUrl}/users/owner`,
+          authorIsOwner: true,
+          object: { id: `${baseUrl}/users/owner/outbox/1`, type: "Note" },
+        },
+      },
+      { baseUrl, ownerAccount },
+    );
+    const quote = status.quote as { quoted_status: { account: unknown } };
+    expect(quote.quoted_status.account).toBe(ownerAccount);
+  });
+});
+
 describe("notificationEntity", () => {
   const baseUrl = "https://owner.example";
 

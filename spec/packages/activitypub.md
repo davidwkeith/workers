@@ -103,6 +103,20 @@ large media; bodies **MUST** stream and **MUST NOT** be buffered in the DO.
   `key_unresolved` alone doesn't distinguish a network error from a
   challenge/redirect loop (or, on Cloudflare, a same-zone key fetch looped by
   the zone's Flexible SSL/TLS mode — see the package README).
+- Inbound **quote posts** are stored like any `Create`. For the client API,
+  `__client/*` reads resolve a `Note`'s quoted post (`quotedObjectIri`:
+  FEP-044f `quote`, then `quoteUrl`, `quoteUri`, `_misskey_quote`, then a
+  FEP-e232 `Link` tag with `rel`
+  `https://misskey-hub.net/ns#_misskey_quote`; `http(s)` IRIs only) against
+  locally-held posts via `#resolveLocalObject`, exactly like a bare-IRI
+  boost, and return it as `quote`. `#resolveLocalObject` (shared by reply,
+  boost and quote hydration) trusts only the owner's outbox or an inbox
+  `Create`/`Update` whose `actor` has the same origin as the object IRI,
+  newest row first. A `Like`/`Announce` embedding someone else's object, or a
+  `Create` from another origin claiming its id, is never rendered as that
+  post. Its inbox lookup is served by `idx_inbox_object_id`. There is no network fetch and no
+  `QuoteRequest`/`quoteAuthorization` handling (FEP-044f consent) yet, and
+  this actor does not publish quotes.
 - Inbound **reactions**. A Pleroma/Akkoma `EmojiReact` is stored and
   forwarded exactly like a `Like`, and counts toward `favourites_count` and
   the `favourite` notification (Misskey already sends its reactions as

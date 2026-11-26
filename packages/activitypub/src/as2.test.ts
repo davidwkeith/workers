@@ -9,10 +9,13 @@ import {
   buildActorDocument,
   buildCollection,
   buildCollectionPage,
+  MISSKEY_QUOTE_REL,
   objectId,
   objectType,
+  quotedObjectIri,
   wantsActivityJson,
   type ActorIris,
+  type JsonValue,
 } from "./as2.js";
 
 const IRIS: ActorIris = {
@@ -287,5 +290,61 @@ describe("as2ContentType", () => {
     expect(
       as2ContentType("application/activity+json, application/ld+json"),
     ).toBe(AS2_CONTENT_TYPE);
+  });
+});
+
+describe("quotedObjectIri", () => {
+  const Q = "https://remote.example/notes/quoted";
+
+  it.each([
+    ["FEP-044f quote", { quote: Q }],
+    ["an embedded quote object", { quote: { id: Q, type: "Note" } }],
+    ["Pleroma quoteUrl", { quoteUrl: Q }],
+    ["Fedibird quoteUri", { quoteUri: Q }],
+    ["Misskey _misskey_quote", { _misskey_quote: Q }],
+    [
+      "a FEP-e232 object link",
+      {
+        tag: [
+          { type: "Mention", href: "https://remote.example/users/x" },
+          {
+            type: "Link",
+            mediaType:
+              'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
+            rel: MISSKEY_QUOTE_REL,
+            href: Q,
+          },
+        ],
+      },
+    ],
+  ])("reads %s", (_label, fields) => {
+    expect(quotedObjectIri({ type: "Note", ...fields } as JsonValue)).toBe(Q);
+  });
+
+  it("prefers FEP-044f quote over the legacy fields", () => {
+    expect(
+      quotedObjectIri({
+        type: "Note",
+        quote: Q,
+        quoteUrl: "https://remote.example/notes/other",
+      }),
+    ).toBe(Q);
+  });
+
+  it.each([
+    ["no quote at all", { type: "Note", content: "hi" }],
+    ["a non-http IRI", { type: "Note", quote: "javascript:alert(1)" }],
+    ["a malformed IRI", { type: "Note", quoteUrl: "not a url" }],
+    [
+      "a Link without the quote rel",
+      { type: "Note", tag: { type: "Link", href: Q } },
+    ],
+  ])("returns undefined for %s", (_label, object) => {
+    expect(quotedObjectIri(object)).toBeUndefined();
+  });
+
+  it("returns undefined for a non-object", () => {
+    expect(quotedObjectIri("https://remote.example/notes/1")).toBeUndefined();
+    expect(quotedObjectIri(undefined)).toBeUndefined();
   });
 });

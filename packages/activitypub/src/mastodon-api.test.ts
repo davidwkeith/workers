@@ -633,6 +633,133 @@ describe("buildMastodonBackend", () => {
     });
   });
 
+  describe("quote posts", () => {
+    const entryFor = async (
+      config: ResolvedConfig,
+      activity: Record<string, unknown>,
+    ) => {
+      const backend = buildMastodonBackend({ config, actor: testEnv.ACTOR });
+      return (await backend.timeline({ limit: 10 })).entries.find(
+        (candidate) => candidate.activity["id"] === activity["id"],
+      );
+    };
+    const quoting = (quoted: string, field = "quoteUrl") => {
+      counter += 1;
+      return {
+        id: `https://remote.example/activities/quote-${counter}`,
+        type: "Create",
+        actor: "https://remote.example/users/quoter",
+        object: {
+          id: `https://remote.example/objects/quote-${counter}`,
+          type: "Note",
+          content: `<p>look at this</p><p>RE: ${quoted}</p>`,
+          [field]: quoted,
+        },
+      };
+    };
+
+    it.each(["quote", "quoteUrl", "_misskey_quote"])(
+      "hydrates a held post quoted via %s",
+      async (field) => {
+        const config = freshConfig();
+        const original = createNote(config);
+        const quotedIri = (original["object"] as { id: string }).id;
+        await seedActivity(config, original);
+        const post = quoting(quotedIri, field);
+        await seedActivity(config, post);
+
+        const entry = await entryFor(config, post);
+        expect(entry?.quote?.object).toMatchObject({
+          id: quotedIri,
+          content: (original["object"] as { content: string }).content,
+        });
+        expect(entry?.quote?.authorIri).toBe(original["actor"]);
+        expect(entry?.quote?.authorIsOwner).toBe(false);
+      },
+    );
+
+    describe("only trusts the author's own Create/Update of the quoted post", () => {
+      const ALICE = "https://alice.example/users/alice";
+      const ALICE_NOTE = "https://alice.example/objects/1";
+      const aliceCreate = (content: string, type = "Create") => {
+        counter += 1;
+        return {
+          id: `https://alice.example/activities/${type.toLowerCase()}-${counter}`,
+          type,
+          actor: ALICE,
+          object: { id: ALICE_NOTE, type: "Note", content },
+        };
+      };
+      const embedding = (type: string, actor: string, content: string) => {
+        counter += 1;
+        return {
+          id: `${actor}/activities/${type.toLowerCase()}-${counter}`,
+          type,
+          actor,
+          object: { id: ALICE_NOTE, type: "Note", content },
+        };
+      };
+
+      it("ignores a Like from another origin that embeds a forged copy", async () => {
+        const config = freshConfig();
+        await seedActivity(
+          config,
+          embedding("Like", "https://evil.example/users/eve", "forged words"),
+        );
+        const post = quoting(ALICE_NOTE);
+        await seedActivity(config, post);
+        expect((await entryFor(config, post))?.quote).toBeUndefined();
+      });
+
+      it("ignores a Create from another origin claiming the post's id", async () => {
+        const config = freshConfig();
+        await seedActivity(
+          config,
+          embedding("Create", "https://evil.example/users/eve", "forged words"),
+        );
+        const post = quoting(ALICE_NOTE);
+        await seedActivity(config, post);
+        expect((await entryFor(config, post))?.quote).toBeUndefined();
+      });
+
+      it("attributes the quote to the author, not an earlier booster", async () => {
+        const config = freshConfig();
+        await seedActivity(
+          config,
+          embedding("Announce", "https://booster.example/users/bo", "copy"),
+        );
+        await seedActivity(config, aliceCreate("the original"));
+        const post = quoting(ALICE_NOTE);
+        await seedActivity(config, post);
+
+        const quote = (await entryFor(config, post))?.quote;
+        expect(quote?.authorIri).toBe(ALICE);
+        expect(quote?.object).toMatchObject({ content: "the original" });
+      });
+
+      it("shows the latest Update of the quoted post", async () => {
+        const config = freshConfig();
+        await seedActivity(config, aliceCreate("before the edit"));
+        await seedActivity(config, aliceCreate("after the edit", "Update"));
+        const post = quoting(ALICE_NOTE);
+        await seedActivity(config, post);
+
+        const quote = (await entryFor(config, post))?.quote;
+        expect(quote?.object).toMatchObject({ content: "after the edit" });
+      });
+    });
+
+    it("leaves a quote of an unheld post absent", async () => {
+      const config = freshConfig();
+      const post = quoting("https://elsewhere.example/notes/unheld");
+      await seedActivity(config, post);
+
+      const entry = await entryFor(config, post);
+      expect(entry).toBeDefined();
+      expect(entry?.quote).toBeUndefined();
+    });
+  });
+
   describe("emoji reactions and undone reactions", () => {
     const favouritesOf = async (
       config: ResolvedConfig,

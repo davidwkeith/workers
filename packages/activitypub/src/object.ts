@@ -22,6 +22,7 @@ import {
   buildCollectionPage,
   objectId,
   objectType,
+  quotedObjectIri,
   wantsActivityJson,
   type ActivityObject,
   type ActorIris,
@@ -445,6 +446,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS idx_outbox_object_id
          ON outbox (json_extract(json, '$.object.id'))`,
+    );
+    // `#resolveLocalObject`'s inbox lookup (reply, boost and quote hydration
+    // on every client timeline read) by the embedded object's id: a peer can
+    // send any number of replies or quotes, so this must not be a full scan
+    // (the #501 rationale).
+    this.#sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_inbox_object_id
+         ON inbox (json_extract(json, '$.object.id'))`,
     );
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS idx_outbox_delete_object
@@ -2979,7 +2988,11 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         actorProfiles: this.#clientActorProfiles(
           entry.activity,
           entry.relayedBy,
-          [resolved.boost?.authorIri, resolved.replyTo?.authorIri],
+          [
+            resolved.boost?.authorIri,
+            resolved.replyTo?.authorIri,
+            resolved.quote?.authorIri,
+          ],
         ),
         ...resolved,
       };
@@ -3013,6 +3026,14 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       authorIri: string | null;
       object: JsonValue;
     };
+    /** The quoted post (FEP-044f / Misskey quote), hydrated like a boost. */
+    quote?: {
+      receivedAt: number;
+      seq: number;
+      source: 0 | 1;
+      authorIri: string | null;
+      object: JsonValue;
+    };
   } {
     const record = activity as Record<string, JsonValue>;
     const type = record.type;
@@ -3022,20 +3043,49 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
         object && typeof object === "object" && !Array.isArray(object)
           ? (object as Record<string, JsonValue>).inReplyTo
           : undefined;
+      const resolved: {
+        replyTo?: {
+          receivedAt: number;
+          seq: number;
+          source: 0 | 1;
+          authorIri: string | null;
+        };
+        quote?: {
+          receivedAt: number;
+          seq: number;
+          source: 0 | 1;
+          authorIri: string | null;
+          object: JsonValue;
+        };
+      } = {};
       if (typeof inReplyTo === "string") {
         const target = this.#resolveLocalObject(inReplyTo);
         if (target) {
-          return {
-            replyTo: {
-              receivedAt: target.receivedAt,
-              seq: target.seq,
-              source: target.source,
-              authorIri: target.authorIri,
-            },
+          resolved.replyTo = {
+            receivedAt: target.receivedAt,
+            seq: target.seq,
+            source: target.source,
+            authorIri: target.authorIri,
           };
         }
       }
-      return {};
+      // A quote renders only from a locally-held copy (no fetch in a client
+      // request, as for boosts); an unheld one leaves `quote` absent, and the
+      // post's own fallback link (`RE: <url>`) stays in its content.
+      const quoted = quotedObjectIri(object);
+      if (quoted) {
+        const target = this.#resolveLocalObject(quoted);
+        if (target && target.object !== null) {
+          resolved.quote = {
+            receivedAt: target.receivedAt,
+            seq: target.seq,
+            source: target.source,
+            authorIri: target.authorIri,
+            object: target.object,
+          };
+        }
+      }
+      return resolved;
     }
     if (type === "Announce") {
       // Only a bare-IRI boost needs hydration — an embedded object already
@@ -3103,29 +3153,37 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       };
     }
     // Inbox: a peer's post we have stored (and not tombstoned / failed).
-    const inboxRow = this.#sql
+    // Only a `Create`/`Update` carries the post as its author published it:
+    // a `Like`/`Announce` embedding the object is someone else's copy, and a
+    // reply/quote IRI is chosen by a remote peer, so trusting any row would
+    // let one peer forge another's post. The newest row wins (an `Update`
+    // shows the edit), and the object's id must share an origin with the
+    // row's actor, so a peer cannot publish an object under another origin.
+    const inboxRows = this.#sql
       .exec<{ seq: number; received_at: number; json: string }>(
         `SELECT seq, received_at, json FROM inbox
            WHERE json_extract(json, '$.object.id') = ?
+             AND COALESCE(type, json_extract(json, '$.type')) IN ('Create', 'Update')
              AND removed_at IS NULL AND verify_state IS NOT 'failed'
-           ORDER BY seq LIMIT 1`,
+           ORDER BY seq DESC LIMIT 5`,
         iri,
       )
-      .toArray()[0];
-    if (inboxRow) {
-      const activity = (() => {
-        try {
-          return JSON.parse(inboxRow.json) as Record<string, JsonValue>;
-        } catch {
-          return null;
-        }
-      })();
+      .toArray();
+    for (const inboxRow of inboxRows) {
+      let activity: Record<string, JsonValue>;
+      try {
+        activity = JSON.parse(inboxRow.json) as Record<string, JsonValue>;
+      } catch {
+        continue;
+      }
+      const author = actorIri(activity.actor);
+      if (!author || !sameOrigin(author, iri)) continue;
       return {
         receivedAt: inboxRow.received_at,
         seq: inboxRow.seq,
         source: 0,
-        authorIri: activity ? (actorIri(activity.actor) ?? null) : null,
-        object: activity?.object ?? null,
+        authorIri: author,
+        object: activity.object ?? null,
       };
     }
     return null;
@@ -3279,6 +3337,7 @@ export class ActivityPubObject extends DurableObject<ActivityPubEnv> {
       actorProfiles: this.#clientActorProfiles(parsed, row.relayed_by, [
         resolved.boost?.authorIri,
         resolved.replyTo?.authorIri,
+        resolved.quote?.authorIri,
       ]),
       ...resolved,
     } as unknown as JsonValue);
@@ -4636,6 +4695,15 @@ function referenceIris(value: JsonValue | undefined): string[] {
   }
   const id = objectId(value);
   return id ? [id] : [];
+}
+
+/** Whether two IRIs share an origin (scheme, host and port); false if either is malformed. */
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
 }
 
 /**
